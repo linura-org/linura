@@ -226,6 +226,11 @@ void NativeEndpoint::CancelApproval()
     if (calledFromDBus())
         runtime_.cancelApproval(message());
 }
+bool NativeEndpoint::RetireDisplayForSecurity(const QString &resource)
+{
+    const auto lock = NativeLockIdentity::parse(resource);
+    return calledFromDBus() && lock && runtime_.retireDisplayForSecurity(message(), *lock);
+}
 bool NativeEndpoint::ArmDisplayApproval(const NativeApprovalWire &wire, const QString &material,
                                         const QString &reason, quint64 deadline,
                                         quint64 deadlineBootMs)

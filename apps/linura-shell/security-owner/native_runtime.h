@@ -62,6 +62,9 @@ class NativeRuntime final : public QObject
                                               const NativeDisplayChoiceChallenge &);
     [[nodiscard]] bool cancelDisplayDecision(const QDBusMessage &,
                                              const NativeDisplayChoiceChallenge &);
+    // Cancels only display continuation and awaits the original compensation.
+    // True is safety readiness, never lock, power or display authority.
+    [[nodiscard]] bool retireDisplayForSecurity(const QDBusMessage &, const NativeLockIdentity &);
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);

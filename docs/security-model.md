@@ -172,8 +172,18 @@ Keep/Revert review consumes fresh physical input and per-output presentation;
 the retained Apply receipt or positive Polkit result cannot substitute for it.
 The root continuation must redeem this exact one-use owner receipt in addition
 to its durable Control authorization. Scoped cancellation cannot retire an
-unrelated conversation. Replacement restoration, S17/power preemption and native
-acceptance remain incomplete, and public display mutation stays disabled.
+unrelated conversation. Replacement restoration and native acceptance remain
+incomplete, and public display mutation stays disabled.
+
+Before lock/power review or native-sleep coverage coordination, Control's private
+safety preparation cancels display continuation in the exact current owner/lock
+generation. It polls restoration readiness within one two-second BOOTTIME budget,
+including final reply revalidation. The compositor retains opaque/input/power
+fences through the original baseline compensation; acknowledgement or numeric
+geometry alone cannot release them. Unknown, expired or failed restoration
+prevents S17 approval and prepared lock dispatch. Successful readiness grants no
+lock, unlock, protective consent or power authority. Native overlap qualification
+remains required.
 
 The owner's native peer/session/unit inspectors queue at most 32 fixed
 `Properties.Get` reads per interface before waiting. Each pending call retains

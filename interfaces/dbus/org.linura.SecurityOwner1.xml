@@ -21,6 +21,14 @@
       <arg name="consumed" type="b" direction="out"/>
     </method>
     <method name="CancelApproval"/>
+    <!-- Control-only safety cancellation in this exact current lock generation.
+         Requests only the original display compensation. Ready requires the
+         native display fence to be retired, not an ACK or elapsed timer. It
+         grants no lock/power/unlock authority; Control owns bounded polling. -->
+    <method name="RetireDisplayForSecurity">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="ready" type="b" direction="out"/>
+    </method>
     <!-- Separate display Apply handshake. Original canonical scope/review,
          complete material/reason and original deadline are immutable comparison
          data; no bool or digest becomes prepared execution authority. Keep and

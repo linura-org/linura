@@ -359,6 +359,24 @@ reentrant admission cannot see a false idle state during the first write.
 These exclusions still require native overlap qualification and do not establish
 per-output scanout/first-frame protection or compositor-death durability.
 
+Control may preempt a display interaction before a new S17 lock/power review or
+the received native-sleep coverage gate. Its separate private
+`RetireDisplayForSecurity` mechanism is exact-bound to the current native lock
+generation and independently supervised Control caller. It cancels human display
+continuation and destroys only that display interaction's resources. The
+compositor retains its scene/input/power fence and performs only the original
+transaction's already admitted baseline compensation. This is not a new layout
+effect, a Revert human receipt, protective-lock consent or power authority.
+Control owns bounded readiness polling within one two-second suspend-inclusive
+clock window. The native display fence must independently retire after ownership,
+geometry and fresh per-output presentation verification before S17 can proceed;
+elapsed time, an acknowledgement or a late reply cannot satisfy readiness.
+Pending or failed recovery refuses lock/power dispatch, including protective lock
+acquisition. S17 retains its canonical policy, prepared dispatch and independently
+verified coverage boundaries. Failure before S17 Arm cannot cancel another S17
+conversation. No key from the cancelled display interaction can confirm a lock
+or authenticate unlock. Real overlap qualification remains mandatory.
+
 The native owner separately binds protected interactions to output configuration
 and keyboard generations. Every active output needs a configured, committed and
 flushed lock frame before input becomes eligible. Hotplug/resize cancels pending

@@ -1124,4 +1124,16 @@ receipt. Control polls within a nonrenewable budget and cancels its exact scope
 on refusal, uncertainty or expiry, including replies arriving after expiry.
 Neither the decision digest nor the transport request is a credential. The
 public Authority1 mutation composition remains disabled pending replacement
-restoration, S17/power preemption and real native acceptance.
+restoration and real native acceptance.
+
+Control's separate display safety preparation cancels only human continuation
+in the current owner/lock generation and lets the compositor perform the
+original baseline compensation. It cannot accept a new target, acquire/release
+session lock, waive protective consent or request power. A nonrenewable two-second
+BOOTTIME window bounds Control's readiness polling and final reply check. The
+retained native scene/input/power fence must actually retire after verified
+ownership, geometry and per-output presentation; uncertainty or failed recovery
+blocks S17 review/dispatch. Failure before S17 Arm does not issue generic approval
+cancellation. Prepared root lock acquisition also checks the native display
+fence, closing the unsafe coverage-change path during restoration. Real lock,
+power and first-frame overlap cases still require native qualification.

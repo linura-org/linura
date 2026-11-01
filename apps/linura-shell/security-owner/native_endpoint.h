@@ -101,6 +101,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"in\"/>"
         "<arg name=\"consumed\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"CancelApproval\"/>"
+        "<method name=\"RetireDisplayForSecurity\"><arg name=\"resource\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"ready\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"ArmDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
         "direction=\"in\"/>"
         "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
@@ -204,6 +206,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     bool ArmApproval(const NativeApprovalWire &scope);
     bool ConsumeApproval(const NativeApprovalWire &scope);
     void CancelApproval();
+    bool RetireDisplayForSecurity(const QString &resource);
     bool ArmDisplayApproval(const NativeApprovalWire &, const QString &material,
                             const QString &reason, quint64 deadline_unix_ms,
                             quint64 deadline_boot_ms);

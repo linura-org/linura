@@ -135,6 +135,7 @@ pub(crate) fn digest(value: &str) -> Result<ComponentDigest, String> {
 }
 
 trait NativeApprovalPort {
+    fn prepare_security(&self, request: &NativeApprovalRequest) -> Result<(), String>;
     fn arm(&self, request: &NativeApprovalRequest) -> Result<bool, String>;
     fn authenticate(
         &self,
@@ -175,7 +176,22 @@ fn complete_native_approval_bounded<P: NativeApprovalPort>(
     started: Instant,
     elapsed: &impl Fn() -> Duration,
 ) -> Result<(), String> {
-    // Even an uncertain ArmApproval reply must cancel any possibly armed scope.
+    if matches!(
+        request.purpose,
+        NativeApprovalPurpose::Lock
+            | NativeApprovalPurpose::Suspend
+            | NativeApprovalPurpose::Logout
+            | NativeApprovalPurpose::Reboot
+            | NativeApprovalPurpose::PowerOff
+    ) {
+        port.prepare_security(request)?;
+    }
+    if elapsed() >= budget {
+        return Err("native approval expired during display restoration".into());
+    }
+    // Only now can this call arm S17. Failed display restoration must not
+    // cancel an unrelated existing S17 interaction. An uncertain Arm reply
+    // still requires cleanup before any later stage.
     let mut pending = CancelPending {
         port,
         uid: request.lock.epoch().uid(),
@@ -220,6 +236,9 @@ struct ProductionApprovalPort<'a> {
     channel: &'a NativeSessionChannel,
 }
 impl NativeApprovalPort for ProductionApprovalPort<'_> {
+    fn prepare_security(&self, request: &NativeApprovalRequest) -> Result<(), String> {
+        crate::display_safety::prepare(self.channel, &request.lock)
+    }
     fn arm(&self, request: &NativeApprovalRequest) -> Result<bool, String> {
         self.channel.arm_approval(request)
     }
@@ -253,6 +272,9 @@ mod tests {
         consumes: Cell<u32>,
     }
     impl NativeApprovalPort for Port {
+        fn prepare_security(&self, _: &NativeApprovalRequest) -> Result<(), String> {
+            Ok(())
+        }
         fn arm(&self, _: &NativeApprovalRequest) -> Result<bool, String> {
             Ok(self.armed)
         }
@@ -359,7 +381,8 @@ mod tests {
             complete_native_approval(&port, &request(NativeApprovalPurpose::Lock), Duration::ZERO)
                 .is_err()
         );
-        assert!(port.cancelled.get());
+        // This expired before Arm; do not cancel an unrelated S17 scope.
+        assert!(!port.cancelled.get());
     }
     #[test]
     fn authentication_digests_cannot_accept_recovery_placeholders_or_aliases() {
@@ -381,7 +404,7 @@ mod tests {
             let elapsed = || {
                 let sample = samples.get();
                 samples.set(sample + 1);
-                if sample < 2 {
+                if sample < 3 {
                     Duration::ZERO
                 } else {
                     Duration::from_secs(1)
@@ -402,6 +425,44 @@ mod tests {
             assert_eq!(
                 port.authentications.get(),
                 u32::from(purpose != NativeApprovalPurpose::Lock)
+            );
+        }
+    }
+    #[test]
+    fn failed_display_restoration_cannot_arm_authenticate_consume_or_cancel_s17() {
+        struct Unrestored;
+        impl NativeApprovalPort for Unrestored {
+            fn prepare_security(&self, _: &NativeApprovalRequest) -> Result<(), String> {
+                Err("original native restoration incomplete".into())
+            }
+            fn arm(&self, _: &NativeApprovalRequest) -> Result<bool, String> {
+                unreachable!()
+            }
+            fn authenticate(
+                &self,
+                _: &NativeApprovalRequest,
+                _: Instant,
+                _: Duration,
+            ) -> Result<(), String> {
+                unreachable!()
+            }
+            fn consume(&self, _: &NativeApprovalRequest) -> Result<bool, String> {
+                unreachable!()
+            }
+            fn cancel(&self, _: u32) {
+                unreachable!()
+            }
+        }
+        for purpose in [
+            NativeApprovalPurpose::Lock,
+            NativeApprovalPurpose::Suspend,
+            NativeApprovalPurpose::Logout,
+            NativeApprovalPurpose::Reboot,
+            NativeApprovalPurpose::PowerOff,
+        ] {
+            assert!(
+                complete_native_approval(&Unrestored, &request(purpose), Duration::from_secs(60))
+                    .is_err()
             );
         }
     }

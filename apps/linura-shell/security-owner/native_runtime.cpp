@@ -59,6 +59,7 @@ class NativeRuntime::Impl final
     std::unique_ptr<NativeLockProtocol> protocol;
     std::unique_ptr<AuthenticationAgent> authentication;
     std::unique_ptr<NativeDisplayFlow> display;
+    bool displayRetiring = false;
     std::optional<NativePeerIdentity> approvalPeer;
     std::optional<NativeApprovalScope> approvalScope;
     quint64 approvalInputGeneration = 0;
@@ -158,7 +159,7 @@ class NativeRuntime::Impl final
             return;
         if (display && display->fenced())
             return; // Display composition owns only its fixed protected view.
-        if (transitionFence.active() || sleepFence.active())
+        if (displayRetiring || transitionFence.active() || sleepFence.active())
             presentation->present(NativePresentation::State::Recovering);
         else if (approvalScope && approvalScope->purpose != ApprovalPurpose::ConfirmLock)
             presentation->presentAuthentication(approvalScope->purpose);
@@ -406,8 +407,9 @@ void NativeRuntime::requestNativeUnlock()
         return;
     }
     if (!impl_->initialized || impl_->unlockRequestPending || impl_->approvalScope ||
-        (impl_->display && impl_->display->fenced()) || impl_->transitionFence.active() ||
-        !impl_->currentSession() || impl_->protocol->inspect() != LockMechanism::State::Secure ||
+        impl_->displayRetiring || (impl_->display && impl_->display->fenced()) ||
+        impl_->transitionFence.active() || !impl_->currentSession() ||
+        impl_->protocol->inspect() != LockMechanism::State::Secure ||
         impl_->independentState() != NativeCompositorLockState::Locked)
         return;
     const auto control = impl_->peers->namedPeer(NativePeerPurpose::ControlApproval);
@@ -639,7 +641,7 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
     if (!peer || scope.purpose != ApprovalPurpose::ApplyDisplay || !scope.valid() ||
-        scope.lock != identity() || impl_->approvalScope ||
+        scope.lock != identity() || impl_->approvalScope || impl_->displayRetiring ||
         (impl_->display && impl_->display->fenced()) || impl_->transitionFence.active() ||
         impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest)
         return false;
@@ -742,12 +744,42 @@ bool NativeRuntime::cancelDisplayDecision(const QDBusMessage &received,
     return true;
 }
 
+bool NativeRuntime::retireDisplayForSecurity(const QDBusMessage &received,
+                                             const NativeLockIdentity &lock)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || lock != identity())
+        return false;
+    if (impl_->display && impl_->display->fenced()) {
+        // Retire human authority before touching its wire resources. The
+        // compositor retains its opaque/input fence and original compensation;
+        // no key can become lock confirmation or unlock authentication here.
+        impl_->displayRetiring = true;
+        impl_->display->cancel();
+        impl_->refreshPresentation();
+    }
+    const bool ready = impl_->backend->displayAllowsSecurityTransition();
+    if (!impl_->currentSession() || identity() != lock ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return false;
+    if (!ready && impl_->display) {
+        impl_->displayRetiring = true;
+        impl_->refreshPresentation();
+    }
+    if (ready && impl_->displayRetiring) {
+        impl_->display.reset();
+        impl_->displayRetiring = false;
+        impl_->refreshPresentation();
+    }
+    return ready;
+}
+
 bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprovalScope &scope)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
-    if (!peer || impl_->approvalScope || (impl_->display && impl_->display->fenced()) ||
-        impl_->transitionFence.active() || impl_->sleepFence.active() || !scope.valid() ||
-        scope.lock != identity())
+    if (!peer || impl_->approvalScope || impl_->displayRetiring ||
+        (impl_->display && impl_->display->fenced()) || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || !scope.valid() || scope.lock != identity())
         return false;
     NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto state = impl_->independentState();
@@ -848,8 +880,8 @@ bool NativeRuntime::dispatchPrepared(const QDBusMessage &received, const NativeL
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
     if (!peer || lock != identity() || impl_->approvalScope || impl_->transitionFence.active() ||
-        impl_->sleepFence.active() ||
-        (!secure && !impl_->backend->displayAllowsSecurityTransition()))
+        impl_->sleepFence.active() || impl_->displayRetiring ||
+        !impl_->backend->displayAllowsSecurityTransition())
         return false;
     // Only the separately attested root session executor can call this. A human
     // approval or its identifiers never reach dispatch as reusable authority.

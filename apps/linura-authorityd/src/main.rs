@@ -3,6 +3,7 @@
 mod display_adapter;
 mod display_approval;
 mod display_decision;
+mod display_safety;
 mod runtime;
 mod session_adapter;
 mod session_approval;

@@ -559,7 +559,7 @@ int main(int argc, char **argv)
     for (const char *method :
          {"armDisplayApproval()", "displayApprovalReady()", "consumeDisplayApproval()",
           "cancelDisplayApproval()", "armDisplayDecision()", "displayDecisionReady()",
-          "consumeDisplayDecision()", "cancelDisplayDecision()"})
+          "consumeDisplayDecision()", "cancelDisplayDecision()", "retireDisplayForSecurity()"})
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
@@ -583,11 +583,11 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 26 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 27 && signals == 1 && annotations == 3);
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
           "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",
-          "ConsumeDisplayDecision", "CancelDisplayDecision"})
+          "ConsumeDisplayDecision", "CancelDisplayDecision", "RetireDisplayForSecurity"})
         assert(introspection.contains(QString::fromLatin1(method)));
     assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));

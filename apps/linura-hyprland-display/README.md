@@ -170,5 +170,13 @@ requires a fresh physical Keep/Revert choice, input/frame generations and a
 one-use receipt before the separately prepared root continuation can proceed.
 Expired, denied, replaced-owner and uncertain calls cancel only that exact scope.
 This composition does not enable the public Authority1 methods: compositor-
-replacement restoration, S17/power preemption and real multi-output/adversarial
-runtime acceptance remain required before public activation.
+replacement restoration and real multi-output/adversarial runtime acceptance
+remain required before public activation.
+
+The private Control safety adapter preempts display choice before lock/power
+review or native sleep coverage coordination. Original compensation and its
+opaque/input/power fences stay compositor-owned. Control polls actual retirement
+within a nonrenewable two-second BOOTTIME budget; unavailable, late or unresolved
+restoration cannot advance S17. Prepared lock acquisition also checks the native
+display fence. This mechanism grants no lock/power authority, and its overlap
+behavior still requires real native qualification.
