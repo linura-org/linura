@@ -1,7 +1,7 @@
 //! S22-2: read-only geometry and private-buffer resource budgeting.
 //! This does not acquire frames or publish files; capture remains disabled.
 
-use super::{CaptureSource, CaptureUnavailable, validate_source};
+use super::{CaptureSource, validate_source};
 
 /// The maximum private bytes one unqualified screenshot request may ask to
 /// stage. No such staging is registered as a runtime operation.
@@ -32,10 +32,7 @@ pub fn private_frame_budget(
     bytes_per_pixel: u8,
     stride_bytes: u64,
 ) -> Result<PrivateFrameBudget, ScreenshotBudgetError> {
-    validate_source(source).map_err(|reason| match reason {
-        CaptureUnavailable::InvalidNativeGeometry => ScreenshotBudgetError::InvalidGeometry,
-        _ => ScreenshotBudgetError::InvalidGeometry,
-    })?;
+    validate_source(source).map_err(|_| ScreenshotBudgetError::InvalidGeometry)?;
     if bytes_per_pixel != 4 {
         return Err(ScreenshotBudgetError::UnsupportedPixelFormat);
     }

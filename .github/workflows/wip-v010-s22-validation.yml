@@ -1,0 +1,38 @@
+name: S22 WIP scoped validation
+
+# Development-only checks. This workflow stays on the S22 WIP branch and
+# does not replace canonical, security, native, or physical release gates.
+on:
+  push:
+    branches:
+      - wip/v010-s22-utilities
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s22-wip-scoped-validation
+  cancel-in-progress: true
+
+jobs:
+  rust-and-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install repository-pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.98.0
+      - name: Check exact-source Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Build and test S22 native observation crate
+        run: cargo test --locked -p linura-linux-observation
+      - name: Check S22 observation Clippy warnings
+        run: cargo clippy --locked -p linura-linux-observation --all-targets -- -D warnings
+      - name: Verify inert S22 architecture and split contracts
+        run: |
+          python3 -m unittest \
+            tests.tooling.test_v010_s22_design \
+            tests.tooling.test_v010_s22_pr_decomposition

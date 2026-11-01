@@ -202,6 +202,28 @@ pub fn observe_compositor(
     )
 }
 
+/// S22 source authentication never accepts a caller-controlled system-bus
+/// address. Bind the socket peer to root, just as the S17 session observer
+/// does, and bound both connect and D-Bus authentication separately.
+fn connect_capture_system_bus() -> Result<Connection, PlatformProbeError> {
+    let stream = connect_unix_with_deadline(
+        Path::new("/run/dbus/system_bus_socket"),
+        NATIVE_PROBE_TIMEOUT,
+        "S22 logind system bus",
+    )?;
+    let credentials = socket_peercred(&stream).map_err(|_| {
+        PlatformProbeError::new("cannot authenticate S22 system-bus kernel peer")
+    })?;
+    if credentials.uid.as_raw() != 0 {
+        return Err(PlatformProbeError::new(
+            "S22 logind system-bus peer is not root",
+        ));
+    }
+    let builder = AsyncConnectionBuilder::async_io_unix_stream(stream)
+        .method_timeout(NATIVE_PROBE_TIMEOUT);
+    build_dbus_connection_with_deadline(builder, "S22 logind system bus")
+}
+
 /// Read-only, session-bound XDG portal presence. **Not** capture permission.
 ///
 /// Uses the same kernel-peer-authenticated logind and user bus routes as the
@@ -211,7 +233,7 @@ pub fn observe_compositor(
 pub fn observe_capture_portal(
     target: &LogindSessionTarget,
 ) -> Result<ObservationEnvelope, PlatformProbeError> {
-    let system = connect_system_bus()?;
+    let system = connect_capture_system_bus()?;
     let before = query_session_context(&system, target)?;
     if before.session_type != "wayland" || before.desktop != "hyprland" {
         return Err(PlatformProbeError::new(
@@ -1517,7 +1539,7 @@ mod capture_portal_scope_tests {
             ":1",
             ":1.",
             ":1.2.3",
-            ":1.2\\nforged",
+            ":1.2\nforged",
             ":1234567890123456789.1",
             ":1.-1",
         ] {

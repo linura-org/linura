@@ -1,6 +1,6 @@
 # S22 Phase 1 — source audit, architecture and requirements for protected desktop utilities
 
-- **Status:** Proposed engineering architecture and acceptance. No native capture/history implementation, approved effect, support promotion, or physical acceptance.
+- **Status:** Proposed engineering architecture and acceptance. WIP now contains read-only native portal owner/version observation and fail-closed screenshot, recorder, clipboard and history policy guards. There is still no qualified frame acquisition, recording executor, clipboard data transport, history persistence, approved effect, support promotion or physical acceptance.
 - **Slice:** v0.10 S22, desktop utilities, screenshot/recording and clipboard history; `arch-hyprland-v1`; S16 dependency.
 - **Source baseline audited:** `e867f5348f1a0b6833d0b622187e1213cac0039e` and S22's original engineering reference.
 - **Architecture:** [proposed ADR 0051](../adr/0051-s22-protected-desktop-utilities.md), [inactive design contract](../../contracts/v010-s22-design.toml), [native qualification](../qualification/v0.10.0-s22.md), [security acceptance](../qualification/v0.10.0-s22-security.md), [WIP reference](v010-s22-utilities.md).

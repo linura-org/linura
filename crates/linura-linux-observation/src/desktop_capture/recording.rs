@@ -40,6 +40,22 @@ pub struct RecordingObservationLease {
     max_frames: u64,
 }
 
+impl std::fmt::Debug for RecordingObservationLease {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RecordingObservationLease")
+            .finish_non_exhaustive()
+    }
+}
+
+/// An unforgeable type outside this native module. A future native owner must
+/// implement independently verified supervision before a constructor exists.
+/// Tests can use a fixture to prove the metadata path remains bounded.
+#[derive(Debug)]
+pub struct NativeStopSupervisorWitness {
+    _private: (),
+}
+
 /// Construct scoped metadata only; this is not the native recording Start.
 pub fn validate_recording_scope(
     origin: CaptureSourceSnapshot,
@@ -50,12 +66,12 @@ pub fn validate_recording_scope(
     requested_max_encoded_bytes: u64,
     requested_max_frames: u64,
     include_audio: bool,
-    native_stop_supervised: bool,
+    native_stop_supervised: Option<&NativeStopSupervisorWitness>,
 ) -> Result<RecordingObservationLease, RecordingScopeError> {
     if include_audio {
         return Err(RecordingScopeError::AudioConsentMissing);
     }
-    if !native_stop_supervised {
+    if native_stop_supervised.is_none() {
         return Err(RecordingScopeError::UnsupervisedNativeStream);
     }
     if requested_duration_ms == 0
@@ -186,9 +202,9 @@ mod tests {
             100_000,
             300,
             false,
-            true,
+            Some(&NativeStopSupervisorWitness { _private: () }),
         )
-        .unwrap()
+        .unwrap_or_else(|error| unreachable!("{error:?}"))
     }
 
     #[test]
@@ -204,7 +220,7 @@ mod tests {
                 100_000,
                 300,
                 false,
-                false
+                None
             ),
             Err(RecordingScopeError::UnsupervisedNativeStream)
         ));
@@ -218,7 +234,7 @@ mod tests {
                 100_000,
                 300,
                 true,
-                true
+                Some(&NativeStopSupervisorWitness { _private: () })
             ),
             Err(RecordingScopeError::AudioConsentMissing)
         ));

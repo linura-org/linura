@@ -25,6 +25,16 @@ pub struct HistoryPolicy {
     enabled: bool,
 }
 
+impl std::fmt::Debug for HistoryPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HistoryPolicy")
+            .field("revision", &self.revision)
+            .field("enabled", &self.enabled)
+            .finish_non_exhaustive()
+    }
+}
+
 impl HistoryPolicy {
     pub fn new(
         owner_uid: u32,
@@ -123,7 +133,7 @@ mod tests {
 
     #[test]
     fn history_is_off_and_cannot_enable_without_key_custody() {
-        let policy = HistoryPolicy::new(1000, "2".into(), "seat0".into()).unwrap();
+        let policy = HistoryPolicy::new(1000, "2".into(), "seat0".into()).unwrap_or_else(|error| unreachable!("{error:?}"));
         assert!(!policy.enabled());
         assert_eq!(
             policy.request_persistent_enable(1000, "2", "seat0", 1),
@@ -137,7 +147,7 @@ mod tests {
 
     #[test]
     fn revision_and_cross_seat_replay_are_denied() {
-        let mut policy = HistoryPolicy::new(1000, "2".into(), "seat0".into()).unwrap();
+        let mut policy = HistoryPolicy::new(1000, "2".into(), "seat0".into()).unwrap_or_else(|error| unreachable!("{error:?}"));
         assert_eq!(
             policy.revoke(1001, "2", "seat0", 1),
             Err(HistoryPolicyError::InvalidOwner)
