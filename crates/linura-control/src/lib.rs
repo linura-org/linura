@@ -34,6 +34,17 @@ mod protective_lock_safety;
 mod protective_lock_settings;
 #[rustfmt::skip]
 mod personalization_preferences;
+#[rustfmt::skip]
+mod personalization_preview;
+#[rustfmt::skip]
+mod personalization_theme;
+pub use personalization_theme::{
+    EffectiveScheme, PersonalizationTokenProjection, Rgb, SemanticColors,
+};
+pub use personalization_preview::{
+    MAX_PERSONALIZATION_PREVIEWS, PERSONALIZATION_PREVIEW_TTL_MS,
+    PersonalizationPreviewContext, PersonalizationPreviewControl, PersonalizationPreviewReceipt,
+};
 pub use personalization_preferences::{
     PersonalizationConfigurationReceipt, PersonalizationConfigurationRequest,
     PersonalizationPreferencesControl,
