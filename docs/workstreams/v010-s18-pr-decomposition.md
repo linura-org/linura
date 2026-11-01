@@ -1,17 +1,17 @@
-# S18 v0.10 — ten independent implementation boundaries
+# S18 v0.10 — architecture-first and nine implementation boundaries
 
-> **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. **Do not merge this branch directly.** The new ten-part decomposition follows the S17 identity → Control → native authority → protected security → client → qualification split and the S21 per-feature + convergence + qualification pattern.
+> **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. **Do not merge this branch directly.** S18-1 now follows the S21 architecture/security-contract first gate; S18-2 begins implementation with native identities and passive observation, following the S17 trust-boundary separation thereafter.
 
-**Draft PR base/reference:** `wip/v010-s18-network`. This WIP branch is the authoritative live integration/development source. All ten draft PRs (#267–#276) target WIP with standalone non-executable scope documents; none may be merged into WIP as an implementation claim. After the reviewed implementation is extracted and qualified, rebase/retarget for final integration into accepted `main` without merging the WIP branch wholesale. S18-8, S18-9 and S18-10 are now reserved as draft PRs #274, #275 and #276, respectively.
+**Draft PR base/reference:** `wip/v010-s18-network`. This WIP branch is the authoritative live integration/development source. All ten draft PRs (#267–#276) target WIP; their actual diffs must match their scope, and none may be merged into WIP as an implementation claim. After the reviewed implementation is extracted and qualified, rebase/retarget for final integration into accepted `main` without merging the WIP branch wholesale. S18-8, S18-9 and S18-10 are now reserved as draft PRs #274, #275 and #276, respectively.
 
 Source of truth: [Phase-1 inventory](v010-s18-network-phase1.md), [ADR 0048](../adr/0048-s18-networkmanager-authority.md), [inactive effect design](../../contracts/v010-s18-design.toml), [machine-checked decomposition](../../contracts/v010-s18-pr-decomposition.toml).
 
-Existing code changes in the WIP observer now belong **conceptually to S18-2**, not S18-1. Move them into a future review branch only after source/compilation/native qualification checks. No runtime registration, permission downgrade or unsupported feature is introduced by this plan.
+Existing WIP native observation and PR #267's previously misassigned core identity code belong **exclusively to S18-2**; S18-1 owns documentation, architecture/security and executable design contracts only. Move them into a future review branch only after source/compilation/native qualification checks. No runtime registration, permission downgrade or unsupported feature is introduced by this plan.
 
 | ID | Boundary | Reserved PR | Required predecessors | Candidate native effects |
 | --- | --- | --- | --- | --- |
-| S18-1 | feat(core): model exact native network identities | [#267](https://github.com/linura-org/linura/pull/267) | S16 | none |
-| S18-2 | feat(network): establish native NetworkManager observation | [#268](https://github.com/linura-org/linura/pull/268) | S18-1 | none |
+| S18-1 | docs(v0.10): define NetworkManager connectivity architecture and security contracts | [#267](https://github.com/linura-org/linura/pull/267) | S16 | none |
+| S18-2 | feat(network): establish native NetworkManager identities and observation | [#268](https://github.com/linura-org/linura/pull/268) | S18-1 | none |
 | S18-3 | feat(control): add managed network authority semantics | [#269](https://github.com/linura-org/linura/pull/269) | S18-1, S18-2 | none |
 | S18-4 | feat(security): add protected network credentials and native authorization | [#270](https://github.com/linura-org/linura/pull/270) | S18-1, S18-3 | none |
 | S18-5 | feat(network): add bounded Wi-Fi discovery and scan authority | [#271](https://github.com/linura-org/linura/pull/271) | S18-2, S18-3, S18-4 | `operation:network.wifi.scan` |
@@ -23,39 +23,39 @@ Existing code changes in the WIP observer now belong **conceptually to S18-2**, 
 
 ## Reviewable scopes and acceptance
 
-### S18-1 — feat(core): model exact native network identities
+### S18-1 — docs(v0.10): define NetworkManager connectivity architecture and security contracts
 
-**Source ownership:** `crates/linura-core/src/`, `crates/linura-linux-observation/src/`, `contracts/stability.toml`.
+**Source ownership:** `docs/adr/0048-s18-networkmanager-authority.md`, `contracts/v010-s18-design.toml`, `docs/qualification/v0.10.0-s18.md`, `docs/qualification/v0.10.0-s18-security.md`, `docs/workstreams/v010-s18-network-phase1.md`, `tests/tooling/test_v010_s18_design.py`, `contracts/qualification-gate-matrix.toml`, `.github/workflows/v010-qualification.yml`.
 
-**Dependencies:** S16. **Requirements:** R18-OBS-02, R18-AUTH-01. **Adversarial cases:** T01, T03, T04, T05, T08, T11, T15, T24, T28.
+**Dependencies:** S16. **Requirements:** R18-OBS-01, R18-OBS-02, R18-OBS-03, R18-AUTH-01, R18-AUTH-02, R18-SEC-01, R18-REC-01, R18-QUAL-01, R18-REL-01. **Adversarial cases:** T01, T02, T03, T04, T05, T08, T11, T13, T15, T16, T17, T18, T19, T20, T21, T24, T26, T28, T29, T30.
 
-- Introduce exact typed boot, NM unique owner, interface/device, access point, active connection, saved profile revision and non-authorizing observed generation identities.
-- Reject interface-name, ifindex, SSID/BSSID, UUID and path aliases as standalone authority across replacement, restart, or namespace changes.
-- Define canonical bounded encodings, comparison and anti-replay equality, including ambiguous/unknown identities that cannot be used for effects.
-- Preserve existing read-only query names and avoid granting any runtime operation, Polkit approval or native D-Bus mutation.
-- Unit-test malformed, mixed-epoch, conflicting path, reused device and profile revision identities.
+- Finalize ADR 0048, proposed read-only/effect architecture, trust boundaries, and workstream ownership before native changes.
+- Specify boot, system-bus incarnation, NetworkManager unique owner, exact native identity and nonauthorizing correlation aliases without runtime code.
+- Define risk floors, real Polkit subject, purpose-bound protected secrets, route impact and offline recovery, independent verification and no blind replay.
+- Lock all nine candidate operations inactive, retain manager/device query aliases and reject unsupported VPN/hotspot/mobile/arbitrary settings forwarding.
+- Add adversarial design/qualification contract checks with exact v0.10 routing; distinguish real native A/B and physical C/Q11 from mock evidence and release claims.
 
-**Required evidence:** typed-identity-adversarial-tests; existing-core-compatibility.
+**Required evidence:** design-contract-negative-and-inert-operation-tests; adr-threat-model-and-qualification-routing; existing-observer-and-Control-authority-regression; canonical-exact-head-repository-validation.
 
-**Blockers:** No merge until exact-generation invariants and backward-compatible identity tests pass.
+**Blockers:** Architecture/security review, exact-head validation, and retained inactive-state evidence required; no native effect or physical support inferred.
 
 **No operation activated or granted here.**
 
-### S18-2 — feat(network): establish native NetworkManager observation
+### S18-2 — feat(network): establish native NetworkManager identities and observation
 
-**Source ownership:** `crates/linura-linux-observation/src/`, `crates/linura-observation-control/`, `apps/linurad/src/`, `apps/linura-firstboot/src/`.
+**Source ownership:** `crates/linura-core/src/`, `crates/linura-linux-observation/src/`, `crates/linura-observation-control/`, `apps/linurad/src/`, `apps/linura-firstboot/src/`.
 
-**Dependencies:** S18-1. **Requirements:** R18-OBS-01, R18-OBS-02, R18-OBS-03. **Adversarial cases:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T22, T27, T28.
+**Dependencies:** S18-1. **Requirements:** R18-OBS-01, R18-OBS-02, R18-OBS-03. **Adversarial cases:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T15, T22, T24, T27, T28.
 
-- Extend the existing canonical observer and coordinator, preserving manager/device resource aliases, daemon/CLI and First Boot behavior.
-- Implement bounded typed manager, device, passive AP, saved/active profile, radio/rfkill, IPv4/IPv6, DNS and default-route observations with distinct unknown/stale states.
-- Bind actual unique NetworkManager D-Bus owner, boot and stable device/profile epochs before accepting related snapshots; detect churn and duplicate identity.
-- Enforce transport receive/decode byte and nesting budgets, list bounds and real query deadlines, not only post-decoding elapsed time.
-- Keep all reads passive: no RequestScan, secret read, profile mutation, connection activation or new effect authority.
+- Implement typed boot/system-bus/NM owner epochs, device and AP identities, saved profile revisions, active connections and bounded observation generations.
+- Unit-test malformed, mixed-owner, reused path, interface, ifindex, profile revision and AP aliases without granting approval or mutation authority.
+- Extend canonical read-only observer/coordinator, preserving manager/device aliases and daemon, CLI and First Boot consumers.
+- Observe bounded typed manager/device/passive AP, saved/active profiles, radio, dual-stack IP, DNS and route facts with explicit unknown/unavailable/stale semantics.
+- Enforce true receive/decode byte and nesting budgets, list and transport deadlines and coherent owner/device/profile revalidation; no RequestScan, secrets or native mutation.
 
-**Required evidence:** unit-fuzz-device-ap-profile-ip; level-a-real-networkmanager-system-bus; existing-observation-control-and-firstboot.
+**Required evidence:** typed-identity-adversarial-unit-tests; real-networkmanager-native-system-bus-observation-level-a; observation-control-and-firstboot-compatibility; owner-swap-nonatomic-multiobject-and-malformed-provider-tests.
 
-**Blockers:** Complete native boundedness, owner swap, dual-stack and malformed-provider evidence before calling S18-2 complete.
+**Blockers:** Native boundedness, full typed facts, real NM Level A, owner-swap and inherited exact-head checks remain unqualified until demonstrated.
 
 **No operation activated or granted here.**
 

@@ -93,7 +93,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
     referenced_threats: set[str] = set()
     for index, pr in enumerate(prs):
         assert all(field in pr for field in REQUIRED_FIELDS), pr["id"]
-        assert pr["slug"] and pr["title"].startswith(("feat(", "test("))
+        assert pr["slug"] and pr["title"].startswith(("docs(", "feat(", "test("))
         assert pr["owned_paths"] and len(set(pr["owned_paths"])) == len(pr["owned_paths"])
         for field in ("capabilities", "requirements", "negative_cases",
                       "acceptance", "qualification", "blocked_until"):
@@ -126,6 +126,12 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert referenced_requirements == REQUIREMENTS
     assert referenced_threats == THREATS
     assert prs[0]["depends_on"] == []
+    assert prs[0]["title"].startswith("docs(v0.10):")
+    assert all(not path.startswith(("crates/", "apps/", "executors/")) for path in prs[0]["owned_paths"])
+    assert "contracts/v010-s18-design.toml" in prs[0]["owned_paths"]
+    assert "docs/adr/0048-s18-networkmanager-authority.md" in prs[0]["owned_paths"]
+    assert prs[1]["title"].startswith("feat(network):")
+    assert "crates/linura-core/src/" in prs[1]["owned_paths"]
     assert "S18-1" in prs[1]["depends_on"]
     assert "S18-2" in prs[2]["depends_on"]
     assert "S18-3" in prs[3]["depends_on"]
@@ -175,7 +181,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
         assert operation["provider"] == "networkmanager"
         assert operation["class"] == "managed-external-effect"
         assert operation["risk_floor"] == RISK_FLOORS[operation["id"]]
-    assert "ten independent implementation boundaries" in document
+    assert "architecture-first and nine implementation boundaries" in document
     assert "Current read-only WIP provider tests" in document
     assert "Do not merge this branch directly" in document
 
@@ -189,6 +195,18 @@ class S18DecompositionTests(unittest.TestCase):
 
     def test_plan_preserves_inactive_phase1_and_exact_operations(self) -> None:
         validate(self.plan, self.design, self.document)
+
+    def test_contract_first_ownership_cannot_be_changed(self) -> None:
+        for change in ("implementation-first", "core-owned-by-architecture", "missing-core-identity"):
+            mutated = copy.deepcopy(self.plan)
+            if change == "implementation-first":
+                mutated["pull_request"][0]["title"] = "feat(core): skip architecture"
+            elif change == "core-owned-by-architecture":
+                mutated["pull_request"][0]["owned_paths"].append("crates/linura-core/src/")
+            else:
+                mutated["pull_request"][1]["owned_paths"].remove("crates/linura-core/src/")
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                validate(mutated, self.design, self.document)
 
     def test_premature_activation_and_evidence_are_rejected(self) -> None:
         for flag in ("runtime_effects_enabled", "evidence_accepted", "slice_complete",
