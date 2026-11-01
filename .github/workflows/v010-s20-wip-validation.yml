@@ -26,6 +26,13 @@ jobs:
           set -euo pipefail
           rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt
           rustc +1.98.0 --version
+      - name: Review exact S20 dependency lock delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.98.0 metadata --format-version 1 > /dev/null
+          git diff -- Cargo.lock
+          git diff --exit-code -- Cargo.lock
       - name: Rustfmt exact-head review
         shell: bash
         run: |
