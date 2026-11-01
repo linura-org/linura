@@ -73,9 +73,9 @@ pub enum CapturePreflight {
 fn bounded_native_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_ID_BYTES
-        && value.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':')
-        })
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':'))
 }
 
 fn boot_id_is_valid(value: &str) -> bool {
@@ -118,9 +118,7 @@ fn unique_bus_owner_is_valid(value: &str) -> bool {
 }
 
 fn geometry_is_bounded(width: u32, height: u32) -> bool {
-    width > 0
-        && height > 0
-        && u64::from(width) * u64::from(height) <= MAX_CAPTURE_SOURCE_PIXELS
+    width > 0 && height > 0 && u64::from(width) * u64::from(height) <= MAX_CAPTURE_SOURCE_PIXELS
 }
 
 fn validate_source(source: &CaptureSource) -> Result<(), CaptureUnavailable> {
@@ -169,7 +167,8 @@ fn validate_source(source: &CaptureSource) -> Result<(), CaptureUnavailable> {
             if !geometry_is_bounded(*width, *height)
                 || !geometry_is_bounded(*output_width, *output_height)
                 || x.checked_add(*width).is_none_or(|end| end > *output_width)
-                || y.checked_add(*height).is_none_or(|end| end > *output_height)
+                || y.checked_add(*height)
+                    .is_none_or(|end| end > *output_height)
             {
                 return Err(CaptureUnavailable::InvalidNativeGeometry);
             }
