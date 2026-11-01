@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod xdg_applications;
+pub use xdg_applications::XdgApplicationObserver;
+
 mod logind;
 pub mod platform_discovery;
 pub use logind::{
