@@ -5,7 +5,7 @@ mod session_audit;
 
 use std::error::Error;
 
-use linura_linux_observation::{AlpmInstalledObserver, NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver, XdgApplicationObserver};
+use linura_linux_observation::{AlpmInstalledObserver, NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver, XdgApplicationObserver, XdgMimeAppsObserver};
 use linura_observation_control::ObservationCoordinator;
 
 fn main() {
@@ -24,6 +24,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     coordinator.register_observer(Box::new(XdgApplicationObserver::from_environment()))?;
     // Local ALPM inventory is a read-only provider; absent/locked DB stays unavailable.
     coordinator.register_observer(Box::new(AlpmInstalledObserver::system()))?;
+    // Parsed MIME defaults remain candidates until desktop association verification.
+    coordinator.register_observer(Box::new(XdgMimeAppsObserver::from_environment()))?;
     let state_dir = session_audio::state_dir().map_err(std::io::Error::other)?;
     let session_runtime =
         session_audio::SessionAudioRuntime::open(&state_dir).map_err(std::io::Error::other)?;
