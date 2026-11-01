@@ -26,7 +26,35 @@ def read(path: Path) -> dict:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
+def enforce_architecture_gate(doc: dict) -> None:
+    gate = doc["architecture_gate"]
+    expected = {
+        "phase": "contract-first",
+        "owner_pr": 267,
+        "native_identity_and_observation_owner_pr": 268,
+        "review_base": "wip/v010-s18-network",
+        "architecture_only": True,
+        "enable_effects": False,
+        "evidence_accepted": False,
+        "identity_inputs_are_authorization": False,
+        "native_api_support_claimed": False,
+        "physical_q11_qualified": False,
+        "native_identity_scope": "boot-bus-instance-unique-nm-owner-device-profile-activation-generation",
+        "canonical_observation_authority": "linura-observation::ObservationEnvelope-and-Control",
+        "require_real_authenticated_subject": True,
+        "require_native_independent_postcondition": True,
+        "require_offline_local_recovery": True,
+        "require_durable_indeterminate_no_replay": True,
+        "require_purpose_bound_protected_credentials": True,
+        "require_native_decode_and_transport_budgets": True,
+        "deny_nonlisted_network_effects": True,
+    }
+    if gate != expected:
+        raise ValueError("S18-1 architecture/security gate changed or bypassed")
+
+
 def enforce_inert(doc: dict) -> None:
+    enforce_architecture_gate(doc)
     if doc["status"] != "proposed" or doc["activation"] != "none":
         raise ValueError("design activated")
     false_flags = (
@@ -111,6 +139,48 @@ def enforce_inert(doc: dict) -> None:
 
 
 class ProposedS18ContractTests(unittest.TestCase):
+    def test_s18_1_is_contract_first_and_native_identity_belongs_to_s18_2(self):
+        doc = read(SOURCE)
+        enforce_architecture_gate(doc)
+        plan = read(ROOT / "contracts/v010-s18-pr-decomposition.toml")
+        self.assertEqual(plan["pull_request"][0]["reservation_pr"], 267)
+        self.assertTrue(plan["pull_request"][0]["title"].startswith("docs(v0.10):"))
+        self.assertTrue(
+            all(
+                not p.startswith(("crates/", "apps/", "executors/"))
+                for p in plan["pull_request"][0]["owned_paths"]
+            )
+        )
+        self.assertEqual(plan["pull_request"][1]["reservation_pr"], 268)
+        self.assertIn("crates/linura-core/src/", plan["pull_request"][1]["owned_paths"])
+        architecture_note = (
+            ROOT / "docs/development/v010-s18-1-network-architecture-contracts.md"
+        )
+        self.assertTrue(architecture_note.is_file())
+        self.assertIn(
+            "Architecture-first", architecture_note.read_text(encoding="utf-8")
+        )
+
+    def test_s18_architecture_gate_mutations_are_rejected(self):
+        doc = read(SOURCE)
+        for key, unsafe in (
+            ("owner_pr", 268),
+            ("native_identity_and_observation_owner_pr", 267),
+            ("architecture_only", False),
+            ("enable_effects", True),
+            ("identity_inputs_are_authorization", True),
+            ("evidence_accepted", True),
+            ("physical_q11_qualified", True),
+            ("require_real_authenticated_subject", False),
+            ("require_native_decode_and_transport_budgets", False),
+            ("deny_nonlisted_network_effects", False),
+            ("require_durable_indeterminate_no_replay", False),
+        ):
+            bad = copy.deepcopy(doc)
+            bad["architecture_gate"][key] = unsafe
+            with self.subTest(field=key), self.assertRaises(ValueError):
+                enforce_inert(bad)
+
     def test_metadata_and_inert_semantics(self):
         doc = read(SOURCE)
         self.assertEqual(
@@ -225,6 +295,28 @@ class ProposedS18ContractTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/v010-qualification.yml").read_text()
         for path in expected:
             self.assertIn(f'"{path}"', workflow)
+
+    def test_s18_architecture_cross_document_traceability(self):
+        expected_markers = (
+            ("docs/adr/README.md", "S18-1 architecture review"),
+            ("docs/milestones/v0.10.0.md", "S18-1 contract-first milestone acceptance"),
+            ("docs/qualification/v0.10.0.md", "S18-1 architecture-only gate"),
+            ("docs/threat-model.md", "S18-1 architecture-stage threat gate"),
+            (
+                "docs/workstreams/v010-s18-network-phase1.md",
+                "S18-1 contract-first evidence and extraction map",
+            ),
+        )
+        for relative_path, marker in expected_markers:
+            with self.subTest(path=relative_path):
+                content = (ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn(marker, content)
+                self.assertIn("S18-2", content)
+        scope = (
+            ROOT / "docs/development/v010-s18-1-network-architecture-contracts.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Complete architecture review surfaces", scope)
+        self.assertIn("S21-1", scope)
 
     def test_ledger_and_evidence_remain_unpromoted(self):
         ledger = {

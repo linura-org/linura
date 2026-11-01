@@ -165,3 +165,25 @@ require_network_loss_recovery = true
 require_indeterminate_no_replay = true
 require_credential_redaction = true
 require_keyboard_pointer_accessibility = true
+
+# S18-1 architectural acceptance, not a source of executable authority.
+[architecture_gate]
+phase = "contract-first"
+owner_pr = 267
+native_identity_and_observation_owner_pr = 268
+review_base = "wip/v010-s18-network"
+architecture_only = true
+enable_effects = false
+evidence_accepted = false
+identity_inputs_are_authorization = false
+native_api_support_claimed = false
+physical_q11_qualified = false
+native_identity_scope = "boot-bus-instance-unique-nm-owner-device-profile-activation-generation"
+canonical_observation_authority = "linura-observation::ObservationEnvelope-and-Control"
+require_real_authenticated_subject = true
+require_native_independent_postcondition = true
+require_offline_local_recovery = true
+require_durable_indeterminate_no_replay = true
+require_purpose_bound_protected_credentials = true
+require_native_decode_and_transport_budgets = true
+deny_nonlisted_network_effects = true
