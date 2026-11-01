@@ -84,6 +84,7 @@ impl AudioObject {
     fn attributes(&self) -> BTreeMap<String, ObservedValue> {
         let mut values = BTreeMap::from([
             ("id".into(), ObservedValue::U64(u64::from(self.id))),
+            ("observer_uid".into(), ObservedValue::U64(u64::from(geteuid().as_raw()))),
             ("object_serial".into(), ObservedValue::U64(self.serial)),
             ("kind".into(), ObservedValue::Text(self.kind.as_str().into())),
             ("name_escaped".into(), ObservedValue::Text(escape(&self.name))),
@@ -317,7 +318,20 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
 
     let mut global_ids = BTreeSet::new();
     let mut global_serials = BTreeSet::new();
+    // Select audio node IDs regardless of native JSON record order.
+    let audio_node_ids: BTreeSet<u32> = rows.iter()
+        .filter(|row| row.get("type").and_then(Value::as_str)
+            == Some("PipeWire:Interface:Node"))
+        .filter(|row| row.get("info").and_then(|info| info.get("props"))
+            .and_then(|props| props.get("media.class"))
+            .and_then(Value::as_str)
+            .is_some_and(|class| matches!(class,
+                "Audio/Sink" | "Audio/Source"
+                | "Stream/Output/Audio" | "Stream/Input/Audio")))
+        .filter_map(|row| item_id(row).ok())
+        .collect();
     let mut nodes = BTreeMap::new();
+    let mut attached_devices = BTreeSet::new();
     let mut devices = Vec::new();
     let mut ports = Vec::new();
     let mut links = Vec::new();
@@ -358,6 +372,9 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                 }
                 let node_name = p.get("node.name").and_then(Value::as_str)
                     .ok_or_else(|| invalid("audio node missing name"))?;
+                if p.get("device.id").is_some() {
+                    attached_devices.insert(property_u32(p, "device.id")?);
+                }
                 let object = AudioObject {
                     kind: Kind::Node,
                     id,
@@ -385,6 +402,9 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
             }
             "PipeWire:Interface:Port" => {
                 let parent_node = property_u32(p, "node.id")?;
+                if !audio_node_ids.contains(&parent_node) {
+                    continue;
+                }
                 let name = p.get("port.name").and_then(Value::as_str)
                     .ok_or_else(|| invalid("audio port missing name"))?;
                 let direction = match p.get("port.direction").and_then(Value::as_str) {
@@ -400,11 +420,16 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                 });
             }
             "PipeWire:Interface:Link" => {
+                let output_node = property_u32(p, "link.output.node")?;
+                let input_node = property_u32(p, "link.input.node")?;
+                if !audio_node_ids.contains(&output_node) || !audio_node_ids.contains(&input_node) {
+                    continue;
+                }
                 links.push(AudioObject {
                     kind: Kind::Link, id, serial, name: "PipeWire audio link".into(),
                     media_class: None, parent_node: None, direction: None,
-                    output_node: Some(property_u32(p, "link.output.node")?),
-                    input_node: Some(property_u32(p, "link.input.node")?),
+                    output_node: Some(output_node),
+                    input_node: Some(input_node),
                     output_port: Some(property_u32(p, "link.output.port")?),
                     input_port: Some(property_u32(p, "link.input.port")?),
                 });
@@ -416,9 +441,9 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
     let mut objects: Vec<AudioObject> = nodes.values().cloned().collect();
     // Only audio-related ports and links are projected. Never imply an
     // incomplete link set represents a privacy or access-control guarantee.
-    let live_ports: BTreeMap<u32, &AudioObject> = ports.iter()
+    let live_ports: BTreeMap<u32, AudioObject> = ports.iter()
         .filter(|port| port.parent_node.is_some_and(|id| nodes.contains_key(&id)))
-        .map(|port| (port.id, port))
+        .map(|port| (port.id, port.clone()))
         .collect();
     objects.extend(
         ports.into_iter()
@@ -444,7 +469,7 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
         }
         objects.push(link);
     }
-    objects.extend(devices);
+    objects.extend(devices.into_iter().filter(|device| attached_devices.contains(&device.id)));
     if objects.len() > MAX_GRAPH_OBJECTS {
         return Err(invalid("PipeWire graph projection exceeds resource budget"));
     }
@@ -452,7 +477,7 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
     Ok(objects)
 }
 
-fn pipe_limit(mut reader: impl Read, bound: u64) -> Result<Vec<u8>, ProviderError> {
+fn pipe_limit(reader: impl Read, bound: u64) -> Result<Vec<u8>, ProviderError> {
     let mut data = Vec::new();
     reader.take(bound + 1).read_to_end(&mut data)
         .map_err(|_| ProviderError::Unavailable("PipeWire snapshot read failed".into()))?;
@@ -526,7 +551,7 @@ mod tests {
 
     const FIXTURE: &str = r#"[
         {"id":10,"type":"PipeWire:Interface:Node","info":{"props":{
-            "object.serial":"100","node.name":"sink<&","media.class":"Audio/Sink"}}},
+            "object.serial":"100","device.id":"15","node.name":"sink<&","media.class":"Audio/Sink"}}},
         {"id":11,"type":"PipeWire:Interface:Node","info":{"props":{
             "object.serial":"101","node.name":"player","media.class":"Stream/Output/Audio"}}},
         {"id":12,"type":"PipeWire:Interface:Port","info":{"props":{
