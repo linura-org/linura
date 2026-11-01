@@ -57,6 +57,8 @@ const NM_DEVICE_RESOURCE_PREFIX: &str = "networkmanager:device:";
 const MAX_NM_DEVICES: usize = 128;
 const MAX_NM_INTERFACE_BYTES: usize = 128;
 const MAX_NM_TEXT_BYTES: usize = 1024;
+// Post-read guard only: this does not set a zbus receive or decode deadline.
+const NM_SNAPSHOT_MAX_ELAPSED: Duration = Duration::from_secs(2);
 const OBSERVATION_VALID_FOR_MS: u64 = 2_000;
 
 pub const PIPEWIRE_SESSION_PROVIDER: &str = "pipewire";
@@ -310,13 +312,12 @@ impl NetworkManagerObserver {
         }
         let mut rows = Vec::with_capacity(paths.len());
         for path in paths {
-            let device = Proxy::new(&self.connection, owner, path.as_str(), NM_DEVICE_INTERFACE)
-                .map_err(provider_bus_error)?;
-            let interface: String = device
-                .get_property("Interface")
-                .map_err(provider_bus_error)?;
-            // The D-Bus proxy borrows the path; release it before moving the path.
-            drop(device);
+            // Individual proxy property reads may use a stale PropertiesChanged
+            // cache; resolve identity from the same unique-owner GetAll snapshot.
+            let properties =
+                all_properties(&self.connection, owner, path.as_str(), NM_DEVICE_INTERFACE)?;
+            let interface: String = snapshot_property(&properties, "Interface")?;
+            validate_nm_interface(&interface)?;
             rows.push((interface, path));
         }
         let index = index_nm_devices(rows)?;
@@ -339,6 +340,8 @@ impl NetworkManagerObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        let started = Instant::now();
+        let boot_id = nm_boot_id()?;
         let owner = self.unique_owner()?;
         let properties = all_properties(&self.connection, &owner, NM_PATH, NM_INTERFACE)?;
         let version: String = snapshot_property(&properties, "Version")?;
@@ -358,6 +361,7 @@ impl NetworkManagerObserver {
                 ObservedValue::Bool(networking_enabled),
             ),
             ("service_owner".into(), ObservedValue::Text(owner.clone())),
+            ("boot_id".into(), ObservedValue::Text(boot_id.clone())),
         ]);
         for (native, attribute) in [
             ("WirelessEnabled", "wireless_enabled"),
@@ -371,6 +375,8 @@ impl NetworkManagerObserver {
             }
         }
         self.require_same_owner(&owner)?;
+        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        require_nm_elapsed(started)?;
         Ok(ObservationEnvelope {
             provider: provider_id(NM_PROVIDER),
             resource: resource.clone(),
@@ -388,6 +394,8 @@ impl NetworkManagerObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        let started = Instant::now();
+        let boot_id = nm_boot_id()?;
         let interface = Self::device_interface(resource)?;
         let owner = self.unique_owner()?;
         let path = self.find_device_path(&owner, interface)?;
@@ -415,6 +423,7 @@ impl NetworkManagerObserver {
             ("driver".into(), ObservedValue::Text(driver)),
             ("object_path".into(), ObservedValue::Text(path.to_string())),
             ("service_owner".into(), ObservedValue::Text(owner.clone())),
+            ("boot_id".into(), ObservedValue::Text(boot_id.clone())),
         ]);
         // These are correlations to NM-owned objects, not sufficient mutation IDs.
         for (native, attribute) in [
@@ -430,6 +439,27 @@ impl NetworkManagerObserver {
                 );
             }
         }
+        // Conservative read-only hints, not evidence of DNS/route readiness.
+        if properties.contains_key("IpInterface") {
+            let ip_interface: String = snapshot_property(&properties, "IpInterface")?;
+            if !ip_interface.is_empty() {
+                validate_nm_interface(&ip_interface)?;
+                attributes.insert("ip_interface".into(), ObservedValue::Text(ip_interface));
+            }
+        }
+        if properties.contains_key("Mtu") {
+            let mtu: u32 = snapshot_property(&properties, "Mtu")?;
+            attributes.insert("mtu".into(), ObservedValue::U64(u64::from(mtu)));
+        }
+        for (native, attribute) in [
+            ("Autoconnect", "autoconnect"),
+            ("FirmwareMissing", "firmware_missing"),
+        ] {
+            if properties.contains_key(native) {
+                let value: bool = snapshot_property(&properties, native)?;
+                attributes.insert(attribute.into(), ObservedValue::Bool(value));
+            }
+        }
         // The interface alias can be reused on a new object without changing
         // the daemon's unique owner; reject that case as well.
         if self.find_device_path(&owner, interface)? != path {
@@ -438,6 +468,8 @@ impl NetworkManagerObserver {
             ));
         }
         self.require_same_owner(&owner)?;
+        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        require_nm_elapsed(started)?;
         Ok(ObservationEnvelope {
             provider: provider_id(NM_PROVIDER),
             resource: resource.clone(),
@@ -449,6 +481,47 @@ impl NetworkManagerObserver {
             attributes,
         })
     }
+}
+
+fn nm_boot_id() -> Result<String, ProviderError> {
+    let raw = fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|_| {
+        ProviderError::Unavailable("cannot read the current kernel boot identity".into())
+    })?;
+    let value = raw.trim_end_matches('\n');
+    validate_nm_boot_id(value)?;
+    Ok(value.to_owned())
+}
+
+fn validate_nm_boot_id(value: &str) -> Result<(), ProviderError> {
+    if value.len() != 36
+        || !value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+    {
+        return Err(ProviderError::InvalidState(
+            "kernel boot identity is malformed".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_nm_boot_match(expected: &str, actual: &str) -> Result<(), ProviderError> {
+    if expected != actual {
+        return Err(ProviderError::Unavailable(
+            "kernel boot identity changed during NetworkManager observation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_nm_elapsed(started: Instant) -> Result<(), ProviderError> {
+    if started.elapsed() > NM_SNAPSHOT_MAX_ELAPSED {
+        return Err(ProviderError::Unavailable(
+            "NetworkManager observation exceeded the supported snapshot window".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_nm_interface(interface: &str) -> Result<(), ProviderError> {
@@ -537,11 +610,15 @@ impl Observer for NetworkManagerObserver {
             ResourceId::new(NM_MANAGER_RESOURCE)
                 .map_err(|error| invalid_identifier("NetworkManager manager resource", error))?,
         ];
+        let started = Instant::now();
+        let boot_id = nm_boot_id()?;
         let owner = self.unique_owner()?;
         for interface in self.device_index(&owner)?.keys() {
             resources.push(Self::device_resource(interface)?);
         }
         self.require_same_owner(&owner)?;
+        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        require_nm_elapsed(started)?;
         resources.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(resources)
     }
@@ -1346,6 +1423,34 @@ mod tests {
         ));
         assert!(matches!(
             require_nm_owner_match(":1.21", ""),
+            Err(ProviderError::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn networkmanager_boot_identity_rejects_malformed_and_replaced_epoch() {
+        let boot = "12345678-9abc-4def-8123-fedcba987654";
+        assert!(validate_nm_boot_id(boot).is_ok());
+        assert!(matches!(
+            require_nm_boot_match(boot, "12345678-9abc-4def-8123-fedcba987655"),
+            Err(ProviderError::Unavailable(_))
+        ));
+        for malformed in [
+            "",
+            "12345678-9abc-4def-8123-fedcba98765",
+            "12345678-9abc-4def-8123-fedcba98765g",
+            "12345678:9abc-4def-8123-fedcba987654",
+        ] {
+            assert!(validate_nm_boot_id(malformed).is_err(), "{malformed}");
+        }
+    }
+
+    #[test]
+    fn networkmanager_snapshot_elapsed_window_is_fail_closed() {
+        assert!(require_nm_elapsed(Instant::now()).is_ok());
+        let old = Instant::now() - NM_SNAPSHOT_MAX_ELAPSED - Duration::from_secs(1);
+        assert!(matches!(
+            require_nm_elapsed(old),
             Err(ProviderError::Unavailable(_))
         ));
     }
