@@ -449,6 +449,26 @@ impl TransactionAuthorityVerifier {
     }
 }
 
+
+/// Durable local-state port. Neither a stored record nor a signed update is an
+/// external-effect permit or a claim about visible renderer state.
+pub trait PersonalizationPreferenceStore: std::fmt::Debug + Send {
+    fn current(
+        &self,
+        owner: &PrincipalId,
+    ) -> Result<Option<PersonalizationPreferenceRecord>, TransactionStoreError>;
+    fn request(
+        &self,
+        owner: &PrincipalId,
+        request: &RequestId,
+    ) -> Result<Option<PersonalizationPreferenceRecord>, TransactionStoreError>;
+    fn apply(
+        &mut self,
+        update: &PersonalizationPreferenceUpdate,
+    ) -> Result<PersonalizationPreferenceRecord, TransactionStoreError>;
+    fn integrity_check(&self) -> Result<(), TransactionStoreError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

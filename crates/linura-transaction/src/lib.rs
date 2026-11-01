@@ -9,7 +9,7 @@ pub use approved_request::{
 pub use personalization_preference::{
     AccentPreset, Density, FontPreset, IconPreset, MAX_PERSONALIZATION_PREFERENCE_BYTES,
     PERSONALIZATION_REQUEST_PREFIX, PersonalizationChoices, PersonalizationPreferenceRecord,
-    PersonalizationPreferenceUpdate, ThemeMode,
+    PersonalizationPreferenceStore, PersonalizationPreferenceUpdate, ThemeMode,
 };
 pub use protective_lock_setting::{
     MAX_PROTECTIVE_LOCK_SETTING_BYTES, ProtectiveLockSettingRecord, ProtectiveLockSettingStore,

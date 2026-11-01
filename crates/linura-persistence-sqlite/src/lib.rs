@@ -19,6 +19,8 @@ mod schema;
 #[allow(clippy::too_many_arguments)]
 mod store;
 mod protective_lock_settings;
+#[rustfmt::skip]
+mod personalization_preferences;
 mod request_journal;
 mod storage_error;
 #[rustfmt::skip]
@@ -30,6 +32,7 @@ mod validation_base;
 
 pub use integrity::SqliteIntegrityKey;
 pub use protective_lock_settings::SqliteProtectiveLockSettingStore;
+pub use personalization_preferences::SqlitePersonalizationPreferenceStore;
 pub use request_journal::SqliteApprovedRequestJournal;
 pub use storage_error::is_physical_storage_exhaustion;
 pub use store::{SqliteSettings, SqliteTransactionStore, StoreLimits};

@@ -32,6 +32,12 @@ pub use protective_sleep_gate::{
 };
 mod protective_lock_safety;
 mod protective_lock_settings;
+#[rustfmt::skip]
+mod personalization_preferences;
+pub use personalization_preferences::{
+    PersonalizationConfigurationReceipt, PersonalizationConfigurationRequest,
+    PersonalizationPreferencesControl,
+};
 pub use protective_lock_settings::{
     PROTECTIVE_LOCK_SETTING_REQUEST_PREFIX, ProtectiveLockConfigurationReceipt,
     ProtectiveLockConfigurationRequest, ProtectiveLockSettingsControl,
