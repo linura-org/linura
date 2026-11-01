@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod logind;
+mod mpris;
+pub use mpris::{MPRIS_PLAYER_CAPABILITY, MPRIS_PROVIDER, MprisObserver};
 pub mod platform_discovery;
 pub use logind::{
     LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
