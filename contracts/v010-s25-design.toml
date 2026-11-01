@@ -1,0 +1,244 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S25"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+new_persistent_preferences_enabled = false
+imported_theme_is_executable = false
+qml_writes_provider_directly = false
+wallpaper_uri_grants_external_effect = false
+theme_can_override_security_status_semantics = false
+theme_can_modify_lock_authentication = false
+system_palette_equals_committed_revision = false
+preference_save_proves_native_renderer_applied = false
+unsafe_asset_fallback_allowed = false
+network_asset_auto_fetch = false
+unreviewed_font_or_icon_install = false
+indeterminate_effect_replay = false
+preserve_ui_sdk_and_tokens = true
+preserve_s17_security_owner_isolation = true
+preserve_s21_display_topology_authority = true
+require_owner_authenticated_cas = true
+require_separate_preview_commit_and_applied_state = true
+require_safe_content_hash_asset_provenance = true
+require_semantic_contrast_focus_and_reduced_motion = true
+require_actual_renderer_revision_observation = true
+require_recoverable_no_model_offline_configuration = true
+unsupported_behavior = "fail-closed"
+architecture = "docs/adr/0053-s25-personalization-authority-and-safe-rendering.md"
+source_audit = "docs/workstreams/v010-s25-personalization-phase1.md"
+qualification_document = "docs/qualification/v0.10.0-s25.md"
+security_qualification = "docs/qualification/v0.10.0-s25-security.md"
+existing_semantics = "contracts/operation-semantics.toml"
+
+[existing_visual_foundation]
+tokens = "design/tokens.json"
+theme = "apps/linura-shell/ui/LinuraTheme.qml"
+component_manifest = "apps/linura-shell/ui/CMakeLists.txt"
+sdk_module = "org.linura.UI"
+sdk_version = "1.0"
+system_palette_source = "SystemPalette"
+sdk_is_presentation_only = true
+existing_theme_is_durable_preference_store = false
+do_not_change_existing_token_semantics = true
+do_not_change_existing_s10_s16_visual_behavior = true
+
+[proposed_local_preference_state]
+schema_version = 1
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+owner_identity = "authenticated-uid-owner-and-revision"
+require_atomic_compare_and_swap = true
+require_owner_only_persistence = true
+require_base_revision_and_digest = true
+require_strict_known_fields_and_schema_version = true
+require_bounded_migration_and_recovery = true
+require_no_desired_to_applied_shortcut = true
+require_no_transient_preview_persistence = true
+require_explicit_previous_revision_restore = true
+require_no_external_effect_on_local_commit = true
+
+[proposed_renderer_observation]
+capability = "desktop.personalization.applied.observe"
+bind_selected_user_session_and_seat = true
+bind_renderer_module_and_version = true
+bind_preference_revision_and_effective_fallback = true
+bind_s21_output_topology_for_wallpaper = true
+observe_each_supported_surface_independently = true
+no_fabricated_cross_surface_consensus = true
+distinguish_committed_applied_pending_and_failed = true
+
+[preview]
+class = "experience-ephemeral"
+bind_window_session_preview_generation = true
+bounded_preview_lifetime = true
+cancel_on_lock_logout_or_restart = true
+no_compositor_or_privileged_effect = true
+no_implicit_persist_on_preview = true
+
+[assets]
+require_regular_safe_open_file = true
+require_content_hash_provenance = true
+require_owner_scope_and_trusted_root = true
+require_mime_format_and_decoder_allowlist = true
+require_bounded_encoded_and_decoded_bytes = true
+require_bounded_dimensions_frames_and_resources = true
+deny_remote_uris_and_external_svg_references = true
+deny_scripts_stylesheets_and_qml_code = true
+require_installed_font_icon_and_glyph_fallback = true
+require_no_security_owner_fontconfig_override = true
+
+[semantic_safety]
+require_readable_contrast_in_all_qualified_states = true
+require_accessible_focus_and_selection = true
+require_distinct_denial_warning_failure_and_success = true
+require_reduced_motion_override = true
+require_keyboard_pointer_rtl_and_screen_reader = true
+require_safe_nonpersonalized_security_chrome = true
+
+[[candidate_operation]]
+id = "operation:personalization.appearance.configure"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-appearance-schema-revision"
+requested_keys = ["palette", "mode", "accent"]
+requires = ["authenticated-owner", "typed-contrast-safe-palette", "revision-checked", "atomic-local-commit", "no-native-provider-effect"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.typography.configure"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-type-schema-revision"
+requested_keys = ["font_family", "font_scale"]
+requires = ["authenticated-owner", "installed-font-and-glyph-fallback", "bounded-scale", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.density.configure"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-density-schema-revision"
+requested_keys = ["density"]
+requires = ["authenticated-owner", "bounded-control-sizes", "keyboard-focus-safety", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.motion.configure"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-motion-schema-revision"
+requested_keys = ["reduced_motion"]
+requires = ["authenticated-owner", "accessibility-user-override", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.icons.configure"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-icon-family-schema-revision"
+requested_keys = ["icon_family"]
+requires = ["authenticated-owner", "installed-allowlisted-icon-family", "safe-resource-fallback", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.wallpaper.configure"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-wallpaper-source-revision"
+requested_keys = ["asset_digest", "fit_mode", "output_preferences"]
+requires = ["authenticated-owner", "safe-content-hash-asset", "s21-output-topology-binding", "revision-checked", "atomic-local-commit", "no-native-provider-effect"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.profile.reset"
+provider = "linura-local-personalization"
+observation = "linura.personalization.preference.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-authenticated-owner-preferences-root-revision"
+requested_keys = ["reset_keys"]
+requires = ["authenticated-owner", "explicit-reset-scope", "preserve-security-semantics", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.wallpaper.apply"
+provider = "desktop-wallpaper"
+observation = "desktop.personalization.applied.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-session-compositor-output-generation-asset-digest"
+requested_keys = ["asset_digest", "output_targets"]
+requires = ["current-session-and-compositor", "s21-output-topology-binding", "safe-content-hash-asset", "narrow-adapter-no-shell", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.wallpaper.clear"
+provider = "desktop-wallpaper"
+observation = "desktop.personalization.applied.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-session-compositor-output-generation"
+requested_keys = ["output_targets", "clear"]
+requires = ["current-session-and-compositor", "s21-output-topology-binding", "narrow-adapter-no-shell", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:personalization.desktop.color-scheme.set"
+provider = "desktop-appearance"
+observation = "desktop.personalization.applied.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-session-appearance-provider-generation"
+requested_keys = ["color_scheme"]
+requires = ["real-native-provider-and-owner", "no-security-owner-mutation", "narrow-adapter-no-shell", "independent-reobserve"]
+enabled = false
+
+[unsupported_extensions]
+untrusted_remote_theme_download = false
+arbitrary_qml_css_js_or_shader_in_theme = false
+arbitrary_compositor_config_write = false
+arbitrary_wallpaper_shell_command = false
+security_owner_password_theme_override = false
+global_fontconfig_mutation = false
+font_or_icon_package_install = false
+unqualified_multidistribution_theme_engine = false
+unbounded_svg_script_or_external_reference = false
+theme_import_approval_or_authority_token = false
+silent_cross_user_theme_sync = false
+
+[qualification]
+development_level = "level-a-exact-source-arch-hyprland"
+interactive_vm_level = "level-b-exact-source-arch-hyprland"
+physical_release_level = "level-c-maintained-hardware-q11"
+mock_token_comparison_is_visual_proof = false
+snapshot_png_is_full_accessibility_proof = false
+vm_render_is_physical_display_proof = false
+require_adversarial = true
+require_s10_s16_compiled_sdk_regression = true
+require_schema_cas_concurrency_and_recovery = true
+require_safe_image_font_icon_decoder = true
+require_cross_surface_effective_revision = true
+require_s17_lock_chrome_and_font_isolation = true
+require_s21_multioutput_hidpi = true
+require_reduced_motion_contrast_focus_rtl = true
+require_reviewed_visual_baselines_diffs_and_interactions = true
+require_native_reobserve_and_no_replay = true

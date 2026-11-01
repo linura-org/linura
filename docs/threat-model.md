@@ -748,6 +748,37 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S25 personalized rendering, untrusted themes and preference authority confusion
+
+A theme, wallpaper path or imported font/icon can smuggle executable QML,
+unsafe image decoders, a privileged compositor target or visual approval
+spoofing into a user-setting operation. An accepted local preference revision
+also must not be mistaken for an observed external renderer state.
+- Bind local preferences to authenticated owner, strict versioned schema,
+  immutable previous revision/hash, atomic CAS and owner-only persistence.
+  Previews are ephemeral session/window generations, never a durable commit.
+- Strictly reject code, dynamic QML/JS/CSS/shader, unknown scheme fields,
+  unsafe image/SVG metadata, remote URLs and untrusted font/icon paths.
+  Use content-hashed regular files, bounded decode, installed font/icon
+  allowlists and deterministic visible fallback.
+- Protect semantic success/warning/failure/denial and focus contrast,
+  accessible sizing, reduced motion and protected interaction regardless
+  of personalized accent, mode, icon, font and imported theme values.
+- User settings cannot change S17 native lock, password focus, packaged
+  fontconfig or security-owner authority. S21 still owns output topology,
+  scale, first frame and compositor identity on wallpaper apply.
+- Preserve the presentation-only org.linura.UI 1.0 component boundary.
+  A stored theme is not proof that each renderer applied it; report
+  independently verified source/target revisions and partial failures.
+- Native wallpaper or desktop-scheme writes require separately registered
+  Control operations and owner/provider/target epochs, with a narrow adapter,
+  audit, independently re-observed result and no blind crash replay.
+  Never use QML shell/Hyprland/DBus arbitrary command forwarding.
+- Q10 reviewed captures/diffs and interaction/accessibility artifacts and
+  Q11 genuine GPU/display/lock evidence cannot be inferred from static tokens.
+- See proposed [ADR 0053](adr/0053-s25-personalization-authority-and-safe-rendering.md)
+  and [S25 security qualification](qualification/v0.10.0-s25-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to
