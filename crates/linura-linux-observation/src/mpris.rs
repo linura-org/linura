@@ -302,6 +302,21 @@ impl Observer for MprisObserver {
             attributes.insert("length_us".into(), ObservedValue::I64(length));
         }
 
+        // Position is optional in MPRIS GetAll; when present it is a bounded
+        // native fact, not a seek authorization or an independently fresh clock.
+        if let Some(value) = player.get("Position") {
+            let position = i64::try_from(
+                value
+                    .try_clone()
+                    .map_err(|_| invalid("invalid MPRIS position"))?,
+            )
+            .map_err(|_| invalid("invalid MPRIS position"))?;
+            if !(0..=86_400_000_000).contains(&position) {
+                return Err(invalid("MPRIS position out of bounds"));
+            }
+            attributes.insert("position_us".into(), ObservedValue::I64(position));
+        }
+
         // Both properties interfaces are non-atomic reads. Preserve exact bus/owner
         // identity, but do NOT promote this read to a playback/seek authorization.
         if self.owner(name)? != actual_owner {
