@@ -1,0 +1,220 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S20"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_new_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+indeterminate_replay = false
+existing_operation_must_remain_unchanged = true
+no_generic_provider_relay = true
+no_shell_or_wpctl_executor = true
+no_qml_owned_mutation = true
+no_cross_uid_session_access = true
+untrusted_media_metadata_is_authority = false
+default_alias_grants_effect_authority = false
+microphone_mute_proves_no_capture = false
+unverified_reply_is_success = false
+existing_semantics = "contracts/operation-semantics.toml"
+architecture = "docs/adr/0050-s20-audio-media-authority.md"
+qualification_document = "docs/qualification/v0.10.0-s20.md"
+security_qualification = "docs/qualification/v0.10.0-s20-security.md"
+source_audit = "docs/workstreams/v010-s20-audio-media-phase1.md"
+unsupported_behavior = "fail-closed"
+identity_binding = "boot-user-session-bus-pipewire-core-node-serial-name-graph-generation"
+verification = "independent-native-post-effect-observation"
+
+[existing_registered_operation]
+id = "operation:audio.output.set-session-volume"
+provider = "pipewire"
+observation = "audio.session.observe"
+class = "transient-external-effect"
+risk_floor = "user-state"
+resource_prefix = "audio:session:output:"
+change_keys = ["volume_percent"]
+min_volume_percent = 0
+max_volume_percent = 100
+reused_not_duplicated = true
+retain_exact_native_helper = true
+retain_same_uid_session1 = true
+retain_durable_audit_reservation = true
+retain_strictly_newer_verification = true
+do_not_claim_physical_q11 = true
+
+[proposed_observation]
+outputs = "audio.session.observe"
+inputs = "audio.input.observe"
+streams = "audio.stream.observe"
+devices = "audio.device.observe"
+media_players = "mpris.player.observe"
+require_boot_session_and_real_bus_owner = true
+require_pipewire_core_generation = true
+require_node_id_serial_name_and_class = true
+require_default_alias_read_only = true
+require_exact_stream_links_for_route = true
+distinguish_output_input_stream_and_profile = true
+distinguish_hardware_mute_software_mute_and_capture = true
+bound_and_sanitize_mpris_metadata = true
+require_exact_mpris_owner_and_track = true
+control_owns_observation_and_aggregation = true
+
+[[candidate_operation]]
+id = "operation:audio.output.set-mute"
+provider = "pipewire"
+observation = "audio.session.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-pipewire-output-node-serial"
+requested_keys = ["muted"]
+requires = ["separate-mute-from-zero-volume", "exact-node", "subject-bound-policy", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:audio.output.set-default"
+provider = "pipewire"
+observation = "audio.device.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-pipewire-output-device-generation"
+requested_keys = ["default_output"]
+requires = ["default-alias-not-effect-identity", "current-output-device", "stream-route-impact", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:audio.input.set-volume"
+provider = "pipewire"
+observation = "audio.input.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-session-pipewire-input-node-serial"
+requested_keys = ["volume_percent"]
+requires = ["capture-privacy-review", "exact-source-node", "bounded-gain", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:audio.input.set-mute"
+provider = "pipewire"
+observation = "audio.input.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-session-pipewire-input-node-serial"
+requested_keys = ["muted"]
+requires = ["capture-privacy-review", "not-privacy-kill-switch", "exact-source-node", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:audio.input.set-default"
+provider = "pipewire"
+observation = "audio.device.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-session-pipewire-input-device-generation"
+requested_keys = ["default_input"]
+requires = ["capture-privacy-review", "current-input-device", "stream-route-impact", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:audio.stream.set-route"
+provider = "pipewire"
+observation = "audio.stream.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-session-pipewire-stream-node-link-generation"
+requested_keys = ["target_device"]
+requires = ["exact-stream-and-device", "capture-stream-privacy", "route-link-verification", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:audio.device.set-profile"
+provider = "pipewire"
+observation = "audio.device.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-session-pipewire-card-profile-generation"
+requested_keys = ["profile"]
+requires = ["profile-support", "input-and-output-impact", "recovery-reobserve", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:media.player.play"
+provider = "mpris"
+observation = "mpris.player.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-mpris-unique-owner-track-generation"
+requested_keys = ["playback_status"]
+requires = ["untrusted-metadata", "owner-identity", "player-capability", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:media.player.pause"
+provider = "mpris"
+observation = "mpris.player.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-mpris-unique-owner-track-generation"
+requested_keys = ["playback_status"]
+requires = ["untrusted-metadata", "owner-identity", "player-capability", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:media.player.next"
+provider = "mpris"
+observation = "mpris.player.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-mpris-unique-owner-track-generation"
+requested_keys = ["next_requested"]
+requires = ["untrusted-metadata", "owner-identity", "capability-can-go-next", "no-false-track-verification", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:media.player.previous"
+provider = "mpris"
+observation = "mpris.player.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-mpris-unique-owner-track-generation"
+requested_keys = ["previous_requested"]
+requires = ["untrusted-metadata", "owner-identity", "capability-can-go-previous", "no-false-track-verification", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:media.player.seek"
+provider = "mpris"
+observation = "mpris.player.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-session-mpris-unique-owner-track-generation"
+requested_keys = ["position"]
+requires = ["untrusted-metadata", "owner-identity", "seekable-track", "bounded-position", "independent-reobserve"]
+enabled = false
+
+[unsupported_extensions]
+amplification_above_existing_cap = false
+arbitrary_pipewire_command_or_lua = false
+raw_capture_or_recording = false
+microphone_permission_bypass = false
+claim_hardware_privacy_from_software_mute = false
+arbitrary_mpris_method_relay = false
+network_media_uri_fetch = false
+unbounded_album_art_fetch = false
+cross_user_media_control = false
+
+[qualification]
+development_level = "level-a-arch-hyprland-exact-source"
+interactive_vm_level = "level-b-arch-hyprland-exact-source"
+physical_release_level = "level-c-maintained-hardware-q11"
+virtual_audio_is_physical = false
+video_is_correctness_oracle = false
+require_adversarial = true
+require_s08_exact_source_regression = true
+require_session_uid_and_node_generation = true
+require_microphone_privacy_state = true
+require_mpris_owner_and_metadata_safety = true
+require_indeterminate_no_replay_for_managed_effects = true
+require_keyboard_pointer_accessibility = true

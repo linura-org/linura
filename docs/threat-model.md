@@ -748,6 +748,34 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S20 PipeWire node reuse, capture privacy and hostile MPRIS players
+
+A reused PipeWire numeric node, moving default output/input, stale stream,
+cross-UID session or forged media-player name can retarget a previously reviewed
+effect or misrepresent privacy and final postcondition verification.
+- Preserve the existing `operation:audio.output.set-session-volume` trusted
+  transient descriptor, same-UID Session1 transport, node ID + serial + name,
+  sealed immutable helper, strictly newer native verification and bounded
+  durable audit; S20 candidate effects must not inherit its permissions.
+- Bind source, sink, device/card, profile, stream link and current owner
+  generations independently. Default alias, friendly name, node number and
+  cached QML draft cannot provide an effect grant.
+- Software microphone mute is not physical capture inhibition. Distinguish
+  device hardware privacy switch, native source mute, active capture streams
+  and actual permissions; do not promise a universal kill-switch without proof.
+- Session-bus MPRIS unique owner and selected player/track must be freshly
+  verified. Player metadata, artwork URIs and error text are hostile input:
+  limit/escape presentation and never fetch arbitrary external resources.
+- Treat media playback keys as external player effects, not Linura UI
+  navigation; no arbitrary user D-Bus method, shell or privileged helper.
+- A lost native reply, provider restart, changed graph or player death may
+  leave durable effects uncertain. Re-observe, never blindly replay an
+  ambiguous managed operation or optimistically report verified success.
+- Preserve S17 secure-session and S19 Bluetooth/S21 power/device boundaries,
+  plus separate physical Q11 microphone and speaker verification.
+- See proposed [ADR 0050](adr/0050-s20-audio-media-authority.md) and
+  [S20 security qualification](qualification/v0.10.0-s20-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to
