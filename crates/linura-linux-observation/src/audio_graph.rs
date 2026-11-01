@@ -599,6 +599,36 @@ mod tests {
     }
 
     #[test]
+    fn capture_nodes_are_observed_but_never_claim_hardware_privacy() {
+        let source = r#"[
+            {"id":20,"type":"PipeWire:Interface:Node","info":{"props":{
+                "object.serial":"200","node.name":"capture-source","media.class":"Audio/Source"}}},
+            {"id":21,"type":"PipeWire:Interface:Node","info":{"props":{
+                "object.serial":"201","node.name":"recorder","media.class":"Stream/Input/Audio"}}}
+        ]"#;
+        let graph = parse_snapshot(source).unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(graph.len(), 2);
+        assert_eq!(graph[0].media_class, Some("Audio/Source"));
+        assert_eq!(graph[1].media_class, Some("Stream/Input/Audio"));
+        for node in &graph {
+            assert_eq!(
+                node.attributes().get("capture_privacy_verified"),
+                Some(&ObservedValue::Bool(false))
+            );
+        }
+    }
+
+    #[test]
+    fn foreign_video_nodes_are_not_exposed_as_audio() {
+        let video = r#"[
+            {"id":20,"type":"PipeWire:Interface:Node","info":{"props":{
+                "object.serial":"200","node.name":"camera","media.class":"Video/Source"}}}
+        ]"#;
+        let graph = parse_snapshot(video).unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(graph.is_empty());
+    }
+
+    #[test]
     fn audio_graph_resources_pin_exact_serial_and_reject_aliases() {
         let graph = parse_snapshot(FIXTURE)
             .unwrap_or_else(|e| unreachable!("{e}"));
