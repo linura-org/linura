@@ -358,6 +358,20 @@ kernel protections remain. No DRM master, output write or effect authority is
 introduced. Native modeset/hotplug/reset qualification, startup protection,
 single-use restoration and terminal/retention semantics remain required.
 
+The executor additionally retains a fixed original logind `sleep:shutdown`
+blocker beside the kernel witness. It acquires this protection inside the
+already-admitted prepared checkpoint callback and before native apply, binds
+the current boot/root logind owner, and rejects preparation, peer replacement
+and failed FIFO liveness. This closes the compositor-local lifetime of that
+protection mechanism without creating power authority. Revalidation is bounded,
+invalidity permanent, and no subsequent subscription or lease may replace the
+original one. Kernel facts are rechecked after bus work. The original subscription
+retains success/failure suspend counters before native sampling and rejects any
+changed count; a completed or failed cycle cannot be hidden by current preparation
+properties becoming false. Executor restart still loses these live protections;
+startup supervision, qualified terminal release
+and real logind/power/process-loss acceptance remain required before activation.
+
 The exact upstream hook transformations live in the native integration source
 tree as `source_integration.py`. The shared owner/compositor CMake identity hashes
 that recipe alongside the native implementation and protocol. Changing only a

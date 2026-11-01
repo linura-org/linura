@@ -1178,6 +1178,23 @@ death are not established by portable component fixtures; startup fencing,
 one-use recovery admission, terminal verification and native acceptance remain
 unfinished.
 
+The compositor-owned power inhibitor is insufficient on process death. The
+executor now acquires and retains a separate original logind blocker only in
+the already-admitted prepared display callback. Its fixed scope/mode/reason
+cannot be selected by a client. Exact root-owner/boot checks, the two fixed
+preparation properties and quiet/live CLOEXEC FIFO checks precede and follow
+acquisition and later continuation. Wrong types, missing state, denied/late
+transport, peer replacement, unexpected data, hangup, error or changed flags
+permanently invalidate the original lease. Reopening a peer or quieting a failed
+FIFO cannot revive it; no reacquisition/retry path exists. Retained protection
+also binds the kernel's successful and failed suspend counters captured before
+native sampling. Missing, reset or changed counts permanently fence continuity,
+even when current logind preparation properties have returned to false. It
+survives compositor/UI death, not executor/logind death or reboot. It cannot
+request power, waive policy, unlock a session, verify a frame or clear recovery.
+Terminal cleanup and executor-loss startup fencing are not established, and
+real logind/compositor death and adversarial power qualification remain required.
+
 Control's separate display safety preparation cancels only human continuation
 in the current owner/lock generation and lets the compositor perform the
 original baseline compensation. It cannot accept a new target, acquire/release

@@ -148,6 +148,34 @@ pub struct NativeDisplayKernelSubscription {
     sequence: OwnedFd,
     socket: OwnedFd,
     stream: Stream,
+    power: PowerEpoch,
+}
+#[derive(Debug)]
+struct PowerEpoch {
+    success: OwnedFd,
+    fail: OwnedFd,
+    expected: [u64; 2],
+}
+impl PowerEpoch {
+    fn capture(sys: &OwnedFd) -> Result<Self, String> {
+        let directory = sys_directory(sys, "power/suspend_stats")?;
+        let success = attribute(&directory, "success")?;
+        let fail = attribute(&directory, "fail")?;
+        let expected = [number(&text(&success)?)?, number(&text(&fail)?)?];
+        let epoch = Self {
+            success,
+            fail,
+            expected,
+        };
+        epoch.verify()?;
+        Ok(epoch)
+    }
+    fn verify(&self) -> Result<(), String> {
+        if [number(&text(&self.success)?)?, number(&text(&self.fail)?)?] != self.expected {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
 }
 impl NativeDisplayKernelSubscription {
     pub fn begin() -> Result<Self, String> {
@@ -172,6 +200,7 @@ impl NativeDisplayKernelSubscription {
             .map_err(|_| unavailable())?;
         net::bind(&socket, &SocketAddrNetlink::new(0, 1)).map_err(|_| unavailable())?;
         let initial = number(&text(&sequence)?)?;
+        let power = PowerEpoch::capture(&sys)?;
         Ok(Self {
             sys,
             sequence,
@@ -182,6 +211,7 @@ impl NativeDisplayKernelSubscription {
                 valid: true,
                 ancestors: BTreeSet::new(),
             },
+            power,
         })
     }
 
@@ -357,11 +387,13 @@ impl NativeDisplayKernelWitness {
                 return Err(unavailable());
             }
             self.subscription.drain()?;
+            self.subscription.power.verify()?;
             for connector in &self.connectors {
                 connector.verify()?;
             }
             let seq = number(&text(&self.subscription.sequence)?)?;
             self.subscription.drain()?;
+            self.subscription.power.verify()?;
             if self.subscription.stream.last < seq
                 || number(&text(&self.subscription.sequence)?)? != self.subscription.stream.last
             {

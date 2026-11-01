@@ -136,7 +136,7 @@ impl NativeSessionChannel {
         )
     }
 
-    fn logind_owner(&self, started: Instant) -> Result<String, String> {
+    pub(super) fn logind_owner(&self, started: Instant) -> Result<String, String> {
         let owner: String = self
             .bus_call("GetNameOwner", &(LOGIND,), started)?
             .body()

@@ -71,9 +71,11 @@ struct NativeSessionDispatch {
 }
 impl SessionDispatch for NativeSessionDispatch {
     fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String> {
-        self.displays.verify(continuation.dispatch_digest())?;
+        self.displays
+            .verify(continuation.dispatch_digest(), &self.channel)?;
         let result = self.channel.dispatch_display_continuation(continuation);
-        self.displays.verify(continuation.dispatch_digest())?;
+        self.displays
+            .verify(continuation.dispatch_digest(), &self.channel)?;
         result
     }
     fn require_control(&self, sender: &str) -> Result<(), String> {
@@ -100,9 +102,10 @@ impl SessionDispatch for NativeSessionDispatch {
             binding,
             deadline_unix_ms,
             native_baseline_guard,
-            |record| self.displays.reserve(record, subscription),
+            |record| self.displays.reserve(record, subscription, &self.channel),
         );
-        self.displays.verify(&binding.dispatch_digest)?;
+        self.displays
+            .verify(&binding.dispatch_digest, &self.channel)?;
         result
     }
 }

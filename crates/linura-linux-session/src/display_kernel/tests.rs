@@ -190,6 +190,8 @@ fn unread_stream_watermark_and_bad_transport_are_permanently_fenced() {
         None,
         Some(event(41, "input")),
         Some(vec![b'x'; MAX_EVENT_BYTES + 1]),
+        None, // A completed sleep hidden by current PreparingForSleep=false.
+        None, // A failed sleep still invalidates native output continuity.
     ]
     .into_iter()
     .enumerate()
@@ -208,6 +210,22 @@ fn unread_stream_watermark_and_bad_transport_are_permanently_fenced() {
         sequence
             .write_all(b"40\n")
             .unwrap_or_else(|e| unreachable!("{e}"));
+        let power_paths = [path.with_extension("success"), path.with_extension("fail")];
+        let counters: Vec<_> = power_paths
+            .iter()
+            .map(|path| {
+                let mut file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+                file.write_all(b"40\n")
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+                file
+            })
+            .collect();
         let (receiver, sender) = UnixDatagram::pair().unwrap_or_else(|e| unreachable!("{e}"));
         receiver
             .set_nonblocking(true)
@@ -226,11 +244,25 @@ fn unread_stream_watermark_and_bad_transport_are_permanently_fenced() {
                     .into(),
                 socket: receiver.into(),
                 stream: stream(),
+                power: PowerEpoch {
+                    success: counters[0]
+                        .try_clone()
+                        .unwrap_or_else(|e| unreachable!("{e}"))
+                        .into(),
+                    fail: counters[1]
+                        .try_clone()
+                        .unwrap_or_else(|e| unreachable!("{e}"))
+                        .into(),
+                    expected: [40, 40],
+                },
             },
             connectors: Vec::new(),
         };
         assert!(witness.verify().is_ok());
-        if let Some(bytes) = message {
+        if index >= 3 {
+            rustix::io::pwrite(&counters[index - 3], b"41\n", 0)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+        } else if let Some(bytes) = message {
             sender.send(&bytes).unwrap_or_else(|e| unreachable!("{e}"));
         } else {
             // Lost final event, without a subsequent event to expose its gap.
@@ -238,8 +270,14 @@ fn unread_stream_watermark_and_bad_transport_are_permanently_fenced() {
         }
         assert!(witness.verify().is_err());
         rustix::io::pwrite(&sequence, b"40\n", 0).unwrap_or_else(|e| unreachable!("{e}"));
+        for counter in &counters {
+            rustix::io::pwrite(counter, b"40\n", 0).unwrap_or_else(|e| unreachable!("{e}"));
+        }
         assert!(witness.verify().is_err());
         assert!(!witness.subscription.stream.valid);
         std::fs::remove_file(path).unwrap_or_else(|e| unreachable!("{e}"));
+        for path in power_paths {
+            std::fs::remove_file(path).unwrap_or_else(|e| unreachable!("{e}"));
+        }
     }
 }

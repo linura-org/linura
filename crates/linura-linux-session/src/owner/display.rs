@@ -28,9 +28,11 @@ mod decision;
 mod safety;
 pub use decision::NativeDisplayDecisionRequest;
 pub use safety::NativeDisplaySafetyRequest;
+mod power;
 mod preimage;
 mod prepared;
 pub use continuation::NativeDisplayContinuation;
+pub use power::NativeDisplayPowerFence;
 pub use preimage::NativeDisplayRecoveryCheckpoint;
 
 type Wire = (String, String, String, u64, String, String, bool);

@@ -222,6 +222,23 @@ or privileged commands. This witness supplies comparison evidence only; it does
 not authorize replacement startup/restoration or supply protected frame proof.
 Real kernel hotplug/reset and modeset acceptance remain required.
 
+The same fixed prepared-checkpoint callback acquires a separate original logind
+`sleep:shutdown`/`block` inhibitor and retains its opaque FIFO in the executor.
+Compositor death cannot release this executor-owned descriptor. Acquisition and
+later checks bind the exact current root logind owner and boot, observe only the
+two fixed preparation properties, and require a live CLOEXEC FIFO with no input,
+hangup or error. Failure permanently poisons the lease; no retry, replacement
+owner or re-open can revive it. Power probes share bounded transport deadlines
+and consume the original display sample/confirmation clocks; kernel evidence is
+rechecked afterward. This protection neither requests a power transition nor
+bypasses power policy/inhibitors. It adds no new credential or public method.
+Retained kernel success/failure suspend counters bracket the original sample
+and subsequent checks; a completed or failed sleep cannot be hidden by current
+logind properties returning to false. Missing/reset/changed counters refuse.
+Only qualified terminal recovery may release retained protection; executor-loss
+startup supervision, terminal cleanup and real power-race qualification remain
+incomplete, and public display mutation remains disabled.
+
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock
 generation. It polls restoration readiness within one two-second BOOTTIME budget,

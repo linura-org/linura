@@ -55,8 +55,10 @@ impl NativeSessionChannel {
             return Err("prepared display sample expired before dispatch".into());
         }
         // Native preimages must survive independently BEFORE the first write.
-        // This callback can persist only the already validated opaque record;
-        // it is not a policy or effect callback. Storage failure never dispatches.
+        // The fixed executor callback persists this validated opaque record and
+        // retains the operation's narrow recovery protections. It is not policy,
+        // an effect dispatcher or client-supplied orchestration. Failure never
+        // reaches native apply.
         let record =
             NativeDisplayRecoveryCheckpoint::capture(material, binding, deadline_unix_ms, &sample)?;
         checkpoint(&record)?;
