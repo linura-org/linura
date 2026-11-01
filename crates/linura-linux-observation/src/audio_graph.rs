@@ -458,11 +458,22 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                     .get("port.name")
                     .and_then(Value::as_str)
                     .ok_or_else(|| invalid("audio port missing name"))?;
-                let direction = match p.get("port.direction").and_then(Value::as_str) {
-                    Some("in") => "in",
-                    Some("out") => "out",
-                    _ => return Err(invalid("invalid PipeWire port direction")),
+                let direction = match row
+                    .get("info")
+                    .and_then(|info| info.get("direction"))
+                    .and_then(Value::as_str)
+                {
+                    Some("input") => "in",
+                    Some("output") => "out",
+                    _ => return Err(invalid("invalid native PipeWire port direction")),
                 };
+                // info.direction is authoritative; the property must agree.
+                if p.get("port.direction")
+                    .and_then(Value::as_str)
+                    .is_some_and(|reported| reported != direction)
+                {
+                    return Err(invalid("contradictory PipeWire port direction"));
+                }
                 ports.push(AudioObject {
                     kind: Kind::Port,
                     id,
@@ -644,10 +655,10 @@ mod tests {
             "object.serial":"100","device.id":"15","node.name":"sink<&","media.class":"Audio/Sink"}}},
         {"id":11,"type":"PipeWire:Interface:Node","info":{"props":{
             "object.serial":"101","node.name":"player","media.class":"Stream/Output/Audio"}}},
-        {"id":12,"type":"PipeWire:Interface:Port","info":{"props":{
+        {"id":12,"type":"PipeWire:Interface:Port","info":{"direction":"output","props":{
             "object.serial":"102","node.id":"11","port.name":"output",
             "port.direction":"out"}}},
-        {"id":13,"type":"PipeWire:Interface:Port","info":{"props":{
+        {"id":13,"type":"PipeWire:Interface:Port","info":{"direction":"input","props":{
             "object.serial":"103","node.id":"10","port.name":"input",
             "port.direction":"in"}}},
         {"id":14,"type":"PipeWire:Interface:Link","info":{"props":{
@@ -734,6 +745,25 @@ mod tests {
         ]"#;
         let graph = parse_snapshot(video).unwrap_or_else(|e| unreachable!("{e}"));
         assert!(graph.is_empty());
+    }
+
+    #[test]
+    fn audio_graph_requires_native_direction_and_rejects_contradictory_port_claims() {
+        assert!(parse_snapshot(&FIXTURE.replace(
+            "\"direction\":\"output\"",
+            "\"direction\":\"input\"",
+        ))
+        .is_err());
+        assert!(parse_snapshot(&FIXTURE.replace(
+            "\"direction\":\"output\",",
+            "",
+        ))
+        .is_err());
+        assert!(parse_snapshot(&FIXTURE.replace(
+            "\"port.direction\":\"out\"",
+            "\"port.direction\":\"in\"",
+        ))
+        .is_err());
     }
 
     #[test]
