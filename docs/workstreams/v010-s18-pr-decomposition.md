@@ -2,22 +2,24 @@
 
 > **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. **Do not merge this branch directly.** The new ten-part decomposition follows the S17 identity → Control → native authority → protected security → client → qualification split and the S21 per-feature + convergence + qualification pattern.
 
+**Draft PR base/reference:** `wip/v010-s18-network`. This WIP branch is the authoritative live integration/development source. Each existing reserved PR (#267–#273) targets WIP with a standalone non-executable scope document; it must not be merged into WIP as an implementation claim. After the reviewed implementation is extracted and qualified, rebase/retarget for final integration into accepted `main` without merging the WIP branch wholesale. PRs S18-8–S18-10 are unassigned; no new PRs are opened by this plan.
+
 Source of truth: [Phase-1 inventory](v010-s18-network-phase1.md), [ADR 0048](../adr/0048-s18-networkmanager-authority.md), [inactive effect design](../../contracts/v010-s18-design.toml), [machine-checked decomposition](../../contracts/v010-s18-pr-decomposition.toml).
 
 Existing code changes in the WIP observer now belong **conceptually to S18-2**, not S18-1. Move them into a future review branch only after source/compilation/native qualification checks. No runtime registration, permission downgrade or unsupported feature is introduced by this plan.
 
-| ID | Boundary | Required predecessors | Candidate native effects |
-| --- | --- | --- | --- |
-| S18-1 | feat(core): model exact native network identities | S16 | none |
-| S18-2 | feat(network): establish native NetworkManager observation | S18-1 | none |
-| S18-3 | feat(control): add managed network authority semantics | S18-1, S18-2 | none |
-| S18-4 | feat(security): add protected network credentials and native authorization | S18-1, S18-3 | none |
-| S18-5 | feat(network): add bounded Wi-Fi discovery and scan authority | S18-2, S18-3, S18-4 | `operation:network.wifi.scan` |
-| S18-6 | feat(network): add managed networking and radio controls | S18-2, S18-3, S18-4 | `operation:network.networking.set-enabled`, `operation:network.wifi.set-enabled` |
-| S18-7 | feat(network): add managed connection lifecycle | S18-2, S18-3, S18-4 | `operation:network.connection.activate`, `operation:network.connection.deactivate`, `operation:network.wifi.join` |
-| S18-8 | feat(network): add revisioned connection profile management | S18-2, S18-3, S18-4 | `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete` |
-| S18-9 | feat(shell): add unified network controls | S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8 | none |
-| S18-10 | test(qualification): qualify native network integration | S18-1, S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8, S18-9 | none |
+| ID | Boundary | Reserved PR | Required predecessors | Candidate native effects |
+| --- | --- | --- | --- | --- |
+| S18-1 | feat(core): model exact native network identities | [#267](https://github.com/linura-org/linura/pull/267) | S16 | none |
+| S18-2 | feat(network): establish native NetworkManager observation | [#268](https://github.com/linura-org/linura/pull/268) | S18-1 | none |
+| S18-3 | feat(control): add managed network authority semantics | [#269](https://github.com/linura-org/linura/pull/269) | S18-1, S18-2 | none |
+| S18-4 | feat(security): add protected network credentials and native authorization | [#270](https://github.com/linura-org/linura/pull/270) | S18-1, S18-3 | none |
+| S18-5 | feat(network): add bounded Wi-Fi discovery and scan authority | [#271](https://github.com/linura-org/linura/pull/271) | S18-2, S18-3, S18-4 | `operation:network.wifi.scan` |
+| S18-6 | feat(network): add managed networking and radio controls | [#272](https://github.com/linura-org/linura/pull/272) | S18-2, S18-3, S18-4 | `operation:network.networking.set-enabled`, `operation:network.wifi.set-enabled` |
+| S18-7 | feat(network): add managed connection lifecycle | [#273](https://github.com/linura-org/linura/pull/273) | S18-2, S18-3, S18-4 | `operation:network.connection.activate`, `operation:network.connection.deactivate`, `operation:network.wifi.join` |
+| S18-8 | feat(network): add revisioned connection profile management | Unassigned | S18-2, S18-3, S18-4 | `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete` |
+| S18-9 | feat(shell): add unified network controls | Unassigned | S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8 | none |
+| S18-10 | test(qualification): qualify native network integration | Unassigned | S18-1, S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8, S18-9 | none |
 
 ## Reviewable scopes and acceptance
 
@@ -202,7 +204,7 @@ Existing code changes in the WIP observer now belong **conceptually to S18-2**, 
 **No operation activated or granted here.**
 ## Extraction rules
 
-1. A PR reservation is not source qualification. For each boundary, rebuild the existing assigned GitHub PR head from a current accepted `main` and retain its historical head-branch name unless GitHub separately renames it. Avoid stacking incomplete WIP history into any PR.
+1. A PR reservation is not source qualification. Existing reserved PRs use this WIP branch as their current GitHub review base/reference and carry only inert scope-document differences. Do not merge these reservations into WIP, confuse inherited WIP code with PR-delivered implementation, or treat WIP CI as final release acceptance. Once implementation is qualified, extract the exact boundary onto accepted `main`, rebase/retarget intentionally and rerun all exact-head gates; do not merge WIP history wholesale.
 2. Original reserved PR heads may belong to other slices; archive their old refs before any destructive rebuild and do not lose S19, S20, S22, S23, S25 or S26 WIP code. A historic branch name is not an authority or scope declaration.
 3. The nine existing `contracts/v010-s18-design.toml` operations stay unregistered and off. S18-1/2/3/4/9/10 cannot enable effects. S18-5/6/7/8 must prove each separately reviewed native effect, exact authenticated subject and independent verification before registration.
 4. Allow S18-5, S18-6, S18-7 and S18-8 to develop independently after shared identity, observation, Control and protected security. Do not make Ethernet activation depend on Wi-Fi scanning or radio toggles; do not implement hidden profile persistence in Wi-Fi join.

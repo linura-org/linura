@@ -4,7 +4,8 @@ milestone = "v0.10.0"
 slice = "S18"
 name = "NetworkManager connectivity"
 status = "proposed"
-base_branch = "main"
+base_branch = "wip/v010-s18-network"
+final_integration_base = "main"
 phase1_reference_branch = "wip/v010-s18-network"
 phase1_source = "docs/workstreams/v010-s18-network-phase1.md"
 design_source = "contracts/v010-s18-design.toml"
@@ -34,6 +35,7 @@ unsupported = "Deny unknown VPN, hotspot, mobile and arbitrary settings extensio
 
 [[pull_request]]
 id = "S18-1"
+reservation_pr = 267
 slug = "exact-network-identities"
 title = "feat(core): model exact native network identities"
 depends_on = []
@@ -49,6 +51,7 @@ blocked_until = ["No merge until exact-generation invariants and backward-compat
 
 [[pull_request]]
 id = "S18-2"
+reservation_pr = 268
 slug = "native-network-observation"
 title = "feat(network): establish native NetworkManager observation"
 depends_on = ["S18-1"]
@@ -64,6 +67,7 @@ blocked_until = ["Complete native boundedness, owner swap, dual-stack and malfor
 
 [[pull_request]]
 id = "S18-3"
+reservation_pr = 269
 slug = "managed-network-authority"
 title = "feat(control): add managed network authority semantics"
 depends_on = ["S18-1", "S18-2"]
@@ -79,6 +83,7 @@ blocked_until = ["All durable authorizations and recovery paths independently re
 
 [[pull_request]]
 id = "S18-4"
+reservation_pr = 270
 slug = "protected-network-security"
 title = "feat(security): add protected network credentials and native authorization"
 depends_on = ["S18-1", "S18-3"]
@@ -94,6 +99,7 @@ blocked_until = ["No native credential use until genuine protected-input and sec
 
 [[pull_request]]
 id = "S18-5"
+reservation_pr = 271
 slug = "wifi-scan-discovery"
 title = "feat(network): add bounded Wi-Fi discovery and scan authority"
 depends_on = ["S18-2", "S18-3", "S18-4"]
@@ -109,6 +115,7 @@ blocked_until = ["Native authenticated RequestScan and exact-freshness oracle st
 
 [[pull_request]]
 id = "S18-6"
+reservation_pr = 272
 slug = "managed-radio-controls"
 title = "feat(network): add managed networking and radio controls"
 depends_on = ["S18-2", "S18-3", "S18-4"]
@@ -124,6 +131,7 @@ blocked_until = ["No effect enabled until protected local recovery and independe
 
 [[pull_request]]
 id = "S18-7"
+reservation_pr = 273
 slug = "managed-connection-lifecycle"
 title = "feat(network): add managed connection lifecycle"
 depends_on = ["S18-2", "S18-3", "S18-4"]

@@ -65,7 +65,8 @@ def validate(plan: dict, design: dict, document: str) -> None:
         "v0.10.0", "S18", "proposed"
     )
     assert plan["declared_slice_predecessor"] == "S16"
-    assert plan["base_branch"] == "main"
+    assert plan["base_branch"] == "wip/v010-s18-network"
+    assert plan["final_integration_base"] == "main"
     assert plan["phase1_reference_branch"] == "wip/v010-s18-network"
     assert plan["implementation_pr_count"] == len(EXPECTED_PRS)
     assert plan["phase1_source"] == "docs/workstreams/v010-s18-network-phase1.md"
@@ -86,6 +87,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
 
     prs = plan["pull_request"]
     assert [pr["id"] for pr in prs] == EXPECTED_PRS
+    assert [pr.get("reservation_pr") for pr in prs] == [267, 268, 269, 270, 271, 272, 273, None, None, None]
     assigned: list[str] = []
     referenced_requirements: set[str] = set()
     referenced_threats: set[str] = set()
@@ -224,6 +226,18 @@ class S18DecompositionTests(unittest.TestCase):
                 moved = mutated["pull_request"][4]["candidate_operations"].pop()
                 mutated["pull_request"][6]["candidate_operations"].append(moved)
             with self.subTest(change=changed), self.assertRaises(AssertionError):
+                validate(mutated, self.design, self.document)
+
+    def test_pr_assignment_and_review_base_cannot_drift(self) -> None:
+        for changed in ("pr", "base", "final"):
+            mutated = copy.deepcopy(self.plan)
+            if changed == "pr":
+                mutated["pull_request"][2]["reservation_pr"] = 270
+            elif changed == "base":
+                mutated["base_branch"] = "main"
+            else:
+                mutated["final_integration_base"] = "wip/v010-s18-network"
+            with self.subTest(changed=changed), self.assertRaises(AssertionError):
                 validate(mutated, self.design, self.document)
 
     def test_forward_dependency_or_missing_predecessor_is_rejected(self) -> None:
