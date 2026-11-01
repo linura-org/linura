@@ -1,4 +1,5 @@
 """Guard proposed S18 PR extraction against architecture and authority drift."""
+
 from __future__ import annotations
 
 import copy
@@ -29,21 +30,49 @@ EXPECTED_ASSIGNMENTS = {
     "S18-3": set(),
     "S18-4": set(),
     "S18-5": {"operation:network.wifi.scan"},
-    "S18-6": {"operation:network.networking.set-enabled", "operation:network.wifi.set-enabled"},
-    "S18-7": {"operation:network.connection.activate", "operation:network.connection.deactivate", "operation:network.wifi.join"},
-    "S18-8": {"operation:network.profile.create", "operation:network.profile.update", "operation:network.profile.delete"},
+    "S18-6": {
+        "operation:network.networking.set-enabled",
+        "operation:network.wifi.set-enabled",
+    },
+    "S18-7": {
+        "operation:network.connection.activate",
+        "operation:network.connection.deactivate",
+        "operation:network.wifi.join",
+    },
+    "S18-8": {
+        "operation:network.profile.create",
+        "operation:network.profile.update",
+        "operation:network.profile.delete",
+    },
     "S18-9": set(),
     "S18-10": set(),
 }
 REQUIRED_FIELDS = (
-    "slug", "title", "depends_on", "external_effects", "candidate_operations",
-    "capabilities", "owned_paths", "requirements", "negative_cases",
-    "acceptance", "qualification", "blocked_until",
+    "slug",
+    "title",
+    "depends_on",
+    "external_effects",
+    "candidate_operations",
+    "capabilities",
+    "owned_paths",
+    "requirements",
+    "negative_cases",
+    "acceptance",
+    "qualification",
+    "blocked_until",
 )
 REQUIREMENTS = {
-    "R18-OBS-01", "R18-OBS-02", "R18-OBS-03",
-    "R18-AUTH-01", "R18-AUTH-02", "R18-SEC-01", "R18-REC-01",
-    "R18-UX-01", "R18-UX-02", "R18-QUAL-01", "R18-REL-01",
+    "R18-OBS-01",
+    "R18-OBS-02",
+    "R18-OBS-03",
+    "R18-AUTH-01",
+    "R18-AUTH-02",
+    "R18-SEC-01",
+    "R18-REC-01",
+    "R18-UX-01",
+    "R18-UX-02",
+    "R18-QUAL-01",
+    "R18-REL-01",
 }
 THREATS = {f"T{index:02}" for index in range(1, 31)}
 RISK_FLOORS = {
@@ -62,7 +91,9 @@ RISK_FLOORS = {
 def validate(plan: dict, design: dict, document: str) -> None:
     assert plan["schema_version"] == 1
     assert (plan["milestone"], plan["slice"], plan["status"]) == (
-        "v0.10.0", "S18", "proposed"
+        "v0.10.0",
+        "S18",
+        "proposed",
     )
     assert plan["declared_slice_predecessor"] == "S16"
     assert plan["base_branch"] == "wip/v010-s18-network"
@@ -71,8 +102,13 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert plan["implementation_pr_count"] == len(EXPECTED_PRS)
     assert plan["phase1_source"] == "docs/workstreams/v010-s18-network-phase1.md"
     assert plan["design_source"] == "contracts/v010-s18-design.toml"
-    for flag in ("runtime_effects_enabled", "evidence_accepted", "slice_complete",
-                 "q11_physical_hardware_qualified", "merge_wip_directly"):
+    for flag in (
+        "runtime_effects_enabled",
+        "evidence_accepted",
+        "slice_complete",
+        "q11_physical_hardware_qualified",
+        "merge_wip_directly",
+    ):
         assert plan[flag] is False, flag
 
     guard = plan["guardrails"]
@@ -94,18 +130,27 @@ def validate(plan: dict, design: dict, document: str) -> None:
     for index, pr in enumerate(prs):
         assert all(field in pr for field in REQUIRED_FIELDS), pr["id"]
         assert pr["slug"] and pr["title"].startswith(("docs(", "feat(", "test("))
-        assert pr["owned_paths"] and len(set(pr["owned_paths"])) == len(pr["owned_paths"])
-        for field in ("capabilities", "requirements", "negative_cases",
-                      "acceptance", "qualification", "blocked_until"):
+        assert pr["owned_paths"] and len(set(pr["owned_paths"])) == len(
+            pr["owned_paths"]
+        )
+        for field in (
+            "capabilities",
+            "requirements",
+            "negative_cases",
+            "acceptance",
+            "qualification",
+            "blocked_until",
+        ):
             values = pr[field]
-            assert values and all(isinstance(value, str) and value for value in values), (
-                pr["id"], field
-            )
+            assert values and all(
+                isinstance(value, str) and value for value in values
+            ), (pr["id"], field)
             assert len(set(values)) == len(values), (pr["id"], field)
         assert len(pr["acceptance"]) >= 5
         assert len(set(pr["depends_on"])) == len(pr["depends_on"])
-        assert all(dependency in EXPECTED_PRS[:index]
-                   for dependency in pr["depends_on"]), pr["id"]
+        assert all(
+            dependency in EXPECTED_PRS[:index] for dependency in pr["depends_on"]
+        ), pr["id"]
         assert len(set(pr["candidate_operations"])) == len(pr["candidate_operations"])
         actual_operations = set(pr["candidate_operations"])
         assert actual_operations == EXPECTED_ASSIGNMENTS[pr["id"]], pr["id"]
@@ -127,7 +172,10 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert referenced_threats == THREATS
     assert prs[0]["depends_on"] == []
     assert prs[0]["title"].startswith("docs(v0.10):")
-    assert all(not path.startswith(("crates/", "apps/", "executors/")) for path in prs[0]["owned_paths"])
+    assert all(
+        not path.startswith(("crates/", "apps/", "executors/"))
+        for path in prs[0]["owned_paths"]
+    )
     assert "contracts/v010-s18-design.toml" in prs[0]["owned_paths"]
     assert "docs/adr/0048-s18-networkmanager-authority.md" in prs[0]["owned_paths"]
     assert prs[1]["title"].startswith("feat(network):")
@@ -135,14 +183,17 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert "S18-1" in prs[1]["depends_on"]
     assert "S18-2" in prs[2]["depends_on"]
     assert "S18-3" in prs[3]["depends_on"]
-    assert all(set(prs[index]["depends_on"]) == {"S18-2", "S18-3", "S18-4"}
-               for index in (4, 5, 6, 7))
+    assert all(
+        set(prs[index]["depends_on"]) == {"S18-2", "S18-3", "S18-4"}
+        for index in (4, 5, 6, 7)
+    )
     assert set(prs[8]["depends_on"]) == set(EXPECTED_PRS[1:8])
     assert set(prs[9]["depends_on"]) == set(EXPECTED_PRS[:9])
-    assert not any("S18-5" in prs[index]["depends_on"]
-                   for index in (5, 6, 7))
-    assert any("physical" in evidence.lower() or "hardware" in evidence.lower()
-               for evidence in prs[9]["qualification"])
+    assert not any("S18-5" in prs[index]["depends_on"] for index in (5, 6, 7))
+    assert any(
+        "physical" in evidence.lower() or "hardware" in evidence.lower()
+        for evidence in prs[9]["qualification"]
+    )
 
     assert design["slice"] == "S18" and design["status"] == "proposed"
     assert design["activation"] == "none"
@@ -167,10 +218,14 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert design["qualification"]["require_keyboard_pointer_accessibility"] is True
     assert all(value is False for value in design["unsupported_extensions"].values())
     for invariant in (
-        "strict_single_owner_epoch", "bounded_device_enumeration",
-        "bounded_access_point_enumeration", "bounded_profile_enumeration",
-        "reject_duplicate_interface_aliases", "reject_mixed_owner_snapshots",
-        "require_fresh_effect_preconditions", "control_owns_aggregation",
+        "strict_single_owner_epoch",
+        "bounded_device_enumeration",
+        "bounded_access_point_enumeration",
+        "bounded_profile_enumeration",
+        "reject_duplicate_interface_aliases",
+        "reject_mixed_owner_snapshots",
+        "require_fresh_effect_preconditions",
+        "control_owns_aggregation",
     ):
         assert design["proposed_observation"][invariant] is True, invariant
     operations = design["candidate_operation"]
@@ -197,20 +252,33 @@ class S18DecompositionTests(unittest.TestCase):
         validate(self.plan, self.design, self.document)
 
     def test_contract_first_ownership_cannot_be_changed(self) -> None:
-        for change in ("implementation-first", "core-owned-by-architecture", "missing-core-identity"):
+        for change in (
+            "implementation-first",
+            "core-owned-by-architecture",
+            "missing-core-identity",
+        ):
             mutated = copy.deepcopy(self.plan)
             if change == "implementation-first":
                 mutated["pull_request"][0]["title"] = "feat(core): skip architecture"
             elif change == "core-owned-by-architecture":
-                mutated["pull_request"][0]["owned_paths"].append("crates/linura-core/src/")
+                mutated["pull_request"][0]["owned_paths"].append(
+                    "crates/linura-core/src/"
+                )
             else:
-                mutated["pull_request"][1]["owned_paths"].remove("crates/linura-core/src/")
+                mutated["pull_request"][1]["owned_paths"].remove(
+                    "crates/linura-core/src/"
+                )
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 validate(mutated, self.design, self.document)
 
     def test_premature_activation_and_evidence_are_rejected(self) -> None:
-        for flag in ("runtime_effects_enabled", "evidence_accepted", "slice_complete",
-                     "q11_physical_hardware_qualified", "merge_wip_directly"):
+        for flag in (
+            "runtime_effects_enabled",
+            "evidence_accepted",
+            "slice_complete",
+            "q11_physical_hardware_qualified",
+            "merge_wip_directly",
+        ):
             mutated = copy.deepcopy(self.plan)
             mutated[flag] = True
             with self.subTest(flag=flag), self.assertRaises(AssertionError):
@@ -220,15 +288,23 @@ class S18DecompositionTests(unittest.TestCase):
         cases = (
             ("operation:network.profile.delete", "risk_floor", "user-state"),
             ("operation:network.wifi.scan", "class", "authoritative-query"),
-            ("operation:network.connection.activate", "class", "transient-external-effect"),
+            (
+                "operation:network.connection.activate",
+                "class",
+                "transient-external-effect",
+            ),
             ("operation:network.wifi.set-enabled", "enabled", True),
         )
         for operation_id, field, value in cases:
             mutated = copy.deepcopy(self.design)
-            target = next(op for op in mutated["candidate_operation"]
-                          if op["id"] == operation_id)
+            target = next(
+                op for op in mutated["candidate_operation"] if op["id"] == operation_id
+            )
             target[field] = value
-            with self.subTest(operation=operation_id), self.assertRaises(AssertionError):
+            with (
+                self.subTest(operation=operation_id),
+                self.assertRaises(AssertionError),
+            ):
                 validate(self.plan, mutated, self.document)
 
     def test_duplicate_missing_or_reassigned_operation_is_rejected(self) -> None:
@@ -280,7 +356,9 @@ class S18DecompositionTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             validate(mutated, self.design, self.document)
 
-    def test_unsupported_expansions_and_secret_policy_downgrade_are_rejected(self) -> None:
+    def test_unsupported_expansions_and_secret_policy_downgrade_are_rejected(
+        self,
+    ) -> None:
         for field, value in (
             ("no_generic_dbus_forwarding", False),
             ("no_shell_executor", False),
