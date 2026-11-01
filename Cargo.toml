@@ -23,6 +23,7 @@ members = [
   "crates/linura-sdk",
   "crates/linura-provenance",
   "crates/linura-provider-sdk",
+  "crates/linura-provider-bluez",
   "crates/linura-transaction",
   "crates/linura-persistence-sqlite",
   "crates/linura-control",

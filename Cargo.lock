@@ -777,6 +777,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "linura-provider-bluez"
+version = "0.9.0"
+dependencies = [
+ "async-io",
+ "futures-lite",
+ "linura-core",
+ "linura-observation",
+ "linura-provider-sdk",
+ "zbus",
+]
+
+[[package]]
 name = "linura-provider-sdk"
 version = "0.9.0"
 dependencies = [
@@ -865,6 +877,7 @@ dependencies = [
  "linura-observation",
  "linura-observation-control",
  "linura-protocol",
+ "linura-provider-bluez",
  "linura-provider-sdk",
  "rusqlite",
  "rustix",

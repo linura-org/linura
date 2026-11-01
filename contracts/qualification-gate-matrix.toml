@@ -179,6 +179,7 @@ paths = [
   "crates/linura-hardware/**",
   "crates/linura-dbus/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-provider-bluez/**",
   "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
@@ -235,6 +236,7 @@ paths = [
   "crates/linura-dbus/**",
   "crates/linura-graph/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-provider-bluez/**",
   "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
@@ -365,6 +367,7 @@ paths = [
   "tests/tooling/test_qualification_evidence.py",
   ".github/workflows/trusted-release-proof.yml",
   "crates/linura-linux-observation/**",
+  "crates/linura-provider-bluez/**",
   "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-provider-sdk/**",
@@ -421,6 +424,7 @@ paths = [
   "crates/linura-dbus/**",
   "crates/linura-lifecycle/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-provider-bluez/**",
   "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
@@ -623,6 +627,7 @@ paths = [
   "crates/linura-core/**",
   "crates/linura-hardware/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-provider-bluez/**",
   "crates/linura-linux-session/**",
   "crates/linura-migrations/**",
   "crates/linura-observation/**",
@@ -788,6 +793,7 @@ paths = [
   "crates/linura-library/**",
   "crates/linura-lifecycle/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-provider-bluez/**",
   "crates/linura-linux-session/**",
   "executors/linura-executor-session/**",
   "crates/linura-observation/**",
@@ -1050,6 +1056,11 @@ gates = ["vm-acceptance","control1-plan-preview","v06-managed-lifecycle","v09-qu
 [[component]]
 id = "linura-linux-observation"
 path = "crates/linura-linux-observation"
+gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-provider-bluez"
+path = "crates/linura-provider-bluez"
 gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
 
 [[component]]

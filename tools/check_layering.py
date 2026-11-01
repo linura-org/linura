@@ -37,6 +37,7 @@ EXPECTED_RULE_PACKAGES = {
     "linura-control",
     "linura-sdk",
     "linura-linux-observation",
+    "linura-provider-bluez",
     "linura-linux-session",
     "linura-dbus",
     "linura-executor-systemd",

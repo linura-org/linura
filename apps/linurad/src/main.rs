@@ -7,6 +7,7 @@ use std::error::Error;
 
 use linura_linux_observation::{NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver};
 use linura_observation_control::ObservationCoordinator;
+use linura_provider_bluez::BlueZObserver;
 
 fn main() {
     if let Err(error) = run() {
@@ -19,6 +20,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut coordinator = ObservationCoordinator::new();
     coordinator.register_observer(Box::new(SystemdObserver::connect()?))?;
     coordinator.register_observer(Box::new(NetworkManagerObserver::connect()?))?;
+    coordinator.register_observer(Box::new(BlueZObserver::connect()?))?;
     coordinator.register_observer(Box::new(PipeWireSessionObserver::new()))?;
     let state_dir = session_audio::state_dir().map_err(std::io::Error::other)?;
     let session_runtime =
