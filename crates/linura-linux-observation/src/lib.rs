@@ -3,6 +3,9 @@
 mod alpm_installed;
 pub use alpm_installed::AlpmInstalledObserver;
 
+mod xdg_mimeapps;
+pub use xdg_mimeapps::XdgMimeAppsObserver;
+
 mod xdg_applications;
 pub use xdg_applications::XdgApplicationObserver;
 
