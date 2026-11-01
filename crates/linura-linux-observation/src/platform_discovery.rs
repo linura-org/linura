@@ -48,6 +48,7 @@ pub const PLATFORM_ARCHITECTURE_CAPABILITY: &str = "platform.architecture.observ
 pub const PLATFORM_INIT_CAPABILITY: &str = "platform.init-system.observe";
 pub const PLATFORM_SESSION_CAPABILITY: &str = "platform.session.observe";
 pub const PLATFORM_COMPOSITOR_CAPABILITY: &str = "platform.compositor.observe";
+pub const PLATFORM_CAPTURE_PORTAL_CAPABILITY: &str = "utility.capture.portal.observe";
 pub const PLATFORM_NETWORK_PROVIDER_CAPABILITY: &str = "platform.provider.network.observe";
 pub const PLATFORM_BLUETOOTH_PROVIDER_CAPABILITY: &str = "platform.provider.bluetooth.observe";
 pub const PLATFORM_AUDIO_PROVIDER_CAPABILITY: &str = "platform.provider.audio.observe";
@@ -199,6 +200,200 @@ pub fn observe_compositor(
         identity,
         source,
     )
+}
+
+/// Read-only, session-bound XDG portal presence. **Not** capture permission.
+///
+/// Uses the same kernel-peer-authenticated logind and user bus routes as the
+/// platform observer. Portal version/owner alone cannot prove S17 protected
+/// surface exclusion or authorize a screenshot/recording. An unknown or
+/// activatable-only portal returns an error rather than starting a service.
+pub fn observe_capture_portal(
+    target: &LogindSessionTarget,
+) -> Result<ObservationEnvelope, PlatformProbeError> {
+    let system = connect_system_bus()?;
+    let before = query_session_context(&system, target)?;
+    if before.session_type != "wayland" || before.desktop != "hyprland" {
+        return Err(PlatformProbeError::new(
+            "S22 capture observation requires a verified Hyprland Wayland session",
+        ));
+    }
+    let (before_seat, before_active) = capture_logind_seat(&system, &before)?;
+    if !before_active {
+        return Err(PlatformProbeError::new(
+            "S22 capture observation requires an active logind seat",
+        ));
+    }
+    let (before_compositor, _) = probe_compositor(&system, &before)?;
+    let user_bus = connect_runtime_bus(&before)?;
+    let first = capture_portal_snapshot(&user_bus, target.uid())?;
+    let second = capture_portal_snapshot(&user_bus, target.uid())?;
+    if first != second {
+        return Err(PlatformProbeError::new(
+            "S22 XDG portal ownership or interfaces changed during probe",
+        ));
+    }
+    let after = query_session_context(&system, target)?;
+    let (after_seat, after_active) = capture_logind_seat(&system, &after)?;
+    let (after_compositor, _) = probe_compositor(&system, &after)?;
+    if before != after
+        || before_seat != after_seat
+        || !after_active
+        || before_compositor != after_compositor
+    {
+        return Err(PlatformProbeError::new(
+            "S22 capture source session, seat or compositor changed during probe",
+        ));
+    }
+    let mut observation = session_identity_envelope(
+        &after,
+        "platform:capture-portal",
+        PLATFORM_CAPTURE_PORTAL_CAPABILITY,
+        ObservationAuthority::NativeApi,
+        "xdg-desktop-portal".into(),
+        "authenticated-user-bus",
+    )?;
+    observation.attributes.insert(
+        "seat_id".into(),
+        ObservedValue::Text(after_seat),
+    );
+    observation.attributes.insert(
+        "portal_unique_owner".into(),
+        ObservedValue::Text(second.unique_owner),
+    );
+    observation.attributes.insert(
+        "screenshot_version".into(),
+        ObservedValue::U64(u64::from(second.screenshot_version)),
+    );
+    observation.attributes.insert(
+        "screencast_version".into(),
+        ObservedValue::U64(u64::from(second.screencast_version)),
+    );
+    // A separate trusted S17 lock and S21 frame/topology epoch is mandatory.
+    // This observation explicitly cannot claim any protected-pixel exclusion.
+    observation.attributes.insert(
+        "protected_frame_exclusion_proved".into(),
+        ObservedValue::Bool(false),
+    );
+    observation.attributes.insert(
+        "capture_authorized".into(),
+        ObservedValue::Bool(false),
+    );
+    Ok(observation)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CapturePortalSnapshot {
+    unique_owner: String,
+    screenshot_version: u32,
+    screencast_version: u32,
+}
+
+fn capture_logind_seat(
+    system: &Connection,
+    context: &NativeSessionContext,
+) -> Result<(String, bool), PlatformProbeError> {
+    let session = Proxy::new(
+        system,
+        LOGIN1_SERVICE,
+        context.session_object_path.as_str(),
+        LOGIN1_SESSION,
+    )
+    .map_err(|_| PlatformProbeError::new("cannot bind S22 logind session"))?;
+    let (seat, _seat_path): (String, OwnedObjectPath) = session
+        .get_property("Seat")
+        .map_err(|_| PlatformProbeError::new("cannot observe S22 native seat"))?;
+    let active: bool = session
+        .get_property("Active")
+        .map_err(|_| PlatformProbeError::new("cannot observe S22 session activity"))?;
+    if seat.is_empty()
+        || seat.len() > 64
+        || !seat
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(PlatformProbeError::new(
+            "S22 session seat is missing or malformed",
+        ));
+    }
+    Ok((seat, active))
+}
+
+fn valid_capture_portal_owner(value: &str) -> bool {
+    let Some((left, right)) = value.strip_prefix(':').and_then(|rest| rest.split_once('.')) else {
+        return false;
+    };
+    !left.is_empty()
+        && !right.is_empty()
+        && left.len() <= 18
+        && right.len() <= 18
+        && left.bytes().all(|byte| byte.is_ascii_digit())
+        && right.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn capture_portal_snapshot(
+    user_bus: &Connection,
+    required_uid: u32,
+) -> Result<CapturePortalSnapshot, PlatformProbeError> {
+    const PORTAL_SERVICE: &str = "org.freedesktop.portal.Desktop";
+    const PORTAL_OBJECT: &str = "/org/freedesktop/portal/desktop";
+    let daemon = Proxy::new(user_bus, DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE)
+        .map_err(|_| PlatformProbeError::new("S22 user bus identity unavailable"))?;
+    // GetNameOwner does not auto-activate an absent portal.
+    let owner: String = daemon
+        .call("GetNameOwner", &(PORTAL_SERVICE,))
+        .map_err(|_| PlatformProbeError::new("S22 XDG portal has no current owner"))?;
+    if !valid_capture_portal_owner(&owner) {
+        return Err(PlatformProbeError::new(
+            "S22 portal owner is not a canonical unique bus name",
+        ));
+    }
+    let uid: u32 = daemon
+        .call("GetConnectionUnixUser", &(owner.as_str(),))
+        .map_err(|_| PlatformProbeError::new("S22 portal owner UID unavailable"))?;
+    if uid != required_uid {
+        return Err(PlatformProbeError::new(
+            "S22 portal owner does not match the logind user",
+        ));
+    }
+    let screenshot = Proxy::new(
+        user_bus,
+        owner.as_str(),
+        PORTAL_OBJECT,
+        "org.freedesktop.portal.Screenshot",
+    )
+    .map_err(|_| PlatformProbeError::new("S22 screenshot interface unavailable"))?;
+    let screenshot_version: u32 = screenshot
+        .get_property("version")
+        .map_err(|_| PlatformProbeError::new("S22 screenshot version unavailable"))?;
+    let screencast = Proxy::new(
+        user_bus,
+        owner.as_str(),
+        PORTAL_OBJECT,
+        "org.freedesktop.portal.ScreenCast",
+    )
+    .map_err(|_| PlatformProbeError::new("S22 screencast interface unavailable"))?;
+    let screencast_version: u32 = screencast
+        .get_property("version")
+        .map_err(|_| PlatformProbeError::new("S22 screencast version unavailable"))?;
+    if !(1..=16).contains(&screenshot_version) || !(1..=16).contains(&screencast_version) {
+        return Err(PlatformProbeError::new(
+            "S22 native portal interface versions are unsupported",
+        ));
+    }
+    let after: String = daemon
+        .call("GetNameOwner", &(PORTAL_SERVICE,))
+        .map_err(|_| PlatformProbeError::new("S22 portal owner disappeared"))?;
+    if after != owner {
+        return Err(PlatformProbeError::new(
+            "S22 portal owner was replaced during the native probe",
+        ));
+    }
+    Ok(CapturePortalSnapshot {
+        unique_owner: owner,
+        screenshot_version,
+        screencast_version,
+    })
 }
 
 pub fn observe_network_provider() -> Result<ObservationEnvelope, PlatformProbeError> {
@@ -1305,5 +1500,28 @@ mod tests {
         ));
         assert!(!valid_hyprland_version_response("sway version 1.10\n"));
         assert!(!valid_hyprland_version_response(""));
+    }
+}
+
+#[cfg(test)]
+mod capture_portal_scope_tests {
+    use super::valid_capture_portal_owner;
+
+    #[test]
+    fn only_bounded_unique_bus_owners_pass() {
+        assert!(valid_capture_portal_owner(":1.42"));
+        assert!(valid_capture_portal_owner(":12.345"));
+        for invalid in [
+            "",
+            "org.freedesktop.portal.Desktop",
+            ":1",
+            ":1.",
+            ":1.2.3",
+            ":1.2\\nforged",
+            ":1234567890123456789.1",
+            ":1.-1",
+        ] {
+            assert!(!valid_capture_portal_owner(invalid));
+        }
     }
 }

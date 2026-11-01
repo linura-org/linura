@@ -6,6 +6,11 @@
 //! Native trusted S17/S21/portal observations and an independently enforced
 //! source-side exclusion mechanism must be integrated before capture is offered.
 
+pub mod clipboard;
+pub mod history;
+pub mod recording;
+pub mod screenshot;
+
 const MAX_ID_BYTES: usize = 128;
 const MAX_CAPTURE_SOURCE_PIXELS: u64 = 132_710_400;
 const MAX_OBSERVATION_AGE_MS: u64 = 500;
