@@ -55,6 +55,44 @@ Potential technical seams to evaluate, combine or subdivide as the implementatio
 
 These are **capability seams, not PR-A–D promises**. Some seams may produce multiple PRs (for example separate authentication, executor, recovery or native qualification); others may merge into one coherent PR. No PRs are created from this document.
 
+## WIP implementation checkpoint — source, not qualification
+
+The WIP branch now contains actual additive source for:
+
+- S26-1 bounded transactional pages for existing Intent, Setup and Profile
+  identities, typed SDK exposure, immutable exact-closure inspection digests.
+- S26-2 pure identity/base-revision-checked editor draft preparation and
+  deterministic revision-field comparisons. Existing released CAS saves remain
+  the only local commit path; this work does not create an authenticated UI save.
+- S26-3 in-memory deterministic portable export preview plus untrusted
+  setup/profile import decoding and native collision/missing-ref preflight;
+  filesystem publication and authenticated local commit are not wired.
+- S26-4 read-only bounded backup validation and digest. Destructive live
+  restore remains inactive; released restore alone does not prove quiescence.
+- S26-5 blocked-or-needs-fresh-Control-plan readiness projection, with
+  separate machine effect authority deliberately inactive.
+- S26-6 staged first-party QML presentational views and an offline read-only
+  CLI using the released SQLite Library, with explicit local-only labeling.
+
+Added native tests cover revision history/CAS, profile revision references,
+portable roundtrips/tampering, non-mutating preflight, read-only database
+opening, file backup validation, malformed files and symlink rejection.
+Source-level structural inspection was performed, not full compilation.
+
+**Remaining critical gaps:** Verified authenticated owner/current DB epoch in
+ShellBridge; complete graph/ownership review surfaced into the GUI; safe,
+descriptor-bound managed file publication and quiescent destructive recovery;
+fresh real target observation plus canonical Control plan and domain-only
+execution; wired fully operable keyboard/screen-reader/high-DPI experience,
+CLI/SDK parity beyond listing, real SQLite concurrency/crash fault injection,
+exact-head rustfmt/Clippy/native/VM qualification and maintained physical
+Q11 for supported effects. Do not advance the v0.10 ledger or mark S26
+production-ready on WIP source or static checks.
+
+**Branch rule:** All remaining work stays on
+wip/v010-s26-library. No PR opening, merging, retargeting or rebuilding
+until explicitly requested. Existing reserved #271 must remain untouched.
+
 ## Acceptance evidence and nonclaims
 
 Use released v0.7/v0.9 deterministic SQLite/portable bundle tests as baseline and add restart/corruption/backup-restore, depth/cycle/owner, cross-platform unsupported mapping and no-model evidence. Native shell checks must confirm every rendered successful adoption reflects independent verified state and audit rather than imported receipts.
