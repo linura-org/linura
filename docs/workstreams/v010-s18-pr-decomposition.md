@@ -1,6 +1,6 @@
 # S18 v0.10 — ten independent implementation boundaries
 
-> **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. The new ten-part decomposition follows the S17 identity → Control → native authority → protected security → client → qualification split and the S21 per-feature + convergence + qualification pattern.
+> **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. **Do not merge this branch directly.** The new ten-part decomposition follows the S17 identity → Control → native authority → protected security → client → qualification split and the S21 per-feature + convergence + qualification pattern.
 
 Source of truth: [Phase-1 inventory](v010-s18-network-phase1.md), [ADR 0048](../adr/0048-s18-networkmanager-authority.md), [inactive effect design](../../contracts/v010-s18-design.toml), [machine-checked decomposition](../../contracts/v010-s18-pr-decomposition.toml).
 
