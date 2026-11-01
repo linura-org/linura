@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod alpm_installed;
+pub use alpm_installed::AlpmInstalledObserver;
+
 mod xdg_applications;
 pub use xdg_applications::XdgApplicationObserver;
 
