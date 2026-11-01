@@ -1,0 +1,109 @@
+# Development decomposition only; this file grants no runtime registry or release authority.
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S18"
+name = "NetworkManager connectivity"
+status = "proposed"
+base_branch = "main"
+phase1_reference_branch = "wip/v010-s18-network"
+phase1_source = "docs/workstreams/v010-s18-network-phase1.md"
+design_source = "contracts/v010-s18-design.toml"
+declared_slice_predecessor = "S16"
+implementation_pr_count = 5
+runtime_effects_enabled = false
+evidence_accepted = false
+slice_complete = false
+q11_physical_hardware_qualified = false
+merge_wip_directly = false
+
+[guardrails]
+native_provider = "NetworkManager"
+system_bus_name = "org.freedesktop.NetworkManager"
+observation_envelope = "linura-observation::ObservationEnvelope"
+cross_provider_authority = "Linura Control"
+classification = "Trusted operation registry and canonical ReconciliationPlan"
+effect_semantics = "ManagedExternalEffect until separately reviewed"
+authn = "Transport-authenticated principal/Polkit subject and exact NM unique owner"
+verification = "Fresh independent native postcondition with IP/DNS/route impact"
+recovery = "Durable indeterminate state, offline local fallback, no blind replay"
+privacy = "No plaintext credentials in plans, logs, model or retained evidence"
+scan_semantics = "Passive AP read is query; RequestScan is external effect"
+connection_safety = "Never disrupt the last recoverable link without proven local recovery"
+qualification = "Exact-source A/B and maintained physical network hardware C/Q11"
+unsupported = "Deny unknown VPN, hotspot, mobile and arbitrary settings extensions"
+
+[[pull_request]]
+id = "S18-1"
+slug = "native-network-observation"
+title = "feat(network): establish bounded native NetworkManager observation"
+depends_on = []
+external_effects = false
+candidate_operations = []
+capabilities = ["networkmanager.manager.observe", "networkmanager.device.observe", "networkmanager.wifi.observe", "networkmanager.connections.observe", "networkmanager.ipconfig.observe"]
+owned_paths = ["crates/linura-linux-observation/src/", "crates/linura-observation-control/", "apps/linurad/src/", "apps/linura-firstboot/src/"]
+requirements = ["R18-OBS-01", "R18-OBS-02", "R18-OBS-03"]
+negative_cases = ["T01", "T02", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T22", "T27", "T28"]
+acceptance = ["Extend the canonical NetworkManagerObserver and ObservationEnvelope; preserve tested manager/device query aliases, daemon/CLI/First Boot integration, and existing PlatformProfile provider-discovery behavior without creating a second authority.", "Pin actual NetworkManager system-bus unique owner and boot epoch across bounded manager, device, saved-profile, active-connection, AP and IP reads; detect daemon replacement, alias/path reuse and inconsistent multi-object snapshots rather than claiming an atomic GetAll.", "Provide typed observed wired/Wi-Fi inventory, passive AP results, saved/active connection identities and revisions, IPv4/IPv6 assignment, gateways, DNS, default routes and radio/rfkill with explicit stale/unknown/unsupported states; distinguish NM connectivity category from independent Internet reachability.", "Enforce native transport byte/variant/depth, list count, string and time ceilings before unsafe allocation/retention; reject duplicates and oversized/malformed data, not truncation or first-match identity selection.", "Keep all observations read-only; reading scan results is permitted, but RequestScan, secret retrieval, profile mutation and connection activation cannot be reached from the observer; add source-pinned negative/real-native tests."]
+qualification = ["unit-malformed-and-duplicate-device-fixtures", "level-a-real-networkmanager-system-bus", "existing-control1-cli-firstboot-regressions", "observation-control-regression"]
+blocked_until = ["Exact-source Rust unit/adversarial and inherited regression checks pass", "Real NM owner-replacement, hotplug, service-absent, malformed-object and budget/deadline tests pass", "Complete AP/profile/active/IP/DNS/route observations are verified without claiming physical Wi-Fi support"]
+
+[[pull_request]]
+id = "S18-2"
+slug = "wifi-discovery-radio"
+title = "feat(network): qualify Wi-Fi scan and radio management authority"
+depends_on = ["S18-1"]
+external_effects = true
+candidate_operations = ["operation:network.wifi.scan", "operation:network.networking.set-enabled", "operation:network.wifi.set-enabled"]
+capabilities = ["networkmanager.manager.observe", "networkmanager.wifi.observe", "networkmanager.device.observe"]
+owned_paths = ["crates/linura-linux-observation/src/", "crates/linura-control/", "crates/linura-policy/", "contracts/operation-semantics.toml"]
+requirements = ["R18-OBS-02", "R18-AUTH-01", "R18-AUTH-02", "R18-REC-01"]
+negative_cases = ["T02", "T03", "T05", "T06", "T11", "T12", "T13", "T14", "T15", "T18", "T19", "T20", "T22", "T23", "T26", "T29"]
+acceptance = ["Keep passive AP reads separate from active RequestScan, which is an external effect; define exact adapter- and epoch-scoped scan limits, permissions and privacy, never a read-only shortcut.", "Qualify independently typed networking-enabled and Wi-Fi-radio operations against observed NM, rfkill, hardware block and managed/unmanaged state; never conflate adapter and global toggles.", "Route each proposed effect through trusted Control registration, canonical ReconciliationPlan, authenticated principal, policy, prepare, bounded native execution and independent postcondition verification; no shell/nmcli or generic D-Bus forwarding.", "Bind unique NM owner, boot, device and relevant route generations before dispatch; reject changed epochs, changed risk class, reused approval, ambiguous replies and foreign session/Polkit subjects.", "Protect the last working link and system/remote administration; deny when a proven local recovery path is required but unavailable, with durable indeterminate state and no blind replay."]
+qualification = ["unit-scan-authorization-and-rfkill", "level-a-real-nm-scan-radio", "managed-effect-denial-and-no-replay", "local-recovery-and-security-review"]
+blocked_until = ["Separately reviewed operation classes, risk floors and authenticated NM/Polkit subject are accepted", "Native scan permissions/emission/privacy and bounded request/verification are independently proven", "Networking/radio toggles have viable offline local recovery and full durable ambiguity qualification"]
+
+[[pull_request]]
+id = "S18-3"
+slug = "connection-lifecycle"
+title = "feat(network): implement protected connection activation and recovery"
+depends_on = ["S18-1", "S18-2"]
+external_effects = true
+candidate_operations = ["operation:network.connection.activate", "operation:network.connection.deactivate", "operation:network.wifi.join"]
+capabilities = ["networkmanager.connections.observe", "networkmanager.wifi.observe", "networkmanager.ipconfig.observe"]
+owned_paths = ["crates/linura-control/", "crates/linura-policy/", "crates/linura-linux-observation/src/", "apps/linura-shell/plugins/network/"]
+requirements = ["R18-AUTH-01", "R18-AUTH-02", "R18-SEC-01", "R18-REC-01"]
+negative_cases = ["T03", "T05", "T08", "T09", "T10", "T11", "T13", "T14", "T15", "T16", "T18", "T19", "T20", "T21", "T23", "T24", "T26", "T29"]
+acceptance = ["Prepare exact profile revision, device/adapter, active-connection instance, owner/boot/session generation and impact on current IPv4/IPv6 default routes before activation or deactivation.", "Keep authenticated Wi-Fi credentials in purpose-bound protected native handling; prohibit plaintext PSK, 802.1X, SSID/BSSID-sensitive diagnostics and secret-agent payloads in model, intent, plan, logs or retained evidence.", "Distinguish one-time join from saving credentials/profiles; durable creation or editing must use S18-4 approved allowlisted profile authority, not hidden auto-save or arbitrary NM settings passthrough.", "Verify independent association, active profile, IP, DNS, routes and requested postcondition; NM Connected/Connectivity category or D-Bus method receipt alone cannot prove Internet reachability or completion.", "Retain uncertain-effect intent and native attempt; after crash, restart, lost reply, lock transition or route loss re-observe before compensation/retry and never replay blindly, with offline local recovery for consequential changes."]
+qualification = ["unit-identity-route-secret-and-ambiguity", "level-a-native-ethernet-and-wifi-lifecycle", "level-b-protected-credentials", "level-c-maintained-wifi-recovery", "security-and-managed-lifecycle-regressions"]
+blocked_until = ["S17 protected credential/session handling, true native principal and exact NM subject are qualified", "Native connect/disconnect/join proof includes default route and DNS postconditions, partial activation and no-blind-replay recovery", "Physical Wi-Fi connection and offline local recovery evidence exist before claiming physical support"]
+
+[[pull_request]]
+id = "S18-4"
+slug = "connection-profile-management"
+title = "feat(network): add revisioned NetworkManager profile management"
+depends_on = ["S18-1", "S18-3"]
+external_effects = true
+candidate_operations = ["operation:network.profile.create", "operation:network.profile.update", "operation:network.profile.delete"]
+capabilities = ["networkmanager.connections.observe", "networkmanager.ipconfig.observe"]
+owned_paths = ["crates/linura-control/", "crates/linura-policy/", "crates/linura-linux-observation/src/", "apps/linura-shell/plugins/network/"]
+requirements = ["R18-OBS-03", "R18-AUTH-01", "R18-AUTH-02", "R18-SEC-01", "R18-REC-01"]
+negative_cases = ["T03", "T05", "T08", "T09", "T13", "T14", "T15", "T16", "T17", "T18", "T19", "T20", "T21", "T24", "T25", "T28", "T29"]
+acceptance = ["Provide typed, allowlisted saved-profile create/update/delete with exact setting revision, UUID and original owner scope; reject arbitrary settings maps, unreviewed VPN plugins and unsupported IP/DNS/hotspot extensions.", "Present complete material diff, credential-save choice, owners/dependents and activation/default-route impact before any persisted change, with explicit conflict refusal and rereview.", "Bind authentic Polkit subject, native settings owner epoch, exact previous profile version and durable Control-prepared transaction before mutation; never treat a user-supplied UUID as authority.", "Make profile deletion destructive-risk with shared-owner/dependent and safe-restoration checks; never remove an active/last viable profile without qualified recovery.", "Verify persisted native revision and intended effective state separately; detect edits by foreign applications, NM restart and ambiguous/lost replies without blindly re-executing."]
+qualification = ["unit-allowlist-revision-ownership", "level-a-native-nm-profile-edits", "shared-owner-and-secret-redaction", "indeterminate-rollback-security-review"]
+blocked_until = ["Allowlisted typed profile schema and exact current NM settings revision are accepted", "Real NM profile mutation, concurrent-edit detection, shared-ownership safety and independent recovery are proven", "Destructive deletion risk remains non-downgradable and protected secrets are never leaked"]
+
+[[pull_request]]
+id = "S18-5"
+slug = "experience-qualification"
+title = "feat(network): deliver unified network experience and qualification"
+depends_on = ["S18-1", "S18-2", "S18-3", "S18-4"]
+external_effects = false
+candidate_operations = []
+capabilities = ["networkmanager.manager.observe", "networkmanager.device.observe", "networkmanager.wifi.observe", "networkmanager.connections.observe", "networkmanager.ipconfig.observe"]
+owned_paths = ["apps/linura-shell/plugins/network/", "apps/linura-shell/bridge/", "apps/linuractl/src/", "crates/linura-sdk/", "qualification/v010/interactive-workstation/"]
+requirements = ["R18-UX-01", "R18-UX-02", "R18-QUAL-01", "R18-REL-01"]
+negative_cases = ["T01", "T02", "T09", "T10", "T16", "T18", "T20", "T21", "T22", "T23", "T24", "T26", "T27", "T28", "T30"]
+acceptance = ["Use one typed Control state across network Control Center, Quick Settings, CLI/SDK and no-model flows; preserve existing manager/device query aliases, provider health and separate readiness/effect status.", "Show fresh link, association, profile, IPv4/IPv6, DNS, route, portal/limited/unknown observations; never promote cached, inferred or NM-reported connectivity into independently verified Internet access.", "Render purpose-bound protected credentials, exact review/approval, denial, stale data, progress, indeterminate/compensating state and verified outcome with correct S17 lock/session ownership.", "Prove keyboard, focus, pointer, screen-reader, high-DPI/reduced-motion, screenshot/privacy and native offline fallback in actual ShellBridge/Qt/QML without direct QML NetworkManager mutation.", "Retain exact-head A/B/Q9/Q10 and separate real physical C/Q11 hardware evidence; missing physical NIC/roaming/rfkill/recovery proof cannot be replaced by VM, mock or video."]
+qualification = ["level-a-source-pinned-arch-nm-native", "level-b-interactive-control-center-quick-settings", "level-c-maintained-physical-nic-wifi-q11", "q10-accessibility-and-visual", "full-inherited-regressions"]
+blocked_until = ["All predecessor S18 implementation PRs independently merge with exact-head canonical/security gates", "GUI/CLI/SDK and offline no-model parity prove fresh observed outcomes without optimistic success", "Maintained physical Wi-Fi/Q11 plus exact-source Q9/Q10 and inherited Q12-Q14 evidence are accepted before slice-wide support"]
+
