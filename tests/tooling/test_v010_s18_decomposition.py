@@ -170,7 +170,21 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert set(assigned) == EXPECTED_OPERATIONS
     assert referenced_requirements == REQUIREMENTS
     assert referenced_threats == THREATS
-    assert set(prs[0]["owned_paths"]) == ["docs/adr/0048-s18-networkmanager-authority.md", "contracts/v010-s18-design.toml", "docs/qualification/v0.10.0-s18.md", "docs/qualification/v0.10.0-s18-security.md", "docs/workstreams/v010-s18-network-phase1.md", "tests/tooling/test_v010_s18_design.py", "contracts/qualification-gate-matrix.toml", ".github/workflows/v010-qualification.yml", "docs/adr/README.md", "docs/development/v010-s18-1-network-architecture-contracts.md", "docs/milestones/v0.10.0.md", "docs/qualification/v0.10.0.md", "docs/threat-model.md"]
+    assert set(prs[0]["owned_paths"]) == {
+        "docs/adr/0048-s18-networkmanager-authority.md",
+        "contracts/v010-s18-design.toml",
+        "docs/qualification/v0.10.0-s18.md",
+        "docs/qualification/v0.10.0-s18-security.md",
+        "docs/workstreams/v010-s18-network-phase1.md",
+        "tests/tooling/test_v010_s18_design.py",
+        "contracts/qualification-gate-matrix.toml",
+        ".github/workflows/v010-qualification.yml",
+        "docs/adr/README.md",
+        "docs/development/v010-s18-1-network-architecture-contracts.md",
+        "docs/milestones/v0.10.0.md",
+        "docs/qualification/v0.10.0.md",
+        "docs/threat-model.md",
+    }
     assert prs[0]["depends_on"] == []
     assert prs[0]["title"].startswith("docs(v0.10):")
     assert all(
