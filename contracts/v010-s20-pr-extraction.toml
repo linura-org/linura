@@ -1,0 +1,96 @@
+# Planning-only extraction map; not a runtime operation registry or release ledger.
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S20"
+profile = "arch-hyprland-v1"
+status = "proposed"
+phase1_branch = "wip/v010-s20-audio-media"
+phase1_source = "docs/workstreams/v010-s20-audio-media-phase1.md"
+inert_candidate_registry = "contracts/v010-s20-design.toml"
+authoritative_slice_ledger = "contracts/v010-workstation-slices.toml"
+new_operation_registration = false
+new_effect_activation = false
+physical_q11_qualified = false
+release_ready = false
+pr_count = 5
+extraction_policy = "independent-implementation-with-exact-head-evidence"
+s08_preserved_operation = "operation:audio.output.set-session-volume"
+s08_preserved_transport = "org.linura.Session1.SetAudioOutputVolume"
+s08_preserved_class = "transient-external-effect"
+s08_preserved_risk = "user-state"
+s08_preserved_helper = "packaging/wireplumber/linura-session-audio.lua"
+candidate_operations_must_remain_inert_until_separately_qualified = true
+no_unverified_success = true
+no_cross_user_access = true
+no_generic_command_or_dbus_relay = true
+no_vm_as_physical_q11 = true
+
+[[unit]]
+id = "S20-1"
+title = "Native PipeWire Audio Graph"
+depends_on_units = []
+depends_on_slices = ["S16"]
+kind = "observation"
+effects_authorized = false
+operation_owners = []
+source_areas = ["crates/linura-linux-observation/", "crates/linura-observation-control/", "qualification/v010/"]
+deliverables = ["bounded-native-snapshot", "session-and-pipewire-generation", "output-input-device-card-profile-port-and-stream-identity", "actual-route-links", "default-alias-is-query-only", "existing-s08-sink-abi-preserved"]
+required_tests = ["native-multiple-sinks-and-sources", "node-id-reuse", "serial-and-name-drift", "provider-restart", "duplicate-and-overlong-state", "mixed-generation", "existing-s08-exact-source-regression"]
+adversarial_cases = ["M20-01", "M20-02", "M20-03", "M20-04", "M20-08", "M20-09", "M20-11", "M20-23"]
+merge_requirement = "real-observation-and-adversarial-tests-without-enabling-new-effects"
+
+[[unit]]
+id = "S20-2"
+title = "Playback and Output Authority"
+depends_on_units = ["S20-1"]
+depends_on_slices = ["S16"]
+kind = "effect"
+effects_authorized = false
+operation_owners = ["operation:audio.output.set-mute", "operation:audio.output.set-default"]
+source_areas = ["crates/linura-control/", "apps/linurad/", "interfaces/dbus/", "crates/linura-dbus/", "crates/linura-linux-observation/"]
+deliverables = ["independent-output-mute-vs-zero-gain", "exact-sink-default-selection", "real-playback-route-impact-preview", "typed-registration-and-reviewed-risk", "purpose-bound-native-effect", "fresh-postcondition", "durable-managed-recovery"]
+required_tests = ["same-uid-session-auth", "moving-default-before-dispatch", "s08-volume-unchanged", "no-durable-audit-no-dispatch", "lost-reply-indeterminate", "provider-restart-no-replay", "disabled-until-qualified"]
+adversarial_cases = ["M20-01", "M20-03", "M20-04", "M20-05", "M20-06", "M20-09", "M20-10", "M20-12", "M20-16", "M20-22", "M20-24"]
+merge_requirement = "one-or-more-complete-exact-output-operations-or-explicitly-inert-unsupported-boundaries"
+
+[[unit]]
+id = "S20-3"
+title = "Input, Microphone Privacy and Shared Routing Authority"
+depends_on_units = ["S20-1", "S20-2"]
+depends_on_slices = ["S16"]
+kind = "effect"
+effects_authorized = false
+operation_owners = ["operation:audio.input.set-volume", "operation:audio.input.set-mute", "operation:audio.input.set-default", "operation:audio.stream.set-route", "operation:audio.device.set-profile"]
+source_areas = ["crates/linura-control/", "apps/linurad/", "interfaces/dbus/", "crates/linura-dbus/", "crates/linura-linux-observation/"]
+deliverables = ["typed-capture-activity-and-permissions", "software-mute-is-not-hardware-privacy", "input-gain-and-mute", "input-default", "exact-playback-and-capture-stream-routing", "profile-impact-preview", "managed-uncertain-recovery", "no-microphone-kill-switch-claim"]
+required_tests = ["source-sink-confusion", "foreign-capture-denial", "privacy-indicator-truthfulness", "profile-rollback", "route-drift-before-and-after-dispatch", "audited-indeterminate-state", "daemon-and-session-loss", "hardware-privacy-not-claimed-from-vm"]
+adversarial_cases = ["M20-02", "M20-07", "M20-08", "M20-09", "M20-10", "M20-11", "M20-12", "M20-16", "M20-17", "M20-18", "M20-20", "M20-22"]
+merge_requirement = "capture-and-routing-proofs-per-operation-without-promising-unobservable-privacy"
+
+[[unit]]
+id = "S20-4"
+title = "MPRIS Player Observation and Media Authority"
+depends_on_units = []
+depends_on_slices = ["S16"]
+kind = "observation-and-effect"
+effects_authorized = false
+operation_owners = ["operation:media.player.play", "operation:media.player.pause", "operation:media.player.next", "operation:media.player.previous", "operation:media.player.seek"]
+source_areas = ["crates/linura-linux-observation/", "crates/linura-control/", "apps/linurad/", "interfaces/dbus/", "crates/linura-dbus/"]
+deliverables = ["actual-session-bus-and-unique-owner", "bounded-sanitized-metadata", "no-artwork-network-fetch", "exact-player-and-track-epoch", "typed-capability-gates", "real-player-postconditions", "no-arbitrary-method-relay"]
+required_tests = ["hostile-metadata-and-uris", "player-owner-rebind", "cross-uid-bus-denial", "unsupported-capability", "seek-and-auto-next-races", "lost-reply", "no-verified-result-from-method-return"]
+adversarial_cases = ["M20-02", "M20-13", "M20-14", "M20-15", "M20-19", "M20-23", "M20-24"]
+merge_requirement = "native-mpris-fixture-plus-each-enabled-effect-independent-proof"
+
+[[unit]]
+id = "S20-5"
+title = "Audio and Media Experience and Qualification"
+depends_on_units = ["S20-1", "S20-2", "S20-3", "S20-4"]
+depends_on_slices = ["S16"]
+kind = "experience-and-qualification"
+effects_authorized = false
+operation_owners = []
+source_areas = ["apps/linura-shell/", "apps/linuractl/", "crates/linura-sdk/", "qualification/v010/", "docs/qualification/"]
+deliverables = ["shared-control-machine-state", "control-center-quick-settings-osd", "cli-sdk-no-model-parity", "accessible-keyboard-pointer-and-screen-reader", "unavailable-and-indeterminate-ui", "exact-source-a-b-c-evidence", "preserved-s08-qualification"]
+required_tests = ["ui-restart-no-replay", "session-lock-and-hotplug", "native-player-and-audio-graph", "accessibility-and-visual", "exact-head-canonical-and-security-checks", "physical-q11-real-device-and-microphone-proof"]
+adversarial_cases = ["M20-01", "M20-04", "M20-07", "M20-14", "M20-18", "M20-19", "M20-20", "M20-21", "M20-24"]
+merge_requirement = "dependent-merged-evidence-plus-remaining-a-b-c-qualification-honestly-reported"
