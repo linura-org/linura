@@ -749,21 +749,19 @@ mod tests {
 
     #[test]
     fn audio_graph_requires_native_direction_and_rejects_contradictory_port_claims() {
-        assert!(parse_snapshot(&FIXTURE.replace(
-            "\"direction\":\"output\"",
-            "\"direction\":\"input\"",
-        ))
-        .is_err());
-        assert!(parse_snapshot(&FIXTURE.replace(
-            "\"direction\":\"output\",",
-            "",
-        ))
-        .is_err());
-        assert!(parse_snapshot(&FIXTURE.replace(
-            "\"port.direction\":\"out\"",
-            "\"port.direction\":\"in\"",
-        ))
-        .is_err());
+        assert!(
+            parse_snapshot(
+                &FIXTURE.replace("\"direction\":\"output\"", "\"direction\":\"input\"",)
+            )
+            .is_err()
+        );
+        assert!(parse_snapshot(&FIXTURE.replace("\"direction\":\"output\",", "",)).is_err());
+        assert!(
+            parse_snapshot(
+                &FIXTURE.replace("\"port.direction\":\"out\"", "\"port.direction\":\"in\"",)
+            )
+            .is_err()
+        );
     }
 
     #[test]
