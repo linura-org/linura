@@ -147,7 +147,7 @@ pub fn review_package_impact(
             || !package.version.bytes().all(|b| {
                 b.is_ascii_alphanumeric() || b".:+_~@-".contains(&b)
             })
-            || !package_map.insert(package.name.clone(),package).is_none()
+            || package_map.insert(package.name.clone(),package).is_some()
         {
             add(&mut blockers, PackageBlocker::InvalidUniverse);
         }
