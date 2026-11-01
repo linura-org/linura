@@ -134,6 +134,84 @@ def validate_inert(doc: dict) -> None:
             raise ValueError(f"missing qualification invariant {key}")
 
 
+
+EXPECTED_S23_PR_DEPENDENCIES = {
+    "S23-1": [],
+    "S23-2": [],
+    "S23-3": ["S23-2"],
+    "S23-4": ["S23-3"],
+    "S23-5": ["S23-1"],
+    "S23-6": ["S23-1", "S23-2", "S23-3", "S23-4", "S23-5"],
+}
+S23_ADVERSARIAL = {f"P23-{n:02d}" for n in range(1, 31)}
+
+
+def validate_pr_decomposition(doc: dict) -> None:
+    meta = doc["pr_decomposition"]
+    if (
+        meta["status"] != "proposed"
+        or meta["adaptive"] is not True
+        or meta["planned_pr_count"] != 6
+        or meta["branch"] != "wip/v010-s23-applications"
+        or meta["implementation_base"] != "main"
+    ):
+        raise ValueError("S23 PR planning metadata drift")
+    denial_flags = (
+        "merge_wip_directly", "register_effects_from_design",
+        "allow_document_only_slice_completion",
+    )
+    required_flags = (
+        "require_independent_pr_verification",
+        "require_exact_head_applicable_gates",
+        "require_physical_q11_for_release",
+        "s24_keeps_coordinated_upgrade_ownership",
+        "unqualified_package_operations_remain_disabled",
+    )
+    if any(meta[x] is not False for x in denial_flags):
+        raise ValueError("S23 premature implementation/release route")
+    if any(meta[x] is not True for x in required_flags):
+        raise ValueError("S23 qualification or update ownership weakened")
+    prs = doc["implementation_pr"]
+    if len(prs) != 6 or len({x["id"] for x in prs}) != 6:
+        raise ValueError("S23 duplicate or missing PR")
+    edges = {x["id"]: x["depends_on"] for x in prs}
+    if edges != EXPECTED_S23_PR_DEPENDENCIES:
+        raise ValueError("S23 dependency order changed without rebaseline")
+    owners = [x["owner"] for x in prs]
+    if len(owners) != len(set(owners)):
+        raise ValueError("S23 ownership overlap needs explicit split")
+    covered = set()
+    required_fields = ("title", "phase", "owner", "source_areas",
+                       "requirements", "capabilities", "acceptance",
+                       "adversarial_cases", "native_levels", "activation")
+    for pr in prs:
+        if any(not pr[x] for x in required_fields):
+            raise ValueError("S23 PR has an incomplete ownership/acceptance contract")
+        if not all(x.startswith(("R23-",)) for x in pr["requirements"]):
+            raise ValueError("S23 PR not linked to phase-1 requirements")
+        if any(not x.startswith(("apps/", "crates/", "executors/", "qualification/"))
+               for x in pr["source_areas"]):
+            raise ValueError("S23 PR has non-implementation ownership")
+        if pr["candidate_effect_enabled"] is not False:
+            raise ValueError("S23 PR plan must not activate effects")
+        if pr["activation"] not in (
+            "observation-only", "disabled-effect", "disabled-until-qualified",
+            "no-release-promotion-without-evidence",
+        ):
+            raise ValueError("S23 PR plan has an unqualified activation state")
+        if not set(pr["native_levels"]) <= {"A", "B", "C"}:
+            raise ValueError("S23 native proof level invalid")
+        if not set(pr["adversarial_cases"]) <= S23_ADVERSARIAL:
+            raise ValueError("S23 has unknown adversarial case")
+        covered.update(pr["adversarial_cases"])
+    if covered != S23_ADVERSARIAL:
+        raise ValueError("S23 adversarial matrix not fully assigned")
+    if prs[-1]["native_levels"] != ["A", "B", "C"]:
+        raise ValueError("S23 physical release evidence omitted")
+    if prs[3]["activation"] != "disabled-until-qualified":
+        raise ValueError("S23 ALPM effects promoted prematurely")
+
+
 class S23InertArchitectureTests(unittest.TestCase):
     def test_scope_and_proposed_operation_semantics(self):
         d = read(DESIGN)
@@ -245,6 +323,42 @@ class S23InertArchitectureTests(unittest.TestCase):
         self.assertFalse(d["qualification"]["vm_install_is_physical_recovery_proof"])
         self.assertTrue(d["qualification"]["require_partial_upgrade_denial"])
         self.assertTrue(d["qualification"]["require_interruption_no_replay"])
+
+
+
+class S23PrDecompositionTests(unittest.TestCase):
+    def test_pr_capabilities_requirements_and_adversarial_coverage(self):
+        doc = read(DESIGN)
+        validate_inert(doc)
+        validate_pr_decomposition(doc)
+
+    def test_pr_security_mutations_are_detected(self):
+        baseline = read(DESIGN)
+        for key, replacement in (
+            ("merge_wip_directly", True),
+            ("require_physical_q11_for_release", False),
+            ("s24_keeps_coordinated_upgrade_ownership", False),
+        ):
+            with self.subTest(key=key):
+                altered = copy.deepcopy(baseline)
+                altered["pr_decomposition"][key] = replacement
+                with self.assertRaises(ValueError):
+                    validate_pr_decomposition(altered)
+        for identifier, field, replacement in (
+            ("S23-1", "candidate_effect_enabled", True),
+            ("S23-2", "adversarial_cases", []),
+            ("S23-3", "depends_on", []),
+            ("S23-4", "activation", "enabled"),
+            ("S23-5", "source_areas", ["docs/"]),
+            ("S23-6", "native_levels", ["A", "B"]),
+        ):
+            with self.subTest(identifier=identifier, field=field):
+                altered = copy.deepcopy(baseline)
+                item = next(p for p in altered["implementation_pr"]
+                            if p["id"] == identifier)
+                item[field] = replacement
+                with self.assertRaises(ValueError):
+                    validate_pr_decomposition(altered)
 
 
 if __name__ == "__main__":
