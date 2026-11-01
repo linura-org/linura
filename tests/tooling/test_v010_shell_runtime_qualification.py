@@ -43,6 +43,7 @@ FIXTURE_PATHS = (
     "crates/linura-protocol/Cargo.toml",
     "crates/linura-provenance/Cargo.toml",
     "crates/linura-provider-sdk/Cargo.toml",
+    "crates/linura-provider-bluez/Cargo.toml",
     "crates/linura-transaction/Cargo.toml",
     "apps/linura-shell/qualification-controller.qml",
     "apps/linura-shell/qualification-palette.qml",
