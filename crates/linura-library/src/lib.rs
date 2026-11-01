@@ -16,6 +16,7 @@ mod proposal_acceptance_tests;
 mod proposal_replay;
 mod schema;
 mod store;
+mod workflows;
 
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
@@ -26,6 +27,11 @@ use linura_intent::{Intent, MachineProfile, Setup};
 
 pub use adoption::AdoptionContext;
 pub use catalog::{CatalogPage, MAX_CATALOG_PAGE_SIZE};
+pub use workflows::{
+    BackupInspection, MachineAdoptionDecision, MachineAdoptionReadiness, PortableExportPreview,
+    PortableImportReview, ProfileEditorDraft, RevisionComparison, RevisionInspection,
+    SetupEditorDraft, inspect_backup_read_only,
+};
 pub use portable::{
     PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle, decode_profile_bundle,
     decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,

@@ -43,6 +43,11 @@ pub use linura_library::{
     encode_setup_bundle as encode_durable_setup_bundle, restore_backup as restore_library_backup,
     validate_backup as validate_library_backup,
 };
+pub use linura_library::{
+    BackupInspection, MachineAdoptionDecision, MachineAdoptionReadiness, PortableExportPreview,
+    PortableImportReview, ProfileEditorDraft, RevisionComparison, RevisionInspection,
+    SetupEditorDraft, inspect_backup_read_only,
+};
 pub use linura_observation::{
     FreshnessState, ObservationAuthority, ObservationEnvelope, ObservationValidationError,
     ObservedValue, ProviderAvailability, ProviderHealth,
