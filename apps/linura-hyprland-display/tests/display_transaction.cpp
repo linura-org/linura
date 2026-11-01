@@ -540,6 +540,91 @@ void ambiguousWriteAlwaysCompletesItsProtectionStack()
     attempt->tick(Start);
     assert(!attempt->fenced() && protection->releases == 1 && !native.inhibited);
 }
+
+void protectedMultiOutputChangesRequireIndependentRetirement()
+{
+    for (const bool keep : {false, true}) {
+        Fixture native;
+        // The compositor maintains its own opaque safety coverage for every
+        // head while locked; owner/Control lock-surface evidence is separate.
+        native.facts.coverage = Coverage::Secure;
+        for (auto &head : native.facts.heads)
+            head.covered = true;
+        const auto baseline = native.baseline();
+        auto desired = native.desired();
+        desired[1] = Target{baseline[1].output, false, {}, 0, 0, 0, 0, {}};
+        assert(DisplayTransaction::validLayout(desired, native.facts));
+
+        auto protection = std::make_shared<Test::MutationFixture>();
+        protection->applyPresented = false;
+        auto attempt = DisplayTransaction::start(native, Bound, baseline, desired, native.facts,
+                                                 Start, protection);
+        assert(attempt && attempt->fenced() && native.writes == 1 && native.inhibited);
+        assert(native.facts.heads[1].current == desired[1]);
+        // Neither a successful modeset nor one covered remaining output is
+        // permission to Keep: all enabled-head presentation belongs to the
+        // independently consumed native protection.
+        assert(!attempt->confirm(Bound, {100'100, 50'100}));
+        protection->applyPresented = true;
+        if (keep) {
+            protection->keepDecision = false;
+            assert(!attempt->confirm(Bound, {100'100, 50'100}));
+            protection->keepDecision = true;
+            assert(attempt->confirm(Bound, {100'100, 50'100}));
+            assert(attempt->phase() == DisplayTransaction::Phase::Confirmed);
+            assert(!attempt->fenced() && native.writes == 1 && !native.inhibited);
+            assert(!attempt->requestRestore(Bound, {100'100, 50'100}));
+        } else {
+            protection->revertDecision = false;
+            assert(!attempt->requestRestore(Bound, {100'100, 50'100}));
+            assert(native.writes == 1 && native.inhibited);
+            protection->revertDecision = true;
+            protection->restorePresented = false;
+            native.ownedStateRestored = false;
+            assert(attempt->requestRestore(Bound, {100'100, 50'100}));
+            assert(attempt->phase() == DisplayTransaction::Phase::Restoring);
+            assert(native.baseline() == baseline && native.restores == 1);
+            attempt->tick(ClockSample{100'200, 50'200});
+            assert(attempt->fenced() && native.inhibited && protection->releases == 0);
+            native.ownedStateRestored = true;
+            attempt->tick(ClockSample{100'200, 50'200});
+            assert(attempt->fenced() && native.inhibited); // No completed restore frame.
+            protection->restorePresented = true;
+            attempt->tick(ClockSample{100'200, 50'200});
+            assert(attempt->phase() == DisplayTransaction::Phase::Restored);
+            assert(!attempt->fenced() && !native.inhibited && protection->releases == 1);
+            assert(native.writes == 2 && native.restores == 1);
+            assert(!attempt->confirm(Bound, {100'200, 50'200}));
+            assert(!attempt->requestRestore(Bound, {100'200, 50'200}));
+        }
+    }
+}
+
+void failedProtectedRestorationNeverReplaysOrReleasesItsFence()
+{
+    Fixture native;
+    const auto baseline = native.baseline();
+    auto protection = std::make_shared<Test::MutationFixture>();
+    protection->allowRestore = false;
+    auto attempt = DisplayTransaction::start(native, Bound, baseline, native.desired(),
+                                             native.facts, Start, protection);
+    assert(attempt && native.inhibited && native.writes == 1);
+    attempt->restore();
+    assert(attempt->phase() == DisplayTransaction::Phase::RecoveryFailed);
+    assert(attempt->fenced() && native.inhibited && native.restores == 0);
+    assert(protection->restores == 1 && protection->releases == 0);
+    for (int i = 0; i < 3; ++i) {
+        attempt->restore();
+        attempt->tick(ClockSample{100'500, 50'500});
+        assert(attempt->phase() == DisplayTransaction::Phase::RecoveryFailed);
+        assert(native.writes == 1 && native.inhibited && protection->restores == 1);
+    }
+    attempt.reset();
+    // Compositor-local loss is not a verified recovery or permission to start
+    // a new transaction. A replacement requires independent durable recovery.
+    assert(native.inhibited && native.inhibitorReleases == 0 && protection->releases == 0);
+}
+
 void scenePreparationCannotRenewTheDispatchBudget()
 {
     Fixture native;
@@ -568,4 +653,6 @@ int main()
     nativeProtectionIsRequiredAndRetainedThroughRecovery();
     ambiguousWriteAlwaysCompletesItsProtectionStack();
     scenePreparationCannotRenewTheDispatchBudget();
+    protectedMultiOutputChangesRequireIndependentRetirement();
+    failedProtectedRestorationNeverReplaysOrReleasesItsFence();
 }
