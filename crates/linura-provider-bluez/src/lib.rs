@@ -342,11 +342,9 @@ fn bound_resource(
 ) -> Result<ResourceId, ProviderError> {
     // D-Bus object paths contain no '@', so this suffix is unambiguous.
     // The core ResourceId length budget also bounds the composed identifier.
-    ResourceId::new(format!("{prefix}{path}@{boot_id}@{owner}")).map_err(
-        |error: ValidationError| {
-            ProviderError::InvalidState(format!("invalid BlueZ resource: {error}"))
-        },
-    )
+    ResourceId::new(format!("{prefix}{path}@{boot_id}@{owner}")).map_err(|error: ValidationError| {
+        ProviderError::InvalidState(format!("invalid BlueZ resource: {error}"))
+    })
 }
 fn boot_id() -> Result<String, ProviderError> {
     let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
@@ -797,7 +795,17 @@ mod tests {
         assert!(parse(raw).is_err());
     }
     #[test]
-    fn duplicate_uuid_and_unbounded_alias_rejected() {
+    fn malformed_native_rssi_and_control_character_alias_fail_closed() {
+        let mut source = device_properties("/org/bluez/hci0");
+        source.insert("RSSI".into(), str_value("not-a-signal"));
+        assert!(parse_device(&source).is_err());
+        let mut source = device_properties("/org/bluez/hci0");
+        source.insert("Alias".into(), str_value("normal\nspoofed"));
+        assert!(parse_device(&source).is_err());
+    }
+
+    #[test]
+    fn oversized_alias_is_rejected() {
         let mut source = device_properties("/org/bluez/hci0");
         source.insert("Alias".into(), str_value(&"X".repeat(MAX_LABEL_BYTES + 1)));
         assert!(parse_device(&source).is_err());
