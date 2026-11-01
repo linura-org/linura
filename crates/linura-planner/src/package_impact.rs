@@ -104,8 +104,23 @@ pub fn review_package_impact(
     let mut blockers = BTreeSet::new();
     add(&mut blockers, PackageBlocker::UnqualifiedExecutor);
     let mut requested = BTreeSet::new();
-    if request.targets.is_empty() || request.targets.len() > MAX_TARGETS
-        || universe.packages.is_empty() || universe.packages.len() > MAX_PACKAGE_NODES
+    // Fail before materializing any unbounded untrusted graph or target set.
+    if request.targets.len() > MAX_TARGETS || universe.packages.len() > MAX_PACKAGE_NODES {
+        add(&mut blockers, if request.targets.len() > MAX_TARGETS {
+            PackageBlocker::InvalidTarget
+        } else {
+            PackageBlocker::InvalidUniverse
+        });
+        return PackageImpactPreview {
+            requested: Vec::new(),
+            direct_dependency_closure: Vec::new(),
+            reverse_dependents: Vec::new(),
+            blockers: blockers.into_iter().collect(),
+            execution_authorized: false,
+        };
+    }
+    if request.targets.is_empty()
+        || universe.packages.is_empty()
         || universe.boot_id.len() < 8 || universe.boot_id.len() > 128
         || universe.local_db_digest.len() != 64 || universe.repository_digest.len() != 64
         || !universe.local_db_digest.bytes().all(|b| b.is_ascii_hexdigit())
@@ -306,6 +321,25 @@ mod tests {
         assert!(preview.blockers.contains(&PackageBlocker::InvalidTarget));
         assert!(!preview.execution_authorized);
     }
+    #[test]
+    fn oversized_target_and_graph_inputs_stop_before_graph_construction() {
+        let u=universe();
+        let oversized=PackageImpactRequest {
+            kind: PackageChangeKind::Install,
+            targets:vec!["editor".to_string();MAX_TARGETS+1],
+        };
+        let answer=review_package_impact(&u,&oversized);
+        assert!(answer.blockers.contains(&PackageBlocker::InvalidTarget));
+        assert!(!answer.execution_authorized);
+        let mut massive=universe();
+        massive.packages.resize(MAX_PACKAGE_NODES+1, fact("p",&[]));
+        let answer=review_package_impact(&massive,&PackageImpactRequest {
+            kind: PackageChangeKind::Remove,targets:vec!["editor".into()],
+        });
+        assert!(answer.blockers.contains(&PackageBlocker::InvalidUniverse));
+        assert!(!answer.execution_authorized);
+    }
+
     #[test]
     fn even_complete_claims_never_produce_authority() {
         let mut u=universe();
