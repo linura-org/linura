@@ -748,6 +748,40 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S23 package-source replacement, privileged installation and MIME handler hijack
+
+A user-supplied application title, desktop entry, package-search result,
+repository mirror, forged signature or outdated dependency graph may
+substitute a malicious executable into a reviewed operation, while a MIME
+handler override may redirect sensitive files or URLs to a different app.
+- Preserve S12/S14 exact desktop-entry re-resolution and fixed unprivileged
+  user-systemd app.slice broker; launching an app is not package authority.
+- Bind native ALPM effect to frozen signed Arch source/keyring/sync DB and
+  actual installed DB+lock generation, complete dependency/replacement and
+  reverse-dependency/owner analysis, current Polkit subject and exact plan.
+  Package names, process exit codes and signed maintainer scripts alone
+  cannot certify safety or full postcondition success.
+- Reject Arch partial upgrades, arbitrary pacman flags/commands, AUR/PKGBUILD,
+  untrusted repositories and privileged scriptlet/code proxying. The
+  v0.9 direct-upgrade guard and break-glass environment remain distinct
+  from Linura authority; S24 owns coordinated upgrade, snapshots and repair.
+- Native installation/removal with changed source, disk, lock or scripts
+  must invalidate approval. Unknown/partially applied ALPM effects remain
+  indeterminate after crashes and may not be blindly replayed or claimed
+  to have rolled back.
+- XDG MIME/scheme associations bind exact eligible desktop-file identity,
+  ordered user/config/system precedence, target MIME, actual safe file
+  descriptor/content revision, and independently effective handler.
+  A write to mimeapps.list is not a package install, app launch or
+  proof that the effective default changed; reset may expose fallback.
+- Deny symlink/hardlink, cross-user XDG paths, concurrent config edits,
+  replaced/hidden desktop handlers, malicious scheme redirect, model-
+  supplied effect class/risk or shell-based privileged package execution.
+- Preserve S17 session/approval, S21 display/power, S24 coordinated
+  recovery, Q10 usability and separately real Q11 hardware evidence.
+- See proposed [ADR 0052](adr/0052-s23-application-package-and-default-handler-authority.md)
+  and [S23 security qualification](qualification/v0.10.0-s23-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to

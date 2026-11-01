@@ -1,0 +1,228 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S23"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+downstream_slice = "S24"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+partial_upgrades_allowed = false
+new_system_upgrade_authority = false
+untrusted_package_sources_allowed = false
+break_glass_is_control_permission = false
+generic_root_pacman_shell = false
+unknown_package_effect_is_success = false
+assume_scriptlets_harmless = false
+native_exit_code_is_verification = false
+replay_indeterminate_transaction = false
+implicit_package_rollback_claim = false
+mime_edit_installs_package = false
+desktop_entry_alias_grants_authority = false
+preserve_existing_launcher = true
+preserve_update_guard = true
+signed_frozen_repository_required = true
+complete_dependency_closure_required = true
+protect_system_components = true
+require_native_polkit_subject = true
+require_immutable_alpm_transaction_plan = true
+require_s24_lock_and_recovery_compatibility = true
+require_independent_package_and_xdg_postconditions = true
+offline_no_model_path_required = true
+unsupported_behavior = "fail-closed"
+existing_semantics = "contracts/operation-semantics.toml"
+architecture = "docs/adr/0052-s23-application-package-and-default-handler-authority.md"
+source_audit = "docs/workstreams/v010-s23-applications-phase1.md"
+qualification_document = "docs/qualification/v0.10.0-s23.md"
+security_qualification = "docs/qualification/v0.10.0-s23-security.md"
+
+[existing_launcher]
+file = "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+catalog = "DesktopEntries.applications"
+fixed_user_broker = "/usr/bin/systemd-run"
+app_slice = "app.slice"
+exit_type = "cgroup"
+filter_nodisplay = true
+reject_terminal_required = true
+reresolve_exact_desktop_id = true
+not_package_install_authority = true
+
+[existing_update_guard]
+file = "apps/linura-update-guard/src/main.rs"
+coordinator_context = "LINURA_UPDATE_CONTEXT"
+native_break_glass = "LINURA_ALLOW_DIRECT_PACMAN"
+break_glass_not_linura_permission = true
+s24_owns_update_and_snapshots = true
+no_s23_guard_override = true
+
+[proposed_observation]
+application = "desktop.application.observe"
+installed = "alpm.package.installed.observe"
+repository = "alpm.repository.catalog.observe"
+preflight = "alpm.transaction.preflight.observe"
+mime = "xdg.mime.association.observe"
+require_desktop_file_source_revision = true
+require_alpm_db_lock_and_boot_epoch = true
+require_signed_snapshot_keyring_digest = true
+require_complete_dependency_conflict_and_replaces_closure = true
+require_xdg_handler_precedence = true
+require_exact_visible_desktop_id_and_mime = true
+control_owns_cross_provider_aggregation = true
+
+[package_authority]
+reject_partial_upgrade_and_unsynced_repos = true
+reject_alpm_force_and_arbitrary_flags = true
+reject_untrusted_aur_local_archives = true
+deny_protected_system_dependency_removal = true
+deny_when_s24_coordinator_lock_active = true
+deny_if_recovery_precondition_unproven = true
+require_full_dependency_and_scriptlet_impact_review = true
+require_native_signature_and_pacman_lock = true
+require_current_authenticated_polkit = true
+require_durable_prepared_effect = true
+require_independent_installed_version_and_file_verification = true
+require_observe_only_indeterminate_recovery = true
+
+[xdg_authority]
+file = "mimeapps.list"
+default_group = "Default Applications"
+added_group = "Added Associations"
+removed_group = "Removed Associations"
+require_exact_user_owned_safe_file = true
+require_original_file_content_revision = true
+require_valid_mime_and_associated_desktop_id = true
+require_user_config_precedence = true
+require_atomic_non_symlink_write = true
+require_effective_default_reobservation = true
+preserve_unrelated_mime_groups = true
+no_systemwide_write_or_install = true
+
+[[candidate_operation]]
+id = "operation:package.install"
+provider = "alpm"
+observation = "alpm.transaction.preflight.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-package-universe-source-db-lock-epoch"
+requested_keys = ["install_targets"]
+requires = ["frozen-signed-source", "complete-dependency-plan", "no-partial-upgrade", "s24-recovery-compatibility", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:package.remove"
+provider = "alpm"
+observation = "alpm.transaction.preflight.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-installed-package-version-owners-dependency-closure"
+requested_keys = ["remove_targets"]
+requires = ["reverse-dependency-review", "protected-package-denial", "shared-owner-review", "s24-recovery-compatibility", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:package.reinstall"
+provider = "alpm"
+observation = "alpm.transaction.preflight.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-package-universe-name-version-db-epoch"
+requested_keys = ["reinstall_targets"]
+requires = ["same-version-exact-source", "no-partial-upgrade", "scriptlet-impact-review", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:package.orphans.remove"
+provider = "alpm"
+observation = "alpm.transaction.preflight.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-local-db-unused-packages-and-owners-revision"
+requested_keys = ["remove_targets"]
+requires = ["explicit-exact-targets", "reverse-dependency-review", "protected-package-denial", "shared-owner-review", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:application.default.set"
+provider = "xdg-mimeapps"
+observation = "xdg.mime.association.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-xdg-config-mime-handler-revision"
+requested_keys = ["mime_type", "desktop_id"]
+requires = ["exact-associated-desktop-entry", "safe-atomic-user-config", "effective-precedence", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:application.default.reset"
+provider = "xdg-mimeapps"
+observation = "xdg.mime.association.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-xdg-config-mime-handler-revision"
+requested_keys = ["mime_type", "reset"]
+requires = ["safe-atomic-user-config", "no-false-empty-default", "effective-precedence", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:application.association.add"
+provider = "xdg-mimeapps"
+observation = "xdg.mime.association.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-xdg-config-added-association-revision"
+requested_keys = ["mime_type", "desktop_id"]
+requires = ["exact-associated-desktop-entry", "safe-atomic-user-config", "added-not-default", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:application.association.remove"
+provider = "xdg-mimeapps"
+observation = "xdg.mime.association.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-user-xdg-config-removed-association-revision"
+requested_keys = ["mime_type", "desktop_id"]
+requires = ["current-associated-desktop-entry", "safe-atomic-user-config", "removal-impact-review", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:application.favorite.configure"
+provider = "linura-local-application-preferences"
+observation = "linura.application.preferences.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-current-user-application-preferences-revision"
+requested_keys = ["desktop_id", "favorite"]
+requires = ["authenticated-owner", "exact-current-visible-desktop-entry", "revision-check", "atomic-local-commit", "no-launch-grant"]
+enabled = false
+
+[unsupported_extensions]
+aur_pkgbuild_install = false
+arbitrary_package_archive_install = false
+untrusted_or_new_repository_mutation = false
+generic_flatpak_snap_backend = false
+partial_system_upgrade = false
+raw_pacman_options_and_shell = false
+automatic_s24_snapshot_claim = false
+systemwide_mime_association_write = false
+untrusted_desktop_exec_as_package_command = false
+
+[qualification]
+level_a = "exact-source-arch-pacman-xdg-native-vm"
+level_b = "exact-source-interactive-hyprland-vm"
+level_c = "maintained-nonvirtual-workstation-q11"
+synthetic_alpm_db_is_native_effect_proof = false
+vm_install_is_physical_recovery_proof = false
+video_is_correctness_oracle = false
+require_s12_s14_launcher_regression = true
+require_real_alpm_lock_and_package_transactions = true
+require_native_trust_signature_failures = true
+require_partial_upgrade_denial = true
+require_s24_update_lock_separation = true
+require_xdg_mime_precedence_and_safe_write = true
+require_adversarial = true
+require_interruption_no_replay = true
+require_accessibility_and_no_model = true
