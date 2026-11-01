@@ -748,6 +748,27 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S18 NetworkManager identity substitution, credential leakage and network lockout
+
+A stale interface alias, profile UUID, AP or well-known service name may
+retarget a previously reviewed effect, leak Wi-Fi secrets or destroy the sole
+network path needed to recover the machine.
+- Bind the live unique NetworkManager system-bus owner, boot, device and
+  connection/profile generations, authenticated principal and real native
+  Polkit subject; no interface name or D-Bus path is an executor credential.
+- Bound native reads and reject ambiguous duplicate names, changed AP/profile,
+  mixed provider epochs, missing IP/DNS/routes or oversized input.
+- Treat active Wi-Fi scanning as an external effect, not a passive query.
+  Keep proposed effects unregistered and unsupported until reviewed.
+- Never place PSK, EAP or secret-agent challenge material in audit, plans,
+  logs, model context or retained qualification data.
+- Deny disruptive changes without a proven offline local recovery path;
+  uncertain dispatch must re-observe before retry, with no blind replay.
+- Preserve S17 secure-owner and S21 display/power boundaries, First Boot
+  nonauthorizing bootstrap, and independently verified postconditions.
+- See proposed [ADR 0048](adr/0048-s18-networkmanager-authority.md) and
+  [S18 security qualification](qualification/v0.10.0-s18-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to

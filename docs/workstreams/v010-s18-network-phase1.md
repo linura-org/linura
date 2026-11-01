@@ -9,6 +9,8 @@
 - **Decision authority:** Canonical accepted ADRs/contracts take precedence over this working specification
 - **Effect activation:** **None** introduced by this document. Every proposed operation remains unregistered/unsupported until independently reviewed and qualified.
 
+Related proposed architecture and acceptance: [ADR 0048](../adr/0048-s18-networkmanager-authority.md), [inactive S18 design](../../contracts/v010-s18-design.toml), [qualification](../qualification/v0.10.0-s18.md) and [security qualification](../qualification/v0.10.0-s18-security.md). The audit remains the implementation traceability record; no proposed operation is activated.
+
 ## 1. Scope and nonclaims
 
 S18 must provide a usable, secure first-party network experience on the exact v0.10 workstation target, instead of treating NetworkManager's mere presence or read-only manager state as a complete product capability. The first supported reference-profile experience must let a human inspect current Ethernet/Wi-Fi connectivity, see available/saved connections, perform explicitly qualified network actions, understand progress/failure/recovery and use deterministic manual/no-model paths. All displayed final state must come from fresh authoritative provider evidence.

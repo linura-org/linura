@@ -68,3 +68,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0043 — Separate lightweight development from dedicated qualification storage](0043-dedicated-development-and-qualification-storage.md)
 - [0044 — Explicit native development preparation across Ubuntu and Arch](0044-explicit-native-development-preparation.md)
 - [0045 — S21 device effects share trusted Control authority and verified recovery](0045-s21-workstation-device-authority.md)
+- [0048 — S18 NetworkManager authority and network recovery](0048-s18-networkmanager-authority.md)
