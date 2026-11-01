@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+// Non-executable, bounded S23 package impact advisory.
+pub mod package_impact;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 
