@@ -302,7 +302,10 @@ class ProposedS18ContractTests(unittest.TestCase):
             ("docs/milestones/v0.10.0.md", "S18-1 contract-first milestone acceptance"),
             ("docs/qualification/v0.10.0.md", "S18-1 architecture-only gate"),
             ("docs/threat-model.md", "S18-1 architecture-stage threat gate"),
-            ("docs/workstreams/v010-s18-network-phase1.md", "S18-1 contract-first evidence and extraction map"),
+            (
+                "docs/workstreams/v010-s18-network-phase1.md",
+                "S18-1 contract-first evidence and extraction map",
+            ),
         )
         for relative_path, marker in expected_markers:
             with self.subTest(path=relative_path):
