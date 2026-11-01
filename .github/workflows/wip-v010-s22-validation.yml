@@ -35,4 +35,5 @@ jobs:
         run: |
           python3 -m unittest \
             tests.tooling.test_v010_s22_design \
-            tests.tooling.test_v010_s22_pr_decomposition
+            tests.tooling.test_v010_s22_pr_decomposition \
+            tests.tooling.test_v010_s22_wip_inert

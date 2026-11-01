@@ -3,7 +3,7 @@
 //! This module cannot start, stop or export PipeWire streams. Its stop
 //! directives are not native Stop calls, and no effect is registered.
 
-use super::{CaptureSourceSnapshot, CaptureUnavailable};
+use super::CaptureSourceSnapshot;
 
 const MAX_RECORDING_DURATION_MS: u64 = 5 * 60 * 1000;
 const MAX_RECORDING_BYTES: u64 = 1024 * 1024 * 1024;
@@ -26,6 +26,13 @@ pub enum RecordingStopDirective {
     RevokeOwnedStream,
     /// Source cannot be identified: do not assume stopped or replay Start.
     InvestigateIndeterminate,
+}
+
+/// Without an independent PipeWire/portal source observer there is no
+/// authoritative terminal proof of Stop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecordingStopError {
+    NoIndependentNativeStopProof,
 }
 
 /// A non-authorizing read-only state binding, created only after a separate
@@ -157,8 +164,8 @@ impl RecordingObservationLease {
 
     /// No method in this module equates Stop acknowledgement with verified
     /// native revocation. An independent stream observer is still required.
-    pub fn native_stop_is_verified(&self) -> Result<(), CaptureUnavailable> {
-        Err(CaptureUnavailable::CompositorExclusionNotProved)
+    pub fn native_stop_is_verified(&self) -> Result<(), RecordingStopError> {
+        Err(RecordingStopError::NoIndependentNativeStopProof)
     }
 }
 

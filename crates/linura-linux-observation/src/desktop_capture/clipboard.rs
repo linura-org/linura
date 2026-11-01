@@ -45,6 +45,30 @@ pub struct ClipboardMetadataConsistent {
     pub maximum_payload_bytes: u64,
 }
 
+/// Explicitly non-authorizing result. Safe-looking metadata is never consent
+/// to read a selection or proof a compositor excluded protected offers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClipboardReadPreflight {
+    Unavailable(ClipboardScopeError),
+}
+
+/// No native selection provenance or protected-source enforcement is
+/// connected yet. Even a consistent current offer must remain unavailable.
+pub fn protected_clipboard_read_preflight(
+    before: &ClipboardSelectionSnapshot,
+    after: &ClipboardSelectionSnapshot,
+    now_monotonic_ms: u64,
+    mime_type: &str,
+    advertised_size: u64,
+) -> ClipboardReadPreflight {
+    match validate_selection_metadata(before, after, now_monotonic_ms, mime_type, advertised_size) {
+        Ok(_) => ClipboardReadPreflight::Unavailable(
+            ClipboardScopeError::UnknownOrProtectedSource,
+        ),
+        Err(reason) => ClipboardReadPreflight::Unavailable(reason),
+    }
+}
+
 fn allowed_mime(value: &str) -> Result<(MimeClass, u64), ClipboardScopeError> {
     match value {
         "text/plain;charset=utf-8" => Ok((MimeClass::Utf8PlainText, MAX_TEXT_OFFER_BYTES)),
@@ -149,6 +173,23 @@ mod tests {
         assert_eq!(
             validate_selection_metadata(&s, &s, 10_000, "image/png", 30_000_000),
             Err(ClipboardScopeError::ExcessivePayload)
+        );
+    }
+
+    #[test]
+    fn metadata_consistency_cannot_authorize_a_clipboard_read() {
+        let s = snapshot();
+        assert_eq!(
+            protected_clipboard_read_preflight(
+                &s,
+                &s,
+                10_000,
+                "text/plain;charset=utf-8",
+                64,
+            ),
+            ClipboardReadPreflight::Unavailable(
+                ClipboardScopeError::UnknownOrProtectedSource,
+            )
         );
     }
 
