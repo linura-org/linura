@@ -24,16 +24,16 @@ EXPECTED_OPERATIONS = {
     "operation:network.profile.delete",
 }
 EXPECTED_ASSIGNMENTS = {
-    "S18-1": {},
-    "S18-2": {},
-    "S18-3": {},
-    "S18-4": {},
+    "S18-1": set(),
+    "S18-2": set(),
+    "S18-3": set(),
+    "S18-4": set(),
     "S18-5": {"operation:network.wifi.scan"},
     "S18-6": {"operation:network.networking.set-enabled", "operation:network.wifi.set-enabled"},
     "S18-7": {"operation:network.connection.activate", "operation:network.connection.deactivate", "operation:network.wifi.join"},
     "S18-8": {"operation:network.profile.create", "operation:network.profile.update", "operation:network.profile.delete"},
-    "S18-9": {},
-    "S18-10": {},
+    "S18-9": set(),
+    "S18-10": set(),
 }
 REQUIRED_FIELDS = (
     "slug", "title", "depends_on", "external_effects", "candidate_operations",
