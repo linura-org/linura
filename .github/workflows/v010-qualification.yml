@@ -64,6 +64,7 @@ on:
       - "contracts/v010-workstation-qualification.toml"
       - "contracts/v010-workstation-slices.toml"
       - "contracts/v010-s18-design.toml"
+      - "docs/development/v010-s18-1-network-architecture-contracts.md"
       - "contracts/v010-s18-pr-decomposition.toml"
       - "tests/tooling/test_v010_s18_decomposition.py"
       - "docs/adr/0048-s18-networkmanager-authority.md"
