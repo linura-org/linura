@@ -1,0 +1,158 @@
+# Planning data; no effect, approval, portal grant, PR or qualification is created by this file.
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S22"
+profile = "arch-hyprland-v1"
+phase = "implementation-pr-decomposition"
+status = "proposed"
+source_branch = "wip/v010-s22-utilities"
+source_architecture = "docs/workstreams/v010-s22-utilities-phase1.md"
+source_design = "contracts/v010-s22-design.toml"
+source_adr = "docs/adr/0051-s22-protected-desktop-utilities.md"
+source_qualification = "docs/qualification/v0.10.0-s22.md"
+source_security = "docs/qualification/v0.10.0-s22-security.md"
+expected_pr_count = 6
+proposed_ids_are_github_numbers = false
+runtime_implementation_claim = false
+runtime_activation = false
+runtime_support_promotion = false
+slice_completion_claim = false
+native_evidence_claim = false
+physical_q11_claim = false
+release_ledger_change = false
+merge_wip_directly = false
+extract_from_current_main = true
+declared_roadmap_predecessor = "S16"
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+
+[authority]
+owner = "linura-control"
+compositor_enforced_exclusion_required = true
+authenticated_session_seat_epoch_required = true
+independent_native_verification_required = true
+control_can_be_replaced_by_portal_grant = false
+untrusted_client_may_run_capture = false
+general_model_access_to_content = false
+clipboard_history_enabled_by_default = false
+recorder_without_native_stop = false
+implicit_s20_audio_consent = false
+automatic_upload_or_share = false
+unverified_effect_may_activate = false
+vm_counts_as_physical_q11 = false
+unsupported = "fail-closed"
+
+[[pr]]
+id = "S22-1"
+title = "Protected Capture Foundation"
+state = "proposed"
+create_as_draft = true
+requires_same_pr_code_tests_security_review = true
+runtime_activation = false
+release_evidence_claim = false
+depends_on = []
+integration_slices = ["S17","S21"]
+owned_implementation_paths = ["apps/linura-shell/plugins/screenshot/foundation/","crates/linura-linux-observation/src/desktop_capture/"]
+owned_candidate_operations = []
+requirements = ["R22-AUTH-01","R22-OBS-01","R22-SEC-01"]
+adversarial_cases = ["U22-01","U22-02","U22-03","U22-04","U22-05","U22-06","U22-07","U22-08","U22-24","U22-25","U22-27","U22-28"]
+mandatory_native_proofs = ["exact-session-and-seat","pinned-portal-and-compositor-owner","protected-lock-and-input-epoch","s21-output-topology-generation","source-side-exclusion-before-frame"]
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+activation_rule = "Observation only; unknown compositor protected exclusion denies capture; never register an effect."
+
+[[pr]]
+id = "S22-2"
+title = "Screenshot Workflows"
+state = "proposed"
+create_as_draft = true
+requires_same_pr_code_tests_security_review = true
+runtime_activation = false
+release_evidence_claim = false
+depends_on = ["S22-1"]
+integration_slices = ["S17","S21"]
+owned_implementation_paths = ["apps/linura-shell/plugins/screenshot/workflows/","apps/linura-shell/plugins/screenshot/artifacts/"]
+owned_candidate_operations = ["operation:utility.screenshot.capture","operation:utility.screenshot.save"]
+requirements = ["R22-AUTH-01","R22-CAP-01","R22-CAP-02","R22-SEC-01"]
+adversarial_cases = ["U22-02","U22-03","U22-04","U22-05","U22-06","U22-07","U22-08","U22-09","U22-10","U22-15","U22-23","U22-24","U22-25","U22-28"]
+mandatory_native_proofs = ["exact-output-window-region-and-transform","purpose-bound-user-consent","protected-content-exclusion","bounded-private-staging","user-owned-fd-and-verified-atomic-publication"]
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+activation_rule = "No raw screenshot fallback, implied upload, or implicit publication."
+
+[[pr]]
+id = "S22-3"
+title = "Screen Recording"
+state = "proposed"
+create_as_draft = true
+requires_same_pr_code_tests_security_review = true
+runtime_activation = false
+release_evidence_claim = false
+depends_on = ["S22-1"]
+integration_slices = ["S17","S20","S21"]
+owned_implementation_paths = ["apps/linura-shell/plugins/recording/"]
+owned_candidate_operations = ["operation:utility.recording.start","operation:utility.recording.stop","operation:utility.recording.export"]
+requirements = ["R22-AUTH-01","R22-REC-01","R22-SEC-01"]
+adversarial_cases = ["U22-02","U22-03","U22-04","U22-05","U22-06","U22-07","U22-08","U22-11","U22-12","U22-13","U22-14","U22-15","U22-23","U22-24","U22-25","U22-27"]
+mandatory_native_proofs = ["source-bound-portal-pipewire-session","independent-native-stop-owner","duration-size-frame-quotas","verified-native-activity-and-stop","separate-s20-audio-consent"]
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+activation_rule = "No long-lived recording without native supervised stop; audio excluded unless separately authorized."
+
+[[pr]]
+id = "S22-4"
+title = "Clipboard Authority"
+state = "proposed"
+create_as_draft = true
+requires_same_pr_code_tests_security_review = true
+runtime_activation = false
+release_evidence_claim = false
+depends_on = []
+integration_slices = ["S17"]
+owned_implementation_paths = ["apps/linura-shell/plugins/clipboard/selection/","crates/linura-linux-observation/src/desktop_clipboard/"]
+owned_candidate_operations = ["operation:utility.clipboard.write"]
+requirements = ["R22-AUTH-01","R22-CLIP-01","R22-SEC-01"]
+adversarial_cases = ["U22-01","U22-07","U22-16","U22-17","U22-18","U22-23","U22-24","U22-25","U22-28"]
+mandatory_native_proofs = ["authenticated-seat-and-selection-owner","exact-volatile-offer-and-mime-epoch","purpose-bound-sensitive-read-consent","bounded-mime-allowlist","independent-clipboard-handoff-observation"]
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+activation_rule = "Do not turn data-control access into blanket monitoring or claim an actual paste from handoff."
+
+[[pr]]
+id = "S22-5"
+title = "Clipboard History"
+state = "proposed"
+create_as_draft = true
+requires_same_pr_code_tests_security_review = true
+runtime_activation = false
+release_evidence_claim = false
+depends_on = ["S22-4"]
+integration_slices = ["S17"]
+owned_implementation_paths = ["apps/linura-shell/plugins/clipboard/history/","crates/linura-persistence-sqlite/src/clipboard_history/"]
+owned_candidate_operations = ["operation:utility.clipboard.history.configure","operation:utility.clipboard.history.delete","operation:utility.clipboard.history.restore"]
+requirements = ["R22-AUTH-01","R22-CLIP-01","R22-HIST-01","R22-SEC-01"]
+adversarial_cases = ["U22-16","U22-17","U22-18","U22-19","U22-20","U22-21","U22-22","U22-23","U22-24","U22-25","U22-28"]
+mandatory_native_proofs = ["explicit-owner-opt-in-default-off","protected-source-secret-exclusion","reviewed-key-custody-or-volatile-only","atomic-revision-and-producer-cancellation","separately-authorized-restore-to-clipboard"]
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+activation_rule = "No plaintext persistence without proven key custody and source exclusion; deletion is not physical shredding."
+
+[[pr]]
+id = "S22-6"
+title = "Utilities Experience and Qualification"
+state = "proposed"
+create_as_draft = true
+requires_same_pr_code_tests_security_review = true
+runtime_activation = false
+release_evidence_claim = false
+depends_on = ["S22-1","S22-2","S22-3","S22-4","S22-5"]
+integration_slices = ["S17","S20","S21","S25"]
+owned_implementation_paths = ["apps/linura-shell/plugins/screenshot/ui/","apps/linura-shell/plugins/recording/ui/","apps/linura-shell/plugins/clipboard/ui/"]
+owned_candidate_operations = []
+requirements = ["R22-AUTH-01","R22-SEC-01","R22-UX-01","R22-QUAL-01"]
+adversarial_cases = ["U22-01","U22-02","U22-03","U22-04","U22-05","U22-06","U22-07","U22-08","U22-09","U22-10","U22-11","U22-12","U22-13","U22-14","U22-15","U22-16","U22-17","U22-18","U22-19","U22-20","U22-21","U22-22","U22-23","U22-24","U22-25","U22-26","U22-27","U22-28"]
+mandatory_native_proofs = ["single-control-gui-cli-sdk-route","offline-no-model-keyboard-and-screenreader","exact-source-level-a-native","level-b-interactive-native","separate-maintained-physical-q11"]
+acceptance_levels = ["A", "B", "C"]
+required_gates = ["canonical-check", "dependency-audit", "analyze", "security-verification", "applicable-qualification"]
+activation_rule = "No green support promotion without full A/B and independent physical C evidence."
+
