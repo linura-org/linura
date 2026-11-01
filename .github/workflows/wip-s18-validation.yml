@@ -1,0 +1,66 @@
+# Branch-local development feedback only. This is not a trusted merge/release
+# gate, native Level A/B/C qualification, or an accepted S18 support claim.
+name: S18 WIP validation
+
+on:
+  push:
+    branches:
+      - wip/v010-s18-network
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s18-wip-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s18-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact WIP source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify pinned source and branch
+        env:
+          EXPECTED_REF: refs/heads/wip/v010-s18-network
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Test S18 design and decomposition constraints
+        run: python3 -m unittest tests.tooling.test_v010_s18_design tests.tooling.test_v010_s18_decomposition
+      - name: Validate repository, ADR and roadmap invariants
+        run: |
+          python3 scripts/check_repository.py
+          python3 tools/check_adrs.py
+          python3 tools/check_roadmap.py
+
+  s18-observer-rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact WIP source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify pinned source and branch
+        env:
+          EXPECTED_REF: refs/heads/wip/v010-s18-network
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Install repository-pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt
+      - name: Check workspace formatting
+        run: cargo +1.98.0 fmt --all -- --check
+      - name: Test native observation crate and canonical observation coordinator
+        run: |
+          cargo +1.98.0 test --locked -p linura-linux-observation
+          cargo +1.98.0 test --locked -p linura-observation-control
+      - name: Check native observation crate warnings
+        run: cargo +1.98.0 clippy --locked -p linura-linux-observation --all-targets -- -D warnings
