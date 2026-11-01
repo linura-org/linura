@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod desktop_capture;
 mod logind;
 pub mod platform_discovery;
 pub use logind::{

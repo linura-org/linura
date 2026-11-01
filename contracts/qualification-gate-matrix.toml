@@ -763,6 +763,11 @@ paths = [
   "contracts/roadmap.toml",
   "contracts/v010-workstation-qualification.toml",
   "contracts/v010-workstation-slices.toml",
+  "contracts/v010-s22-design.toml",
+  "docs/adr/0051-s22-protected-desktop-utilities.md",
+  "docs/qualification/v0.10.0-s22.md",
+  "docs/qualification/v0.10.0-s22-security.md",
+  "tests/tooling/test_v010_s22_design.py",
   "contracts/v010-s21-design.toml",
   "docs/adr/0045-s21-workstation-device-authority.md",
   "docs/qualification/v0.10.0-s21.md",
@@ -1251,6 +1256,10 @@ gates = ["v010-workstation"]
 
 [[contract]]
 path = "contracts/v010-workstation-slices.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v010-s22-design.toml"
 gates = ["v010-workstation"]
 
 [[contract]]

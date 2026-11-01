@@ -1,0 +1,204 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S22"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+clipboard_history_enabled_by_default = false
+portal_grant_is_control_authority = false
+capture_without_compositor_protection = false
+recording_without_native_stop = false
+allow_sensitive_bytes_in_plan_audit_model = false
+allow_auto_upload_or_share = false
+allow_generic_capture_shell_fallback = false
+allow_untrusted_wayland_or_clipboard_access = false
+allow_restore_token_as_permanent_grant = false
+claim_secure_file_shredding_from_unlink = false
+indeterminate_replay = false
+require_current_protected_session_epoch = true
+require_exact_user_session_and_seat = true
+require_compositor_enforced_protected_exclusion = true
+require_privacy_explicit_consent = true
+require_safe_destination_file_descriptors = true
+require_recording_native_activity_and_stop = true
+require_history_owner_opt_in_and_key_protection = true
+require_explicit_unknown_unavailable_states = true
+unsupported_behavior = "fail-closed"
+architecture = "docs/adr/0051-s22-protected-desktop-utilities.md"
+source_audit = "docs/workstreams/v010-s22-utilities-phase1.md"
+qualification_document = "docs/qualification/v0.10.0-s22.md"
+security_qualification = "docs/qualification/v0.10.0-s22-security.md"
+existing_semantics = "contracts/operation-semantics.toml"
+identity_binding = "boot-session-seat-compositor-owner-output-window-geometry-capture-epoch"
+verification = "independent-native-post-effect-or-local-store-observation"
+
+[existing_non_authorizing_example]
+path = "workflows/screenshot-share.toml"
+workflow_id = "workflow.screenshot-share"
+runtime_executor_exists = false
+allows_automatic_upload = false
+
+[proposed_observation]
+session = "session.secure-lock.observe"
+outputs = "display.outputs.observe"
+capture = "utility.capture.observe"
+recording = "utility.recording.observe"
+clipboard = "utility.clipboard.observe"
+history = "utility.clipboard.history.observe"
+require_current_compositor_and_lock_epoch = true
+require_output_topology_transform_scale = true
+require_exact_window_region_source = true
+require_recording_session_and_pipewire_stream = true
+require_clipboard_seat_offer_and_selection_epoch = true
+require_protected_content_exclusion_before_buffer = true
+require_actual_native_capture_activity_for_indicator = true
+reject_cross_user_or_stale_session = true
+control_owns_cross_provider_aggregation = true
+
+[proposed_sensitive_reads]
+clipboard_read = "utility.clipboard.selection.read"
+history_browse = "utility.clipboard.history.browse"
+screenshot_preview = "utility.screenshot.preview"
+class = "authoritative-query"
+purpose_bound_access_required = true
+protected_session_required = true
+authorization_and_consent_required = true
+never_unrestricted_agent_or_model_access = true
+no_general_observation_cache_of_bytes = true
+no_secret_data_in_audit_or_logs = true
+
+[[candidate_operation]]
+id = "operation:utility.screenshot.capture"
+provider = "desktop-capture"
+observation = "utility.capture.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-user-session-compositor-target-geometry-epoch"
+requested_keys = ["capture_target"]
+requires = ["purpose-bound-capture-consent", "compositor-protected-content-exclusion", "no-implicit-file-or-upload", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.screenshot.save"
+provider = "desktop-artifact"
+observation = "utility.capture.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-owner-content-digest-destination-descriptor"
+requested_keys = ["destination"]
+requires = ["safe-user-file-descriptor", "atomic-publication", "no-symlink-hardlink-traversal", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.recording.start"
+provider = "desktop-capture"
+observation = "utility.recording.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-user-session-compositor-source-recording-generation"
+requested_keys = ["recording_active", "audio_included"]
+requires = ["purpose-bound-capture-consent", "compositor-protected-content-exclusion", "separate-audio-consent", "bounded-duration-and-bytes", "supervised-stop", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.recording.stop"
+provider = "desktop-capture"
+observation = "utility.recording.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-owner-native-recording-session-generation"
+requested_keys = ["recording_active"]
+requires = ["stop-owned-session-only", "native-stop-confirmation", "abort-on-protected-transition", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.recording.export"
+provider = "desktop-artifact"
+observation = "utility.recording.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-owner-recording-artifact-digest-destination-descriptor"
+requested_keys = ["destination"]
+requires = ["safe-user-file-descriptor", "atomic-publication", "no-symlink-hardlink-traversal", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.clipboard.write"
+provider = "desktop-clipboard"
+observation = "utility.clipboard.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-session-seat-selection-source-revision"
+requested_keys = ["mime_type", "data_reference"]
+requires = ["purpose-bound-explicit-target", "no-general-paste-proof", "sensitive-bytes-outside-plan", "native-selection-reobserve", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.clipboard.history.restore"
+provider = "desktop-clipboard"
+observation = "utility.clipboard.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-owner-history-entry-revision-seat-selection"
+requested_keys = ["entry_reference"]
+requires = ["authenticated-history-owner", "purpose-bound-explicit-target", "sensitive-bytes-outside-plan", "native-selection-reobserve", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.clipboard.history.configure"
+provider = "linura-local-history"
+observation = "utility.clipboard.history.observe"
+class = "linura-owned-state"
+risk_floor = "security-sensitive"
+resource = "exact-authenticated-owner-local-history-policy-revision"
+requested_keys = ["enabled", "retention_policy"]
+requires = ["explicit-owner-opt-in", "protected-key-lifecycle", "atomic-local-commit", "no-background-default", "history-store-revision"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:utility.clipboard.history.delete"
+provider = "linura-local-history"
+observation = "utility.clipboard.history.observe"
+class = "linura-owned-state"
+risk_floor = "destructive"
+resource = "exact-authenticated-owner-history-entry-or-history-revision"
+requested_keys = ["delete_scope"]
+requires = ["authenticated-owner", "producer-cancellation", "atomic-local-commit", "honest-erasure-semantics", "history-store-revision"]
+enabled = false
+
+[unsupported_extensions]
+automatic_cloud_upload = false
+model_read_of_clipboard_or_screenshots = false
+silent_background_screen_capture = false
+raw_wayland_screencopy_fallback = false
+unbounded_screencast = false
+remote_desktop_control = false
+global_clipboard_keylogger = false
+unapproved_primary_selection_history = false
+implicit_audio_capture = false
+unencrypted_persistent_clipboard_history = false
+cross_user_capture_or_clipboard_access = false
+generic_shell_uploader = false
+
+[qualification]
+development_level = "level-a-arch-hyprland-exact-source"
+interactive_vm_level = "level-b-arch-hyprland-exact-source"
+physical_release_level = "level-c-maintained-hardware-q11"
+synthetic_screenshot_is_native_security_proof = false
+recorded_video_is_correctness_oracle = false
+virtual_display_is_physical_q11 = false
+require_adversarial = true
+require_protected_compositor_frame_exclusion = true
+require_portal_permission_denial_and_revoke = true
+require_multioutput_hidpi_geometry = true
+require_recording_supervised_native_stop = true
+require_history_explicit_opt_in = true
+require_secrets_and_content_redaction = true
+require_no_automatic_upload = true
+require_accessibility_keyboard_pointer = true
+require_indeterminate_no_replay = true

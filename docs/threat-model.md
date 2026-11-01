@@ -748,6 +748,37 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S22 protected-frame capture, unattended recording and clipboard exfiltration
+
+A shell/plugin, model proposal, untrusted portal, stale output source or
+clipboard observer may obtain confidential pixels/text, silently retain them,
+record S17 protected input, or leak them to a filesystem or network.
+- Bind capture to the authenticated user/logind seat, exact compositor owner,
+  native output/window/region generation and current S17 protected-session
+  coverage. Deny where compositor/capture-provider enforcement cannot prove
+  protected pixels never reach capture buffers; UI state checks are insufficient.
+- Portal permission, capture URI, handle or restore token is not Linura
+  authorization and cannot be upgraded into an executor or permanent grant.
+  No raw screenshot/recorder shell fallback after native consent/lock denial.
+- Capture audio is separately consented under S20; the native recording owner
+  must retain stop/revoke ability across GUI crash, lock and hotplug. Never
+  use Stop to terminate another app's capture or trust a mere OSD badge.
+- Clipboard data-control is a privileged per-seat mechanism. Bind live
+  offer/owner/MIME/selection epochs and deny protected or foreign-seat reads;
+  sensitive contents cannot enter ordinary observation cache, agent context
+  or logs.
+- Clipboard history is off by default, revisioned, explicitly owner-opted-in
+  and never persisted as plaintext when protected key retention is unproven.
+  OTP/password source exclusion and concurrent clear/revoke need native
+  negative tests; unlink does not promise SSD/COW physical erasure.
+- Save/export only to safe user-selected destination descriptors with quotas,
+  atomic publication and independent verification. The declarative
+  screenshot-share example must not authorize automatic network uploading.
+- Preserve S17 secure-owner/lock, S21 topology/first-frame, Q10 interaction
+  and Q11 physical capture/visual requirements.
+- See proposed [ADR 0051](adr/0051-s22-protected-desktop-utilities.md) and
+  [S22 security qualification](qualification/v0.10.0-s22-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to
