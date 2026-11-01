@@ -5,7 +5,9 @@ mod session_audit;
 
 use std::error::Error;
 
-use linura_linux_observation::{NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver};
+use linura_linux_observation::{
+    MprisObserver, NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver,
+};
 use linura_observation_control::ObservationCoordinator;
 
 fn main() {
@@ -20,6 +22,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     coordinator.register_observer(Box::new(SystemdObserver::connect()?))?;
     coordinator.register_observer(Box::new(NetworkManagerObserver::connect()?))?;
     coordinator.register_observer(Box::new(PipeWireSessionObserver::new()))?;
+    // An unavailable optional media observer must not disable existing S08 audio Control.
+    if let Ok(observer) = MprisObserver::connect() {
+        coordinator.register_observer(Box::new(observer))?;
+    }
     let state_dir = session_audio::state_dir().map_err(std::io::Error::other)?;
     let session_runtime =
         session_audio::SessionAudioRuntime::open(&state_dir).map_err(std::io::Error::other)?;
