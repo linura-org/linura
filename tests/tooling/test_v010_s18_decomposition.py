@@ -170,6 +170,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert set(assigned) == EXPECTED_OPERATIONS
     assert referenced_requirements == REQUIREMENTS
     assert referenced_threats == THREATS
+    assert set(prs[0]["owned_paths"]) == ["docs/adr/0048-s18-networkmanager-authority.md", "contracts/v010-s18-design.toml", "docs/qualification/v0.10.0-s18.md", "docs/qualification/v0.10.0-s18-security.md", "docs/workstreams/v010-s18-network-phase1.md", "tests/tooling/test_v010_s18_design.py", "contracts/qualification-gate-matrix.toml", ".github/workflows/v010-qualification.yml", "docs/adr/README.md", "docs/development/v010-s18-1-network-architecture-contracts.md", "docs/milestones/v0.10.0.md", "docs/qualification/v0.10.0.md", "docs/threat-model.md"]
     assert prs[0]["depends_on"] == []
     assert prs[0]["title"].startswith("docs(v0.10):")
     assert all(
@@ -236,6 +237,10 @@ def validate(plan: dict, design: dict, document: str) -> None:
         assert operation["provider"] == "networkmanager"
         assert operation["class"] == "managed-external-effect"
         assert operation["risk_floor"] == RISK_FLOORS[operation["id"]]
+        owning_slice = next(
+            item["id"] for item in prs if operation["id"] in item["candidate_operations"]
+        )
+        assert operation["source"] == owning_slice, operation["id"]
     assert "architecture-first and nine implementation boundaries" in document
     assert "Current read-only WIP provider tests" in document
     assert "Do not merge this branch directly" in document
@@ -306,6 +311,25 @@ class S18DecompositionTests(unittest.TestCase):
                 self.assertRaises(AssertionError),
             ):
                 validate(self.plan, mutated, self.document)
+
+    def test_source_owner_in_design_cannot_drift(self) -> None:
+        for operation_id, wrong_owner in (
+            ("operation:network.wifi.scan", "S18-6"),
+            ("operation:network.profile.delete", "S18-7"),
+            ("operation:network.wifi.join", "S18-4"),
+        ):
+            mutated = copy.deepcopy(self.design)
+            next(
+                op for op in mutated["candidate_operation"] if op["id"] == operation_id
+            )["source"] = wrong_owner
+            with self.subTest(operation=operation_id), self.assertRaises(AssertionError):
+                validate(self.plan, mutated, self.document)
+
+    def test_missing_architecture_owned_path_is_rejected(self) -> None:
+        mutated = copy.deepcopy(self.plan)
+        mutated["pull_request"][0]["owned_paths"].remove("docs/threat-model.md")
+        with self.assertRaises(AssertionError):
+            validate(mutated, self.design, self.document)
 
     def test_duplicate_missing_or_reassigned_operation_is_rejected(self) -> None:
         for changed in ("duplicate", "missing", "reassigned"):

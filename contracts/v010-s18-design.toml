@@ -50,6 +50,7 @@ control_owns_aggregation = true
 
 [[candidate_operation]]
 id = "operation:network.wifi.scan"
+source = "S18-5"
 provider = "networkmanager"
 observation = "networkmanager.wifi.observe"
 class = "managed-external-effect"
@@ -61,6 +62,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.networking.set-enabled"
+source = "S18-6"
 provider = "networkmanager"
 observation = "networkmanager.manager.observe"
 class = "managed-external-effect"
@@ -72,6 +74,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.wifi.set-enabled"
+source = "S18-6"
 provider = "networkmanager"
 observation = "networkmanager.manager.observe"
 class = "managed-external-effect"
@@ -83,6 +86,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.connection.activate"
+source = "S18-7"
 provider = "networkmanager"
 observation = "networkmanager.connections.observe"
 class = "managed-external-effect"
@@ -94,6 +98,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.connection.deactivate"
+source = "S18-7"
 provider = "networkmanager"
 observation = "networkmanager.connections.observe"
 class = "managed-external-effect"
@@ -105,6 +110,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.wifi.join"
+source = "S18-7"
 provider = "networkmanager"
 observation = "networkmanager.connections.observe"
 class = "managed-external-effect"
@@ -116,6 +122,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.profile.create"
+source = "S18-8"
 provider = "networkmanager"
 observation = "networkmanager.connections.observe"
 class = "managed-external-effect"
@@ -127,6 +134,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.profile.update"
+source = "S18-8"
 provider = "networkmanager"
 observation = "networkmanager.connections.observe"
 class = "managed-external-effect"
@@ -138,6 +146,7 @@ enabled = false
 
 [[candidate_operation]]
 id = "operation:network.profile.delete"
+source = "S18-8"
 provider = "networkmanager"
 observation = "networkmanager.connections.observe"
 class = "managed-external-effect"

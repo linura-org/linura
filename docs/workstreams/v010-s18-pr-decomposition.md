@@ -25,7 +25,7 @@ Existing WIP native observation and PR #267's previously misassigned core identi
 
 ### S18-1 — docs(v0.10): define NetworkManager connectivity architecture and security contracts
 
-**Source ownership:** `docs/adr/0048-s18-networkmanager-authority.md`, `contracts/v010-s18-design.toml`, `docs/qualification/v0.10.0-s18.md`, `docs/qualification/v0.10.0-s18-security.md`, `docs/workstreams/v010-s18-network-phase1.md`, `tests/tooling/test_v010_s18_design.py`, `contracts/qualification-gate-matrix.toml`, `.github/workflows/v010-qualification.yml`.
+**Source ownership:** `docs/adr/0048-s18-networkmanager-authority.md`, `contracts/v010-s18-design.toml`, `docs/qualification/v0.10.0-s18.md`, `docs/qualification/v0.10.0-s18-security.md`, `docs/workstreams/v010-s18-network-phase1.md`, `tests/tooling/test_v010_s18_design.py`, `contracts/qualification-gate-matrix.toml`, `.github/workflows/v010-qualification.yml`, `docs/adr/README.md`, `docs/development/v010-s18-1-network-architecture-contracts.md`, `docs/milestones/v0.10.0.md`, `docs/qualification/v0.10.0.md`, `docs/threat-model.md`.
 
 **Dependencies:** S16. **Requirements:** R18-OBS-01, R18-OBS-02, R18-OBS-03, R18-AUTH-01, R18-AUTH-02, R18-SEC-01, R18-REC-01, R18-QUAL-01, R18-REL-01. **Adversarial cases:** T01, T02, T03, T04, T05, T08, T11, T13, T15, T16, T17, T18, T19, T20, T21, T24, T26, T28, T29, T30.
 
@@ -39,7 +39,7 @@ Existing WIP native observation and PR #267's previously misassigned core identi
 
 **Blockers:** Architecture/security review, exact-head validation, and retained inactive-state evidence required; no native effect or physical support inferred.
 
-**No operation activated or granted here.**
+**No operation activated or granted here.** The nine candidate operation IDs carry `source` values identifying their S18-5/6/7/8 owning slices, independently checked against the decomposition contract.
 
 ### S18-2 — feat(network): establish native NetworkManager identities and observation
 
