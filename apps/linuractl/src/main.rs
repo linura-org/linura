@@ -5,10 +5,12 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 use linura_sdk::{
-    ActorKind, CapabilityId, IntentId, LocalAuthorityClient, LocalControlClient,
+    ActorKind, CapabilityId, IntentId, LocalLibrary, MAX_CATALOG_PAGE_SIZE,
+    LocalAuthorityClient, LocalControlClient,
     LocalSessionClient, LocalSessionEffectReceipt, PlanDesiredStateRequest, PlanId, PlanPreview,
     PlanReview, ProtectiveLockSettingReceipt, ProtectiveLockSettingRequest, ProtocolVersion,
-    ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason, SessionEpoch,
+    ProfileId, ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason,
+    SetupId, SessionEpoch,
     SessionLockId, SessionLockReceipt, SessionLockRequest, SessionTransitionCompletion,
     SessionTransitionReceipt, SessionTransitionRequest,
 };
@@ -95,6 +97,11 @@ const COMMANDS: &[CommandInfo] = &[
         name: "acknowledge-session-release",
         summary: "Acknowledge a committed verified release without another effect",
         offline: false,
+    },
+    CommandInfo {
+        name: "library-list",
+        summary: "Offline read-only bounded exact Library catalog; does not verify machine state",
+        offline: true,
     },
     CommandInfo {
         name: "version",
@@ -327,6 +334,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             );
             field("effect_replayed", "false");
         }
+        Some("library-list") => library_list(&args)?,
         Some("version") => {
             require_arity(&args, 1, "version")?;
             let version = ProtocolVersion::default();
@@ -491,6 +499,82 @@ fn run() -> Result<(), Box<dyn Error>> {
             return Err(Box::new(CliError(format!(
                 "unknown command {other:?}; run `linuractl help`"
             ))));
+        }
+    }
+    Ok(())
+}
+
+fn library_list(args: &[String]) -> Result<(), Box<dyn Error>> {
+    if args.len() < 3 || args.len() > 5 {
+        return Err(Box::new(CliError(
+            "usage: linuractl library-list <existing-db-path> <intents|setups|profiles> [page-size] [after-id]".into(),
+        )));
+    }
+    let page_size = match args.get(3) {
+        Some(size) => size.parse::<usize>()?,
+        None => 32,
+    };
+    if !(1..=MAX_CATALOG_PAGE_SIZE).contains(&page_size) {
+        return Err(Box::new(CliError(format!(
+            "library page size must be between 1 and {MAX_CATALOG_PAGE_SIZE}"
+        ))));
+    }
+    let mut library = LocalLibrary::open_existing_read_only(&args[1])?;
+    field("schema_version", &library.schema_version()?.to_string());
+    field("source", "existing-local-sqlite");
+    field("machine_verified", "false");
+    match args[2].as_str() {
+        "intents" => {
+            let after = args.get(4).map(|id| IntentId::new(id)).transpose()?;
+            let page = library.catalog_intents_page(after.as_ref(), page_size)?;
+            for value in &page.items {
+                println!();
+                field("kind", "intent");
+                field("id", value.intent.id.as_str());
+                field("revision", &value.revision.to_string());
+                field("status", &format!("{:?}", value.intent.status));
+            }
+            if let Some(next) = &page.next_after {
+                println!();
+                field("next_after", next.as_str());
+            }
+        }
+        "setups" => {
+            let after = args.get(4).map(|id| SetupId::new(id)).transpose()?;
+            let page = library.catalog_setups_page(after.as_ref(), page_size)?;
+            for value in &page.items {
+                println!();
+                field("kind", "setup");
+                field("id", value.setup.id.as_str());
+                field("revision", &value.setup.revision.to_string());
+                field("name", &value.setup.name);
+                field("local_state", "stored-only");
+            }
+            if let Some(next) = &page.next_after {
+                println!();
+                field("next_after", next.as_str());
+            }
+        }
+        "profiles" => {
+            let after = args.get(4).map(|id| ProfileId::new(id)).transpose()?;
+            let page = library.catalog_profiles_page(after.as_ref(), page_size)?;
+            for value in &page.items {
+                println!();
+                field("kind", "profile");
+                field("id", value.profile.id.as_str());
+                field("revision", &value.revision.to_string());
+                field("name", &value.profile.name);
+                field("local_state", "stored-only");
+            }
+            if let Some(next) = &page.next_after {
+                println!();
+                field("next_after", next.as_str());
+            }
+        }
+        _ => {
+            return Err(Box::new(CliError(
+                "library kind must be intents, setups, or profiles".into(),
+            )));
         }
     }
     Ok(())
@@ -963,6 +1047,7 @@ fn print_help() {
     println!("Commands:");
     println!("  version");
     println!("  commands [--json]");
+    println!("  library-list <existing-db-path> <intents|setups|profiles> [page-size] [after-id]");
     println!("  whoami");
     println!("  capabilities");
     println!("  observe <resource>");

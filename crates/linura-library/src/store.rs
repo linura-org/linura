@@ -101,6 +101,35 @@ impl LocalLibrary {
         })
     }
 
+    /// Open an existing initialized Library for offline, non-privileged reads.
+    /// This rejects absent/newer/older schema without migrating or creating a DB.
+    /// SQLite may still use ordinary WAL coordination sidecars while reading.
+    pub fn open_existing_read_only(path: impl AsRef<Path>) -> Result<Self, LibraryError> {
+        let path = path.as_ref().to_path_buf();
+        let connection = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.busy_timeout(Duration::from_millis(LibrarySettings::default().busy_timeout_ms))?;
+        connection.pragma_update(None, "foreign_keys", true)?;
+        integrity_check_connection(&connection)?;
+        let version = schema::read_schema_version(&connection)?;
+        if version != LIBRARY_SCHEMA_VERSION {
+            return Err(if version > LIBRARY_SCHEMA_VERSION {
+                LibraryError::UnsupportedSchema {
+                    found: version,
+                    supported: LIBRARY_SCHEMA_VERSION,
+                }
+            } else {
+                LibraryError::Corrupt("unsupported or uninitialized read-only Library schema".into())
+            });
+        }
+        Ok(Self {
+            connection,
+            path: Some(path),
+        })
+    }
+
     pub fn open_in_memory() -> Result<Self, LibraryError> {
         let mut connection = Connection::open_in_memory()?;
         connection.pragma_update(None, "foreign_keys", true)?;

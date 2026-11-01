@@ -283,3 +283,34 @@ fn backup_inspection_validates_real_sqlite_without_restoring() {
         assert!(inspect_backup_read_only(dir.path().join("link.db")).is_err());
     }
 }
+
+#[test]
+fn read_only_catalog_is_offline_and_never_creates_or_updates_rows() {
+    let dir = tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+    let path = dir.path().join("existing.db");
+    let absent = dir.path().join("absent.db");
+    assert!(LocalLibrary::open_existing_read_only(&absent).is_err());
+    assert!(!absent.exists());
+    {
+        let mut writer = LocalLibrary::open(&path)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        writer
+            .create_intent(&req("readonly-source"), &intent("readonly"))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+    }
+    let mut reader = LocalLibrary::open_existing_read_only(&path)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let page = reader.catalog_intents_page(None, 1)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].intent.id, id(IntentId::new("intent:readonly")));
+    assert!(matches!(
+        reader.create_intent(&req("readonly-fail"), &intent("other")),
+        Err(LibraryError::Sqlite(_))
+    ));
+    drop(reader);
+    let writer = LocalLibrary::open(&path)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(writer.list_intents()
+        .unwrap_or_else(|error| unreachable!("{error}").len(), 1);
+}
