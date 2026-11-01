@@ -137,7 +137,7 @@ fn immutable_revision_diff_and_exact_closure_digests() {
     let profile_delta = library
         .compare_profile_revisions(&machine.id, 1, 2)
         .unwrap_or_else(|error| unreachable!("{error}"));
-    assert_eq!(profile_delta.changed_fields, BTreeSet::from(["name"]));
+    assert_eq!(profile_delta.changed_fields, BTreeSet::from(["name", "setup_revisions"]));
     assert_eq!(library
         .inspect_profile_revision(&machine.id, 1)
         .unwrap_or_else(|error| unreachable!("{error}"), profile_before);
