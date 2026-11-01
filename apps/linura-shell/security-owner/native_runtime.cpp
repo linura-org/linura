@@ -412,6 +412,11 @@ void NativeRuntime::requestNativeUnlock()
         impl_->protocol->inspect() != LockMechanism::State::Secure ||
         impl_->independentState() != NativeCompositorLockState::Locked)
         return;
+    // A canceled display approval is not evidence that its native mutation
+    // completed or restored. Refuse a new unlock conversation until the
+    // compositor independently reports no retained display safety fence.
+    if (!impl_->backend->displayAllowsSecurityTransition())
+        return;
     const auto control = impl_->peers->namedPeer(NativePeerPurpose::ControlApproval);
     if (!control) {
         impl_->presentation->present(NativePresentation::State::Unavailable);
@@ -654,6 +659,12 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
                                                  impl_->backend->secureCoverage());
     if (!settled || (*settled != NativeObservedLockState::Secure &&
                      *settled != NativeObservedLockState::Unlocked))
+        return false;
+    // An earlier display conversation can be canceled or lose its native owner
+    // while the compositor still holds a pending/recovery-failed mutation. Do
+    // not present another protected approval over that unresolved native fence.
+    // This is a refusal-only current-state check, never new mutation authority.
+    if (!impl_->backend->displayAllowsSecurityTransition())
         return false;
     impl_->display.reset();
     const auto lock = identity();
