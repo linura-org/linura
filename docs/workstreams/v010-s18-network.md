@@ -22,6 +22,16 @@ This workstream is defined by `contracts/v010-workstation-slices.toml`, `docs/mi
 
 This branch is the **single ongoing S18 WIP workspace**. A previously opened PR (#267) was closed unmerged because implementation PR extraction was premature. Do not infer a PR plan, reviewed status, or permission to merge from this checkpoint.
 
+## S18-1 active WIP source checkpoint — November 1, 2026
+
+- **Source:** Read-only native NetworkManager observation improvements are implemented on `wip/v010-s18-network`; **S18-1 is still incomplete**, not a production or review-ready capability.
+- **Concrete changes:** The existing manager/device resource aliases are preserved; `GetDevices` identities are read from unique-owner `GetAll` snapshots rather than property-cache lookups; duplicate name/path and oversized post-decoded device lists are rejected; selected device mappings and service owner are rechecked.
+- **Boot and time:** Read-only observations now include the current kernel boot ID and reject changed boot/NetworkManager owner epochs; an elapsed-time guard denies results older than the two-second snapshot window. It is **not** a D-Bus transport deadline, raw message size limit, or atomic multi-object proof.
+- **Additional hints:** Device `IpInterface`, `Mtu`, `Autoconnect` and `FirmwareMissing` are conditionally exposed as typed read-only attributes. They **do not** establish working DNS, default route, Wi-Fi association, reachability, or a mutation identity.
+- **First WIP check:** The branch-scoped `S18 WIP validation` workflow on commit `957d3b478fb0cdd817efdc43d26a1cb2ba67c5b3` passed Rust formatting, `linura-linux-observation` and `linura-observation-control` tests, and native-observer Clippy. It identified a test argument error in `test_v010_s18_decomposition.py`, corrected in the next WIP commit. These are developer feedback, **not** canonical exact-head release gates.
+- **Blocking work:** True receive/decode-byte and transport deadline caps, fully typed AP/profile/active-connection/IP/DNS/routes with bounded privacy-safe projection, coherent native NM snapshots under daemon/device churn, adversarial real NM fixtures, complete S18-2–S18-5 managed effects and UX, mandatory source-pinned A/B testing, maintained physical C/Q11 and inherited canonical CI/security qualification are still unqualified.
+- **Workflow:** `.github/workflows/wip-s18-validation.yml` is a branch-only development check, not an alternative to the required CI or qualification rules. No PR is opened or changed by these WIP commits; `#267` remains a reserved draft outside this branch.
+
 ## Exact resource, identity and observation requirements
 
 Bind the live `org.freedesktop.NetworkManager` unique D-Bus owner, manager/device/active-connection/settings object generation, native interface identity, boot/session/seat as needed and fresh connectivity, IP/DNS/route observations. Interface names, SSIDs, BSSIDs, UUID strings and object paths on their own are not authorization identities; scan results and cached connection profiles cannot establish current link state. Explicitly distinguish unowned/unmanaged interfaces, absent radios, airplane mode, portal connectivity and daemon restarts.

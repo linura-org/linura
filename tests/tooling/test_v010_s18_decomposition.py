@@ -251,7 +251,8 @@ class S18DecompositionTests(unittest.TestCase):
             mutated = copy.deepcopy(self.design)
             mutated[field] = value
             with self.subTest(field=field), self.assertRaises(AssertionError):
-                validate(mutated, self.design, self.document)
+                validate(self.plan, mutated, self.document)
+
     def test_budget_consistency_and_unsupported_scope_cannot_be_relaxed(self) -> None:
         mutated = copy.deepcopy(self.design)
         mutated["proposed_observation"]["reject_mixed_owner_snapshots"] = False
