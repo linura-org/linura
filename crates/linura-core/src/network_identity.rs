@@ -427,14 +427,17 @@ impl NetworkAccessPointId {
 }
 
 /// An NM profile revision is correlated by owner, settings object, canonical
-/// profile UUID and a digest of *non-secret* normalized typed settings.
-/// The S18-8 observer must compute this fingerprint; an arbitrary caller hash
-/// does not grant compare-and-swap authority.
+/// profile UUID, a required revision witness, and a digest of *non-secret*
+/// normalized typed settings. A revision witness protects against ABA updates
+/// that restore identical settings bytes. S18-8 must derive these witnesses
+/// from independently attested native facts, not caller-supplied values.
+/// A typed ID never grants compare-and-swap authority.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct NetworkProfileRevision {
     epoch: NetworkManagerEpoch,
     object: NetworkObjectId,
     uuid: String,
+    revision_generation: u64,
     settings_fingerprint: String,
 }
 
@@ -443,6 +446,7 @@ impl NetworkProfileRevision {
         epoch: NetworkManagerEpoch,
         object: NetworkObjectId,
         uuid: impl Into<String>,
+        revision_generation: u64,
         settings_fingerprint: impl Into<String>,
     ) -> Result<Self, NetworkIdentityError> {
         if object.kind != NetworkObjectKind::SettingsConnection {
@@ -452,6 +456,9 @@ impl NetworkProfileRevision {
         if !canonical_uuid(&uuid) {
             return Err(NetworkIdentityError::InvalidProfileUuid);
         }
+        if revision_generation == 0 {
+            return Err(NetworkIdentityError::InvalidGeneration);
+        }
         let settings_fingerprint = settings_fingerprint.into();
         if !canonical_hex(&settings_fingerprint, 64) {
             return Err(NetworkIdentityError::InvalidProfileFingerprint);
@@ -460,6 +467,7 @@ impl NetworkProfileRevision {
             epoch,
             object,
             uuid,
+            revision_generation,
             settings_fingerprint,
         })
     }
@@ -477,6 +485,11 @@ impl NetworkProfileRevision {
     #[must_use]
     pub fn uuid(&self) -> &str {
         &self.uuid
+    }
+
+    #[must_use]
+    pub const fn revision_generation(&self) -> u64 {
+        self.revision_generation
     }
 
     #[must_use]
@@ -654,6 +667,7 @@ mod tests {
             epoch(),
             object(NetworkObjectKind::SettingsConnection, 7),
             UUID,
+            7,
             DIGEST,
         ))
     }
@@ -826,19 +840,27 @@ mod tests {
     fn saved_profile_revision_depends_on_object_uuid_fingerprint_and_owner() {
         let p = profile();
         let next = ok(NetworkProfileRevision::new(
-            epoch(), p.object.clone(), UUID,
+            epoch(), p.object.clone(), UUID, 7,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdee",
         ));
         assert_ne!(p, next);
+        let same_content_different_revision = ok(NetworkProfileRevision::new(
+            epoch(), p.object.clone(), UUID, 8, DIGEST,
+        ));
+        assert_ne!(p, same_content_different_revision);
+        assert_eq!(p.revision_generation(), 7);
+        assert_eq!(NetworkProfileRevision::new(
+            epoch(), p.object.clone(), UUID, 0, DIGEST,
+        ).unwrap_err(), NetworkIdentityError::InvalidGeneration);
         let other_object = ok(NetworkProfileRevision::new(
-            epoch(), object(NetworkObjectKind::SettingsConnection, 8), UUID, DIGEST,
+            epoch(), object(NetworkObjectKind::SettingsConnection, 8), UUID, 7, DIGEST,
         ));
         assert_ne!(p, other_object);
         for uuid in ["", "00000000-0000-0000-0000-000000000000", "10203040-5060-7080-90AB-cdef12345678", "102030405060708090abcdef12345678"] {
-            assert!(NetworkProfileRevision::new(epoch(), p.object.clone(), uuid, DIGEST).is_err());
+            assert!(NetworkProfileRevision::new(epoch(), p.object.clone(), uuid, 7, DIGEST).is_err());
         }
         for digest in ["".to_string(), "0".repeat(64), "z".repeat(64), "A".repeat(64)] {
-            assert!(NetworkProfileRevision::new(epoch(), p.object.clone(), UUID, digest).is_err());
+            assert!(NetworkProfileRevision::new(epoch(), p.object.clone(), UUID, 7, digest).is_err());
         }
     }
 
@@ -866,7 +888,7 @@ mod tests {
                 ok(SystemBusInstanceId::new(BUS)),
                 ok(NetworkManagerOwner::new(":1.48")),
             ),
-            object(NetworkObjectKind::SettingsConnection, 7), UUID, DIGEST,
+            object(NetworkObjectKind::SettingsConnection, 7), UUID, 7, DIGEST,
         ));
         assert_eq!(NetworkActiveConnectionId::new(
             d, active.object.clone(), Some(other_profile), 10,

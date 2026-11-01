@@ -19,7 +19,7 @@ Source of truth:
 
 - `crates/linura-core/src/network_identity.rs`: strict canonical D-Bus system bus/unique owner identities bound to `BootId`; typed and bounded native object identity families.
 - Exact device identity includes kernel namespace, ifindex, current owner epoch, canonical interface, nonzero native generation; checked inventory detects duplicate/recycled aliases and oversize inventories.
-- AP identities bind the observed device and scan generation; profile revisions bind settings object, strict UUID and non-secret fingerprint; active connections bind exact device/activation instance and optionally a matching profile epoch.
+- AP identities bind the observed device and scan generation; profile revisions bind settings object, strict UUID, nonzero revision generation and non-secret fingerprint (including ABA protection); active connections bind exact device/activation instance and optionally a matching profile epoch.
 - Fresh observation correlation checks refuse owner/bus/boot changes, future timestamps and expired evidence, without claiming atomic multi-object proof.
 - No new provider mutation or active scan, no authority grant, secrets, policy, approval, registry, executor, D-Bus API or released capability. Native source attestation and all effect authorization stay in later S18 boundaries.
 - Regression coverage is directly inside the core module, with explicit malformed, cross-epoch, collision, replacement and clock/age cases.
