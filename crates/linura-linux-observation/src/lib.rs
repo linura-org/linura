@@ -7,7 +7,7 @@ pub use logind::{
     LOGIND_SESSION_PROVIDER, LOGIND_TRANSITION_CAPABILITY, LogindSessionObserver,
 };
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::OsString;
 use std::fmt::{Debug, Formatter};
@@ -54,6 +54,11 @@ const NM_MANAGER_CAPABILITY: &str = "networkmanager.manager.observe";
 const NM_DEVICE_CAPABILITY: &str = "networkmanager.device.observe";
 const NM_MANAGER_RESOURCE: &str = "networkmanager:manager";
 const NM_DEVICE_RESOURCE_PREFIX: &str = "networkmanager:device:";
+const MAX_NM_DEVICES: usize = 128;
+const MAX_NM_INTERFACE_BYTES: usize = 128;
+const MAX_NM_TEXT_BYTES: usize = 1024;
+// Post-read guard only: this does not set a zbus receive or decode deadline.
+const NM_SNAPSHOT_MAX_ELAPSED: Duration = Duration::from_secs(2);
 const OBSERVATION_VALID_FOR_MS: u64 = 2_000;
 
 pub const PIPEWIRE_SESSION_PROVIDER: &str = "pipewire";
@@ -249,10 +254,6 @@ impl NetworkManagerObserver {
         })
     }
 
-    fn manager(&self) -> Result<Proxy<'_>, ProviderError> {
-        Proxy::new(&self.connection, NM_SERVICE, NM_PATH, NM_INTERFACE).map_err(provider_bus_error)
-    }
-
     fn device_resource(interface: &str) -> Result<ResourceId, ProviderError> {
         ResourceId::new(format!("{NM_DEVICE_RESOURCE_PREFIX}{interface}"))
             .map_err(|error| invalid_identifier("NetworkManager device resource", error))
@@ -265,40 +266,73 @@ impl NetworkManagerObserver {
                 "resource {value} is not a NetworkManager device resource"
             )));
         };
-        if interface.is_empty() {
-            return Err(ProviderError::InvalidState(
-                "NetworkManager device resource has an empty interface".into(),
-            ));
-        }
+        validate_nm_interface(interface)?;
         Ok(interface)
     }
 
-    fn device_paths(&self) -> Result<Vec<OwnedObjectPath>, ProviderError> {
-        self.manager()?
-            .call("GetDevices", &())
-            .map_err(provider_bus_error)
+    // Never use the replaceable well-known destination for multi-object reads.
+    // A successful NameHasOwner check is not a provider-generation identity.
+    fn unique_owner(&self) -> Result<String, ProviderError> {
+        let bus = Proxy::new(
+            &self.connection,
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+        )
+        .map_err(provider_bus_error)?;
+        let owner: String = bus
+            .call("GetNameOwner", &(NM_SERVICE,))
+            .map_err(provider_bus_error)?;
+        if !owner.starts_with(':') || owner.len() > MAX_NM_INTERFACE_BYTES {
+            return Err(ProviderError::InvalidState(
+                "NetworkManager D-Bus owner is not a bounded unique name".into(),
+            ));
+        }
+        Ok(owner)
     }
 
-    fn find_device_path(&self, interface: &str) -> Result<OwnedObjectPath, ProviderError> {
-        for path in self.device_paths()? {
-            let device = Proxy::new(
-                &self.connection,
-                NM_SERVICE,
-                path.as_str(),
-                NM_DEVICE_INTERFACE,
-            )
+    fn require_same_owner(&self, owner: &str) -> Result<(), ProviderError> {
+        let actual = self.unique_owner()?;
+        require_nm_owner_match(owner, &actual)
+    }
+
+    fn device_index(
+        &self,
+        owner: &str,
+    ) -> Result<BTreeMap<String, OwnedObjectPath>, ProviderError> {
+        let manager = Proxy::new(&self.connection, owner, NM_PATH, NM_INTERFACE)
             .map_err(provider_bus_error)?;
-            let candidate: String = device
-                .get_property("Interface")
-                .map_err(provider_bus_error)?;
-            if candidate == interface {
-                drop(device);
-                return Ok(path);
-            }
+        let paths: Vec<OwnedObjectPath> = manager
+            .call("GetDevices", &())
+            .map_err(provider_bus_error)?;
+        if paths.len() > MAX_NM_DEVICES {
+            return Err(ProviderError::InvalidState(
+                "NetworkManager device inventory exceeds the supported limit".into(),
+            ));
         }
-        Err(ProviderError::Unavailable(format!(
-            "NetworkManager device {interface} is not present"
-        )))
+        let mut rows = Vec::with_capacity(paths.len());
+        for path in paths {
+            // Individual proxy property reads may use a stale PropertiesChanged
+            // cache; resolve identity from the same unique-owner GetAll snapshot.
+            let properties =
+                all_properties(&self.connection, owner, path.as_str(), NM_DEVICE_INTERFACE)?;
+            let interface: String = snapshot_property(&properties, "Interface")?;
+            validate_nm_interface(&interface)?;
+            rows.push((interface, path));
+        }
+        let index = index_nm_devices(rows)?;
+        self.require_same_owner(owner)?;
+        Ok(index)
+    }
+
+    fn find_device_path(
+        &self,
+        owner: &str,
+        interface: &str,
+    ) -> Result<OwnedObjectPath, ProviderError> {
+        self.device_index(owner)?.remove(interface).ok_or_else(|| {
+            ProviderError::Unavailable(format!("NetworkManager device {interface} is not present"))
+        })
     }
 
     fn observe_manager(
@@ -306,11 +340,43 @@ impl NetworkManagerObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
-        let properties = all_properties(&self.connection, NM_SERVICE, NM_PATH, NM_INTERFACE)?;
+        let started = Instant::now();
+        let boot_id = nm_boot_id()?;
+        let owner = self.unique_owner()?;
+        let properties = all_properties(&self.connection, &owner, NM_PATH, NM_INTERFACE)?;
         let version: String = snapshot_property(&properties, "Version")?;
+        bounded_nm_text("version", &version)?;
         let state: u32 = snapshot_property(&properties, "State")?;
         let connectivity: u32 = snapshot_property(&properties, "Connectivity")?;
         let networking_enabled: bool = snapshot_property(&properties, "NetworkingEnabled")?;
+        let mut attributes = BTreeMap::from([
+            ("version".into(), ObservedValue::Text(version)),
+            ("state".into(), ObservedValue::U64(u64::from(state))),
+            (
+                "connectivity".into(),
+                ObservedValue::U64(u64::from(connectivity)),
+            ),
+            (
+                "networking_enabled".into(),
+                ObservedValue::Bool(networking_enabled),
+            ),
+            ("service_owner".into(), ObservedValue::Text(owner.clone())),
+            ("boot_id".into(), ObservedValue::Text(boot_id.clone())),
+        ]);
+        for (native, attribute) in [
+            ("WirelessEnabled", "wireless_enabled"),
+            ("WirelessHardwareEnabled", "wireless_hardware_enabled"),
+            ("WwanEnabled", "wwan_enabled"),
+            ("WwanHardwareEnabled", "wwan_hardware_enabled"),
+        ] {
+            if properties.contains_key(native) {
+                let enabled: bool = snapshot_property(&properties, native)?;
+                attributes.insert(attribute.into(), ObservedValue::Bool(enabled));
+            }
+        }
+        self.require_same_owner(&owner)?;
+        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        require_nm_elapsed(started)?;
         Ok(ObservationEnvelope {
             provider: provider_id(NM_PROVIDER),
             resource: resource.clone(),
@@ -319,18 +385,7 @@ impl NetworkManagerObserver {
             observed_at_unix_ms: now_unix_ms()?,
             valid_for_ms: OBSERVATION_VALID_FOR_MS,
             sequence: next_sequence(&self.sequence)?,
-            attributes: BTreeMap::from([
-                ("version".into(), ObservedValue::Text(version)),
-                ("state".into(), ObservedValue::U64(u64::from(state))),
-                (
-                    "connectivity".into(),
-                    ObservedValue::U64(u64::from(connectivity)),
-                ),
-                (
-                    "networking_enabled".into(),
-                    ObservedValue::Bool(networking_enabled),
-                ),
-            ]),
+            attributes,
         })
     }
 
@@ -339,24 +394,82 @@ impl NetworkManagerObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        let started = Instant::now();
+        let boot_id = nm_boot_id()?;
         let interface = Self::device_interface(resource)?;
-        let path = self.find_device_path(interface)?;
-        let properties = all_properties(
-            &self.connection,
-            NM_SERVICE,
-            path.as_str(),
-            NM_DEVICE_INTERFACE,
-        )?;
+        let owner = self.unique_owner()?;
+        let path = self.find_device_path(&owner, interface)?;
+        let properties =
+            all_properties(&self.connection, &owner, path.as_str(), NM_DEVICE_INTERFACE)?;
         let observed_interface: String = snapshot_property(&properties, "Interface")?;
         if observed_interface != interface {
-            return Err(ProviderError::InvalidState(format!(
-                "NetworkManager device identity changed during observation: expected {interface}, got {observed_interface}"
-            )));
+            return Err(ProviderError::InvalidState(
+                "NetworkManager device interface changed during observation".into(),
+            ));
         }
         let state: u32 = snapshot_property(&properties, "State")?;
         let device_type: u32 = snapshot_property(&properties, "DeviceType")?;
         let managed: bool = snapshot_property(&properties, "Managed")?;
         let driver: String = snapshot_property(&properties, "Driver")?;
+        bounded_nm_text("driver", &driver)?;
+        let mut attributes = BTreeMap::from([
+            ("interface".into(), ObservedValue::Text(observed_interface)),
+            ("state".into(), ObservedValue::U64(u64::from(state))),
+            (
+                "device_type".into(),
+                ObservedValue::U64(u64::from(device_type)),
+            ),
+            ("managed".into(), ObservedValue::Bool(managed)),
+            ("driver".into(), ObservedValue::Text(driver)),
+            ("object_path".into(), ObservedValue::Text(path.to_string())),
+            ("service_owner".into(), ObservedValue::Text(owner.clone())),
+            ("boot_id".into(), ObservedValue::Text(boot_id.clone())),
+        ]);
+        // These are correlations to NM-owned objects, not sufficient mutation IDs.
+        for (native, attribute) in [
+            ("ActiveConnection", "active_connection_path"),
+            ("Ip4Config", "ip4_config_path"),
+            ("Ip6Config", "ip6_config_path"),
+        ] {
+            if properties.contains_key(native) {
+                let native_path: OwnedObjectPath = snapshot_property(&properties, native)?;
+                attributes.insert(
+                    attribute.into(),
+                    ObservedValue::Text(native_path.to_string()),
+                );
+            }
+        }
+        // Conservative read-only hints, not evidence of DNS/route readiness.
+        if properties.contains_key("IpInterface") {
+            let ip_interface: String = snapshot_property(&properties, "IpInterface")?;
+            if !ip_interface.is_empty() {
+                validate_nm_interface(&ip_interface)?;
+                attributes.insert("ip_interface".into(), ObservedValue::Text(ip_interface));
+            }
+        }
+        if properties.contains_key("Mtu") {
+            let mtu: u32 = snapshot_property(&properties, "Mtu")?;
+            attributes.insert("mtu".into(), ObservedValue::U64(u64::from(mtu)));
+        }
+        for (native, attribute) in [
+            ("Autoconnect", "autoconnect"),
+            ("FirmwareMissing", "firmware_missing"),
+        ] {
+            if properties.contains_key(native) {
+                let value: bool = snapshot_property(&properties, native)?;
+                attributes.insert(attribute.into(), ObservedValue::Bool(value));
+            }
+        }
+        // The interface alias can be reused on a new object without changing
+        // the daemon's unique owner; reject that case as well.
+        if self.find_device_path(&owner, interface)? != path {
+            return Err(ProviderError::InvalidState(
+                "NetworkManager device mapping changed during observation".into(),
+            ));
+        }
+        self.require_same_owner(&owner)?;
+        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        require_nm_elapsed(started)?;
         Ok(ObservationEnvelope {
             provider: provider_id(NM_PROVIDER),
             resource: resource.clone(),
@@ -365,19 +478,103 @@ impl NetworkManagerObserver {
             observed_at_unix_ms: now_unix_ms()?,
             valid_for_ms: OBSERVATION_VALID_FOR_MS,
             sequence: next_sequence(&self.sequence)?,
-            attributes: BTreeMap::from([
-                ("interface".into(), ObservedValue::Text(observed_interface)),
-                ("state".into(), ObservedValue::U64(u64::from(state))),
-                (
-                    "device_type".into(),
-                    ObservedValue::U64(u64::from(device_type)),
-                ),
-                ("managed".into(), ObservedValue::Bool(managed)),
-                ("driver".into(), ObservedValue::Text(driver)),
-                ("object_path".into(), ObservedValue::Text(path.to_string())),
-            ]),
+            attributes,
         })
     }
+}
+
+fn nm_boot_id() -> Result<String, ProviderError> {
+    let raw = fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|_| {
+        ProviderError::Unavailable("cannot read the current kernel boot identity".into())
+    })?;
+    let value = raw.trim_end_matches('\n');
+    validate_nm_boot_id(value)?;
+    Ok(value.to_owned())
+}
+
+fn validate_nm_boot_id(value: &str) -> Result<(), ProviderError> {
+    if value.len() != 36
+        || !value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+    {
+        return Err(ProviderError::InvalidState(
+            "kernel boot identity is malformed".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_nm_boot_match(expected: &str, actual: &str) -> Result<(), ProviderError> {
+    if expected != actual {
+        return Err(ProviderError::Unavailable(
+            "kernel boot identity changed during NetworkManager observation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_nm_elapsed(started: Instant) -> Result<(), ProviderError> {
+    if started.elapsed() > NM_SNAPSHOT_MAX_ELAPSED {
+        return Err(ProviderError::Unavailable(
+            "NetworkManager observation exceeded the supported snapshot window".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_nm_interface(interface: &str) -> Result<(), ProviderError> {
+    if interface.is_empty()
+        || interface.len() > MAX_NM_INTERFACE_BYTES
+        || interface.chars().any(char::is_control)
+    {
+        return Err(ProviderError::InvalidState(
+            "NetworkManager device interface is invalid or exceeds the limit".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_nm_owner_match(expected: &str, actual: &str) -> Result<(), ProviderError> {
+    if expected != actual {
+        return Err(ProviderError::Unavailable(
+            "NetworkManager service owner changed during observation".into(),
+        ));
+    }
+    Ok(())
+}
+
+// Reused by native enumeration and pure adversarial fixtures. Both path and
+// interface must be unique; deduplicating aliases would conceal replacement.
+fn index_nm_devices(
+    rows: Vec<(String, OwnedObjectPath)>,
+) -> Result<BTreeMap<String, OwnedObjectPath>, ProviderError> {
+    if rows.len() > MAX_NM_DEVICES {
+        return Err(ProviderError::InvalidState(
+            "NetworkManager device inventory exceeds the supported limit".into(),
+        ));
+    }
+    let mut by_interface = BTreeMap::new();
+    let mut paths = BTreeSet::new();
+    for (interface, path) in rows {
+        validate_nm_interface(&interface)?;
+        if !paths.insert(path.to_string()) || by_interface.insert(interface, path).is_some() {
+            return Err(ProviderError::InvalidState(
+                "NetworkManager device inventory has duplicate paths or interface aliases".into(),
+            ));
+        }
+    }
+    Ok(by_interface)
+}
+
+fn bounded_nm_text(label: &str, value: &str) -> Result<(), ProviderError> {
+    if value.len() > MAX_NM_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(ProviderError::InvalidState(format!(
+            "NetworkManager {label} property exceeds the supported text bound"
+        )));
+    }
+    Ok(())
 }
 
 impl Observer for NetworkManagerObserver {
@@ -413,21 +610,16 @@ impl Observer for NetworkManagerObserver {
             ResourceId::new(NM_MANAGER_RESOURCE)
                 .map_err(|error| invalid_identifier("NetworkManager manager resource", error))?,
         ];
-        for path in self.device_paths()? {
-            let device = Proxy::new(
-                &self.connection,
-                NM_SERVICE,
-                path.as_str(),
-                NM_DEVICE_INTERFACE,
-            )
-            .map_err(provider_bus_error)?;
-            let interface: String = device
-                .get_property("Interface")
-                .map_err(provider_bus_error)?;
-            resources.push(Self::device_resource(&interface)?);
+        let started = Instant::now();
+        let boot_id = nm_boot_id()?;
+        let owner = self.unique_owner()?;
+        for interface in self.device_index(&owner)?.keys() {
+            resources.push(Self::device_resource(interface)?);
         }
+        self.require_same_owner(&owner)?;
+        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        require_nm_elapsed(started)?;
         resources.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        resources.dedup();
         Ok(resources)
     }
 
@@ -1188,6 +1380,86 @@ mod tests {
             NetworkManagerObserver::device_interface(&invalid),
             Err(ProviderError::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn networkmanager_device_index_rejects_ambiguous_and_invalid_identity() {
+        fn path(index: usize) -> OwnedObjectPath {
+            OwnedObjectPath::try_from(format!("/org/freedesktop/NetworkManager/Devices/{index}"))
+                .unwrap_or_else(|error| unreachable!("{error}"))
+        }
+        let good = index_nm_devices(vec![("eth0".into(), path(1)), ("wlan0".into(), path(2))])
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(good.len(), 2);
+        assert_eq!(good["eth0"], path(1));
+
+        for bad in [
+            vec![("eth0".into(), path(1)), ("eth0".into(), path(2))],
+            vec![("eth0".into(), path(1)), ("wlan0".into(), path(1))],
+            vec![("".into(), path(1))],
+            vec![("eth0\n".into(), path(1))],
+            vec![("x".repeat(MAX_NM_INTERFACE_BYTES + 1), path(1))],
+        ] {
+            assert!(matches!(
+                index_nm_devices(bad),
+                Err(ProviderError::InvalidState(_))
+            ));
+        }
+        let too_many = (0..=MAX_NM_DEVICES)
+            .map(|index| (format!("device{index}"), path(index)))
+            .collect();
+        assert!(matches!(
+            index_nm_devices(too_many),
+            Err(ProviderError::InvalidState(_))
+        ));
+    }
+
+    #[test]
+    fn networkmanager_owner_epoch_must_remain_identical() {
+        assert!(require_nm_owner_match(":1.21", ":1.21").is_ok());
+        assert!(matches!(
+            require_nm_owner_match(":1.21", ":1.22"),
+            Err(ProviderError::Unavailable(_))
+        ));
+        assert!(matches!(
+            require_nm_owner_match(":1.21", ""),
+            Err(ProviderError::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn networkmanager_boot_identity_rejects_malformed_and_replaced_epoch() {
+        let boot = "12345678-9abc-4def-8123-fedcba987654";
+        assert!(validate_nm_boot_id(boot).is_ok());
+        assert!(matches!(
+            require_nm_boot_match(boot, "12345678-9abc-4def-8123-fedcba987655"),
+            Err(ProviderError::Unavailable(_))
+        ));
+        for malformed in [
+            "",
+            "12345678-9abc-4def-8123-fedcba98765",
+            "12345678-9abc-4def-8123-fedcba98765g",
+            "12345678:9abc-4def-8123-fedcba987654",
+        ] {
+            assert!(validate_nm_boot_id(malformed).is_err(), "{malformed}");
+        }
+    }
+
+    #[test]
+    fn networkmanager_snapshot_elapsed_window_is_fail_closed() {
+        assert!(require_nm_elapsed(Instant::now()).is_ok());
+        let old = Instant::now() - NM_SNAPSHOT_MAX_ELAPSED - Duration::from_secs(1);
+        assert!(matches!(
+            require_nm_elapsed(old),
+            Err(ProviderError::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn networkmanager_text_bounds_reject_control_characters_and_oversize() {
+        assert!(bounded_nm_text("version", "1.52.0").is_ok());
+        assert!(bounded_nm_text("driver", "bad\nentry").is_err());
+        assert!(bounded_nm_text("version", &"a".repeat(MAX_NM_TEXT_BYTES + 1)).is_err());
     }
 
     #[test]

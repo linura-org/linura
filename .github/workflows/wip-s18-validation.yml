@@ -1,0 +1,54 @@
+# WIP-only developer feedback. Does not replace any canonical CI, security,
+# v0.10 qualification, merge or hardware/physical acceptance gate.
+name: S18 WIP validation
+
+on:
+  push:
+    branches:
+      - wip/v010-s18-network
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s18-wip-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s18-wip-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+      - name: Check WIP branch and exact source binding
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/wip/v010-s18-network"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Test S18 contract and decomposition
+        run: python3 -m unittest tests.tooling.test_v010_s18_design tests.tooling.test_v010_s18_decomposition
+      - name: Validate repository, ADR, roadmap and qualification routing
+        run: |
+          python3 scripts/check_repository.py
+          python3 tools/check_adrs.py
+          python3 tools/check_roadmap.py
+      - name: Install repository-pinned Rust components
+        run: rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt
+      - name: Verify workspace Rust formatting
+        run: cargo +1.98.0 fmt --all -- --check
+      - name: Verify native and canonical observation tests
+        run: |
+          cargo +1.98.0 test --locked -p linura-linux-observation
+          cargo +1.98.0 test --locked -p linura-observation-control
+      - name: Verify native observer Clippy
+        run: cargo +1.98.0 clippy --locked -p linura-linux-observation --all-targets -- -D warnings

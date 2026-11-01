@@ -1,0 +1,167 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S18"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+indeterminate_replay = false
+no_generic_dbus_forwarding = true
+no_shell_executor = true
+secrets_in_audit_or_intent = false
+allow_interface_name_as_effect_identity = false
+require_local_recovery_for_connectivity_loss = true
+architecture = "docs/adr/0048-s18-networkmanager-authority.md"
+qualification_document = "docs/qualification/v0.10.0-s18.md"
+security_qualification = "docs/qualification/v0.10.0-s18-security.md"
+source_audit = "docs/workstreams/v010-s18-network-phase1.md"
+existing_semantics = "contracts/operation-semantics.toml"
+provider = "networkmanager"
+provider_bus = "system"
+provider_well_known_name = "org.freedesktop.NetworkManager"
+unsupported_behavior = "fail-closed"
+identity_binding = "boot-system-bus-unique-owner-device-profile-activation-generation"
+verification = "independent-native-post-effect-observation"
+
+[existing_read_only]
+manager_resource = "networkmanager:manager"
+manager_observation = "networkmanager.manager.observe"
+device_resource_prefix = "networkmanager:device:"
+device_observation = "networkmanager.device.observe"
+compatibility_required = true
+aliases_grant_effect_authority = false
+
+[proposed_observation]
+wifi = "networkmanager.wifi.observe"
+connections = "networkmanager.connections.observe"
+ip_configuration = "networkmanager.ipconfig.observe"
+strict_single_owner_epoch = true
+bounded_device_enumeration = true
+bounded_access_point_enumeration = true
+bounded_profile_enumeration = true
+reject_duplicate_interface_aliases = true
+reject_mixed_owner_snapshots = true
+require_fresh_effect_preconditions = true
+control_owns_aggregation = true
+
+[[candidate_operation]]
+id = "operation:network.wifi.scan"
+provider = "networkmanager"
+observation = "networkmanager.wifi.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-provider-wireless-device-epoch"
+requested_keys = ["scan_requested"]
+requires = ["active-scan-is-external-effect", "native-scan-budget", "authenticated-subject", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.networking.set-enabled"
+provider = "networkmanager"
+observation = "networkmanager.manager.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-global-network-epoch"
+requested_keys = ["enabled"]
+requires = ["route-impact-review", "offline-local-recovery", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.wifi.set-enabled"
+provider = "networkmanager"
+observation = "networkmanager.manager.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-radio-epoch"
+requested_keys = ["enabled"]
+requires = ["radio-impact-review", "offline-local-recovery", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.connection.activate"
+provider = "networkmanager"
+observation = "networkmanager.connections.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-device-profile-revision"
+requested_keys = ["active"]
+requires = ["device-generation", "profile-revision", "route-impact-review", "offline-local-recovery", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.connection.deactivate"
+provider = "networkmanager"
+observation = "networkmanager.connections.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-device-activation-epoch"
+requested_keys = ["active"]
+requires = ["activation-generation", "route-impact-review", "offline-local-recovery", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.wifi.join"
+provider = "networkmanager"
+observation = "networkmanager.connections.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-device-network-profile-revision"
+requested_keys = ["active"]
+requires = ["purpose-bound-secrets", "authenticated-secret-agent", "no-secret-audit", "offline-local-recovery", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.profile.create"
+provider = "networkmanager"
+observation = "networkmanager.connections.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-settings-scope"
+requested_keys = ["typed_profile"]
+requires = ["settings-allowlist", "subject-bound-polkit", "secret-redaction", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.profile.update"
+provider = "networkmanager"
+observation = "networkmanager.connections.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-profile-revision"
+requested_keys = ["typed_profile"]
+requires = ["profile-revision", "settings-allowlist", "secret-redaction", "route-impact-review", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:network.profile.delete"
+provider = "networkmanager"
+observation = "networkmanager.connections.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-provider-profile-revision-owners"
+requested_keys = ["removed"]
+requires = ["profile-revision", "shared-owner-review", "offline-local-recovery", "durable-prepare", "independent-reobserve"]
+enabled = false
+
+[unsupported_extensions]
+vpn_plugin_mutations = false
+hotspot_mutations = false
+mobile_broadband_mutations = false
+manual_route_or_firewall_changes = false
+arbitrary_settings_map = false
+
+[qualification]
+development_level = "level-a-arch-hyprland-exact-source"
+interactive_vm_level = "level-b-arch-hyprland-exact-source"
+physical_release_level = "level-c-maintained-hardware-q11"
+fixture_evidence_is_physical = false
+video_is_correctness_oracle = false
+require_adversarial = true
+require_network_loss_recovery = true
+require_indeterminate_no_replay = true
+require_credential_redaction = true
+require_keyboard_pointer_accessibility = true
