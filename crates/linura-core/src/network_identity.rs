@@ -768,8 +768,8 @@ mod tests {
         assert_eq!(d.namespace_inode(), 4026531840);
         assert_eq!(d.ifindex(), 3);
         assert_eq!(d.generation(), 11);
-        let mk = |ns, ifindex, gen, obj| NetworkDeviceId::new(
-            epoch(), obj, ns, ifindex, ok(NetworkInterfaceName::new("wlp2s0")), gen,
+        let mk = |ns, ifindex, generation, obj| NetworkDeviceId::new(
+            epoch(), obj, ns, ifindex, ok(NetworkInterfaceName::new("wlp2s0")), generation,
         );
         assert_eq!(mk(0, 3, 1, object(NetworkObjectKind::Device, 1)).unwrap_err(), NetworkIdentityError::InvalidNamespace);
         assert_eq!(mk(1, 0, 1, object(NetworkObjectKind::Device, 1)).unwrap_err(), NetworkIdentityError::InvalidIfindex);
