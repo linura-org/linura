@@ -296,6 +296,25 @@ class ProposedS18ContractTests(unittest.TestCase):
         for path in expected:
             self.assertIn(f'"{path}"', workflow)
 
+    def test_s18_architecture_cross_document_traceability(self):
+        expected_markers = (
+            ("docs/adr/README.md", "S18-1 architecture review"),
+            ("docs/milestones/v0.10.0.md", "S18-1 contract-first milestone acceptance"),
+            ("docs/qualification/v0.10.0.md", "S18-1 architecture-only gate"),
+            ("docs/threat-model.md", "S18-1 architecture-stage threat gate"),
+            ("docs/workstreams/v010-s18-network-phase1.md", "S18-1 contract-first evidence and extraction map"),
+        )
+        for relative_path, marker in expected_markers:
+            with self.subTest(path=relative_path):
+                content = (ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn(marker, content)
+                self.assertIn("S18-2", content)
+        scope = (
+            ROOT / "docs/development/v010-s18-1-network-architecture-contracts.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Complete architecture review surfaces", scope)
+        self.assertIn("S21-1", scope)
+
     def test_ledger_and_evidence_remain_unpromoted(self):
         ledger = {
             x["id"]: x

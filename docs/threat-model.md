@@ -769,6 +769,8 @@ network path needed to recover the machine.
 - See proposed [ADR 0048](adr/0048-s18-networkmanager-authority.md) and
   [S18 security qualification](qualification/v0.10.0-s18-security.md).
 
+**S18-1 architecture-stage threat gate:** [the contract-first scope](development/v010-s18-1-network-architecture-contracts.md) requires fail-closed, non-authorizing network identity correlation across kernel boot, system-bus incarnation, unique NM owner, kernel namespace/ifindex, device generation, AP/active connection and profile revision. A copied identity, matching non-secret settings hash or returned D-Bus method result cannot substitute for an authenticated original principal/Polkit subject, fresh native re-observation, durable prepared plan, last-link recovery or independent verification. An active Wi-Fi scan is a proposed effect; passive cached AP inventory is not. A credential challenge must be purpose-bound, protected from logs/model/audit, cancelled across lock/seat/owner changes and separated from durable profile secret persistence. Architecture fixtures and virtual NICs remain ineligible for Q11 physical Wi-Fi promotion; these executable/physical obligations are assigned to S18-2 through S18-10, not certified by S18-1.
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to

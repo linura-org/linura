@@ -52,6 +52,12 @@ that native observation is complete.
 | S18-5–8 / #271–274 | Independent scan, radio, lifecycle and profile effects | No registry support until qualified |
 | S18-9–10 / #275–276 | Unified UI/CLI/SDK and exact-source integrated qualification | No second authority or synthetic Q11 |
 
+## Complete architecture review surfaces
+
+This S18-1 PR covers the same integrated architecture surfaces as S21-1: ADR index and proposed decision; S18 milestone and top-level qualification requirements; the S18 threat model; Phase-1 source and ownership inventory; domain and adversarial qualification dossiers; inert machine-readable operation/architecture contracts; negative contract tests; and v0.10 CI/qualification routing. These changes are **architecture-only** and cannot be used to claim a native NetworkManager effect or physical Q11 acceptance.
+
+The exact code owner for native identity and observation is PR #268. Prior S18 WIP code is not automatically PR #267 implementation, and this draft PR must be rebased/extracted intentionally against accepted `main` before any final merge.
+
 ## Required architecture acceptance
 
 - [x] Boundaries and canonical inactive operation inventory specified.
