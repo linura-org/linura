@@ -45,11 +45,13 @@ on:
       - "interfaces/dbus/org.linura.Authority1.xml"
       - "interfaces/dbus/org.linura.SleepGate1.xml"
       - "interfaces/dbus/org.linura.Executor.Session1.xml"
+      - "interfaces/dbus/org.linura.DisplayProtection1.xml"
       - "interfaces/dbus/org.linura.SecurityOwner1.xml"
       - "interfaces/dbus/org.linura.Executor.Systemd1.xml"
       - "packaging/dbus-1/system.d/org.linura.Authority1.conf"
       - "packaging/dbus-1/system.d/org.linura.SecurityOwner1.conf"
       - "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf"
+      - "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf"
       - "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf"
       - "packaging/polkit-1/actions/org.linura.authority.policy"
       - "packaging/polkit-1/actions/org.linura.executor.session.policy"
@@ -59,6 +61,7 @@ on:
       - "packaging/systemd/system/linura-authorityd.service"
       - "packaging/systemd/system/linura-executor-systemd.service"
       - "packaging/systemd/system/linura-executor-session.service"
+      - "packaging/systemd/system/linura-display-protection.service"
       - "packaging/systemd/system/linura-security-owner@.service"
       - "packaging/systemd/system/linura-security-owner@.path"
       - "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf"
@@ -305,9 +308,11 @@ jobs:
               "authority_dbus_contract": root / "interfaces/dbus/org.linura.Authority1.xml",
               "executor_dbus_contract": root / "interfaces/dbus/org.linura.Executor.Systemd1.xml",
               "session_executor_dbus_contract": root / "interfaces/dbus/org.linura.Executor.Session1.xml",
+              "display_protection_dbus_contract": root / "interfaces/dbus/org.linura.DisplayProtection1.xml",
               "authority_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Authority1.conf",
               "executor_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
               "session_executor_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
+              "display_protection_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
               "authority_polkit_policy": root / "packaging/polkit-1/actions/org.linura.authority.policy",
               "executor_polkit_policy": root / "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
               "session_executor_polkit_policy": root / "packaging/polkit-1/actions/org.linura.executor.session.policy",
@@ -316,6 +321,7 @@ jobs:
               "authority_systemd_unit": root / "packaging/systemd/system/linura-authorityd.service",
               "executor_systemd_unit": root / "packaging/systemd/system/linura-executor-systemd.service",
               "session_executor_systemd_unit": root / "packaging/systemd/system/linura-executor-session.service",
+              "display_protection_systemd_unit": root / "packaging/systemd/system/linura-display-protection.service",
               "qualification_rule": root / "tests/acceptance/v06/49-linura-v06-qualification.rules",
               "managed_fixture": root / "tests/acceptance/v06/linura-managed-v06-qualification.service",
               "not_satisfied_fixture": root / "tests/acceptance/v06/linura-managed-v06-notsatisfied.service",

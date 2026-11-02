@@ -144,6 +144,7 @@ impl Stream {
 /// from a checkpoint or a replacement compositor's advertised identities.
 #[derive(Debug)]
 pub struct NativeDisplayKernelSubscription {
+    began_boot_ms: u64,
     sys: OwnedFd,
     sequence: OwnedFd,
     socket: OwnedFd,
@@ -178,6 +179,9 @@ impl PowerEpoch {
     }
 }
 impl NativeDisplayKernelSubscription {
+    pub fn began_boot_ms(&self) -> u64 {
+        self.began_boot_ms
+    }
     pub fn begin() -> Result<Self, String> {
         if !rustix::process::geteuid().is_root() {
             return Err(unavailable());
@@ -202,6 +206,7 @@ impl NativeDisplayKernelSubscription {
         let initial = number(&text(&sequence)?)?;
         let power = PowerEpoch::capture(&sys)?;
         Ok(Self {
+            began_boot_ms: crate::owner::boot_ms()?,
             sys,
             sequence,
             socket,

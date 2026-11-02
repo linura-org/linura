@@ -36,6 +36,7 @@ class NamespaceContractTests(unittest.TestCase):
             "crates/linura-linux-session/src/owner.rs",
             "crates/linura-linux-session/src/owner/display/approval.rs",
             "executors/linura-executor-session/src/lib.rs",
+            "executors/linura-executor-session/src/display_protection_service.rs",
             "executors/linura-executor-systemd/src/lib.rs",
             "apps/linura-shell/org.linura.ControlCenter.desktop",
             "apps/linura-shell/org.linura.CommandPalette.desktop",
@@ -57,6 +58,24 @@ class NamespaceContractTests(unittest.TestCase):
     def test_repository_namespace_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_display_protection_registration_cannot_move_to_another_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = (
+                root
+                / "executors/linura-executor-session/src/display_protection_service.rs"
+            )
+            original = source.read_text(encoding="utf-8")
+            changed = original.replace(
+                ".at(PATH, service)", '.at("/org/linura/Other", service)', 1
+            )
+            self.assertNotEqual(original, changed)
+            source.write_text(changed, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("registration", result.stderr)
 
     def test_private_sleep_gate_cannot_lose_its_registered_object_or_interface(self):
         for old, new in (

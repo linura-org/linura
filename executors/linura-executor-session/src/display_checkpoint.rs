@@ -68,7 +68,7 @@ fn record_metadata(stat: &fs::Stat, uid: u32) -> Result<(), String> {
     }
     Ok(())
 }
-fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<(), String> {
+fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<Vec<u8>, String> {
     let stat = fs::fstat(&fd).map_err(|_| unavailable())?;
     record_metadata(&stat, uid)?;
     let mut bytes = Vec::new();
@@ -91,7 +91,46 @@ fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<(),
     {
         return Err(unavailable());
     }
-    Ok(())
+    Ok(bytes.split_off(HEADER))
+}
+
+fn load_at(fd: &OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<Vec<u8>, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let name = format!("attempt-{}.checkpoint", dispatch.to_hex());
+        let before = fs::statat(fd, name.as_str(), fs::AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|_| unavailable())?;
+        record_metadata(&before, uid)?;
+        let record = fs::openat(
+            fd,
+            name.as_str(),
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|_| unavailable())?;
+        let after = fs::fstat(&record).map_err(|_| unavailable())?;
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) {
+            return Err(unavailable());
+        }
+        check_record(record, uid, dispatch)
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(payload), Ok(())) => Ok(payload),
+        _ => Err(unavailable()),
+    }
+}
+
+pub(super) fn validate(
+    dispatch: &ComponentDigest,
+    original_payload_digest: &ComponentDigest,
+) -> Result<(), String> {
+    let payload = load_at(&open()?, 0, dispatch)?;
+    if ComponentDigest::from_bytes(Sha256::digest(&payload).into()) != *original_payload_digest {
+        return Err(unavailable());
+    }
+    NativeDisplayRecoveryCheckpoint::validate_stored(&payload, dispatch)
 }
 fn reserve_at(
     fd: &OwnedFd,
@@ -176,9 +215,9 @@ fn reserve_at(
     result.and(unlocked)
 }
 
-pub(super) fn reserve(record: &NativeDisplayRecoveryCheckpoint) -> Result<(), String> {
-    let fd = open()?;
-    reserve_at(&fd, 0, record.dispatch_digest(), record.canonical_bytes())
+pub(super) fn reserve_stored(dispatch: &ComponentDigest, payload: &[u8]) -> Result<(), String> {
+    NativeDisplayRecoveryCheckpoint::validate_stored(payload, dispatch)?;
+    reserve_at(&open()?, 0, dispatch, payload)
 }
 
 #[cfg(test)]

@@ -103,6 +103,8 @@ RUNTIME_ASSETS = {
     ROOT
     / "packaging/systemd/system/linura-executor-session.service": "usr/lib/systemd/system/linura-executor-session.service",
     ROOT
+    / "packaging/systemd/system/linura-display-protection.service": "usr/lib/systemd/system/linura-display-protection.service",
+    ROOT
     / "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "usr/lib/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
     ROOT
     / "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "usr/lib/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
@@ -112,6 +114,8 @@ RUNTIME_ASSETS = {
     / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "usr/share/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
     ROOT
     / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "usr/share/dbus-1/system.d/org.linura.Executor.Session1.conf",
+    ROOT
+    / "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf": "usr/share/dbus-1/system.d/org.linura.DisplayProtection1.conf",
     ROOT
     / "packaging/polkit-1/actions/org.linura.authority.policy": "usr/share/polkit-1/actions/org.linura.authority.policy",
     ROOT
@@ -130,6 +134,8 @@ RUNTIME_ASSETS = {
     / "interfaces/dbus/org.linura.Executor.Systemd1.xml": "usr/share/dbus-1/interfaces/org.linura.Executor.Systemd1.xml",
     ROOT
     / "interfaces/dbus/org.linura.Executor.Session1.xml": "usr/share/dbus-1/interfaces/org.linura.Executor.Session1.xml",
+    ROOT
+    / "interfaces/dbus/org.linura.DisplayProtection1.xml": "usr/share/dbus-1/interfaces/org.linura.DisplayProtection1.xml",
     ROOT
     / "packaging/wireplumber/linura-session-audio.lua": "usr/lib/linura/linura-session-audio.lua",
     ROOT

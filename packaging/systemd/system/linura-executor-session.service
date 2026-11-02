@@ -1,7 +1,8 @@
 [Unit]
 Description=Linura narrow prepared native session executor
-After=dbus.service polkit.service systemd-logind.service
+After=dbus.service polkit.service systemd-logind.service linura-display-protection.service
 Requires=dbus.service
+Wants=linura-display-protection.service
 
 [Service]
 Type=dbus

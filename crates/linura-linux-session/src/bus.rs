@@ -12,6 +12,7 @@ use zbus::zvariant::OwnedValue;
 const BUS_PATH: &str = "/run/dbus/system_bus_socket";
 const CONTROL_SERVICE: &str = "org.linura.Authority1";
 const EXECUTOR_SERVICE: &str = "org.linura.Executor.Session1";
+const DISPLAY_PROTECTION_SERVICE: &str = "org.linura.DisplayProtection1";
 const CONNECT_BUDGET: Duration = Duration::from_secs(2);
 pub(crate) const CALL_BUDGET: Duration = Duration::from_millis(500);
 pub(crate) const PROBE_BUDGET: Duration = Duration::from_secs(2);
@@ -236,6 +237,7 @@ fn native_failure_label(category: &str, method: &str) -> String {
 pub enum NativeSessionRole {
     Control,
     Executor,
+    DisplayProtection,
 }
 
 impl NativeSessionRole {
@@ -243,6 +245,7 @@ impl NativeSessionRole {
         match self {
             Self::Control => CONTROL_SERVICE,
             Self::Executor => EXECUTOR_SERVICE,
+            Self::DisplayProtection => DISPLAY_PROTECTION_SERVICE,
         }
     }
 }
@@ -321,6 +324,9 @@ pub(crate) fn connect_native_bus(role: Option<NativeSessionRole>) -> Result<Conn
                 Some(NativeSessionRole::Executor) => builder
                     .name(EXECUTOR_SERVICE)
                     .map_err(|_| "canonical native executor name is invalid".to_owned())?,
+                Some(NativeSessionRole::DisplayProtection) => builder
+                    .name(DISPLAY_PROTECTION_SERVICE)
+                    .map_err(|_| "canonical display protection name is invalid".to_owned())?,
                 None => builder,
             };
             let connection = builder.build().await.map_err(|_| {

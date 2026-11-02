@@ -25,6 +25,60 @@ def unit(name: str) -> configparser.ConfigParser:
 
 
 class S17DeploymentTests(unittest.TestCase):
+    def test_original_display_protection_has_independent_fixed_supervision(self):
+        protection = unit("linura-display-protection.service")
+        service = protection["Service"]
+        self.assertEqual(service["BusName"], "org.linura.DisplayProtection1")
+        self.assertEqual(
+            service["ExecStart"],
+            "/usr/lib/linura/linura-executor-session --display-protection",
+        )
+        executor = unit("linura-executor-session.service")
+        for key in (
+            "StateDirectory",
+            "StateDirectoryMode",
+            "NoNewPrivileges",
+            "PrivateDevices",
+            "ProtectSystem",
+            "RestrictAddressFamilies",
+            "CapabilityBoundingSet",
+            "AmbientCapabilities",
+            "LimitCORE",
+        ):
+            self.assertEqual(service[key], executor["Service"][key], key)
+        for dependency in ("PartOf", "BindsTo", "Requires", "After"):
+            self.assertNotIn(
+                "linura-executor-session.service",
+                protection["Unit"].get(dependency, ""),
+            )
+        self.assertIn("linura-display-protection.service", executor["Unit"]["Wants"])
+        for relative, destination in (
+            (
+                "packaging/systemd/system/linura-display-protection.service",
+                "usr/lib/systemd/system/linura-display-protection.service",
+            ),
+            (
+                "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
+                "usr/share/dbus-1/system.d/org.linura.DisplayProtection1.conf",
+            ),
+            (
+                "interfaces/dbus/org.linura.DisplayProtection1.xml",
+                "usr/share/dbus-1/interfaces/org.linura.DisplayProtection1.xml",
+            ),
+        ):
+            self.assertEqual(image.RUNTIME_ASSETS[ROOT / relative], destination)
+        policy = ET.parse(
+            ROOT / "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf"
+        ).getroot()
+        self.assertIsNotNone(
+            policy.find(
+                "policy[@context='default']/deny[@send_destination='org.linura.DisplayProtection1']"
+            )
+        )
+        self.assertEqual(
+            [p.get("user") for p in policy.findall("policy[@user]")], ["root"]
+        )
+
     def test_display_kernel_witness_adds_only_local_read_only_observation(self):
         service = unit("linura-executor-session.service")["Service"]
         self.assertEqual(service["RestrictAddressFamilies"], "AF_UNIX AF_NETLINK")

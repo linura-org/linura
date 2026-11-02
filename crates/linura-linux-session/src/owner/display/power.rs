@@ -56,8 +56,8 @@ impl Lease {
     }
 }
 
-/// An opaque, non-cloneable original logind lifetime. The executor retains it
-/// across compositor loss; only separately qualified terminal handling may
+/// An opaque, non-cloneable original logind lifetime. Independent protection retains it
+/// across executor/compositor loss; only separately qualified terminal handling may
 /// retire it. No pipe or bus primitive leaves this concrete adapter.
 pub struct NativeDisplayPowerFence {
     owner: String,
@@ -82,10 +82,10 @@ impl NativeSessionChannel {
         )?;
         not_preparing(&properties)
     }
-    /// Called only inside the fixed executor's original prepared-checkpoint
-    /// callback. No caller-selected reason, scope, mode, peer or retry exists.
+    /// Called only by independent protection during the fixed executor's original
+    /// prepared-checkpoint callback. No caller-selected reason, scope, mode, peer or retry exists.
     pub fn retain_display_recovery_power_fence(&self) -> Result<NativeDisplayPowerFence, String> {
-        self.require_role(NativeSessionRole::Executor)?;
+        self.require_role(NativeSessionRole::DisplayProtection)?;
         let started = Instant::now();
         let boot = current_boot()?;
         let owner = self.logind_owner(started)?;
@@ -131,7 +131,7 @@ impl NativeSessionChannel {
     ) -> Result<(), String> {
         let result = (|| {
             fence.lease.verify()?;
-            self.require_role(NativeSessionRole::Executor)?;
+            self.require_role(NativeSessionRole::DisplayProtection)?;
             if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
                 return Err(unavailable());
             }

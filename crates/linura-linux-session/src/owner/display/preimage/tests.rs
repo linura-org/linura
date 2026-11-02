@@ -159,11 +159,46 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     let record = NativeDisplayRecoveryCheckpoint::capture(&material, &binding, 25_000, &sample)
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(record.dispatch_digest(), &binding.dispatch_digest);
+    assert!(
+        NativeDisplayRecoveryCheckpoint::validate_stored(
+            record.canonical_bytes(),
+            &binding.dispatch_digest
+        )
+        .is_ok()
+    );
     assert_eq!(
         NativeDisplayRecoveryCheckpoint::stored_dispatch(record.canonical_bytes()),
         Ok(binding.dispatch_digest)
     );
     assert_eq!(record.kernel_outputs(), &[[226, 0, 1]]);
+
+    let reserve = |subscription, boot_ms, unix_ms, boot| {
+        NativeDisplayRecoveryCheckpoint::reservation_at(
+            record.canonical_bytes(),
+            &binding.dispatch_digest,
+            subscription,
+            boot_ms,
+            unix_ms,
+            boot,
+        )
+    };
+    assert_eq!(
+        reserve(100, 101, 10_000, sample.boot.as_str()).ok(),
+        Some(vec![[226, 0, 1]])
+    );
+    assert!(reserve(99, 2099, 24_999, sample.boot.as_str()).is_ok());
+    for (subscription, boot_ms, unix_ms, boot) in [
+        (0, 101, 10_000, sample.boot.as_str()),
+        (101, 101, 10_000, sample.boot.as_str()),
+        (100, 99, 10_000, sample.boot.as_str()),
+        (100, 2100, 10_000, sample.boot.as_str()),
+        (100, 101, 25_000, sample.boot.as_str()),
+        (100, 101, 25_001, sample.boot.as_str()),
+        (100, 101, 9_999, sample.boot.as_str()),
+        (100, 101, 10_000, "22222222-2222-4222-8222-222222222222"),
+    ] {
+        assert!(reserve(subscription, boot_ms, unix_ms, boot).is_err());
+    }
     let mut cursor = record.canonical_bytes();
     let mut fields = Vec::new();
     while !cursor.is_empty() {
@@ -193,6 +228,20 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         ]
     );
     assert_eq!(fields[18], sample.recovery_preimage);
+    for index in 1..19 {
+        let mut changed = fields.clone();
+        changed[index] = "unsupported-or-substituted";
+        let mut bytes = Vec::new();
+        for field in changed {
+            bytes.extend_from_slice(&(field.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(field.as_bytes());
+        }
+        assert!(
+            NativeDisplayRecoveryCheckpoint::validate_stored(&bytes, &binding.dispatch_digest)
+                .is_err(),
+            "field {index}"
+        );
+    }
     assert!(!format!("{record:?}").contains("LNDR:") && !format!("{record:?}").contains("LNDI:"));
     sample.native_baseline_guard = None;
     assert!(

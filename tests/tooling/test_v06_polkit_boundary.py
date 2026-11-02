@@ -238,6 +238,9 @@ matrix() {
         )
         assets = (
             "interfaces/dbus/org.linura.Executor.Session1.xml",
+            "interfaces/dbus/org.linura.DisplayProtection1.xml",
+            "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
+            "packaging/systemd/system/linura-display-protection.service",
             "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
             "packaging/polkit-1/actions/org.linura.executor.session.policy",
             "packaging/polkit-1/rules.d/50-linura-executor-session.rules",

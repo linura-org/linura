@@ -192,6 +192,150 @@ impl NativeDisplayRecoveryCheckpoint {
         dispatch.ok_or_else(invalid)
     }
 
+    /// Validate historical storage bytes against their complete original
+    /// execution binding and native scope. This creates no current observation,
+    /// prepared effect, replacement mapping or restoration permission.
+    pub fn validate_stored(payload: &[u8], expected: &ComponentDigest) -> Result<(), String> {
+        if Self::stored_dispatch(payload)? != *expected {
+            return Err(invalid());
+        }
+        let mut remaining = payload;
+        let mut fields = Vec::with_capacity(19);
+        for _ in 0..19 {
+            let (length, body) = remaining.split_at_checked(8).ok_or_else(invalid)?;
+            let length = usize::try_from(u64::from_be_bytes(
+                length.try_into().map_err(|_| invalid())?,
+            ))
+            .map_err(|_| invalid())?;
+            let (field, rest) = body.split_at_checked(length).ok_or_else(invalid)?;
+            fields.push(std::str::from_utf8(field).map_err(|_| invalid())?);
+            remaining = rest;
+        }
+        let parse_digest = |field: &str| {
+            if !digest(field) {
+                return Err(invalid());
+            }
+            ComponentDigest::parse_hex(field).map_err(|_| invalid())
+        };
+        let binding = ExecutionBinding {
+            transaction_id: fields[1].into(),
+            generation: number(fields[2])?,
+            state_version: number(fields[3])?,
+            authority_binding_digest: parse_digest(fields[4])?,
+            authority_use_digest: parse_digest(fields[5])?,
+            effect_digest: parse_digest(fields[6])?,
+            dispatch_digest: parse_digest(fields[7])?,
+        };
+        let effect = linura_provider_sdk::display_layout_effect(fields[8])?;
+        binding.validate_for(&effect).map_err(|_| invalid())?;
+        let material =
+            linura_core::DisplayLayoutMaterial::decode(fields[8]).map_err(|_| invalid())?;
+        let boot = linura_core::BootId::new(fields[10]).map_err(|_| invalid())?;
+        let owner =
+            linura_core::SecurityOwnerInvocationId::new(fields[14]).map_err(|_| invalid())?;
+        if number(fields[9])? == 0
+            || material.lock().epoch().boot() != &boot
+            || !super::super::unique_name(fields[11])
+            || number(fields[12])? != u64::from(material.lock().epoch().uid())
+            || !(1..=i32::MAX as u64).contains(&number(fields[13])?)
+            || material.lock().security_owner_invocation() != &owner
+            || number(fields[15])? == 0
+        {
+            return Err(invalid());
+        }
+        parse_digest(fields[16])?;
+        parse_digest(fields[17])?;
+        if fields[18].is_empty() || fields[18].len() > MAX_PREIMAGE {
+            return Err(invalid());
+        }
+        let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
+        if saved.schema != 1
+            || saved.upstream != "efb50993780079460b0cbed1363e2166a2de1d9f"
+            || !digest(&saved.integration)
+            || number(&saved.generation)? != material.topology().generation()
+            || saved.heads.is_empty()
+            || saved.heads.len() > 16
+        {
+            return Err(invalid());
+        }
+        let mut handles = BTreeSet::new();
+        let mut devices = BTreeSet::new();
+        for head in &saved.heads {
+            if number(&head.handle)? == 0
+                || number(&head.generation)? == 0
+                || !handles.insert(&head.handle)
+                || head.kernel_drm[0] != 226
+                || head.kernel_drm[1] > 63
+                || head.kernel_drm[2] == 0
+                || !devices.insert(head.kernel_drm)
+                || head.owned_target.len() > 512
+                || head.linura_owned == head.owned_target.is_empty()
+                || !digest(&head.output_identity_digest)
+            {
+                return Err(invalid());
+            }
+            rule(&head.base_rule)?;
+        }
+        Ok(())
+    }
+
+    /// Compare an authenticated original prepared transfer with the independent
+    /// subscription's pre-sample clock. The returned historical DRM tuples
+    /// select only which retained kernel objects to compare, never a write.
+    pub fn reservation_kernel_outputs(
+        payload: &[u8],
+        expected: &ComponentDigest,
+        subscription_boot_ms: u64,
+    ) -> Result<Vec<[u32; 3]>, String> {
+        Self::reservation_at(
+            payload,
+            expected,
+            subscription_boot_ms,
+            boot_ms()?,
+            unix_ms()?,
+            current_boot()?.as_str(),
+        )
+    }
+
+    fn reservation_at(
+        payload: &[u8],
+        expected: &ComponentDigest,
+        subscription_boot_ms: u64,
+        now_boot: u64,
+        now: u64,
+        boot: &str,
+    ) -> Result<Vec<[u32; 3]>, String> {
+        Self::validate_stored(payload, expected)?;
+        let mut rest = payload;
+        let mut fields = Vec::with_capacity(19);
+        for _ in 0..19 {
+            let (size, body) = rest.split_at_checked(8).ok_or_else(invalid)?;
+            let size = usize::try_from(u64::from_be_bytes(size.try_into().map_err(|_| invalid())?))
+                .map_err(|_| invalid())?;
+            let (field, tail) = body.split_at_checked(size).ok_or_else(invalid)?;
+            fields.push(std::str::from_utf8(field).map_err(|_| invalid())?);
+            rest = tail;
+        }
+        let sampled = number(fields[15])?;
+        let deadline = number(fields[9])?;
+        if subscription_boot_ms == 0
+            || sampled < subscription_boot_ms
+            || sampled > now_boot
+            || now_boot - sampled >= 2000
+            || boot != fields[10]
+            || deadline <= now
+            || deadline - now > 15_000
+        {
+            return Err(invalid());
+        }
+        Ok(serde_json::from_str::<Preimage>(fields[18])
+            .map_err(|_| invalid())?
+            .heads
+            .into_iter()
+            .map(|head| head.kernel_drm)
+            .collect())
+    }
+
     pub fn canonical_bytes(&self) -> &[u8] {
         &self.canonical
     }

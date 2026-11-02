@@ -70,6 +70,7 @@ CONF_KINDS = {
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.SecurityOwner1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",
+    "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf": "xml",
     "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "ini",
     "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "ini",
     "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",

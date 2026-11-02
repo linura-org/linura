@@ -1177,8 +1177,8 @@ gaps, DRM changes, events on the bound bus/driver ancestry and changed/removed
 attributes permanently fence the witness. Draining and enumeration are bounded;
 a busy stream or unavailable check refuses continuation instead of widening a
 budget. Protected Keep/Revert checks the retained witness before and after
-handoff. Executor restart deliberately loses this evidence and cannot revive it
-from files. AF_NETLINK reception adds no capabilities, device access, IP sockets,
+handoff. Protection-service restart deliberately loses this evidence and cannot
+revive it from files; executor restart leaves that independent process alive. AF_NETLINK reception adds no capabilities, device access, IP sockets,
 sysfs writes or DRM master operations. The adapter uses the kernel multicast
 address and counter; kernel forwarding of injected uevents itself requires
 CAP_SYS_ADMIN in the owning network namespace. No such event grants an effect
@@ -1188,7 +1188,7 @@ one-use recovery admission, terminal verification and native acceptance remain
 unfinished.
 
 The compositor-owned power inhibitor is insufficient on process death. The
-executor now acquires and retains a separate original logind blocker only in
+independent protection process acquires and retains a separate original logind blocker only in
 the already-admitted prepared display callback. Its fixed scope/mode/reason
 cannot be selected by a client. Exact root-owner/boot checks, the two fixed
 preparation properties and quiet/live CLOEXEC FIFO checks precede and follow
@@ -1199,7 +1199,7 @@ FIFO cannot revive it; no reacquisition/retry path exists. Retained protection
 also binds the kernel's successful and failed suspend counters captured before
 native sampling. Missing, reset or changed counts permanently fence continuity,
 even when current logind preparation properties have returned to false. It
-survives compositor/UI death, not executor/logind death or reboot. It cannot
+survives executor/compositor/UI death, not protection-service/logind death or reboot. It cannot
 request power, waive policy, unlock a session, verify a frame or clear recovery.
 Terminal cleanup and executor-loss startup fencing are not established, and
 real logind/compositor death and adversarial power qualification remain required.
@@ -1215,3 +1215,28 @@ blocks S17 review/dispatch. Failure before S17 Arm does not issue generic approv
 cancellation. Prepared root lock acquisition also checks the native display
 fence, closing the unsafe coverage-change path during restoration. Real lock,
 power and first-frame overlap cases still require native qualification.
+
+
+### Independent original display protection
+
+The original kernel witness and fixed logind blocker now reside in the separate
+root `linura-display-protection.service`, using the session executor image's
+fixed `--display-protection` entry. Protection-service death cannot reconstruct
+lost objects. Both peers attest exact immutable systemd invocation, MainPID, argv,
+account and unique bus sender. Default bus policy denies ordinary callers, and
+runtime service admission denies arbitrary root callers with valid correlation.
+The private interface can only begin an original subscription, consume it once
+for the same executor within the original two-second window, persist the exact
+preimage before effect, and verify original retained objects. No privileged
+write, plan, policy, approval or recovery orchestration is exposed there.
+
+Readback is bounded, no-follow, private, shared-directory-locked and non-creating.
+The live protection retains the original payload hash; mismatched historical
+binding, copied/renamed record, substitution or any lost check permanently fences
+continuation. Restarting the executor leaves this process and its objects alive;
+restarting protection deliberately loses the witness and cannot reacquire it.
+Native disposable tests exercise caller denial and service epoch independence,
+not actual DRM retention or compositor replacement restoration. Original clocks,
+S17 lock ownership and canonical Control prepare/revalidation remain mandatory.
+Startup fencing, one-use restoration, verified terminal release and exact native
+fault qualification remain necessary before public mutation support.

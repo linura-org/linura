@@ -194,8 +194,8 @@ restoration are still required before any replacement compositor may use it.
 
 Only the supervised root executor receives original native rule preimages in
 its prepared observation. Rust matches their complete output/ownership/kernel
-scope and checks their canonical representation independently. The executor
-publishes an exclusive immutable private checkpoint and requires both file and
+scope and checks their canonical representation independently. The executor transfers that same prepared preimage once to independent display
+protection, which publishes an exclusive immutable private checkpoint and requires both file and
 directory sync before it can call native apply. Root-owned safe ancestors,
 0700/0600 scope, no-follow descriptor-relative access, serialized admission,
 single-link regular files, bounded history and content digests prevent ordinary
@@ -206,14 +206,14 @@ handoff. These are historical preimages, not policy, approval or executable
 recovery authority. Replacement continuity, restoration and independent terminal
 verification remain incomplete; public display mutations remain unavailable.
 
-The executor starts a read-only kernel subscription before native sampling and
-binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the
-same kernel multicast socket remain outside compositor memory. Every later check
+Independent display protection starts a read-only kernel subscription before
+native sampling and binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the
+same kernel multicast socket remain outside executor/compositor memory. Every later check
 consumes a bounded stream and compares the kernel sequence watermark; gaps,
 overflows, truncation, bad source/data, DRM changes, changes to a bound bus/driver
 ancestor and failed or changed retained attributes irreversibly poison it. It
 never reopens an attribute after loss to discover a replacement. Original
-continuation checks this witness before and after native dispatch. Service
+continuation checks this witness before and after native dispatch. Protection-service
 restart loses continuity and cannot reconstruct it from historical records.
 The service adds AF_NETLINK reception while retaining PrivateDevices, read-only
 kernel protections, no capabilities, no privilege acquisition and no IP socket
@@ -223,8 +223,8 @@ not authorize replacement startup/restoration or supply protected frame proof.
 Real kernel hotplug/reset and modeset acceptance remain required.
 
 The same fixed prepared-checkpoint callback acquires a separate original logind
-`sleep:shutdown`/`block` inhibitor and retains its opaque FIFO in the executor.
-Compositor death cannot release this executor-owned descriptor. Acquisition and
+`sleep:shutdown`/`block` inhibitor and retains its opaque FIFO in the independent
+protection service. Executor/compositor death cannot release this descriptor. Acquisition and
 later checks bind the exact current root logind owner and boot, observe only the
 two fixed preparation properties, and require a live CLOEXEC FIFO with no input,
 hangup or error. Failure permanently poisons the lease; no retry, replacement
@@ -235,9 +235,20 @@ bypasses power policy/inhibitors. It adds no new credential or public method.
 Retained kernel success/failure suspend counters bracket the original sample
 and subsequent checks; a completed or failed sleep cannot be hidden by current
 logind properties returning to false. Missing/reset/changed counters refuse.
-Only qualified terminal recovery may release retained protection; executor-loss
+Only qualified terminal recovery may release retained protection; replacement
 startup supervision, terminal cleanup and real power-race qualification remain
 incomplete, and public display mutation remains disabled.
+
+The private `DisplayProtection1` peer is separately supervised with exact immutable
+unit, MainPID, image, fixed `--display-protection` argv and bus-owner attestation.
+It accepts only the current supervised executor, including for root callers.
+Its three methods only start an original subscription, consume it for the same
+executor within the original two-second window and persist the historical
+checkpoint, or verify retained original objects and stored payload hash. It
+cannot write outputs, mint approval, orchestrate recovery or reconstruct lost
+protection. [ADR 0046](adr/0046-independent-original-display-protection.md)
+records the boundary; public mutation activation still requires complete native
+recovery qualification.
 
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock

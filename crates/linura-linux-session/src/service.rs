@@ -20,6 +20,17 @@ struct Identity {
     invocation: Vec<u8>,
 }
 
+type ExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
+
+fn live_launch(role: NativeSessionRole, image: &str, pid: u32, launches: &[ExecStart]) -> bool {
+    let arguments = match role {
+        NativeSessionRole::DisplayProtection => vec![image, "--display-protection"],
+        NativeSessionRole::Control | NativeSessionRole::Executor => vec![image],
+    };
+    matches!(launches, [(exe, argv, false, real, mono, 0, 0, launch_pid, 0, 0)]
+        if exe == image && argv == &arguments && *real != 0 && *mono != 0 && *launch_pid == pid)
+}
+
 /// Fixed supervised pre-start helper only. The anonymous connection acquires
 /// no executor/Control name and exposes no channel/effect handle to its caller.
 /// Control independently authenticates this process and exact systemd program.
@@ -58,6 +69,57 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    fn display_protection_call<B: serde::Serialize + zbus::zvariant::DynamicType>(
+        &self,
+        method: &str,
+        body: &B,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        let started = Instant::now();
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            method,
+            body,
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "b"
+        {
+            return Err("display protection peer or reply is unavailable".into());
+        }
+        let (verified,): (bool,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "display protection reply is malformed")?;
+        if !verified
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+        {
+            return Err("original display protection is unavailable; no retry".into());
+        }
+        Ok(())
+    }
+
+    pub fn begin_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
+        self.display_protection_call("Begin", &(dispatch.to_hex(),))
+    }
+
+    pub fn reserve_display_protection(
+        &self,
+        record: &crate::NativeDisplayRecoveryCheckpoint,
+    ) -> Result<(), String> {
+        self.display_protection_call("Reserve", &(record.canonical_bytes(),))
+    }
+
+    pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
+        self.display_protection_call("Verify", &(dispatch.to_hex(),))
+    }
+
     /// Continue the already durably reserved operation once. The supplied
     /// digests correlate Control's retained decision; they grant no authority.
     pub fn handoff_display_continuation(
@@ -115,6 +177,12 @@ impl NativeSessionChannel {
                 "/usr/lib/linura/linura-executor-session",
                 "root",
             ),
+            NativeSessionRole::DisplayProtection => (
+                "linura-display-protection.service",
+                "/usr/lib/systemd/system/linura-display-protection.service",
+                "/usr/lib/linura/linura-executor-session",
+                "root",
+            ),
         };
         let sender: String = self
             .bus_call("GetNameOwner", &(role.service(),), started)?
@@ -129,7 +197,7 @@ impl NativeSessionChannel {
         let uid: u32 = field(&credentials, "UnixUserID")?;
         let pid: u32 = field(&credentials, "ProcessID")?;
         let expected_uid = match role {
-            NativeSessionRole::Executor => 0,
+            NativeSessionRole::Executor | NativeSessionRole::DisplayProtection => 0,
             NativeSessionRole::Control => {
                 crate::account::local_service_uid(crate::account::LocalServiceAccount::Authority)?
             }
@@ -184,7 +252,6 @@ impl NativeSessionChannel {
         let service = get("org.freedesktop.systemd1.Service")?;
         let invocation: Vec<u8> = array(&facts, "InvocationID")?;
         let drop_ins: Vec<String> = array(&facts, "DropInPaths")?;
-        type ExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
         let launches: Vec<ExecStart> = array(&service, "ExecStart")?;
         if field::<u32>(&service, "MainPID")? != pid
             || field::<&str>(&service, "User")? != account
@@ -194,7 +261,7 @@ impl NativeSessionChannel {
             || field::<&str>(&facts, "SubState")? != "running"
             || invocation.len() != 16
             || invocation.iter().all(|b| *b == 0)
-            || !matches!(launches.as_slice(), [(exe, argv, false, real, mono, 0, 0, launch_pid, 0, 0)] if exe == image && argv == &[image] && *real != 0 && *mono != 0 && *launch_pid == pid)
+            || !live_launch(role, image, pid, &launches)
             || !crate::owner::immutable_file(std::path::Path::new(fragment), false)
             || !crate::owner::immutable_file(std::path::Path::new(image), true)
         {
@@ -233,6 +300,22 @@ impl NativeSessionChannel {
                 != sender
         {
             return Err("session executor caller is not the supervised Control owner".into());
+        }
+        Ok(())
+    }
+
+    /// The protection process accepts only the current independently supervised
+    /// session executor. Root UID or possession of a dispatch digest is not
+    /// sufficient. This admits a bounded mechanism, not a new effect path.
+    pub fn require_trusted_display_executor_sender(&self, sender: &str) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        if !crate::owner::unique_name(sender)
+            || self
+                .trusted_service(NativeSessionRole::Executor, Instant::now())?
+                .sender
+                != sender
+        {
+            return Err("display protection caller is not the supervised executor".into());
         }
         Ok(())
     }
@@ -404,4 +487,83 @@ where
         .try_clone()
         .map_err(|_| "native service array field is unavailable".to_owned())?;
     Vec::<T>::try_from(value).map_err(|_| "native service array field has the wrong type".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protection_mode_is_not_an_executor_or_control_launch() {
+        let image = "/usr/lib/linura/linura-executor-session";
+        let original: ExecStart = (
+            image.into(),
+            vec![image.into(), "--display-protection".into()],
+            false,
+            1,
+            2,
+            0,
+            0,
+            42,
+            0,
+            0,
+        );
+        assert!(live_launch(
+            NativeSessionRole::DisplayProtection,
+            image,
+            42,
+            std::slice::from_ref(&original)
+        ));
+        for role in [NativeSessionRole::Control, NativeSessionRole::Executor] {
+            assert!(!live_launch(
+                role,
+                image,
+                42,
+                std::slice::from_ref(&original)
+            ));
+            let mut regular = original.clone();
+            regular.1.pop();
+            assert!(live_launch(role, image, 42, std::slice::from_ref(&regular)));
+            assert!(!live_launch(
+                NativeSessionRole::DisplayProtection,
+                image,
+                42,
+                &[regular]
+            ));
+        }
+        for change in 0..12 {
+            let mut bad = original.clone();
+            match change {
+                0 => bad.0 = "/tmp/executor".into(),
+                1 => bad.1[0] = "/tmp/executor".into(),
+                2 => bad.1[1] = "--protect-before-sleep".into(),
+                3 => bad.1.push("unexpected".into()),
+                4 => bad.2 = true,
+                5 => bad.3 = 0,
+                6 => bad.4 = 0,
+                7 => bad.5 = 3,
+                8 => bad.6 = 4,
+                9 => bad.7 = 43,
+                10 => bad.8 = 1,
+                11 => bad.9 = 1,
+                _ => unreachable!(),
+            }
+            assert!(
+                !live_launch(NativeSessionRole::DisplayProtection, image, 42, &[bad]),
+                "field {change}"
+            );
+        }
+        assert!(!live_launch(
+            NativeSessionRole::DisplayProtection,
+            image,
+            42,
+            &[]
+        ));
+        assert!(!live_launch(
+            NativeSessionRole::DisplayProtection,
+            image,
+            42,
+            &[original.clone(), original]
+        ));
+    }
 }

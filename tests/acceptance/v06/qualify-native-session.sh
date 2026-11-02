@@ -41,6 +41,8 @@ stage install-exact-native-executor-and-privileged-boundary
 sudo -n install -o root -g root -m 0755 /tmp/linura-executor-session "$image"
 sudo -n install -o root -g root -m 0644 /tmp/linura-executor-session.service "$unit"
 sudo -n install -o root -g root -m 0644 /tmp/org.linura.Executor.Session1.conf /etc/dbus-1/system.d/org.linura.Executor.Session1.conf
+sudo -n install -o root -g root -m 0644 /tmp/org.linura.DisplayProtection1.conf /etc/dbus-1/system.d/org.linura.DisplayProtection1.conf
+sudo -n install -o root -g root -m 0644 /tmp/linura-display-protection.service /usr/lib/systemd/system/linura-display-protection.service
 sudo -n install -o root -g root -m 0644 /tmp/org.linura.executor.session.policy /usr/share/polkit-1/actions/org.linura.executor.session.policy
 sudo -n install -o root -g root -m 0644 /tmp/50-linura-executor-session.rules /etc/polkit-1/rules.d/50-linura-executor-session.rules
 sudo -n install -d -o root -g root -m 0755 /usr/lib/systemd/system/systemd-suspend.service.d /usr/lib/systemd/sleep.conf.d
@@ -66,6 +68,32 @@ pkaction --action-id org.linura.executor.session.set-secure >/dev/null
 pkaction --action-id org.linura.executor.session.execute-transition >/dev/null
 pkaction --action-id org.linura.executor.session.apply-display-layout >/dev/null
 echo "native-session-live-executor=qualified"
+
+stage independent-display-protection-admission
+protection=linura-display-protection.service
+protection_destination=org.linura.DisplayProtection1
+protection_path=/org/linura/DisplayProtection1
+sudo -n systemctl is-active --quiet "$protection"
+protection_epoch="$(sudo -n systemctl show "$protection" --value -p InvocationID)"
+[[ "$protection_epoch" =~ ^[0-9a-f]{32}$ ]]
+[[ "$protection_epoch" != 00000000000000000000000000000000 ]]
+protection_digest=1111111111111111111111111111111111111111111111111111111111111111
+for method in Begin Verify; do
+    expect_failure "native-display-protection-$method-ordinary-denied" \
+        busctl --system call "$protection_destination" "$protection_path" "$protection_destination" "$method" s "$protection_digest"
+    grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+    expect_failure "native-display-protection-$method-root-not-executor-denied" \
+        sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" "$method" s "$protection_digest"
+    grep -Eiq 'supervised executor|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+done
+expect_failure native-display-protection-reserve-root-not-executor-denied \
+    sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" Reserve ay 1 0
+grep -Eiq 'supervised executor|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# Separate service lifetime, not a claim that a real DRM witness was acquired.
+sudo -n systemctl restart "$service"
+sudo -n systemctl is-active --quiet "$service"
+test "$(sudo -n systemctl show "$protection" --value -p InvocationID)" = "$protection_epoch"
+echo "native-display-protection-caller-and-lifetime-boundary=qualified"
 
 stage direct-native-executor-denial
 digest=0000000000000000000000000000000000000000000000000000000000000000

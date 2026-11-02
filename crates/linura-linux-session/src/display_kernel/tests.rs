@@ -234,6 +234,7 @@ fn unread_stream_watermark_and_bad_transport_are_permanently_fenced() {
         // continuity fixture or a deserialization/admission path.
         let mut witness = NativeDisplayKernelWitness {
             subscription: NativeDisplayKernelSubscription {
+                began_boot_ms: 1,
                 sys: sequence
                     .try_clone()
                     .unwrap_or_else(|e| unreachable!("{e}"))

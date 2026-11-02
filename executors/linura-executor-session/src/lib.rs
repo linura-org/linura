@@ -15,6 +15,7 @@ use zbus::message::Header;
 
 mod display_checkpoint;
 mod display_kernel;
+mod display_protection_service;
 mod introspection;
 
 const ACTION: &str = "org.linura.executor.session.set-secure";
@@ -67,15 +68,14 @@ trait SessionDispatch: Clone + Send + Sync + 'static {
 #[derive(Clone, Debug)]
 struct NativeSessionDispatch {
     channel: NativeSessionChannel,
-    displays: std::sync::Arc<display_kernel::Witnesses>,
 }
 impl SessionDispatch for NativeSessionDispatch {
     fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String> {
-        self.displays
-            .verify(continuation.dispatch_digest(), &self.channel)?;
+        self.channel
+            .verify_display_protection(continuation.dispatch_digest())?;
         let result = self.channel.dispatch_display_continuation(continuation);
-        self.displays
-            .verify(continuation.dispatch_digest(), &self.channel)?;
+        self.channel
+            .verify_display_protection(continuation.dispatch_digest())?;
         result
     }
     fn require_control(&self, sender: &str) -> Result<(), String> {
@@ -96,16 +96,17 @@ impl SessionDispatch for NativeSessionDispatch {
     ) -> Result<u32, String> {
         // Subscription must precede native baseline sampling. Capturing a new
         // subscription after compositor death cannot replace this lifetime.
-        let subscription = linura_linux_session::NativeDisplayKernelSubscription::begin()?;
+        self.channel
+            .begin_display_protection(&binding.dispatch_digest)?;
         let result = self.channel.dispatch_prepared_display(
             material,
             binding,
             deadline_unix_ms,
             native_baseline_guard,
-            |record| self.displays.reserve(record, subscription, &self.channel),
+            |record| self.channel.reserve_display_protection(record),
         );
-        self.displays
-            .verify(&binding.dispatch_digest, &self.channel)?;
+        self.channel
+            .verify_display_protection(&binding.dispatch_digest)?;
         result
     }
 }
@@ -528,10 +529,7 @@ pub fn serve() -> Result<(), String> {
     let channel = NativeSessionChannel::connect(NativeSessionRole::Executor)?;
     let connection = channel.service_connection();
     let service = introspection::SessionContract(SessionExecutor {
-        channel: NativeSessionDispatch {
-            channel,
-            displays: std::sync::Arc::new(display_kernel::Witnesses::default()),
-        },
+        channel: NativeSessionDispatch { channel },
     });
     connection
         .object_server()
@@ -540,6 +538,12 @@ pub fn serve() -> Result<(), String> {
     loop {
         thread::park();
     }
+}
+
+/// Independently supervised protection mechanism entry point. It cannot dispatch
+/// an output effect or authorize a managed operation.
+pub fn serve_display_protection() -> Result<(), String> {
+    display_protection_service::serve()
 }
 
 #[cfg(test)]

@@ -323,3 +323,40 @@ fn a_valid_outer_checksum_does_not_hide_a_malformed_private_envelope() {
         );
     }
 }
+
+#[test]
+fn retained_preimage_reads_are_private_exact_locked_and_non_creating() {
+    let fixture = Fixture::new();
+    let dispatch = ComponentDigest::from_bytes([1; 32]);
+    assert!(load_at(&fixture.fd, fixture.uid, &dispatch).is_err());
+    assert!(!fixture.name(1).exists());
+    assert!(fixture.reserve(1, b"original private preimage").is_ok());
+    assert_eq!(
+        load_at(&fixture.fd, fixture.uid, &dispatch),
+        Ok(payload(&dispatch, b"original private preimage"))
+    );
+    assert!(load_at(&fixture.fd, fixture.uid + 1, &dispatch).is_err());
+    let separate = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    fs::flock(&separate, FlockOperation::NonBlockingLockExclusive)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(load_at(&fixture.fd, fixture.uid, &dispatch).is_err());
+    fs::flock(&separate, FlockOperation::Unlock).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(load_at(&fixture.fd, fixture.uid, &dispatch).is_ok());
+    std::fs::rename(fixture.name(1), fixture.name(2)).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(load_at(&fixture.fd, fixture.uid, &dispatch).is_err());
+    assert!(
+        load_at(
+            &fixture.fd,
+            fixture.uid,
+            &ComponentDigest::from_bytes([2; 32])
+        )
+        .is_err()
+    );
+    assert!(!fixture.name(1).exists());
+    assert!(fixture.name(2).exists());
+}

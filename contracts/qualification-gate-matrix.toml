@@ -432,11 +432,13 @@ paths = [
   "interfaces/dbus/org.linura.Authority1.xml",
   "interfaces/dbus/org.linura.SleepGate1.xml",
   "interfaces/dbus/org.linura.Executor.Session1.xml",
+  "interfaces/dbus/org.linura.DisplayProtection1.xml",
   "interfaces/dbus/org.linura.SecurityOwner1.xml",
   "interfaces/dbus/org.linura.Executor.Systemd1.xml",
   "packaging/dbus-1/system.d/org.linura.Authority1.conf",
   "packaging/dbus-1/system.d/org.linura.SecurityOwner1.conf",
   "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
+  "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
   "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
   "packaging/polkit-1/actions/org.linura.authority.policy",
   "packaging/polkit-1/actions/org.linura.executor.session.policy",
@@ -446,6 +448,7 @@ paths = [
   "packaging/systemd/system/linura-authorityd.service",
   "packaging/systemd/system/linura-executor-systemd.service",
   "packaging/systemd/system/linura-executor-session.service",
+  "packaging/systemd/system/linura-display-protection.service",
   "packaging/systemd/system/linura-security-owner@.service",
   "packaging/systemd/system/linura-security-owner@.path",
   "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf",
@@ -836,6 +839,10 @@ paths = [
   "visual/**",
   "packaging/arch/**",
   "packaging/dbus-1/system.d/org.linura.SecurityOwner1.conf",
+  "interfaces/dbus/org.linura.DisplayProtection1.xml",
+  "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
+  "packaging/systemd/system/linura-display-protection.service",
+  "packaging/systemd/system/linura-executor-session.service",
   "packaging/systemd/system/linura-security-owner@.service",
   "packaging/systemd/system/linura-security-owner@.path",
   "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf",
@@ -1425,3 +1432,7 @@ gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
 [[contract]]
 path = "contracts/s21-hyprland-build-environment.toml"
 gates = ["v010-workstation"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.DisplayProtection1.xml"
+gates = ["v06-managed-lifecycle","v010-workstation"]

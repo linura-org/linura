@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<node name="/org/linura/DisplayProtection1">
+  <interface name="org.linura.DisplayProtection1">
+    <annotation name="org.linura.ContractId" value="dbus.org.linura.DisplayProtection1"/>
+    <annotation name="org.linura.ContractVersion" value="1"/>
+    <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Private bounded original-witness mechanisms; no effect or recovery authority. -->
+    <method name="Begin">
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Reserve">
+      <arg name="checkpoint" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Verify">
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+  </interface>
+</node>

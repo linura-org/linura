@@ -9,18 +9,23 @@ use linura_linux_session::{
     NativeDisplayRecoveryCheckpoint, NativeSessionChannel,
 };
 use linura_provider_sdk::ComponentDigest;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Default)]
 pub(super) struct Witnesses(Mutex<BTreeMap<String, Protection>>);
 #[derive(Debug)]
 struct Protection {
+    valid: bool,
+    dispatch: ComponentDigest,
+    checkpoint_digest: ComponentDigest,
     kernel: NativeDisplayKernelWitness,
     power: NativeDisplayPowerFence,
 }
 impl Witnesses {
-    pub(super) fn reserve(
+    pub(super) fn reserve_stored(
         &self,
-        record: &NativeDisplayRecoveryCheckpoint,
+        dispatch: &ComponentDigest,
+        payload: &[u8],
         subscription: NativeDisplayKernelSubscription,
         channel: &NativeSessionChannel,
     ) -> Result<(), String> {
@@ -28,15 +33,25 @@ impl Witnesses {
             .0
             .try_lock()
             .map_err(|_| "kernel witness busy or unavailable")?;
-        let key = record.dispatch_digest().to_hex();
+        let key = dispatch.to_hex();
         if witnesses.len() >= 256 || witnesses.contains_key(&key) {
             return Err("original kernel witness cannot be replaced or redelivered".into());
         }
         let mut witness = Protection {
-            kernel: subscription.bind(record.kernel_outputs())?,
+            valid: true,
+            dispatch: *dispatch,
+            checkpoint_digest: ComponentDigest::from_bytes(Sha256::digest(payload).into()),
+            kernel: {
+                let outputs = NativeDisplayRecoveryCheckpoint::reservation_kernel_outputs(
+                    payload,
+                    dispatch,
+                    subscription.began_boot_ms(),
+                )?;
+                subscription.bind(&outputs)?
+            },
             power: channel.retain_display_recovery_power_fence()?,
         };
-        super::display_checkpoint::reserve(record)?;
+        super::display_checkpoint::reserve_stored(dispatch, payload)?;
         // Retain even failed post-sync protection alongside its durable record.
         // Neither uncertainty nor a failed native call permits replacing it.
         let verified = witness.verify(channel);
@@ -68,10 +83,20 @@ impl Witnesses {
 }
 impl Protection {
     fn verify(&mut self, channel: &NativeSessionChannel) -> Result<(), String> {
-        self.kernel.verify()?;
-        channel.verify_display_recovery_power_fence(&mut self.power)?;
-        // Bus probes consume time while kernel changes can queue independently.
-        self.kernel.verify()
+        let result = (|| {
+            if !self.valid {
+                return Err("original display protection was lost; no continuation".into());
+            }
+            super::display_checkpoint::validate(&self.dispatch, &self.checkpoint_digest)?;
+            self.kernel.verify()?;
+            channel.verify_display_recovery_power_fence(&mut self.power)?;
+            // Bus probes consume time while kernel changes can queue independently.
+            self.kernel.verify()
+        })();
+        if result.is_err() {
+            self.valid = false;
+        }
+        result
     }
 }
 

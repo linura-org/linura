@@ -398,3 +398,34 @@ usage = "authorize-caller"
 token = "MANAGED_ACTION_ID"
 action = "org.linura.executor.systemd.set-active-state"
 policy = "packaging/polkit-1/actions/org.linura.executor.systemd.policy"
+
+[[identifier]]
+id = "org.linura.DisplayProtection1"
+kind = "dbus-service"
+status = "active"
+primary_interface = "org.linura.DisplayProtection1"
+
+[[identifier]]
+id = "org.linura.DisplayProtection1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/DisplayProtection1"
+
+[[identifier]]
+id = "linura-display-protection.service"
+kind = "systemd-unit"
+status = "active"
+
+[[dbus_name_binding]]
+source = "crates/linura-linux-session/src/bus.rs"
+token = "DISPLAY_PROTECTION_SERVICE"
+service = "org.linura.DisplayProtection1"
+bus = "system"
+policy = "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf"
+systemd_unit = "packaging/systemd/system/linura-display-protection.service"
+
+[[dbus_registration]]
+source = "executors/linura-executor-session/src/display_protection_service.rs"
+path_token = "PATH"
+object_token = "service"
+interface = "org.linura.DisplayProtection1"
