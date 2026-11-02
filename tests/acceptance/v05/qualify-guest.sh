@@ -50,6 +50,39 @@ field() {
     sed -n "s/^${key}=//p" <<<"$payload" | head -n 1
 }
 
+read_post_observation() {
+    # Parsing must not spend the native sample's short freshness window on
+    # twenty sed/head processes under TCG. Keep the original timestamp/validity;
+    # decode once using builtins, rejecting duplicate or missing proof fields.
+    local key value
+    local -A seen=()
+    provider="" resource="" capability="" authority="" observed_at="" valid_for=""
+    sequence="" observed_id="" load_state="" active_state="" post_ts=""
+    while IFS='=' read -r key value; do
+        case "$key" in
+        provider | resource | capability | authority | observed_at_unix_ms | valid_for_ms | sequence | attribute.id | attribute.load_state | attribute.active_state | attribute.active_enter_timestamp_monotonic)
+            [[ -z "${seen[$key]+present}" && -n "$value" ]] || return 1
+            seen[$key]=1
+            ;;
+        *) continue ;;
+        esac
+        case "$key" in
+        provider) provider="$value" ;;
+        resource) resource="$value" ;;
+        capability) capability="$value" ;;
+        authority) authority="$value" ;;
+        observed_at_unix_ms) observed_at="$value" ;;
+        valid_for_ms) valid_for="$value" ;;
+        sequence) sequence="$value" ;;
+        attribute.id) observed_id="$value" ;;
+        attribute.load_state) load_state="$value" ;;
+        attribute.active_state) active_state="$value" ;;
+        attribute.active_enter_timestamp_monotonic) post_ts="$value" ;;
+        esac
+    done <<<"$1"
+    [[ "${#seen[@]}" -eq 11 ]]
+}
+
 load_binding() {
     local target="$1"
     # Exact-source helper emits a fixed set of shell assignment names and validated digest values.
@@ -155,7 +188,7 @@ post=""
 post_ts=""
 for _ in $(seq 1 80); do
     post="$(linuractl observe "systemd:unit:$unit")"
-    post_ts="$(field attribute.active_enter_timestamp_monotonic "$post")"
+    read_post_observation "$post"
     if [[ -n "$post_ts" ]] && ((post_ts > pre_ts)); then
         advanced=1
         break
@@ -163,21 +196,6 @@ for _ in $(seq 1 80); do
     sleep 0.1
 done
 test "$advanced" -eq 1
-grep -F 'authority=native-api' <<<"$post"
-grep -F 'freshness=current' <<<"$post"
-grep -F 'attribute.load_state=loaded' <<<"$post"
-grep -F 'attribute.active_state=active' <<<"$post"
-
-provider="$(field provider "$post")"
-resource="$(field resource "$post")"
-capability="$(field capability "$post")"
-authority="$(field authority "$post")"
-observed_at="$(field observed_at_unix_ms "$post")"
-valid_for="$(field valid_for_ms "$post")"
-sequence="$(field sequence "$post")"
-observed_id="$(field attribute.id "$post")"
-load_state="$(field attribute.load_state "$post")"
-active_state="$(field attribute.active_state "$post")"
 now_ms="$(date +%s%3N)"
 
 stage independent-verification
@@ -194,6 +212,11 @@ stale_now="$((observed_at + valid_for + 1))"
     "$unit" "$pre_ts" "$provider" "$resource" "$capability" "$authority" \
     "$observed_at" "$valid_for" "$sequence" "$observed_id" "$load_state" \
     "$active_state" "$post_ts" "$stale_now"
+
+grep -F 'authority=native-api' <<<"$post"
+grep -F 'freshness=current' <<<"$post"
+grep -F 'attribute.load_state=loaded' <<<"$post"
+grep -F 'attribute.active_state=active' <<<"$post"
 
 echo "pre-active-enter-timestamp-monotonic=$pre_ts"
 echo "post-active-enter-timestamp-monotonic=$post_ts"
