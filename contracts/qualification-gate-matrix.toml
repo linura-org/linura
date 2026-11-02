@@ -1435,4 +1435,4 @@ gates = ["v010-workstation"]
 
 [[contract]]
 path = "interfaces/dbus/org.linura.DisplayProtection1.xml"
-gates = ["v06-managed-lifecycle","v010-workstation"]
+gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification","v010-workstation"]
