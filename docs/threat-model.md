@@ -1159,6 +1159,15 @@ original clock, and final native scope/sample checks remain mandatory. This
 adds immutable preimages, not a recovery supervisor, kernel continuity, terminal
 retirement authority or a supported public effect.
 
+Content integrity alone cannot detect a valid checkpoint copied or renamed to
+another well-formed dispatch filename. Every history scan therefore also checks
+the bounded, exact nineteen-field private envelope and requires its original
+canonical dispatch digest to equal the filename. New reservations check this
+same correlation before creating a file. A mismatch fences all new reservations,
+including a redelivery under the now-missing original filename, and preserves the
+substituted bytes. The existing private format remains unchanged; decoding this
+historical identity creates no prepared checkpoint or restoration permission.
+
 Independent kernel evidence now retains the original kernfs connector/device
 attribute descriptors and a kernel multicast subscription outside compositor
 memory. Subscription precedes the sampled native baseline. Re-reading a name,

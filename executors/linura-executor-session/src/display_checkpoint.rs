@@ -68,7 +68,7 @@ fn record_metadata(stat: &fs::Stat, uid: u32) -> Result<(), String> {
     }
     Ok(())
 }
-fn check_record(fd: OwnedFd, uid: u32) -> Result<(), String> {
+fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<(), String> {
     let stat = fs::fstat(&fd).map_err(|_| unavailable())?;
     record_metadata(&stat, uid)?;
     let mut bytes = Vec::new();
@@ -87,6 +87,7 @@ fn check_record(fd: OwnedFd, uid: u32) -> Result<(), String> {
     );
     if payload_len != (bytes.len() - HEADER) as u64
         || &bytes[start..start + 32] != Sha256::digest(&bytes[HEADER..]).as_slice()
+        || NativeDisplayRecoveryCheckpoint::stored_dispatch(&bytes[HEADER..])? != *dispatch
     {
         return Err(unavailable());
     }
@@ -99,7 +100,10 @@ fn reserve_at(
     payload: &[u8],
 ) -> Result<(), String> {
     directory(fd, uid, true)?;
-    if payload.is_empty() || payload.len() > MAX_PAYLOAD || dispatch.to_hex() == "0".repeat(64) {
+    if payload.is_empty()
+        || payload.len() > MAX_PAYLOAD
+        || NativeDisplayRecoveryCheckpoint::stored_dispatch(payload)? != *dispatch
+    {
         return Err(unavailable());
     }
     // One directory lock serializes quota/integrity checks and exclusive
@@ -135,7 +139,10 @@ fn reserve_at(
             if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) {
                 return Err(unavailable());
             }
-            check_record(old, uid)?;
+            let dispatch =
+                std::str::from_utf8(&name.to_bytes()[8..72]).map_err(|_| unavailable())?;
+            let dispatch = ComponentDigest::parse_hex(dispatch).map_err(|_| unavailable())?;
+            check_record(old, uid, &dispatch)?;
         }
         let name = format!("attempt-{}.checkpoint", dispatch.to_hex());
         let record = fs::openat(

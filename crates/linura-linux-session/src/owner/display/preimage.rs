@@ -158,6 +158,40 @@ impl std::fmt::Debug for NativeDisplayRecoveryCheckpoint {
     }
 }
 impl NativeDisplayRecoveryCheckpoint {
+    /// Read only the historical dispatch correlation from a bounded private
+    /// envelope. This does not construct a prepared checkpoint, validate current
+    /// native state, recover a lost witness or grant restoration authority.
+    pub fn stored_dispatch(payload: &[u8]) -> Result<ComponentDigest, String> {
+        if payload.is_empty() || payload.len() > MAX_CHECKPOINT {
+            return Err(invalid());
+        }
+        let mut remaining = payload;
+        let mut dispatch = None;
+        for index in 0..19 {
+            let (length, body) = remaining.split_at_checked(8).ok_or_else(invalid)?;
+            let length = usize::try_from(u64::from_be_bytes(
+                length.try_into().map_err(|_| invalid())?,
+            ))
+            .map_err(|_| invalid())?;
+            let (field, rest) = body.split_at_checked(length).ok_or_else(invalid)?;
+            let field = std::str::from_utf8(field).map_err(|_| invalid())?;
+            if index == 0 && field != "linura.native-display.recovery-preimage.v1" {
+                return Err(invalid());
+            }
+            if index == 7 {
+                if !digest(field) {
+                    return Err(invalid());
+                }
+                dispatch = Some(ComponentDigest::parse_hex(field).map_err(|_| invalid())?);
+            }
+            remaining = rest;
+        }
+        if !remaining.is_empty() {
+            return Err(invalid());
+        }
+        dispatch.ok_or_else(invalid)
+    }
+
     pub fn canonical_bytes(&self) -> &[u8] {
         &self.canonical
     }
