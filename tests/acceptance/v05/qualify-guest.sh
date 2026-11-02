@@ -60,24 +60,24 @@ read_post_observation() {
     sequence="" observed_id="" load_state="" active_state="" post_ts=""
     while IFS='=' read -r key value; do
         case "$key" in
-        provider | resource | capability | authority | observed_at_unix_ms | valid_for_ms | sequence | attribute.id | attribute.load_state | attribute.active_state | attribute.active_enter_timestamp_monotonic)
-            [[ -z "${seen[$key]+present}" && -n "$value" ]] || return 1
-            seen[$key]=1
-            ;;
-        *) continue ;;
+            provider | resource | capability | authority | observed_at_unix_ms | valid_for_ms | sequence | attribute.id | attribute.load_state | attribute.active_state | attribute.active_enter_timestamp_monotonic)
+                [[ -z "${seen[$key]+present}" && -n "$value" ]] || return 1
+                seen[$key]=1
+                ;;
+            *) continue ;;
         esac
         case "$key" in
-        provider) provider="$value" ;;
-        resource) resource="$value" ;;
-        capability) capability="$value" ;;
-        authority) authority="$value" ;;
-        observed_at_unix_ms) observed_at="$value" ;;
-        valid_for_ms) valid_for="$value" ;;
-        sequence) sequence="$value" ;;
-        attribute.id) observed_id="$value" ;;
-        attribute.load_state) load_state="$value" ;;
-        attribute.active_state) active_state="$value" ;;
-        attribute.active_enter_timestamp_monotonic) post_ts="$value" ;;
+            provider) provider="$value" ;;
+            resource) resource="$value" ;;
+            capability) capability="$value" ;;
+            authority) authority="$value" ;;
+            observed_at_unix_ms) observed_at="$value" ;;
+            valid_for_ms) valid_for="$value" ;;
+            sequence) sequence="$value" ;;
+            attribute.id) observed_id="$value" ;;
+            attribute.load_state) load_state="$value" ;;
+            attribute.active_state) active_state="$value" ;;
+            attribute.active_enter_timestamp_monotonic) post_ts="$value" ;;
         esac
     done <<<"$1"
     [[ "${#seen[@]}" -eq 11 ]]
