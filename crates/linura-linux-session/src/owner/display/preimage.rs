@@ -36,18 +36,25 @@ fn digest(text: &str) -> bool {
         .is_ok_and(|digest| digest.to_hex() == text && text != "0".repeat(64))
 }
 
-// An independently bounded validation of the native LNDR:1 representation. The
+// An independently bounded validation of the native LNDR:2 representation. The
 // root adapter retains exact bytes, and never converts them into an effect.
 fn rule(raw: &str) -> Result<(), String> {
-    if raw.len() > 12 * 1024 {
+    validate_rule(raw, false)
+}
+
+// Old persisted LNDR:1 bytes remain historical data. They have no selector
+// lineage and cannot be used to reserve a new attempt or reconstruct a rule.
+fn validate_rule(raw: &str, historical: bool) -> Result<(), String> {
+    let legacy = historical && raw.starts_with("LNDR:1;");
+    if raw.len() > if legacy { 12 * 1024 } else { 20 * 1024 } {
         return Err(invalid());
     }
     let raw = raw
-        .strip_prefix("LNDR:1;")
+        .strip_prefix(if legacy { "LNDR:1;" } else { "LNDR:2;" })
         .and_then(|v| v.strip_suffix(';'))
         .ok_or_else(invalid)?;
     let fields: Vec<_> = raw.split(';').collect();
-    if fields.len() != 25 || !matches!(fields[0], "0" | "1") {
+    if fields.len() != if legacy { 25 } else { 26 } || !matches!(fields[0], "0" | "1") {
         return Err(invalid());
     }
     for (i, field) in fields.iter().enumerate().take(7).skip(1) {
@@ -78,6 +85,9 @@ fn rule(raw: &str) -> Result<(), String> {
                 .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
     };
     if !hex(fields[9], 4096) || !hex(fields[24], 32) || fields[24].len() != 64 {
+        return Err(invalid());
+    }
+    if !legacy && !hex(fields[25], 4096) {
         return Err(invalid());
     }
     for (i, field) in fields.iter().enumerate().take(24).skip(10) {
@@ -274,7 +284,7 @@ impl NativeDisplayRecoveryCheckpoint {
             {
                 return Err(invalid());
             }
-            rule(&head.base_rule)?;
+            validate_rule(&head.base_rule, true)?;
         }
         Ok(())
     }
@@ -328,12 +338,15 @@ impl NativeDisplayRecoveryCheckpoint {
         {
             return Err(invalid());
         }
-        Ok(serde_json::from_str::<Preimage>(fields[18])
-            .map_err(|_| invalid())?
+        let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
+        saved
             .heads
             .into_iter()
-            .map(|head| head.kernel_drm)
-            .collect())
+            .map(|head| {
+                rule(&head.base_rule)?;
+                Ok(head.kernel_drm)
+            })
+            .collect()
     }
 
     pub fn canonical_bytes(&self) -> &[u8] {

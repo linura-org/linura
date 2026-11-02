@@ -183,12 +183,16 @@ remain observable without mutation checkpoint qualification. These point-in-time
 facts do not prove continuity after replacement or grant a restoration effect.
 Independent retained kernel observation and durable restoration remain required.
 
-The owner accepts a native rule digest only after bounded canonical `LNDR:1`
+The owner accepts a native rule digest only after bounded canonical `LNDR:2`
 decoding. The preimage must reconstruct all owned display fields exactly,
 including automatic placement/scaling and the full custom modeline, without
 float rounding, integer truncation or alternate encodings. Reconstruction copies
-those fields into the current native rule and preserves its selector/precedence
-and unrelated settings. This codec is not a store or an execution boundary:
+those fields into the current native rule only if its resolved selector still
+matches the original lineage; it preserves the current rule list/precedence and
+unrelated settings. In-process rollback also refuses selector substitution.
+Prepared native comparison binds rule, output-identity and ownership witnesses,
+even when numeric geometry is unchanged. Older persisted `LNDR:1` records remain
+validated historical bytes, without migration or admission to new reservations. This codec is not a store or an execution boundary:
 durable preimage retention, authenticated continuity and independently verified
 restoration are still required before any replacement compositor may use it.
 

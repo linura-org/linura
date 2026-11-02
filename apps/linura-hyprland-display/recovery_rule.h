@@ -22,12 +22,12 @@ namespace Linura::HyprlandDisplay {
 class RecoveryRule final
 {
   public:
-    static constexpr std::size_t MaxBytes = 12 * 1024;
+    static constexpr std::size_t MaxBytes = 20 * 1024;
 
     template <typename Rule>
     [[nodiscard]] static std::optional<RecoveryRule> capture(const Rule &rule)
     {
-        if (rule.m_mirrorOf.size() > 4096)
+        if (rule.m_mirrorOf.size() > 4096 || rule.m_name.size() > 4096)
             return std::nullopt;
         RecoveryRule saved;
         saved.disabled_ = rule.m_disabled;
@@ -38,6 +38,7 @@ class RecoveryRule final
         saved.autoDir_ = static_cast<std::uint64_t>(rule.m_autoDir);
         saved.transform_ = static_cast<std::uint64_t>(rule.m_transform);
         saved.mirror_ = rule.m_mirrorOf;
+        saved.selector_ = rule.m_name;
         const auto &mode = rule.m_drmMode;
         saved.mode_ = {mode.clock, mode.hdisplay, mode.hsync_start, mode.hsync_end, mode.htotal,
                        mode.hskew, mode.vdisplay, mode.vsync_start, mode.vsync_end, mode.vtotal,
@@ -54,7 +55,7 @@ class RecoveryRule final
 
     [[nodiscard]] static std::optional<RecoveryRule> decode(std::string_view bytes)
     {
-        if (bytes.size() > MaxBytes || !bytes.starts_with("LNDR:1;"))
+        if (bytes.size() > MaxBytes || !bytes.starts_with("LNDR:2;"))
             return std::nullopt;
         Reader reader{bytes.substr(7)};
         RecoveryRule saved;
@@ -73,7 +74,7 @@ class RecoveryRule final
                 return std::nullopt;
         std::string name;
         if (!reader.hex(name, saved.modeName_.size()) || name.size() != saved.modeName_.size() ||
-            !reader.remaining.empty() || !saved.valid())
+            !reader.hex(saved.selector_, 4096) || !reader.remaining.empty() || !saved.valid())
             return std::nullopt;
         std::copy(name.begin(), name.end(), saved.modeName_.begin());
         // Reject every alternate representation, including negative zero,
@@ -85,7 +86,7 @@ class RecoveryRule final
 
     [[nodiscard]] std::string encode() const
     {
-        std::string out = "LNDR:1;";
+        std::string out = "LNDR:2;";
         integer(out, disabled_ ? 1 : 0);
         for (const auto value : reals_) {
             const auto bits = std::bit_cast<std::uint64_t>(value);
@@ -99,14 +100,20 @@ class RecoveryRule final
         for (const auto value : mode_)
             integer(out, value);
         hex(out, std::string_view(modeName_.data(), modeName_.size()));
+        hex(out, selector_);
         return out;
     }
 
     // Merge into a COPY of the current rule. The selector, precedence, color,
     // VRR, ICC, reserved areas and all other current fields remain untouched.
+    // The resolved selector must still match. Never transplant old fields into
+    // a different live rule, even when its numeric display values are equal.
+    // Keep current rule precedence; this codec never edits the rule list.
     // Callers still require independent continuity/admission before effects.
-    template <typename Rule> [[nodiscard]] Rule mergeOwnedFields(Rule current) const
+    template <typename Rule> [[nodiscard]] std::optional<Rule> mergeOwnedFields(Rule current) const
     {
+        if (current.m_name != selector_)
+            return std::nullopt;
         current.m_disabled = disabled_;
         current.m_resolution.x = reals_[0];
         current.m_resolution.y = reals_[1];
@@ -142,13 +149,13 @@ class RecoveryRule final
     bool disabled_ = false;
     std::array<double, 6> reals_{};
     std::uint64_t autoDir_ = 0, transform_ = 0;
-    std::string mirror_;
+    std::string mirror_, selector_;
     std::array<std::uint64_t, 14> mode_{};
     std::array<char, 32> modeName_{};
     inline static constexpr char Digits[] = "0123456789abcdef";
     [[nodiscard]] bool valid() const
     {
-        if (autoDir_ > 8 || transform_ > 7 || mirror_.size() > 4096 ||
+        if (autoDir_ > 8 || transform_ > 7 || mirror_.size() > 4096 || selector_.size() > 4096 ||
             !std::all_of(reals_.begin(), reals_.end(), [](double v) { return std::isfinite(v); }))
             return false;
         // Refresh and scale originate in native float members. Reject bytes

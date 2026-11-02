@@ -189,12 +189,21 @@ non-DRM outputs remain read-only without mutation checkpoint qualification.
 These facts are required comparison material for recovery, not proof of kernel
 lifetime across compositor replacement. No new restoration write is enabled.
 
-Native rule witnesses now use a bounded, bidirectional `LNDR:1` codec. The
-protected receiver validates the complete canonical preimage before hashing it;
-truncated, nonfinite, rounded, out-of-range or noncanonical data cannot become a
-baseline checkpoint. Reconstruction copies only owned display fields into the
-current rule, preserving its selector, precedence and unrelated live settings.
-The native encoder retains its existing byte representation. Component tests
-exercise both malformed bytes and the actual pinned upstream rule projection.
+Native rule witnesses use the bounded, bidirectional `LNDR:2` codec. In addition
+to owned display values, it retains the exact resolved native rule selector as
+comparison data. The protected receiver validates the complete canonical
+preimage before hashing it; truncated, nonfinite, rounded, out-of-range or
+noncanonical data cannot become a baseline checkpoint. Reconstruction refuses a
+different live selector and copies only owned display fields into the matching
+current rule. It preserves the live rule list/precedence and unrelated settings.
+In-process rollback applies the same selector-lineage check. Prepared native
+comparison includes all rule, output-identity and ownership witnesses, so equal
+geometry cannot hide drift between capture and mutation. Component tests
+exercise malformed bytes and the actual pinned upstream rule projection.
+
+Older persisted `LNDR:1` records remain historical, bounded, validated bytes;
+they are not migrated, deleted or admitted to a new reservation. Native clients
+accept only `LNDR:2`. The enclosing immutable `LNRJ:1` checkpoint format and
+its dispatch binding are unchanged.
 This codec does not persist a checkpoint, establish kernel continuity or admit
 restoration; the compositor-loss recovery and native acceptance gaps remain.

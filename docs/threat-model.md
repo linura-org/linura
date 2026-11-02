@@ -1136,13 +1136,18 @@ after restart remain insufficient: no kernel lifetime, recovery permission or
 cross-compositor restoration is inferred from this point-in-time sample.
 
 Malformed native rule comparison data cannot become a recovery checkpoint just
-by carrying the `LNDR:1` prefix. The protected receiver requires its complete
+by carrying the `LNDR:2` prefix. The protected receiver requires its complete
 bounded canonical decode before hashing. Nonfinite or non-reconstructable float
 fields, unsupported enums, overflowing modelines, wrong fixed name length,
 truncation and extra data fail closed before mutation. The decoder preserves
 automatic rule semantics and merges only owned fields into a copy of the live
-rule; it cannot restore an old selector, color/ICC/VRR setting or unrelated rule.
-Successful parsing is not current evidence, durable retention, kernel continuity
+rule only when its resolved selector matches the retained lineage. A changed
+selector invalidates in-process rollback as well as reconstructed rule merging;
+equal geometry is insufficient. Prepared native comparison also binds original
+rule, identity and overlay ownership witnesses. It cannot restore an old selector,
+reorder live rules, or overwrite color/ICC/VRR settings. Old `LNDR:1` records stay
+validated historical bytes and cannot reserve another attempt; no migration or
+automatic removal occurs. Successful parsing is not current evidence, durable retention, kernel continuity
 or permission to restore, and cannot enable the public mutation path.
 
 The private prepared observation now delivers original rule/overlay preimages

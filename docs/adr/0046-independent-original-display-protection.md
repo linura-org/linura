@@ -58,6 +58,15 @@ protection additionally retains the hash of its original payload and rejects
 substitution. Historical parsing is comparison data, not fresh observation,
 restoration admission, a recovered approval or authority to execute a plan.
 
+New prepared rule preimages use `LNDR:2`, adding the resolved native selector as
+bounded canonical comparison data. Reconstruction and in-process rollback
+require matching live selector lineage; neither rewrites selectors or the live
+rule list/precedence. All rule, output-identity and ownership witnesses participate
+in prepared native comparison, including equal-geometry drift. Existing nested
+`LNDR:1` preimages retain their exact historical validation and dispatch binding;
+they are never implicitly migrated, deleted, reconstructed or admitted to a new
+reservation. This is explicit nested-payload versioning, not recovered authority.
+
 Existing S17 executor methods retain their original admission and Polkit paths.
 The added service is deployed alongside the same executor artifact. Public SDKs,
 agents, UI and semantic domain crates receive no transport or protection handle.

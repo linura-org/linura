@@ -1,3 +1,4 @@
+#include "recovery_rule.h"
 #include "protected_wire.h"
 #include "linura-protected-display-v1-client-protocol.h"
 #include "tests/wire_scene_fixture.h"
@@ -504,7 +505,7 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
           std::string(Test::RulePreimage) + "0;",
           std::string(Test::RulePreimage).replace(7, 1, "2"),
           std::string(Test::RulePreimage).replace(9, 16, "7ff8000000000000"),
-          std::string(12 * 1024 + 1, '0')}) {
+          std::string(Linura::HyprlandDisplay::RecoveryRule::MaxBytes + 1, '0')}) {
         Harness invalid;
         {
             const std::lock_guard lock(invalid.backend.mutex);

@@ -2,10 +2,10 @@ use super::*;
 use serde_json::{Value, json};
 
 const RULE: &str = concat!(
-    "LNDR:1;0;0000000000000000;0000000000000000;404e000000000000;",
+    "LNDR:2;0;0000000000000000;0000000000000000;404e000000000000;",
     "0000000000000000;0000000000000000;bff0000000000000;0;0;;",
     "0;0;0;0;0;0;0;0;0;0;0;0;0;0;",
-    "0000000000000000000000000000000000000000000000000000000000000000;"
+    "0000000000000000000000000000000000000000000000000000000000000000;;"
 );
 fn inputs() -> (Value, Value) {
     let (mut native, _) = super::super::tests::inputs();
@@ -36,7 +36,7 @@ fn root_preimage_matches_every_exact_original_native_row() {
         ("output_identity_digest", json!("c".repeat(64))),
         (
             "base_rule",
-            json!(RULE.replacen("LNDR:1;0;", "LNDR:1;1;", 1)),
+            json!(RULE.replacen("LNDR:2;0;", "LNDR:2;1;", 1)),
         ),
     ] {
         let mut changed = saved.clone();
@@ -99,8 +99,8 @@ fn native_rule_bytes_are_canonical_bounded_and_exactly_reconstructable() {
     }
     for bad in [
         RULE.to_owned() + ";",
-        RULE.replacen("LNDR:1;", "LNDR:2;", 1),
-        RULE.replacen("LNDR:1;0;", "LNDR:1;00;", 1),
+        RULE.replacen("LNDR:2;", "LNDR:3;", 1),
+        RULE.replacen("LNDR:2;0;", "LNDR:2;00;", 1),
         RULE.replacen("0000000000000000", "8000000000000000", 1),
         RULE.replacen("0000000000000000", "7ff0000000000000", 1),
         RULE.replacen("0000000000000000", "7ff8000000000000", 1),
@@ -112,10 +112,56 @@ fn native_rule_bytes_are_canonical_bounded_and_exactly_reconstructable() {
         RULE.replacen(";;0;0;", ";;4294967296;0;", 1),
         RULE.replacen(";;0;0;", ";;0;65536;", 1),
         RULE.replacen(";;", &format!(";{};", "a".repeat(8194)), 1),
-        "x".repeat(12 * 1024 + 1),
+        "x".repeat(20 * 1024 + 1),
     ] {
         assert!(rule(&bad).is_err());
     }
+}
+
+#[test]
+fn selector_lineage_is_bounded_canonical_and_required_for_new_preimages() {
+    let with_selector = |selector: &str| format!("{}{selector};", &RULE[..RULE.len() - 1]);
+    // Same byte representation as the native codec: arbitrary selector bytes
+    // are comparison data, never parsed as a command or reapplied as a rule.
+    for selector in [
+        String::new(),
+        "646573633a44502d31".into(),
+        "ff00".into(),
+        "61".repeat(4096),
+    ] {
+        assert!(rule(&with_selector(&selector)).is_ok());
+    }
+    for selector in [
+        "0".into(),
+        "GG".into(),
+        "AA".into(),
+        "61;62".into(),
+        "61".repeat(4097),
+    ] {
+        assert!(rule(&with_selector(&selector)).is_err());
+    }
+    let legacy = RULE[..RULE.len() - 1].replacen("LNDR:2;", "LNDR:1;", 1);
+    assert!(validate_rule(&legacy, true).is_ok());
+    assert!(rule(&legacy).is_err());
+    // A version-1 label cannot carry a version-2 selector or an alternate tail.
+    assert!(validate_rule(&RULE.replacen("LNDR:2;", "LNDR:1;", 1), true).is_err());
+    assert!(validate_rule(&(legacy + "garbage"), true).is_err());
+    let (mut saved, mut native) = inputs();
+    saved["heads"][0]["base_rule"] = json!(with_selector("646573633a44502d31"));
+    assert!(!accepts(&saved, &native)); // Same geometry cannot substitute lineage.
+    native["heads"][0]["base_rule_digest"] = json!(
+        ComponentDigest::from_bytes(
+            Sha256::digest(
+                saved["heads"][0]["base_rule"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .as_bytes()
+            )
+            .into()
+        )
+        .to_hex()
+    );
+    assert!(accepts(&saved, &native));
 }
 
 #[test]
@@ -228,6 +274,35 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         ]
     );
     assert_eq!(fields[18], sample.recovery_preimage);
+    // Previously persisted owned-field records remain readable as history;
+    // lacking selector lineage never becomes a new reservation or permission.
+    let legacy_rule = RULE[..RULE.len() - 1].replacen("LNDR:2;", "LNDR:1;", 1);
+    let mut legacy_preimage = saved.clone();
+    legacy_preimage["heads"][0]["base_rule"] = json!(legacy_rule);
+    let legacy_preimage = legacy_preimage.to_string();
+    let mut legacy_fields = fields.clone();
+    legacy_fields[18] = &legacy_preimage;
+    let mut legacy_bytes = Vec::new();
+    for field in legacy_fields {
+        legacy_bytes.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        legacy_bytes.extend_from_slice(field.as_bytes());
+    }
+    assert!(
+        NativeDisplayRecoveryCheckpoint::validate_stored(&legacy_bytes, &binding.dispatch_digest)
+            .is_ok()
+    );
+    assert!(
+        NativeDisplayRecoveryCheckpoint::reservation_at(
+            &legacy_bytes,
+            &binding.dispatch_digest,
+            100,
+            101,
+            10_000,
+            sample.boot.as_str()
+        )
+        .is_err()
+    );
+    assert_eq!(fields[18], sample.recovery_preimage); // No implicit migration.
     for index in 1..19 {
         let mut changed = fields.clone();
         changed[index] = "unsupported-or-substituted";

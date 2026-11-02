@@ -108,7 +108,7 @@ TEST(LinuraDisplayPinnedRule, RestorationResumesAutomaticRulesAndRetainsUnrelate
     current.m_vrr = 1;
     current.m_sdrBrightness = 1.1F;
     auto restored = checkpoint.restoration({baseline}, {{10, current}}, identities,
-                                           sameOwnedDisplayFields<Config::CMonitorRule>);
+                                           sameRecoveryRule<Config::CMonitorRule>);
     ASSERT_TRUE(restored);
     EXPECT_TRUE(restored->empty()); // Empty ownership resumes the live native rule.
     EXPECT_EQ(current.m_autoDir, before.m_autoDir);
@@ -118,12 +118,12 @@ TEST(LinuraDisplayPinnedRule, RestorationResumesAutomaticRulesAndRetainsUnrelate
     EXPECT_NE(current.m_iccFile, before.m_iccFile);
     EXPECT_NE(current.m_vrr, before.m_vrr);
     EXPECT_TRUE(checkpoint.restored(*restored, {{10, current}}, identities,
-                                    sameOwnedDisplayFields<Config::CMonitorRule>));
+                                    sameRecoveryRule<Config::CMonitorRule>));
     Checkpoint priorOwned;
     const Checkpoint::Overlay previous{{10, baseline}};
     ASSERT_TRUE(priorOwned.capture(previous, {{10, before}}, {baseline}, identities));
     restored = priorOwned.restoration({baseline}, {{10, current}}, identities,
-                                      sameOwnedDisplayFields<Config::CMonitorRule>);
+                                      sameRecoveryRule<Config::CMonitorRule>);
     ASSERT_TRUE(restored);
     EXPECT_EQ(*restored, previous);
     const auto effective = overlayDisplayFields(current, restored->at(10), "");
@@ -138,9 +138,12 @@ TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestor
     const Checkpoint::Identities identities{{10, baseline.output}};
     Checkpoint checkpoint;
     ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}, identities));
-    for (int field = 0; field != 25; ++field) {
+    for (int field = 0; field != 26; ++field) {
         auto changed = before;
         switch (field) {
+        case 25:
+            changed.m_name = "different resolved selector";
+            break;
         case 0:
             changed.m_disabled = true;
             break;
@@ -218,7 +221,7 @@ TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestor
             break;
         }
         EXPECT_FALSE(checkpoint.restoration({baseline}, {{10, changed}}, identities,
-                                            sameOwnedDisplayFields<Config::CMonitorRule>))
+                                            sameRecoveryRule<Config::CMonitorRule>))
             << field;
         EXPECT_NE(RecoveryWitness::rule(before), RecoveryWitness::rule(changed)) << field;
     }
@@ -232,18 +235,20 @@ TEST(LinuraDisplayPinnedRule, RecoveryWitnessPreservesAutomaticSemanticsAndExclu
     const auto recovered = RecoveryRule::decode(*encoded);
     ASSERT_TRUE(recovered);
     auto live = before;
-    live.m_name = "new live selector";
+    live.m_name = before.m_name;
     live.m_iccFile = "new live profile";
     live.m_vrr = 1;
     live.m_scale = 1.F;
     const auto merged = recovered->mergeOwnedFields(live);
-    EXPECT_TRUE(sameOwnedDisplayFields(merged, before));
-    unmanagedFieldsEqual(merged, live);
-    EXPECT_EQ(RecoveryWitness::rule(merged), encoded);
+    ASSERT_TRUE(merged);
+    EXPECT_TRUE(sameOwnedDisplayFields(*merged, before));
+    unmanagedFieldsEqual(*merged, live);
+    EXPECT_EQ(RecoveryWitness::rule(*merged), encoded);
+    live.m_name = "new live selector";
+    EXPECT_FALSE(recovered->mergeOwnedFields(live));
     EXPECT_EQ(encoded, RecoveryWitness::rule(before));
-    EXPECT_TRUE(encoded->starts_with("LNDR:1;"));
+    EXPECT_TRUE(encoded->starts_with("LNDR:2;"));
     auto changed = before;
-    changed.m_name = "changed selector";
     changed.m_enable10bit = false;
     changed.m_cmType = NCMType::CM_SRGB;
     changed.m_sdrSaturation = 0.9F;
@@ -256,6 +261,11 @@ TEST(LinuraDisplayPinnedRule, RecoveryWitnessPreservesAutomaticSemanticsAndExclu
     changed.m_vrr = 1;
     EXPECT_TRUE(sameOwnedDisplayFields(before, changed));
     EXPECT_EQ(encoded, RecoveryWitness::rule(changed));
+    changed.m_name = "changed selector";
+    EXPECT_TRUE(sameOwnedDisplayFields(before, changed));
+    EXPECT_FALSE(sameRecoveryRule(before, changed));
+    EXPECT_NE(encoded, RecoveryWitness::rule(changed));
+    changed = before;
     changed.m_scale = 1.F;
     EXPECT_NE(encoded, RecoveryWitness::rule(changed));
 }

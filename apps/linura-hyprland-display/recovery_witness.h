@@ -44,8 +44,9 @@ inline void integer(std::string &out, std::uint64_t value)
     out += ';';
 }
 
-// Historical comparison material only. It contains no selectors to execute,
-// commands, object pointers, policy or permission. Native ownership can resume
+// Historical comparison material only. The resolved selector is comparison
+// data, never a selector to execute, a command, object pointer or permission.
+// Native ownership can resume
 // only after independent scope/continuity checks and canonical Control recovery.
 // Keep every field in sameOwnedDisplayFields, including automatic placement,
 // scaling and custom modelines; omit all unrelated live monitor settings.

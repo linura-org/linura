@@ -119,6 +119,13 @@ template <typename Rule> [[nodiscard]] bool sameOwnedDisplayFields(const Rule &a
            std::equal(std::begin(x.name), std::end(x.name), std::begin(y.name));
 }
 
+// A rule selector is lineage, not a display field Linura may rewrite. Equal
+// geometry is insufficient when a different live rule now owns that geometry.
+template <typename Rule> [[nodiscard]] bool sameRecoveryRule(const Rule &a, const Rule &b)
+{
+    return a.m_name == b.m_name && sameOwnedDisplayFields(a, b);
+}
+
 // Instantiated against Config::CMonitorRule by the pinned native build. Keep the
 // original rule and its selector/precedence; merge only explicitly owned display
 // fields after upstream config and wlr overrides. Color, ICC, VRR, reservations,

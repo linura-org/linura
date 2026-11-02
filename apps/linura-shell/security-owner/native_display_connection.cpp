@@ -290,7 +290,7 @@ class NativeDisplayConnection::Impl final
     {
         auto &head = *static_cast<Head *>(data);
         callback(*head.owner, [&] {
-            const auto base = witness(baseRule, "LNDR:1;", 12 * 1024);
+            const auto base = witness(baseRule, "LNDR:2;", HyprlandDisplay::RecoveryRule::MaxBytes);
             const auto native = witness(identity, "LNDF:2;", 16 * 1024);
             const auto kernel = native ? kernelBinding(*native) : std::nullopt;
             const auto overlay = owned == 1 ? witness(target, "LNOT:1;", 512)

@@ -251,7 +251,7 @@ class PinnedBackend final : public Backend
         const auto identities = identitiesFor(*fresh);
         auto prior = rules && identities
                          ? checkpoint.restoration(targets, *rules, *identities,
-                                                  sameOwnedDisplayFields<Config::CMonitorRule>)
+                                                  sameRecoveryRule<Config::CMonitorRule>)
                          : std::nullopt;
         if (!prior)
             return false; // Changed native layout rules cannot be silently overwritten.
@@ -279,7 +279,7 @@ class PinnedBackend final : public Backend
             roots->securityEpoch != expected.securityEpoch ||
             !hasDesiredPoweredRoot(targets, *roots) || !currentRules || !currentIdentities ||
             !checkpoint.restoration(targets, *currentRules, *currentIdentities,
-                                    sameOwnedDisplayFields<Config::CMonitorRule>))
+                                    sameRecoveryRule<Config::CMonitorRule>))
             return false;
         overlay = std::move(*prior);
         Config::monitorRuleMgr()->ensureMonitorStatus();
@@ -301,7 +301,7 @@ class PinnedBackend final : public Backend
         const auto rules = baseRules();
         return rules && identities &&
                checkpoint.restored(overlay, *rules, *identities,
-                                   sameOwnedDisplayFields<Config::CMonitorRule>);
+                                   sameRecoveryRule<Config::CMonitorRule>);
     }
     [[nodiscard]] PHLMONITOR monitorFor(OutputKey key) const
     {
@@ -372,13 +372,10 @@ class PinnedBackend final : public Backend
     }
     static bool sameCurrent(const Snapshot &left, const Snapshot &right)
     {
-        return left.coverage == right.coverage && left.heads.size() == right.heads.size() &&
-               std::equal(left.heads.begin(), left.heads.end(), right.heads.begin(),
-                          [](const Head &a, const Head &b) {
-                              return a.key == b.key && a.current == b.current &&
-                                     a.modes == b.modes && a.powered == b.powered &&
-                                     a.covered == b.covered;
-                          });
+        // Include original rule lineage, ownership and native identity witnesses.
+        // A config/ownership change with equal geometry still invalidates the
+        // prepared preimage; unrelated live settings are absent from witnesses.
+        return left.coverage == right.coverage && left.heads == right.heads;
     }
     static bool hasDesiredPoweredRoot(const Layout &targets, const Snapshot &sample)
     {

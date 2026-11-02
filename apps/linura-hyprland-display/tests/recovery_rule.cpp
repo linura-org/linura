@@ -32,13 +32,13 @@ struct Rule final
     std::uint32_t m_transform = 0;
     std::string m_mirrorOf;
     Mode m_drmMode;
-    std::string m_name = "live selector", m_iccFile = "live profile";
+    std::string m_name = "", m_iccFile = "live profile";
     int m_vrr = 2;
 };
-const std::string Golden = "LNDR:1;0;0000000000000000;0000000000000000;404e000000000000;"
+const std::string Golden = "LNDR:2;0;0000000000000000;0000000000000000;404e000000000000;"
                            "0000000000000000;0000000000000000;bff0000000000000;0;0;;"
                            "0;0;0;0;0;0;0;0;0;0;0;0;0;0;"
-                           "0000000000000000000000000000000000000000000000000000000000000000;";
+                           "0000000000000000000000000000000000000000000000000000000000000000;;";
 
 std::string replaced(std::string text, std::size_t field, const std::string &value)
 {
@@ -52,7 +52,7 @@ void malformed()
 {
     for (std::size_t size = 0; size < Golden.size(); ++size)
         assert(!RecoveryRule::decode(std::string_view(Golden).substr(0, size)));
-    for (const auto &text : {"", "LNDR:2;", "LNDR:01;", "LNDR:1;", "LNDR:1;0;"})
+    for (const auto &text : {"", "LNDR:2;", "LNDR:01;", "LNDR:2;", "LNDR:2;0;"})
         assert(!RecoveryRule::decode(text));
     for (const auto &suffix : {";", "0;", "\n", "garbage"})
         assert(!RecoveryRule::decode(Golden + suffix));
@@ -78,6 +78,13 @@ void malformed()
     }
     assert(!RecoveryRule::decode(replaced(Golden, 24, std::string(62, '0'))));
     assert(!RecoveryRule::decode(replaced(Golden, 24, std::string(66, '0'))));
+    for (const auto &bad : {"0", "GG", "61;62", "-1"})
+        assert(!RecoveryRule::decode(replaced(Golden, 25, bad)));
+    assert(!RecoveryRule::decode(replaced(Golden, 25, std::string(8194, '0'))));
+    auto legacy = Golden;
+    legacy.replace(0, 7, "LNDR:1;");
+    legacy.pop_back(); // Old complete owned-field preimage had no selector.
+    assert(!RecoveryRule::decode(legacy));
     assert(!RecoveryRule::decode(std::string(RecoveryRule::MaxBytes + 1, '0')));
 }
 void roundTrip()
@@ -96,6 +103,7 @@ void roundTrip()
             original.m_disabled = direction % 2 == 0;
             original.m_autoDir = static_cast<std::uint8_t>(direction);
             original.m_transform = transform;
+            original.m_name = "desc:original;selector";
             original.m_mirrorOf = std::string("desc:original;mirror\0bytes", 26);
             original.m_drmMode.clock = std::numeric_limits<std::uint32_t>::max();
             original.m_drmMode.hdisplay = std::numeric_limits<std::uint16_t>::max();
@@ -105,22 +113,29 @@ void roundTrip()
             const auto restored = RecoveryRule::decode(saved->encode());
             assert(restored && restored->encode() == saved->encode());
             Rule current;
-            current.m_name = "new selector";
+            current.m_name = original.m_name;
             current.m_iccFile = "new profile";
             current.m_vrr = 1;
             const auto merged = restored->mergeOwnedFields(current);
-            const auto after = RecoveryRule::capture(merged);
+            assert(merged);
+            const auto after = RecoveryRule::capture(*merged);
             assert(after && after->encode() == saved->encode());
-            assert(merged.m_name == current.m_name && merged.m_iccFile == current.m_iccFile &&
-                   merged.m_vrr == current.m_vrr);
+            assert(merged->m_name == current.m_name && merged->m_iccFile == current.m_iccFile &&
+                   merged->m_vrr == current.m_vrr);
+            current.m_name += "different selector";
+            assert(!restored->mergeOwnedFields(current));
             assert(current.m_resolution.x == 0); // Merge never mutates its input.
         }
     Rule bounded;
     bounded.m_mirrorOf = std::string(4096, 'x');
+    bounded.m_name = std::string(4096, 's');
     const auto max = RecoveryRule::capture(bounded);
     assert(max && max->encode().size() <= RecoveryRule::MaxBytes);
     assert(RecoveryRule::decode(max->encode()));
     bounded.m_mirrorOf += 'x';
+    assert(!RecoveryRule::capture(bounded));
+    bounded = Rule{};
+    bounded.m_name = std::string(4097, 's');
     assert(!RecoveryRule::capture(bounded));
     bounded = Rule{};
     bounded.m_scale = std::numeric_limits<float>::quiet_NaN();
