@@ -17,6 +17,14 @@ struct NativeBuildIdentity final
     std::string compositorInstance, upstreamCommit, integrationDigest;
 };
 
+struct NativeStartupPort final
+{
+    std::function<unsigned()> phase;
+    // Takes ownership only on success; all callers are independently admitted
+    // protected-owner processes, never ordinary Wayland clients.
+    std::function<bool(int, bool, std::uint32_t)> admit;
+};
+
 // Adapter-private Wayland mechanism. Its native session scoping and ownership
 // checks do not authorize a Linura operation. Linura's sole production caller
 // remains the protected owner reached through prepared executor admission.
@@ -29,7 +37,7 @@ class WireEndpoint final
     // Each effect requires a fresh root-supervised invocation attestation.
     using AdmitOwner = std::function<std::optional<OwnerInvocation>(pid_t, uid_t)>;
     WireEndpoint(wl_display &, Backend &, CompositorDisplayService &, NativeBuildIdentity,
-                 OutputName, AdmitOwner);
+                 OutputName, AdmitOwner, NativeStartupPort);
     ~WireEndpoint();
     WireEndpoint(const WireEndpoint &) = delete;
     WireEndpoint &operator=(const WireEndpoint &) = delete;

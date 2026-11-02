@@ -366,6 +366,8 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         / "graphical-session.target.wants/linura-shell.service": "../linura-shell.service",
         profile
         / "airootfs/usr/lib/systemd/system/multi-user.target.wants/linura-authorityd.service": "../linura-authorityd.service",
+        profile
+        / "airootfs/usr/lib/systemd/system/multi-user.target.wants/linura-display-protection.service": "../linura-display-protection.service",
     }
     for link, target in service_links.items():
         link.parent.mkdir(parents=True, exist_ok=True)

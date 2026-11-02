@@ -25,7 +25,8 @@ pub use owner::{
     NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject,
     NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
     NativeDisplayDecisionRequest, NativeDisplayPowerFence, NativeDisplayRecoveryCheckpoint,
-    NativeDisplaySafetyRequest, NativeOwnerIdentity,
+    NativeDisplaySafetyRequest, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
+    NativeOwnerIdentity,
 };
 pub use service::protect_before_native_sleep;
 pub use sleep_gate::NativeSleepEntry;

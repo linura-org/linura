@@ -2,6 +2,7 @@
 #include "linura-protected-display-v1-client-protocol.h"
 #include "wire_scene_fixture.h"
 #include "wire_endpoint.h"
+#include "startup_fence.h"
 #include "linura-display-management-v1-client-protocol.h"
 
 #include <atomic>
@@ -81,8 +82,9 @@ class Harness final
     std::vector<int> connections;
     std::atomic<bool> stop{false};
     std::atomic<unsigned char> admittedInvocation{1};
+    StartupFence startup;
     std::thread server;
-    explicit Harness(int connectionCount = 3)
+    explicit Harness(int connectionCount = 3, bool startupFixture = false)
     {
         assert(display);
         auto *loop = wl_display_get_event_loop(display);
@@ -103,7 +105,15 @@ class Harness final
                 WireEndpoint::OwnerInvocation invocation{};
                 invocation[0] = value;
                 return invocation;
-            });
+            },
+            NativeStartupPort{
+                [this, startupFixture] { return startupFixture ? startup.phase() : 1U; },
+                [this, startupFixture](int fd, bool ordinary, std::uint32_t guardPid) {
+                    // Portable transport fixture only, not root peer/native
+                    // startup evidence. Production separately requires root.
+                    return startupFixture && guardPid == static_cast<std::uint32_t>(getpid()) &&
+                           startup.retain(fd, ordinary);
+                }});
         assert(endpoint->available());
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
             *display,
@@ -154,7 +164,8 @@ struct SnapshotData final
 {
     linura_display_snapshot_v1 *wire = nullptr;
     std::vector<std::unique_ptr<Head>> heads;
-    bool done = false, unavailable = false;
+    bool done = false, unavailable = false, fenced = true;
+    std::uint32_t startupPhase = 99;
 };
 struct Attempt final
 {
@@ -237,11 +248,7 @@ class Client final
             return;
         for (const auto &attempt : attempts)
             linura_display_attempt_v1_destroy(attempt->wire);
-        for (const auto &snapshot : snapshots) {
-            for (const auto &head : snapshot->heads)
-                linura_display_head_v1_destroy(head->wire);
-            linura_display_snapshot_v1_destroy(snapshot->wire);
-        }
+        discardSnapshots();
         for (auto *scene : protections)
             linura_protected_display_interaction_v1_destroy(scene);
         protections.clear();
@@ -256,6 +263,15 @@ class Client final
     void sync()
     {
         assert(wl_display_roundtrip(display) >= 0);
+    }
+    void discardSnapshots()
+    {
+        for (const auto &snapshot : snapshots) {
+            for (const auto &head : snapshot->heads)
+                linura_display_head_v1_destroy(head->wire);
+            linura_display_snapshot_v1_destroy(snapshot->wire);
+        }
+        snapshots.clear();
     }
     SnapshotData &snapshot()
     {
@@ -275,9 +291,14 @@ class Client final
                const char *) {},
             [](void *, linura_display_head_v1 *) {}};
         static const linura_display_snapshot_v1_listener listener{
-            [](void *, linura_display_snapshot_v1 *, const char *, const char *, const char *,
+            [](void *data, linura_display_snapshot_v1 *, const char *, const char *, const char *,
                std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
-               std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) {},
+               std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t fenced,
+               std::uint32_t startup) {
+                auto &sample = *static_cast<SnapshotData *>(data);
+                sample.fenced = fenced != 0;
+                sample.startupPhase = startup;
+            },
             [](void *data, linura_display_snapshot_v1 *, linura_display_head_v1 *wire,
                std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, const char *) {
                 auto head = std::make_unique<Head>();
@@ -542,8 +563,53 @@ void unconsumedOrReusedSceneCannotDispatch()
     assert(reused.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED && server.native.writes == 1);
 }
 } // namespace
+void startupTransferIsOriginalOneUseAndNeverAWrite()
+{
+    for (const bool ordinary : {false, true}) {
+        Harness server(1, true);
+        Client owner(server.connections[0]);
+        const auto &initial = owner.snapshot();
+        assert(initial.done && initial.fenced && initial.startupPhase == 0);
+        owner.discardSnapshots();
+        int lease[2]{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, lease) == 0);
+        linura_display_manager_v1_admit_startup(owner.manager, lease[0], ordinary ? 1U : 0U,
+                                                static_cast<std::uint32_t>(getpid()),
+                                                "a12ae886-0dd7-48de-ab8c-d42dc17e2389");
+        owner.sync();
+        assert(owner.snapshot().startupPhase == 0); // Cannot transfer between invocations.
+        owner.discardSnapshots();
+        linura_display_manager_v1_admit_startup(owner.manager, lease[0], ordinary ? 1U : 0U,
+                                                static_cast<std::uint32_t>(getpid()),
+                                                "74e3ca24-b38b-4b62-9671-ae32dc38fd57");
+        owner.sync();
+        assert(close(lease[0]) == 0); // Receiver owns its independent original reference.
+        const auto &admitted = owner.snapshot();
+        assert(admitted.startupPhase == (ordinary ? 1U : 2U) && admitted.fenced == !ordinary);
+        owner.discardSnapshots();
+        int replacement[2]{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, replacement) == 0);
+        linura_display_manager_v1_admit_startup(owner.manager, replacement[0], 1,
+                                                static_cast<std::uint32_t>(getpid()),
+                                                "74e3ca24-b38b-4b62-9671-ae32dc38fd57");
+        owner.sync();
+        assert(owner.snapshot().startupPhase == (ordinary ? 1U : 2U));
+        owner.discardSnapshots();
+        assert(close(lease[1]) == 0);
+        const auto &lost = owner.snapshot();
+        assert(lost.startupPhase == 3 && lost.fenced);
+        owner.discardSnapshots();
+        linura_display_manager_v1_admit_startup(owner.manager, replacement[0], 1,
+                                                static_cast<std::uint32_t>(getpid()),
+                                                "74e3ca24-b38b-4b62-9671-ae32dc38fd57");
+        owner.sync();
+        assert(owner.snapshot().startupPhase == 3 && server.native.writes == 0);
+        assert(close(replacement[0]) == 0 && close(replacement[1]) == 0);
+    }
+}
 int main()
 {
+    startupTransferIsOriginalOneUseAndNeverAWrite();
     ownershipAndOneUse();
     staleAndCrossSnapshotAreRejected();
     disconnectRetainsIndependentRestoration();

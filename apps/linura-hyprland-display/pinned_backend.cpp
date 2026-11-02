@@ -8,6 +8,7 @@
 #include "native_owner_admission.h"
 #include "native_output_identity.h"
 #include "linura-display-integration-build.h"
+#include "startup_fence.h"
 
 #include "src/Compositor.hpp"
 #include "src/config/ConfigValue.hpp"
@@ -15,6 +16,7 @@
 #include "src/managers/SessionLockManager.hpp"
 #include "src/output/Monitor.hpp"
 #include "src/state/MonitorState.hpp"
+#include "src/render/Renderer.hpp"
 #include "src/version.h"
 
 #include <algorithm>
@@ -25,11 +27,15 @@
 #include <set>
 #include <string_view>
 #include <sys/random.h>
+#include <sys/socket.h>
+#include <wayland-server-core.h>
 
 namespace Linura::HyprlandDisplay {
 static_assert(std::string_view(GIT_COMMIT_HASH) == UpstreamCommit,
               "Linura display integration requires the exact qualified Hyprland source");
 namespace {
+StartupFence startupFence;
+wl_event_source *startupEvents = nullptr;
 std::optional<std::int32_t> integer(double value, std::int32_t minimum, std::int32_t maximum)
 {
     if (!std::isfinite(value) || value < minimum || value > maximum || value != std::round(value))
@@ -464,19 +470,60 @@ void initialize(wl_display &display, wl_event_loop &loop)
     endpoint = std::make_unique<WireEndpoint>(
         display, *backend, *service,
         NativeBuildIdentity{backend->instance, UpstreamCommit, IntegrationSourceDigest},
-        nativeOutputName, attestDisplayOwner);
+        nativeOutputName, attestDisplayOwner,
+        NativeStartupPort{
+            [] { return startupFence.phase(); },
+            [](int descriptor, bool ordinary, std::uint32_t guardPid) {
+                ucred peer{};
+                socklen_t size = sizeof(peer);
+                if (getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &peer, &size) != 0 ||
+                    size != sizeof(peer) || peer.uid != 0 || peer.pid <= 0 ||
+                    static_cast<std::uint32_t>(peer.pid) != guardPid ||
+                    !startupFence.retain(descriptor, ordinary))
+                    return false;
+                startupEvents = wl_event_loop_add_fd(
+                    g_pCompositor->m_wlEventLoop, descriptor, WL_EVENT_READABLE,
+                    [](int, uint32_t, void *) {
+                        startupFence.invalidate();
+                        startupAdmissionChanged();
+                        if (startupEvents) {
+                            auto *source = startupEvents;
+                            startupEvents = nullptr;
+                            wl_event_source_remove(source);
+                        }
+                        if (g_pHyprRenderer && State::monitorState())
+                            for (const auto &monitor : State::monitorState()->allMonitors())
+                                if (monitor)
+                                    g_pHyprRenderer->damageMonitor(monitor);
+                        return 0;
+                    },
+                    nullptr);
+                if (!startupEvents)
+                    startupFence.invalidate();
+                startupAdmissionChanged();
+                return true; // Ownership transferred, even if event setup failed.
+            }});
     initializeProtectedDisplay(display);
 }
 void shutdown()
 {
+    startupFence.invalidate();
+    if (startupEvents) {
+        wl_event_source_remove(startupEvents);
+        startupEvents = nullptr;
+    }
     endpoint.reset();
     service.reset(); // Compensation while monitor/rule/lock/protection still exist.
     shutdownProtectedDisplay();
     backend.reset();
 }
+bool startupBlocked()
+{
+    return !startupFence.ordinaryAllowed();
+}
 bool lockReleased()
 {
-    if (!backend || !service || service->fenced())
+    if (!backend || !service || service->fenced() || startupBlocked())
         return false;
     if (backend->securityEpoch >= std::numeric_limits<std::uint64_t>::max() - 1) {
         backend->supported = false;
@@ -493,6 +540,10 @@ void commitObserved(Monitor::CMonitor *, bool success)
 bool ownedModesetInProgress()
 {
     return backend && backend->writing && backend->powerInhibitor.held();
+}
+bool ordinaryCommitAllowed()
+{
+    return !protectedDisplayActive() && ownedCommitAllowed();
 }
 bool ownedCommitAllowed()
 {

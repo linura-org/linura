@@ -17,6 +17,7 @@ class SecretEntry;
 struct NativeDisplayCorrelation;
 struct NativeDisplayDecision;
 struct NativeDisplayIntent;
+struct NativePinnedDisplaySample;
 
 // Owns its exclusive actual Wayland connection. The private runtime factory must
 // attest this SAME connection/session and secure-exec protection before binding
@@ -58,6 +59,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
     [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
     [[nodiscard]] bool displayAllowsSecurityTransition();
+    [[nodiscard]] std::optional<NativePinnedDisplaySample> displayStartupSample();
+    [[nodiscard]] bool displayStartupRequired() const noexcept;
+    [[nodiscard]] bool admitDisplayStartup(int lease, bool ordinaryAllowed, quint32 guardPid,
+                                           const QString &compositorInstance);
     // Original owned/attested connection; this sends get_status only. It never
     // configures, confirms, restores or acquires continuation rights.
     [[nodiscard]] std::optional<quint32> observeDisplayAttempt(const NativeDisplayCorrelation &);

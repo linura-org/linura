@@ -4,7 +4,7 @@ mod display;
 pub use display::{
     NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
     NativeDisplayDecisionRequest, NativeDisplayPowerFence, NativeDisplayRecoveryCheckpoint,
-    NativeDisplaySafetyRequest,
+    NativeDisplaySafetyRequest, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
 };
 mod polkit;
 mod sleep_fence;

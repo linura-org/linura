@@ -26,6 +26,11 @@ void ProtectedInputRetirement::close(bool freshPhysicalExit, Held held) noexcept
                  : Phase::Quarantined;
     escapeReleased_ = !held.escape;
 }
+void ProtectedInputRetirement::drainStartup(Held held) noexcept
+{
+    if (phase_ == Phase::Open && (held.any || held.escape || held.other))
+        phase_ = Phase::Draining;
+}
 bool ProtectedInputRetirement::key(bool physical, bool escape, bool pressed, Held held) noexcept
 {
     if (phase_ == Phase::Open)

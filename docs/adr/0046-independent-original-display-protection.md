@@ -24,8 +24,8 @@ It has no display-write, session-lock, power-transition or approval endpoint.
 This is not a privileged recovery coordinator: Control retains all planning,
 policy, prepare, revalidation, verification, durable phase and retirement work.
 
-The private Experimental `DisplayProtection1` interface has exactly three
-mechanisms. `Begin` opens the original bounded kernel subscription before native
+The private Experimental `DisplayProtection1` interface has four
+bounded mechanisms. `Begin` opens the original bounded kernel subscription before native
 sampling. `Reserve` consumes that subscription once, within its original two
 seconds and in the same authenticated executor invocation. It validates the
 historical binding and native preimage, compares the original sample clock with
@@ -34,13 +34,58 @@ the original preimage before returning. `Verify` revalidates the retained
 original objects and exact stored bytes. A dispatch digest is only correlation,
 never caller authentication or an executor permit.
 
-The system bus denies ordinary callers. Every method independently authenticates
-the current supervised executor before and after the mechanism. Root UID alone
+The system bus denies ordinary callers for the original-witness methods. Each
+of those methods independently authenticates the current supervised executor
+before and after the mechanism. The separately bounded `NativeStartup` entry
+requires the current supervised protected owner and independently bound login. Root UID alone
 is insufficient. The executor authenticates the protection service before and
 after each bounded call. Lost replies are not retried. Pending subscriptions are
 bounded to 32 and expire only before dispatch; retained protections are bounded
 to 256 and have no automatic TTL or cleanup. Native confirmation deadlines and
 freshness limits do not widen across this extra process boundary.
+
+### Serialized native startup admission
+
+`NativeStartup` accepts only the current root-supervised protected owner, not an
+ordinary same-UID caller or arbitrary root process. It uses supervisor properties
+without calling the owner's not-yet-registered endpoint. The owner independently
+attests its actual Wayland peer, the installed immutable executing compositor
+image and the compiled native integration identity. Protection independently
+checks the caller's kernel credentials, exact owner invocation, boot, active
+local Wayland login leader, session creation epoch and seat twice. Its retained
+pidfd rejects a live overlapping invocation in that login and compositor UUID
+reuse; independent logins keep separate leases across normal VT switching.
+
+One admission mutex serializes startup publication with original subscription
+creation, consumption and checkpoint publication. A descriptor-relative locked
+history scan never caches an empty result. Pending original probes or any retained
+or unknown history keep startup recovery-fenced. Until qualified terminal
+retirement exists, history fencing is deliberately conservative across logins.
+The service retains at most 64 startup leases, with no replacement or implicit
+cleanup. Only one startup authentication worker may run; dropping an RPC future
+does not release its worker slot early or create an unbounded admission queue.
+
+The same authenticated protected owner transfers the original root-created Unix
+socket through the private native protocol. Native admission compares the exact
+compositor invocation and the socket's kernel root/PID peer with the attested
+service. This descriptor is a presentation lease, never a credential, executor
+permit or restoration grant. Startup defaults to opaque output and blocked
+ordinary input before initialization of the backend or first frame. Every startup
+submission initializes the actual scanout buffer opaque; unavailable rendering
+refuses a commit. Normal rendering, direct scanout, late callbacks, hardware
+cursors, focus and all ordinary input paths retain the fence. Admission drains
+suppressed physical keys/buttons before ordinary focus; it cannot clear private
+or quarantined protected-input state.
+
+The lease is installed once. Unexpected bytes, EOF, loss, an invalid descriptor
+or failed event registration remain fenced for the invocation; reconnecting to a
+new service cannot repair it. Native lease-loss events clear focus, suppress
+cursors and damage outputs. Native Apply and Keep refuse startup-fenced/lost
+state; original in-process safety compensation remains bounded by its retained
+checkpoint. Native snapshots expose startup phase privately and consistently
+with the existing fence. No startup operation acquires/releases S17 lock state,
+reopens original recovery witnesses, changes output rules, renews an old display
+confirmation deadline or admits a restoration effect.
 
 The service's lifetime does not depend on the executor. Restarting the executor
 does not restart protection. Protection service death, logind replacement, boot
@@ -80,7 +125,8 @@ ordinary/root denial and independent service-invocation survival across executor
 restart, with exact contract, policy and unit artifact bindings. That lane does
 not acquire a real DRM witness or qualify display recovery.
 
-Serialized replacement startup fencing, canonical purpose-bound single-use
+The startup mechanism has component coverage, not accepted native first-frame
+or compositor-crash qualification. Canonical purpose-bound single-use
 restoration, native rule/overlay reconstruction, independent terminal evidence,
 retirement and the real S21-2 multi-output crash matrix remain required before
 public mutation activation. This decision does not replace those requirements.

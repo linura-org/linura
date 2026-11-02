@@ -360,3 +360,31 @@ fn retained_preimage_reads_are_private_exact_locked_and_non_creating() {
     assert!(!fixture.name(1).exists());
     assert!(fixture.name(2).exists());
 }
+
+#[test]
+fn startup_never_ignores_retained_unknown_or_busy_history() {
+    let fixture = Fixture::new();
+    assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(true));
+    assert!(startup_clear_at(&fixture.fd, fixture.uid + 1).is_err());
+    let writer = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    fs::flock(&writer, FlockOperation::NonBlockingLockExclusive)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(startup_clear_at(&fixture.fd, fixture.uid).is_err());
+    fs::flock(&writer, FlockOperation::Unlock).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(fixture.reserve(1, b"historical original").is_ok());
+    assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+    std::fs::write(fixture.name(1), b"torn private record").unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+    std::fs::rename(fixture.name(1), fixture.path.join("unknown-history"))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+    assert_eq!(
+        std::fs::read(fixture.path.join("unknown-history")).unwrap_or_else(|e| unreachable!("{e}")),
+        b"torn private record"
+    );
+}

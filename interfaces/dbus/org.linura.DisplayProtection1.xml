@@ -5,6 +5,14 @@
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
     <!-- Private bounded original-witness mechanisms; no effect or recovery authority. -->
+    <method name="NativeStartup">
+      <!-- Only the freshly attested, independently supervised native owner.
+           Tuple: original lock/login, native PID, seat, compositor invocation,
+           integration digest, installed native image digest. No principal input. -->
+      <arg name="request" type="(sussss)" direction="in"/>
+      <arg name="lease" type="h" direction="out"/>
+      <arg name="ordinary_allowed" type="b" direction="out"/>
+    </method>
     <method name="Begin">
       <arg name="dispatch_digest" type="s" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>

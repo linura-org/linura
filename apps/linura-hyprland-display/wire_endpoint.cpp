@@ -157,6 +157,7 @@ class WireEndpoint::Impl final
     NativeBuildIdentity identity;
     OutputName outputName;
     AdmitOwner admitOwner;
+    NativeStartupPort startup;
     wl_global *global = nullptr;
     std::map<wl_client *, std::shared_ptr<Client>> clients;
     std::set<wl_resource *> resources;
@@ -174,14 +175,17 @@ class WireEndpoint::Impl final
     }
 
     Impl(wl_display &display, Backend &native, CompositorDisplayService &attempts,
-         NativeBuildIdentity build, OutputName names, AdmitOwner admission)
+         NativeBuildIdentity build, OutputName names, AdmitOwner admission,
+         NativeStartupPort startupPort)
         : backend(native), service(attempts), identity(std::move(build)),
-          outputName(std::move(names)), admitOwner(std::move(admission))
+          outputName(std::move(names)), admitOwner(std::move(admission)),
+          startup(std::move(startupPort))
     {
         if (getuid() == 0 || getuid() != geteuid() || identity.compositorInstance.size() != 36 ||
             identity.upstreamCommit.size() != 40 || identity.integrationDigest.size() != 64 ||
             !scalar(identity.upstreamCommit.c_str(), 40, true) ||
-            !scalar(identity.integrationDigest.c_str(), 64, true) || !outputName || !admitOwner)
+            !scalar(identity.integrationDigest.c_str(), 64, true) || !outputName || !admitOwner ||
+            !startup.phase || !startup.admit)
             return;
         global = wl_global_create(&display, &linura_display_manager_v1_interface, 1, this, bind);
     }
@@ -315,13 +319,14 @@ class WireEndpoint::Impl final
                 return;
             }
             result->captured = std::make_shared<Captured>(manager.client, *sample, *at);
+            const auto startupPhase = self.startup.phase();
             linura_display_snapshot_v1_send_identity(
                 result->native, self.identity.compositorInstance.c_str(),
                 self.identity.upstreamCommit.c_str(), self.identity.integrationDigest.c_str(),
                 high(sample->generation), low(sample->generation), high(sample->securityEpoch),
                 low(sample->securityEpoch), high(at->unixMs), low(at->unixMs), high(at->bootMs),
                 low(at->bootMs), static_cast<std::uint32_t>(sample->coverage),
-                self.service.fenced() ? 1U : 0U);
+                self.service.fenced() || startupPhase != 1 ? 1U : 0U, startupPhase);
             for (std::size_t i = 0; i < sample->heads.size(); ++i) {
                 const auto &head = sample->heads[i];
                 const auto name = self.outputName(head.key);
@@ -455,8 +460,8 @@ class WireEndpoint::Impl final
     static void apply(wl_client *client, wl_resource *resource, wl_resource *protection)
     {
         auto &attempt = object<Attempt>(resource);
-        if (attempt.used || attempt.invalid || !attempt.captured ||
-            attempt.owner.origins.contains(attempt.bound.transaction)) {
+        if (attempt.used || attempt.invalid || attempt.owner.startup.phase() != 1 ||
+            !attempt.captured || attempt.owner.origins.contains(attempt.bound.transaction)) {
             attempt.deny();
             return;
         }
@@ -507,7 +512,7 @@ class WireEndpoint::Impl final
     static void confirm(wl_client *, wl_resource *resource)
     {
         auto &attempt = object<Attempt>(resource);
-        if (attempt.invalid || !attempt.original()) {
+        if (attempt.invalid || attempt.owner.startup.phase() != 1 || !attempt.original()) {
             attempt.deny();
             return;
         }
@@ -528,6 +533,24 @@ class WireEndpoint::Impl final
     {
         object<Attempt>(resource).status();
     }
+    static void admitStartup(wl_client *, wl_resource *resource, int32_t descriptor,
+                             uint32_t ordinary, uint32_t guardPid, const char *instance)
+    {
+        bool transferred = false;
+        try {
+            auto &manager = object<Manager>(resource);
+            auto &self = manager.owner;
+            const auto fresh = self.admitOwner(manager.client->pid, manager.client->uid);
+            if (manager.client->alive && fresh && *fresh == manager.client->invocation &&
+                ordinary <= 1 && guardPid != 0 && instance && strnlen(instance, 37) == 36 &&
+                self.identity.compositorInstance == instance)
+                transferred = self.startup.admit(descriptor, ordinary == 1, guardPid);
+        } catch (...) {
+            // No diagnostics contain private identities. Failure remains fenced.
+        }
+        if (!transferred && descriptor >= 0)
+            close(descriptor);
+    }
     static const struct linura_display_manager_v1_interface managerImplementation;
     static const struct linura_display_snapshot_v1_interface snapshotImplementation;
     static const struct linura_display_head_v1_interface headImplementation;
@@ -535,7 +558,7 @@ class WireEndpoint::Impl final
 };
 const struct linura_display_manager_v1_interface WireEndpoint::Impl::managerImplementation
 {
-    release, snapshot, attempt
+    release, snapshot, attempt, admitStartup
 };
 const struct linura_display_snapshot_v1_interface WireEndpoint::Impl::snapshotImplementation
 {
@@ -551,9 +574,10 @@ const struct linura_display_attempt_v1_interface WireEndpoint::Impl::attemptImpl
 };
 
 WireEndpoint::WireEndpoint(wl_display &display, Backend &backend, CompositorDisplayService &service,
-                           NativeBuildIdentity identity, OutputName names, AdmitOwner admission)
+                           NativeBuildIdentity identity, OutputName names, AdmitOwner admission,
+                           NativeStartupPort startup)
     : impl_(std::make_unique<Impl>(display, backend, service, std::move(identity), std::move(names),
-                                   std::move(admission)))
+                                   std::move(admission), std::move(startup)))
 {}
 WireEndpoint::~WireEndpoint() = default;
 bool WireEndpoint::available() const noexcept

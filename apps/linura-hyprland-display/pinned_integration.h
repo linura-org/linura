@@ -21,11 +21,13 @@ inline constexpr char UpstreamVersion[] = "0.56.2";
 // compositor, not symbol hooks, a generic eval interface or a plugin ABI.
 void initialize(wl_display &, wl_event_loop &);
 void shutdown();
+[[nodiscard]] bool startupBlocked();
 // Atomic compositor-thread admission: a live/failed display reservation cannot
 // lose protected lock state or change its security epoch before restoration.
 [[nodiscard]] bool lockReleased();
 void commitObserved(Monitor::CMonitor *, bool success);
 [[nodiscard]] bool ownedCommitAllowed();
+[[nodiscard]] bool ordinaryCommitAllowed();
 // Comparison with the compositor-thread owned write, never an admission API.
 // Protected buffer initialization must not assist an unrelated IPC modeset.
 [[nodiscard]] bool ownedModesetInProgress();

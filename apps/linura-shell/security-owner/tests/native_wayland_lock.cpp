@@ -967,7 +967,8 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         [](OutputKey key) -> std::optional<std::string> {
             return key == OutputKey{1, 1} ? std::optional<std::string>("DP-1") : std::nullopt;
         },
-        admit);
+        admit,
+        NativeStartupPort{[] { return 1U; }, [](int, bool, std::uint32_t) { return false; }});
     assert(layout->available());
     class Scene final : public ProtectedScene
     {

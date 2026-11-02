@@ -19,6 +19,7 @@ class CMonitor;
 namespace Linura::HyprlandDisplay {
 void initializeProtectedDisplay(wl_display &);
 void shutdownProtectedDisplay();
+void startupAdmissionChanged();
 [[nodiscard]] bool protectedDisplayActive();
 [[nodiscard]] bool protectedInputExclusive();
 // A true result means that the ordinary scene must not be rendered.

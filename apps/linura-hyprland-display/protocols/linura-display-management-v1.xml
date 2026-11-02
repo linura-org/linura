@@ -22,6 +22,17 @@
       <arg name="deadline_unix_hi" type="uint"/>
       <arg name="deadline_unix_lo" type="uint"/>
     </request>
+    <request name="admit_startup">
+      <description summary="retain the original supervised startup lease">
+        Only the freshly admitted protected owner may transfer the root
+        protection service's original descriptor. This cannot restore outputs,
+        change lock state, renew a timer or replace an earlier admission.
+      </description>
+      <arg name="lease" type="fd"/>
+      <arg name="ordinary_allowed" type="uint"/>
+      <arg name="guard_pid" type="uint"/>
+      <arg name="compositor_instance" type="string"/>
+    </request>
   </interface>
   <interface name="linura_display_snapshot_v1" version="1">
     <description summary="one immutable, bounded native sample">
@@ -51,6 +62,8 @@
       <arg name="sampled_boot_lo" type="uint"/>
       <arg name="coverage" type="uint" enum="coverage"/>
       <arg name="fenced" type="uint"/>
+      <!-- 0 unadmitted, 1 ordinary, 2 recovery fenced, 3 lost/invalid -->
+      <arg name="startup_phase" type="uint"/>
     </event>
     <event name="head">
       <arg name="head" type="new_id" interface="linura_display_head_v1"/>

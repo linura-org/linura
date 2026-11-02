@@ -21,6 +21,9 @@ class ProtectedInputRetirement final
     [[nodiscard]] Phase phase() const noexcept;
     [[nodiscard]] bool blocked() const noexcept;
     [[nodiscard]] bool begin(Held) noexcept;
+    // Startup can drain previously suppressed physical edges only from Open.
+    // It never clears a protected/private/quarantined interaction.
+    void drainStartup(Held) noexcept;
     // The pinned adapter supplies a fresh physical exit witness, never a wire
     // boolean. Unknown closure quarantines subsequent typing as well as held keys.
     void close(bool freshPhysicalExit, Held) noexcept;

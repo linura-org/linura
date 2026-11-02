@@ -217,6 +217,20 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         Ok(binding.dispatch_digest)
     );
     assert_eq!(record.kernel_outputs(), &[[226, 0, 1]]);
+    assert_eq!(
+        NativeDisplayRecoveryCheckpoint::original_startup_scope(
+            record.canonical_bytes(),
+            &binding.dispatch_digest
+        )
+        .ok(),
+        Some((
+            linura_core::DisplayLayoutMaterial::decode(&material)
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .topology()
+                .clone(),
+            ComponentDigest::parse_hex(&"a".repeat(64)).unwrap_or_else(|e| unreachable!("{e}"))
+        ))
+    );
 
     let reserve = |subscription, boot_ms, unix_ms, boot| {
         NativeDisplayRecoveryCheckpoint::reservation_at(

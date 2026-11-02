@@ -81,6 +81,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-startup-fence-tests tests/startup_fence.cpp)
+    target_include_directories(linura-hyprland-startup-fence-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(linura-hyprland-startup-fence-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-startup-admission-lifetime COMMAND linura-hyprland-startup-fence-tests)
+    set_tests_properties(hyprland-startup-admission-lifetime PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-recovery-rule-tests tests/recovery_rule.cpp)
     target_include_directories(linura-hyprland-recovery-rule-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(linura-hyprland-recovery-rule-tests PRIVATE

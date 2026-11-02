@@ -207,3 +207,15 @@ accept only `LNDR:2`. The enclosing immutable `LNRJ:1` checkpoint format and
 its dispatch binding are unchanged.
 This codec does not persist a checkpoint, establish kernel continuity or admit
 restoration; the compositor-loss recovery and native acceptance gaps remain.
+
+
+The source integration now defaults to a startup presentation fence. The
+supervised protected owner transfers one original independent-protection socket,
+bound to the actual native invocation, installed image/integration and login/seat.
+Pending or retained recovery history remains opaque with ordinary input blocked.
+Every initial scanout buffer is rendered opaque; ordinary/direct-scanout commits,
+late hooks, cursor and focus/input paths retain the fence. Held native input
+drains before ordinary focus. Lost descriptors and service replacement cannot
+rearm admission. This grants no restoration effect and changes no S17 lock state.
+Portable tests cover the descriptor lifetime, one-use private wire transfer and
+input routing; real native first-frame/crash acceptance is still required.

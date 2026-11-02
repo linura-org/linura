@@ -951,6 +951,8 @@ def _verify_v06(
             "native-display-protection-Verify-ordinary-denied-rc=",
             "native-display-protection-Verify-root-not-executor-denied-rc=",
             "native-display-protection-reserve-root-not-executor-denied-rc=",
+            "native-display-startup-unqualified-ordinary-denied-rc=",
+            "native-display-startup-unqualified-root-denied-rc=",
             "native-session-ordinary-denied-rc=",
             "native-session-root-denied-rc=",
             "native-session-polkit-ordinary-denied-rc=",

@@ -108,6 +108,27 @@ void explicitExitStillDrainsBeforeAnotherConversation()
     input.close(false, {}); // Stale cleanup cannot close an unrelated lifetime.
     assert(input.phase() == Phase::Open);
 }
+void startupDrainsHeldEdgesWithoutClearingProtectedOrQuarantinedInput()
+{
+    ProtectedInputRetirement input;
+    input.drainStartup({});
+    assert(!input.blocked());
+    input.drainStartup({true, false, true});
+    assert(input.phase() == Phase::Draining);
+    assert(!input.begin({}));
+    assert(input.key(false, false, false, {}));
+    assert(input.blocked()); // Virtual releases cannot clear native startup input.
+    assert(input.key(true, false, false, {})); // Final release is consumed.
+    assert(!input.blocked());
+    assert(input.begin({}));
+    input.drainStartup({});
+    assert(input.phase() == Phase::Private);
+    input.close(false, {});
+    assert(input.phase() == Phase::Quarantined);
+    input.drainStartup({});
+    input.drainStartup({true, true, false});
+    assert(input.phase() == Phase::Quarantined);
+}
 } // namespace
 int main()
 {
@@ -115,4 +136,5 @@ int main()
     unexpectedLossDoesNotRouteTheRestOfAResponseToAnOrdinaryClient();
     heldOrVirtualExitCannotMigrateAcrossLoss();
     explicitExitStillDrainsBeforeAnotherConversation();
+    startupDrainsHeldEdgesWithoutClearingProtectedOrQuarantinedInput();
 }

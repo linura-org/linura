@@ -116,7 +116,7 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
     text = replace_exact(
         outputs[monitor],
         "            if (!m_output->commit()) {",
-        "            if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
+        "            if (!Linura::HyprlandDisplay::ordinaryCommitAllowed()) {\n"
         "                Linura::HyprlandDisplay::commitObserved(this, false);\n"
         "                return false;\n            }\n"
         "            if (!m_output->commit()) {",
@@ -124,7 +124,7 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
     outputs[monitor] = replace_exact(
         text,
         "    bool ok = m_output->commit();",
-        "    if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
+        "    if (!Linura::HyprlandDisplay::ordinaryCommitAllowed()) {\n"
         "        Linura::HyprlandDisplay::commitObserved(this, false);\n"
         "        return false;\n    }\n"
         "    bool ok = m_output->commit();",
@@ -143,7 +143,8 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
         text,
         "    bool ret = m_owner->m_output->commit();",
         "    const auto protectedCommit = Linura::HyprlandDisplay::commitProtectedDisplay(m_owner);\n"
-        "    bool ret = protectedCommit ? *protectedCommit : m_owner->m_output->commit();",
+        "    bool ret = protectedCommit ? *protectedCommit :\n"
+        "        (Linura::HyprlandDisplay::ordinaryCommitAllowed() && m_owner->m_output->commit());",
     )
     text = replace_exact(
         text,

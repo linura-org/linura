@@ -30,6 +30,8 @@ pub use decision::NativeDisplayDecisionRequest;
 pub use safety::NativeDisplaySafetyRequest;
 mod power;
 mod preimage;
+mod startup;
+pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
 mod prepared;
 pub use continuation::NativeDisplayContinuation;
 pub use power::NativeDisplayPowerFence;

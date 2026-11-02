@@ -1,4 +1,5 @@
 #include "native_runtime.h"
+#include "native_display_startup.h"
 #include "authentication_agent.h"
 #include "native_deadline.h"
 #include "native_endpoint.h"
@@ -296,6 +297,8 @@ bool NativeRuntime::initialize(NativeStartup startup)
             }) ||
         !impl_->backend->initialize())
         return runtimeUnavailable("linura-security-owner: runtime/protected-input\n");
+    if (!admitNativeDisplayStartup(*impl_->peers, *impl_->binding, *impl_->backend))
+        return runtimeUnavailable("linura-security-owner: runtime/display-startup-fence\n");
     impl_->protocol = std::make_unique<NativeLockProtocol>(*impl_->backend, impl_->binding->lock);
     if (!impl_->protocol->bound())
         return runtimeUnavailable("linura-security-owner: runtime/protocol-identity\n");

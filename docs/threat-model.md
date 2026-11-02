@@ -1245,3 +1245,26 @@ not actual DRM retention or compositor replacement restoration. Original clocks,
 S17 lock ownership and canonical Control prepare/revalidation remain mandatory.
 Startup fencing, one-use restoration, verified terminal release and exact native
 fault qualification remain necessary before public mutation support.
+
+
+### Replacement native startup admission
+
+A new compositor cannot treat an empty-history query as a reusable startup
+permission. The independent protection process serializes original checkpoint
+reservation and native startup publication, retains the actual process pidfd and
+an original root-created socket endpoint, and fences pending/retained/unknown
+history. Fresh root-systemd owner admission and independent active-login/seat
+checks bind the protected owner's actual executing native peer and integration;
+ordinary callers and arbitrary root processes cannot select a startup principal.
+A single worker bounds the newly callable endpoint before blocking attestation.
+
+The native presentation fence exists before the first backend/frame. Initial
+scanout storage is rendered opaque, and unavailable rendering refuses the commit.
+Normal scene composition, direct scanout, late callbacks, hardware cursors and
+all input/focus paths retain checks. Original descriptor loss is permanent;
+unexpected data, failed event setup or another service epoch cannot reopen it.
+Suppressed held native input drains before ordinary focus and cannot clear a
+protected/quarantined conversation. Startup admission cannot restore a display,
+replay intent, reuse an approval, renew Keep/Revert, reacquire original witnesses
+or manipulate S17 lock state. Native multi-output/first-frame/crash evidence
+remains required; portable transport tests cannot supply it.

@@ -273,6 +273,15 @@ impl NativeSessionChannel {
         })
     }
 
+    /// Fixed guard publication only, after registering its complete object on
+    /// the same connection. This grants no client/executor authority.
+    pub fn publish_display_protection(&self) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        self.connection
+            .request_name(DISPLAY_PROTECTION_SERVICE)
+            .map_err(|_| "display protection name publication failed".to_owned())
+    }
+
     /// Concrete adapter composition only: register the service on the SAME
     /// connection that sends native owner calls. Never pass this to core,
     /// Control-domain, policy, agents, public SDKs or QML contexts.
@@ -324,9 +333,9 @@ pub(crate) fn connect_native_bus(role: Option<NativeSessionRole>) -> Result<Conn
                 Some(NativeSessionRole::Executor) => builder
                     .name(EXECUTOR_SERVICE)
                     .map_err(|_| "canonical native executor name is invalid".to_owned())?,
-                Some(NativeSessionRole::DisplayProtection) => builder
-                    .name(DISPLAY_PROTECTION_SERVICE)
-                    .map_err(|_| "canonical display protection name is invalid".to_owned())?,
+                // Type=dbus must not announce readiness before the guard's
+                // complete object is registered on this same connection.
+                Some(NativeSessionRole::DisplayProtection) => builder,
                 None => builder,
             };
             let connection = builder.build().await.map_err(|_| {

@@ -703,6 +703,16 @@ void supervisedPeerBinding()
     other.nativeUid = 0;
     other.fragment = QStringLiteral("/usr/lib/systemd/system/linura-executor-session.service");
     check(bindNativeService(NativePeerPurpose::PreparedSessionDispatch, 999, other).has_value());
+    check(!bindNativeService(NativePeerPurpose::DisplayProtection, 0, other));
+    other.fragment = QStringLiteral("/usr/lib/systemd/system/linura-display-protection.service");
+    check(bindNativeService(NativePeerPurpose::DisplayProtection, 0, other).has_value());
+    check(!bindNativeService(NativePeerPurpose::PreparedSessionDispatch, 999, other));
+    other.nativeUid = 1000;
+    check(!bindNativeService(NativePeerPurpose::DisplayProtection, 0, other));
+    other.nativeUid = 0;
+    other.exactNativeExecStart = false;
+    check(!bindNativeService(NativePeerPurpose::DisplayProtection, 0, other));
+    other.exactNativeExecStart = true;
     other.fragment = QStringLiteral("/usr/lib/systemd/system/polkit.service");
     check(!bindNativeService(NativePeerPurpose::NativeAuthenticationDaemon, 998, other));
     other.nativeUid = 998;

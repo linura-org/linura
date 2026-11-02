@@ -173,7 +173,7 @@ class NativeDisplayConnection::Impl final
                          const char *upstream, const char *integration, uint32_t generationHi,
                          uint32_t generationLo, uint32_t securityHi, uint32_t securityLo,
                          uint32_t unixHi, uint32_t unixLo, uint32_t bootHi, uint32_t bootLo,
-                         uint32_t coverage, uint32_t fenced)
+                         uint32_t coverage, uint32_t fenced, uint32_t startupPhase)
     {
         auto &capture = *static_cast<Capture *>(data);
         callback(capture, [&] {
@@ -181,7 +181,8 @@ class NativeDisplayConnection::Impl final
                 !integration || strnlen(instance, 37) != 36 ||
                 std::strcmp(upstream, Upstream) != 0 ||
                 std::strcmp(integration, HyprlandDisplay::IntegrationSourceDigest) != 0 ||
-                coverage > 3 || fenced > 1) {
+                coverage > 3 || fenced > 1 || startupPhase > 3 ||
+                (startupPhase != 1 && fenced == 0)) {
                 capture.invalid = true;
                 return;
             }
@@ -195,6 +196,7 @@ class NativeDisplayConnection::Impl final
             sample.sampledBootMs = joined(bootHi, bootLo);
             sample.coverage = coverage;
             sample.fenced = fenced != 0;
+            sample.startupPhase = startupPhase;
             capture.identityReceived = true;
             if (uuid.isNull() || uuid.toString(QUuid::WithoutBraces) != compositor ||
                 !validGeneration(sample.topology.generation) ||
@@ -511,6 +513,19 @@ std::optional<NativePinnedDisplaySample> NativeDisplayConnection::sample()
         *boot - capture.sample.sampledBootMs >= 2000)
         return std::nullopt;
     return capture.sample;
+}
+bool NativeDisplayConnection::admitStartup(int lease, bool ordinary, quint32 guardPid,
+                                           const QString &compositor)
+{
+    if (!impl_->healthy || !impl_->manager || lease < 0 || guardPid == 0 || !impl_->capture ||
+        impl_->capture->sample.startupPhase != 0 || compositor != impl_->capture->sample.compositor)
+        return false;
+    linura_display_manager_v1_admit_startup(impl_->manager, lease, ordinary ? 1U : 0U, guardPid,
+                                            compositor.toLatin1().constData());
+    if (!impl_->sync())
+        return false;
+    const auto fresh = sample();
+    return fresh && fresh->compositor == compositor && fresh->startupPhase == (ordinary ? 1U : 2U);
 }
 std::optional<quint32> NativeDisplayConnection::apply(
     const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,

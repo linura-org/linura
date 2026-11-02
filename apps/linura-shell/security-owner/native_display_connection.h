@@ -18,6 +18,7 @@ struct NativePinnedDisplaySample final
     // Protocol enum: unlocked, secure, transitioning, unknown.
     quint32 coverage = 3;
     bool fenced = true;
+    quint32 startupPhase = 3;
 };
 struct NativeDisplayCorrelation final
 {
@@ -55,6 +56,8 @@ class NativeDisplayConnection final
     void removed(quint32 name);
     [[nodiscard]] bool advertised() const noexcept;
     [[nodiscard]] std::optional<NativePinnedDisplaySample> sample();
+    [[nodiscard]] bool admitStartup(int lease, bool ordinaryAllowed, quint32 guardPid,
+                                    const QString &compositorInstance);
     // Fresh read only. S17 may keep its established behavior if this compositor
     // never advertised S21. Once advertised, unknown/replaced/busy state denies
     // release/power admission; a replacement owner cannot ignore a live attempt.

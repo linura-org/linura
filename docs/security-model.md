@@ -210,6 +210,19 @@ handoff. These are historical preimages, not policy, approval or executable
 recovery authority. Replacement continuity, restoration and independent terminal
 verification remain incomplete; public display mutations remain unavailable.
 
+The pinned compositor starts behind a separate presentation fence, before any
+ordinary frame or input. A one-use original descriptor from independent display
+protection can admit ordinary startup only after the supervised protected owner
+and protection service bind the actual native process, installed image, source
+integration, active login epoch and seat. Startup publication shares the original
+checkpoint admission mutex; pending or retained/unknown history keeps it fenced.
+Native rendering/scanout, focus, cursor and input paths enforce that fence, drain
+suppressed held input and permanently refuse a lost or replaced lease. The new
+private startup endpoint has one bounded authentication worker, independently
+authenticates the supervised owner and grants no restoration or executor
+permission. It neither acquires nor releases S17 state. Component checks do not
+qualify the real first-frame and crash matrix; public mutations stay disabled.
+
 Independent display protection starts a read-only kernel subscription before
 native sampling and binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the
 same kernel multicast socket remain outside executor/compositor memory. Every later check

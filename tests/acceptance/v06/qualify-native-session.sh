@@ -89,6 +89,16 @@ done
 expect_failure native-display-protection-reserve-root-not-executor-denied \
     sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" Reserve ay 1 0
 grep -Eiq 'supervised executor|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# This guest has no qualified display owner/login. Valid bounded correlation
+# cannot make either an ordinary process or arbitrary root a startup authority.
+startup_lock="session:lock:$(cat /proc/sys/kernel/random/boot_id):$(id -u):c2:1:11111111-1111-4111-8111-111111111111:1"
+startup_request=("$startup_lock" "$$" seat0 22222222-2222-4222-8222-222222222222 "$protection_digest" "$protection_digest")
+expect_failure native-display-startup-unqualified-ordinary-denied \
+    busctl --system call "$protection_destination" "$protection_path" "$protection_destination" NativeStartup '(sussss)' "${startup_request[@]}"
+grep -Eiq 'supervised owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-display-startup-unqualified-root-denied \
+    sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" NativeStartup '(sussss)' "${startup_request[@]}"
+grep -Eiq 'supervised owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 # Separate service lifetime, not a claim that a real DRM witness was acquired.
 sudo -n systemctl restart "$service"
 sudo -n systemctl is-active --quiet "$service"

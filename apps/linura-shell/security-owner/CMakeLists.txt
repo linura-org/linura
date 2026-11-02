@@ -186,10 +186,12 @@ if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
         "Canonical native-owner deployment assets")
     add_library(linura-security-owner-runtime STATIC
         native_display_flow.cpp native_display_flow.h
+        native_display_startup.cpp native_display_startup.h
         native_runtime.cpp native_runtime.h
         native_unlock_status.cpp native_unlock_status.h
         native_endpoint.cpp native_endpoint.h
     )
+    target_include_directories(linura-security-owner-runtime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(linura-security-owner-runtime PUBLIC
         linura-security-owner-auth linura-security-owner-wayland
         linura-security-owner-presentation

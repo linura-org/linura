@@ -1310,6 +1310,25 @@ NativeWaylandLock::observeDisplayAttempt(const NativeDisplayCorrelation &correla
         return std::nullopt;
     return impl_->displayConnection->status(correlation);
 }
+bool NativeWaylandLock::displayStartupRequired() const noexcept
+{
+    return impl_->displayConnection && impl_->displayConnection->advertised();
+}
+std::optional<NativePinnedDisplaySample> NativeWaylandLock::displayStartupSample()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping)
+        return std::nullopt;
+    return impl_->displayConnection->sample();
+}
+bool NativeWaylandLock::admitDisplayStartup(int lease, bool ordinary, quint32 guardPid,
+                                            const QString &compositor)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping)
+        return false;
+    return impl_->displayConnection->admitStartup(lease, ordinary, guardPid, compositor);
+}
 bool NativeWaylandLock::available() const noexcept
 {
     return impl_->initialized;

@@ -1,6 +1,7 @@
 [Unit]
 Description=Linura protected native security owner for UID %i
-After=dbus.service polkit.service systemd-logind.service user@%i.service
+After=dbus.service polkit.service systemd-logind.service user@%i.service linura-display-protection.service
+Wants=linura-display-protection.service
 Requires=dbus.service polkit.service systemd-logind.service
 BindsTo=user@%i.service
 StartLimitIntervalSec=120s

@@ -922,21 +922,39 @@ void shutdownProtectedDisplay()
 }
 bool protectedDisplayActive()
 {
-    return !active.expired();
+    return startupBlocked() || !active.expired();
+}
+void startupAdmissionChanged()
+{
+    if (g_pSeatManager) {
+        g_pSeatManager->setKeyboardFocus(nullptr);
+        g_pSeatManager->setPointerFocus(nullptr, {});
+    }
+    if (!startupBlocked())
+        inputRetirement.drainStartup(heldInput());
+    if (Pointer::mgr())
+        Pointer::mgr()->refreshProtectedCursorFence();
+    if (draining() && drainTimer)
+        wl_event_source_timer_update(drainTimer, 100);
+    scheduleRefocus();
 }
 bool protectedInputExclusive()
 {
-    return !active.expired() || draining();
+    return startupBlocked() || !active.expired() || draining();
 }
 bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &now)
 {
     const auto data = active.lock();
-    if (!data || !monitor || !g_pHyprRenderer)
+    if (!data && !startupBlocked())
         return false;
+    if (!monitor || !g_pHyprRenderer)
+        return true; // An unavailable safety renderer never admits the scene.
     CRectPassElement::SRectData black;
     black.box = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
     black.color = CHyprColor(0, 0, 0, 1);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(black));
+    if (startupBlocked())
+        return true;
     auto *surface = data->forMonitor(monitor);
     if (surface) {
         surface->selectedFrame = false;
@@ -980,6 +998,18 @@ void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buf
 }
 std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
 {
+    if (startupBlocked()) {
+        if (!monitor || !monitor->m_output)
+            return false;
+        const auto &state = monitor->m_output->state->state();
+        if (state.enabled && (!state.buffer || !renderOpaqueBuffer(monitor, state.buffer)))
+            return false;
+        // Every startup submission is independently initialized opaque. No
+        // ordinary/stale/uninitialized buffer reaches KMS, even during initial
+        // modeset before a renderer-produced frame. This is not terminal proof.
+        const auto submitted = monitor->m_output->commitAsync({});
+        return submitted.id != 0 && submitted.error == 0;
+    }
     const auto data = active.lock();
     if (!data)
         return std::nullopt;
@@ -1035,6 +1065,8 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
 }
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
 {
+    if (startupBlocked())
+        return !resource;
     const auto data = active.lock();
     if (!resource) {
         if (data && keyboard)
@@ -1064,6 +1096,8 @@ bool protectedPointerFocusAllowed(const SP<CWLSurfaceResource> &surface)
 }
 bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard> &keyboard)
 {
+    if (startupBlocked())
+        return true;
     const auto data = active.lock();
     if (!data) {
         if (!inputRetirement.blocked())
@@ -1124,6 +1158,8 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
 }
 bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
 {
+    if (startupBlocked())
+        return true;
     const auto data = active.lock();
     if (!data)
         return draining();
@@ -1150,6 +1186,8 @@ bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
 }
 bool protectedPointerRefocus(std::uint32_t time)
 {
+    if (startupBlocked())
+        return true;
     const auto data = active.lock();
     if (!data)
         return draining();
@@ -1177,6 +1215,8 @@ bool protectedPointerRefocus(std::uint32_t time)
 }
 bool protectedPointerMove(const IPointer::SMotionEvent &event)
 {
+    if (startupBlocked())
+        return true;
     const auto data = active.lock();
     if (!data)
         return draining();
@@ -1190,6 +1230,8 @@ bool protectedPointerMove(const IPointer::SMotionEvent &event)
 }
 bool protectedPointerWarp(const IPointer::SMotionAbsoluteEvent &event)
 {
+    if (startupBlocked())
+        return true;
     const auto data = active.lock();
     if (!data)
         return draining();
@@ -1202,7 +1244,7 @@ bool protectedPointerWarp(const IPointer::SMotionAbsoluteEvent &event)
 bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPointer> &pointer)
 {
     const auto data = active.lock();
-    if (!data && !draining())
+    if (!data && !draining() && !startupBlocked())
         return false;
     if (event.button > KEY_MAX) {
         if (data)
@@ -1222,6 +1264,8 @@ bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPoint
     } else
         heldButtons.erase(key);
     inputRetirement.poll(heldInput());
+    if (startupBlocked())
+        return true;
     if (!data) {
         if (!draining())
             scheduleRefocus();

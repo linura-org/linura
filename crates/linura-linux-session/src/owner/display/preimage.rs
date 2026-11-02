@@ -168,6 +168,41 @@ impl std::fmt::Debug for NativeDisplayRecoveryCheckpoint {
     }
 }
 impl NativeDisplayRecoveryCheckpoint {
+    /// Historical scope comparison for the retained native startup lease.
+    /// This cannot turn history into current evidence or a recovery permit.
+    pub fn original_startup_scope(
+        payload: &[u8],
+        expected: &ComponentDigest,
+    ) -> Result<(DisplayTopologyId, ComponentDigest), String> {
+        Self::validate_stored(payload, expected)?;
+        let mut rest = payload;
+        let mut topology = None;
+        for index in 0..19 {
+            let (size, body) = rest.split_at_checked(8).ok_or_else(invalid)?;
+            let size = usize::try_from(u64::from_be_bytes(size.try_into().map_err(|_| invalid())?))
+                .map_err(|_| invalid())?;
+            let (field, tail) = body.split_at_checked(size).ok_or_else(invalid)?;
+            if index == 8 {
+                topology = Some(
+                    linura_core::DisplayLayoutMaterial::decode(
+                        std::str::from_utf8(field).map_err(|_| invalid())?,
+                    )
+                    .map_err(|_| invalid())?
+                    .topology()
+                    .clone(),
+                );
+            }
+            if index == 18 {
+                let saved: Preimage = serde_json::from_slice(field).map_err(|_| invalid())?;
+                return Ok((
+                    topology.ok_or_else(invalid)?,
+                    ComponentDigest::parse_hex(&saved.integration).map_err(|_| invalid())?,
+                ));
+            }
+            rest = tail;
+        }
+        Err(invalid())
+    }
     /// Read only the historical dispatch correlation from a bounded private
     /// envelope. This does not construct a prepared checkpoint, validate current
     /// native state, recover a lost witness or grant restoration authority.

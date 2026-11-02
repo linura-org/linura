@@ -132,7 +132,9 @@ class Harness final
                     WireEndpoint::OwnerInvocation invocation{};
                     invocation[0] = 1;
                     return invocation;
-                });
+                },
+                NativeStartupPort{[] { return 1U; },
+                                  [](int, bool, std::uint32_t) { return false; }});
         assert(!publishIntegration || (endpoint && endpoint->available()));
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
             *display,

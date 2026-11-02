@@ -220,5 +220,33 @@ pub(super) fn reserve_stored(dispatch: &ComponentDigest, payload: &[u8]) -> Resu
     reserve_at(&open()?, 0, dispatch, payload)
 }
 
+fn startup_clear_at(fd: &OwnedFd, uid: u32) -> Result<bool, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result: Result<bool, String> = (|| {
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if !matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                // Any retained or unknown history fences ordinary startup. No
+                // corrupt/legacy file is silently ignored, repaired or removed.
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(clear), Ok(())) => Ok(clear),
+        _ => Err(unavailable()),
+    }
+}
+
+/// Caller holds the protection admission mutex through lease publication and
+/// reservation. The directory lock also rejects an independent busy writer;
+/// the empty-history result is never cached or used without that serialization.
+pub(super) fn startup_clear() -> Result<bool, String> {
+    startup_clear_at(&open()?, 0)
+}
+
 #[cfg(test)]
 mod tests;
