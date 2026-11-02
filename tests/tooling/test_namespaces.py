@@ -931,7 +931,7 @@ class NamespaceContractTests(unittest.TestCase):
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: .name(CONTROL_SERVICE)",
+                "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: CONTROL_SERVICE",
                 result.stderr,
             )
 
@@ -993,7 +993,48 @@ class NamespaceContractTests(unittest.TestCase):
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: .name(EXTRA_SERVICE_NAME)",
+                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: EXTRA_SERVICE_NAME",
+                result.stderr,
+            )
+
+    def test_delayed_name_publication_is_required_and_comments_do_not_count(self):
+        for replacement in ("", "// .request_name(DISPLAY_PROTECTION_SERVICE)\n"):
+            with (
+                self.subTest(replacement=replacement),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                source = root / "crates/linura-linux-session/src/bus.rs"
+                original = source.read_text(encoding="utf-8")
+                marker = ".request_name(DISPLAY_PROTECTION_SERVICE)"
+                self.assertIn(marker, original)
+                source.write_text(
+                    original.replace(marker, replacement, 1), encoding="utf-8"
+                )
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: DISPLAY_PROTECTION_SERVICE",
+                    result.stderr,
+                )
+
+    def test_undeclared_delayed_name_publication_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = root / "crates/linura-dbus/src/name_binding_fixture.rs"
+            source.write_text(
+                'pub const EXTRA_SERVICE_NAME: &str = "org.linura.Control1";\n'
+                "fn acquire(connection: zbus::blocking::Connection) {\n"
+                "    let _ = connection.request_name(EXTRA_SERVICE_NAME);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: EXTRA_SERVICE_NAME",
                 result.stderr,
             )
 
