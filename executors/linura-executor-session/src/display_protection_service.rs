@@ -333,9 +333,10 @@ pub(super) fn serve() -> Result<(), String> {
         .at(PATH, service)
         .map_err(|_| format!("{INTERFACE_NAME} registration failed"))?;
     channel.publish_display_protection()?;
-    loop {
-        std::thread::park();
-    }
+    // Loss of the original bus is irreversible. Exiting closes every original
+    // startup lease and retained protection; a new service cannot reacquire it.
+    connection.closed();
+    Err("original display protection bus was lost; no reconnection".into())
 }
 
 #[cfg(test)]

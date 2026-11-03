@@ -276,10 +276,15 @@ impl NativeSessionChannel {
     /// Fixed guard publication only, after registering its complete object on
     /// the same connection. This grants no client/executor authority.
     pub fn publish_display_protection(&self) -> Result<(), String> {
-        self.require_role(NativeSessionRole::DisplayProtection)?;
+        // The name does not exist yet. Do not use require_role here: its
+        // independent bus-owner check is meaningful only after publication.
+        if self.role != NativeSessionRole::DisplayProtection {
+            return Err("native channel has the wrong service role".into());
+        }
         self.connection
             .request_name(DISPLAY_PROTECTION_SERVICE)
-            .map_err(|_| "display protection name publication failed".to_owned())
+            .map_err(|_| "display protection name publication failed".to_owned())?;
+        self.require_role(NativeSessionRole::DisplayProtection)
     }
 
     /// Concrete adapter composition only: register the service on the SAME
