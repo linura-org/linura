@@ -386,6 +386,10 @@ void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
     assert(captured);
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].x = 100;
+    auto renewed = correlation;
+    renewed.deadlineUnixMs = captured->sampledUnixMs + 15'001;
+    assert(!owner.connection->apply(renewed, prior, desired, owner.protection()));
+    assert(harness.backend.writes == 0);
     auto wrongBaseline = prior;
     wrongBaseline.outputs[0].x = -100;
     assert(!owner.connection->apply(correlation, wrongBaseline, desired, owner.protection()));
@@ -598,12 +602,15 @@ void replacementCompositorCannotAdoptOldTopologyOrContinuation()
     // persistent native rules, kernel continuity or durable restoration.
     Harness original;
     Client owner(original.descriptors[0]);
+    // Match production ordering: Control fixes the absolute deadline before
+    // native capture. Recomputing a full window afterwards can exceed the
+    // original sample's bound even when only one millisecond has elapsed.
+    const auto correlation = bound(QStringLiteral("transaction:prior-compositor"));
     const auto first = owner.connection->sample();
     assert(first);
     const auto prior = baseline(*first);
     auto desired = prior;
     desired.outputs[0].x = 100;
-    const auto correlation = bound(QStringLiteral("transaction:prior-compositor"));
     assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
     assert(original.backend.writes == 1);
 

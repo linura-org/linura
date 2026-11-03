@@ -187,6 +187,50 @@ impl NativeSessionChannel {
         self.display_protection_call("Reserve", &(record.canonical_bytes(),))
     }
 
+    /// Reserve exactly once after Control's fresh prepared handoff. This
+    /// private endpoint remains adapter data; the native recipient must match
+    /// its kernel peer to the continuously retained original startup lease.
+    /// This API never retries an ambiguous call or reconstructs a lost grant.
+    pub fn reserve_display_restoration(
+        &self,
+        record: &crate::NativeDisplayRestorationReservation,
+    ) -> Result<std::os::fd::OwnedFd, String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        let started = Instant::now();
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let bytes = record.canonical_bytes();
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReserveRestoration",
+            &(bytes,),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "h"
+        {
+            return Err("original restoration grant peer or signature differs; no retry".into());
+        }
+        let (descriptor,): (zbus::zvariant::OwnedFd,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "original restoration grant is malformed; no retry")?;
+        let descriptor: std::os::fd::OwnedFd = descriptor.into();
+        let peer = rustix::net::sockopt::socket_peercred(&descriptor)
+            .map_err(|_| "original restoration grant has no authenticated kernel peer")?;
+        if peer.uid.as_raw() != 0
+            || peer.pid.as_raw_nonzero().get() as u32 != identity.pid
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+        {
+            return Err("original restoration grant service changed; no reconnection".into());
+        }
+        Ok(descriptor)
+    }
+
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
         self.display_protection_call("Verify", &(dispatch.to_hex(),))
     }

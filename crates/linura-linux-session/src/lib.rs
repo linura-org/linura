@@ -10,6 +10,10 @@ mod account;
 mod bus;
 mod display_kernel;
 mod display_observer;
+mod display_restoration_reservation;
+pub use display_restoration_reservation::{
+    MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayRestorationReservation,
+};
 mod original_display_observer;
 pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;

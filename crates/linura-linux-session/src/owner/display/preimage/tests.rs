@@ -336,6 +336,64 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     );
     assert_eq!(facts.integration_digest(), "a".repeat(64));
     assert_eq!(facts.outputs().len(), 1);
+    let reservation = |original: &str, checkpoint: &str, mapping: &str| {
+        let replacement = material
+            .replace("c2:42", "c3:99")
+            .replace(
+                "33333333-3333-4333-8333-333333333333",
+                "44444444-4444-4444-8444-444444444444",
+            )
+            .replace("0:100:0:-", "0:0:0:-");
+        let mut candidate = "LNRI:1;".to_owned();
+        for field in [
+            "request:v010:display-layout:original",
+            &binding.dispatch_digest.to_hex(),
+            checkpoint,
+            &"c".repeat(64),
+            original,
+            &replacement,
+            mapping,
+        ] {
+            candidate.push_str(&format!("{}:{field};", field.len()));
+        }
+        let effect = linura_provider_sdk::display_restoration_effect(&candidate)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let fresh = ExecutionBinding::new(
+            "transaction:recovery-source",
+            0,
+            1,
+            ComponentDigest::from_bytes([1; 32]),
+            ComponentDigest::from_bytes([2; 32]),
+            &effect,
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        crate::NativeDisplayRestorationReservation::new(&candidate, &fresh)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+    };
+    assert!(
+        NativeDisplayRecoveryCheckpoint::validate_restoration_source(
+            record.canonical_bytes(),
+            &reservation(&material, facts.checkpoint_digest(), "1:2:1:2;")
+        )
+        .is_ok()
+    );
+    for changed in [
+        reservation(&material, &"d".repeat(64), "1:2:1:2;"),
+        reservation(
+            &material.replace("0:100:0:-", "0:200:0:-"),
+            facts.checkpoint_digest(),
+            "1:2:1:2;",
+        ),
+        reservation(&material, facts.checkpoint_digest(), "9:2:1:2;"),
+    ] {
+        assert!(
+            NativeDisplayRecoveryCheckpoint::validate_restoration_source(
+                record.canonical_bytes(),
+                &changed
+            )
+            .is_err()
+        );
+    }
     let projection = facts.attributes();
     for value in projection.values() {
         if let ObservedValue::Text(text) = value {

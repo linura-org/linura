@@ -297,8 +297,30 @@ bool NativeRuntime::initialize(NativeStartup startup)
             }) ||
         !impl_->backend->initialize())
         return runtimeUnavailable("linura-security-owner: runtime/protected-input\n");
-    if (!admitNativeDisplayStartup(*impl_->peers, *impl_->binding, *impl_->backend))
-        return runtimeUnavailable("linura-security-owner: runtime/display-startup-fence\n");
+    switch (admitNativeDisplayStartup(*impl_->peers, *impl_->binding, *impl_->backend)) {
+    case NativeDisplayStartupAdmission::Ready:
+        break;
+    case NativeDisplayStartupAdmission::NativeSample:
+        return runtimeUnavailable("linura-security-owner: startup/native-sample\n");
+    case NativeDisplayStartupAdmission::Session:
+        return runtimeUnavailable("linura-security-owner: startup/session\n");
+    case NativeDisplayStartupAdmission::NativeImage:
+        return runtimeUnavailable("linura-security-owner: startup/native-image\n");
+    case NativeDisplayStartupAdmission::OriginalGuard:
+        return runtimeUnavailable("linura-security-owner: startup/original-guard\n");
+    case NativeDisplayStartupAdmission::GuardReply:
+        return runtimeUnavailable("linura-security-owner: startup/guard-reply\n");
+    case NativeDisplayStartupAdmission::GuardChanged:
+        return runtimeUnavailable("linura-security-owner: startup/guard-changed\n");
+    case NativeDisplayStartupAdmission::SessionChanged:
+        return runtimeUnavailable("linura-security-owner: startup/session-changed\n");
+    case NativeDisplayStartupAdmission::KernelPeer:
+        return runtimeUnavailable("linura-security-owner: startup/kernel-peer\n");
+    case NativeDisplayStartupAdmission::NativeTransfer:
+        return runtimeUnavailable("linura-security-owner: startup/native-transfer\n");
+    default:
+        return runtimeUnavailable("linura-security-owner: startup/unknown\n");
+    }
     impl_->protocol = std::make_unique<NativeLockProtocol>(*impl_->backend, impl_->binding->lock);
     if (!impl_->protocol->bound())
         return runtimeUnavailable("linura-security-owner: runtime/protocol-identity\n");

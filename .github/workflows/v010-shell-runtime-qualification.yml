@@ -870,12 +870,17 @@ jobs:
             > "$ARTIFACT_DIR/s17-native-bootstrap.json" 2> "$ARTIFACT_DIR/s17-native-bootstrap.stderr"
           native_status=$?
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
-            'sudo -n journalctl -b --no-pager -n 1000 -u linura-s17-session.service -u "linura-security-owner@*" -u linura-authorityd.service -u linura-executor-session.service' \
+            'sudo -n journalctl -b --no-pager -n 1000 -u linura-s17-session.service -u "linura-security-owner@*" -u linura-authorityd.service -u linura-executor-session.service -u linura-display-protection.service' \
             > "$ARTIFACT_DIR/s17-native-bootstrap-journal.log" 2>&1
           diagnostics_status=$?
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n systemctl show --no-pager --property=ActiveState,SubState,FragmentPath,DropInPaths,User,Group,MainPID,InvocationID linura-display-protection.service' \
+            > "$ARTIFACT_DIR/s17-native-protection-supervision.txt" 2>&1
+          protection_diagnostics_status=$?
           set -e
           [[ "$native_status" -eq 0 ]] || exit "$native_status"
           [[ "$diagnostics_status" -eq 0 ]] || exit "$diagnostics_status"
+          [[ "$protection_diagnostics_status" -eq 0 ]] || exit "$protection_diagnostics_status"
 
       - name: Exercise native same-UID process-access denial
         run: |

@@ -9,6 +9,7 @@ int main()
 {
     StartupFence absent;
     assert(!absent.guardAlive() && !absent.ordinaryAllowed());
+    assert(!absent.authenticatesGrantPeer(-1));
     for (const bool allowed : {false, true}) {
         std::array<int, 2> pair{};
         assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0);
@@ -48,4 +49,23 @@ int main()
     StartupFence wrongKind;
     assert(!wrongKind.retain(regular, true));
     assert(close(regular) == 0);
+
+    for (const bool ordinary : {false, true}) {
+        std::array<int, 2> lease{}, grant{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, lease.data()) == 0);
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, grant.data()) == 0);
+        StartupFence source;
+        assert(source.retain(lease[0], ordinary));
+        // Actual kernel credentials: matching user-created sockets cannot
+        // impersonate root. Even root peers cannot authorize ordinary mode.
+        const bool rootPeer = getuid() == 0 && getgid() == 0;
+        assert(source.authenticatesGrantPeer(grant[0]) == (!ordinary && rootPeer));
+        assert(!source.authenticatesGrantPeer(-1));
+        assert(fcntl(grant[0], F_SETFD, 0) == 0);
+        assert(!source.authenticatesGrantPeer(grant[0]));
+        assert(fcntl(grant[0], F_SETFD, FD_CLOEXEC) == 0);
+        assert(close(lease[1]) == 0);
+        assert(!source.authenticatesGrantPeer(grant[0]));
+        assert(close(grant[0]) == 0 && close(grant[1]) == 0);
+    }
 }

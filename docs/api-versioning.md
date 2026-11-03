@@ -319,6 +319,16 @@ cancel a newer conversation. These private methods create neither public mutatio
 support nor an executor credential. Keep/Revert must continue a retained original
 transaction; they cannot enter through this Apply handshake.
 
+The private Experimental `DisplayProtection1.ReserveRestoration` takes one
+bounded 16 KiB `ay` reservation and returns one original-root-created Unix
+endpoint (`h`). Runtime admission requires the exact supervised executor; Control
+retains only its member-specific `ReadOriginal` access. The reservation binds a
+fresh execution binding and complete `LNRI:1` material, not an old Apply/Keep
+approval. Typed `LNRR:1` files share the existing private quota and strict history
+checks; original `LNRJ:1` files are unchanged. `LNRG:1` transfer requires complete
+framing and a final fresh-check marker. This producer grants no output write,
+ordinary admission, native consumer qualification or production mutation support.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

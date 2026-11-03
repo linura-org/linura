@@ -388,3 +388,141 @@ fn startup_never_ignores_retained_unknown_or_busy_history() {
         b"torn private record"
     );
 }
+
+pub(crate) fn restoration(original: u8, attempt: u8) -> NativeDisplayRestorationReservation {
+    let old = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3".replace("seat0",if original==4 {"seat1"} else {"seat0"});
+    let new = old.replace("c2:42", "c3:99").replace(
+        "33333333-3333-4333-8333-333333333333",
+        "44444444-4444-4444-8444-444444444444",
+    );
+    let lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-4222-8222-222222222222:1";
+    let original_intent = format!(
+        "LNDI:1;{lock};LNDL:1;{old};1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;{old};1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
+    );
+    let replacement = original_intent
+        .replace(&old, &new)
+        .replace("c2:42", "c3:99")
+        .replace("0:100:0:-", "0:0:0:-");
+    let mut material = "LNRI:1;".to_owned();
+    let dispatch = ComponentDigest::from_bytes([original; 32]).to_hex();
+    for field in [
+        "request:v010:display-layout:original",
+        &dispatch,
+        &"b".repeat(64),
+        &"c".repeat(64),
+        &original_intent,
+        &replacement,
+        "1:2:1:2;",
+    ] {
+        material.push_str(&format!("{}:{field};", field.len()));
+    }
+    let effect = linura_provider_sdk::display_restoration_effect(&material)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = linura_provider_sdk::ExecutionBinding::new(
+        format!("transaction:restore-{attempt}"),
+        0,
+        1,
+        ComponentDigest::from_bytes([1; 32]),
+        ComponentDigest::from_bytes([attempt; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    NativeDisplayRestorationReservation::new(&material, &binding)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+}
+fn reserve_recovery(
+    fixture: &Fixture,
+    record: &NativeDisplayRestorationReservation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &fixture.fd,
+        fixture.uid,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::Restoration,
+    )
+}
+#[test]
+fn restoration_is_exclusive_durable_and_cannot_supersede_an_unresolved_attempt() {
+    let fixture = Fixture::new();
+    assert!(
+        fixture
+            .reserve(1, b"synthetic original comparison data")
+            .is_ok()
+    );
+    let before = std::fs::read(fixture.name(1)).unwrap_or_else(|e| unreachable!("{e}"));
+    let record = restoration(1, 2);
+    assert!(reserve_recovery(&fixture, &record).is_ok());
+    let path = fixture
+        .path
+        .join(Kind::Restoration.name(&record.binding().dispatch_digest));
+    let saved = std::fs::read(&path).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(saved.starts_with(RESTORATION_MAGIC));
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    assert!(reserve_recovery(&fixture, &record).is_err());
+    assert!(reserve_recovery(&fixture, &restoration(1, 3)).is_err());
+    assert!(reserve_recovery(&fixture, &restoration(6, 7)).is_err());
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        reserve_kind_at(
+            &reopened,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            Kind::Restoration
+        )
+        .is_err()
+    );
+    assert_eq!(
+        std::fs::read(path).unwrap_or_else(|e| unreachable!("{e}")),
+        saved
+    );
+    assert_eq!(
+        std::fs::read(fixture.name(1)).unwrap_or_else(|e| unreachable!("{e}")),
+        before
+    );
+    assert!(reserve_recovery(&fixture, &restoration(4, 5)).is_ok());
+}
+#[test]
+fn corruption_or_type_substitution_of_restoration_history_fences_all_new_reservations() {
+    for kind in 0..4 {
+        let fixture = Fixture::new();
+        let record = restoration(1, 2);
+        assert!(reserve_recovery(&fixture, &record).is_ok());
+        let path = fixture
+            .path
+            .join(Kind::Restoration.name(&record.binding().dispatch_digest));
+        match kind {
+            0 => std::fs::write(&path, RESTORATION_MAGIC).unwrap_or_else(|e| unreachable!("{e}")),
+            1 => {
+                let mut bytes = std::fs::read(&path).unwrap_or_else(|e| unreachable!("{e}"));
+                bytes[HEADER] ^= 1;
+                std::fs::write(&path, bytes).unwrap_or_else(|e| unreachable!("{e}"));
+            }
+            2 => std::fs::rename(
+                &path,
+                fixture
+                    .path
+                    .join(Kind::Original.name(&record.binding().dispatch_digest)),
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::rename(
+                &path,
+                fixture
+                    .path
+                    .join(Kind::Restoration.name(&ComponentDigest::from_bytes([8; 32]))),
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        }
+        assert!(fixture.reserve(9, b"no dispatch").is_err());
+        assert!(reserve_recovery(&fixture, &restoration(4, 5)).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+        );
+    }
+}

@@ -58,6 +58,35 @@ class StartupFence final
     {
         return guardAlive() && ordinary_;
     }
+    // Private kernel-peer comparison only, never restoration permission. The
+    // caller must separately consume the exact fresh protected Recovery scope,
+    // prepared binding and complete one-use grant. A replacement root service
+    // or root-looking file cannot replace the continuously retained lease.
+    [[nodiscard]] bool authenticatesGrantPeer(int descriptor) const noexcept
+    {
+        if (ordinary_ || !guardAlive() || descriptor < 0 ||
+            fcntl(descriptor, F_GETFD) != FD_CLOEXEC)
+            return false;
+        int type = 0, domain = 0;
+        socklen_t size = sizeof(type);
+        if (getsockopt(descriptor, SOL_SOCKET, SO_TYPE, &type, &size) != 0 ||
+            size != sizeof(type) || type != SOCK_STREAM)
+            return false;
+        size = sizeof(domain);
+        if (getsockopt(descriptor, SOL_SOCKET, SO_DOMAIN, &domain, &size) != 0 ||
+            size != sizeof(domain) || domain != AF_UNIX)
+            return false;
+        ucred original{}, grant{};
+        size = sizeof(original);
+        if (getsockopt(descriptor_, SOL_SOCKET, SO_PEERCRED, &original, &size) != 0 ||
+            size != sizeof(original))
+            return false;
+        size = sizeof(grant);
+        return getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &grant, &size) == 0 &&
+               size == sizeof(grant) && original.uid == 0 && original.gid == 0 &&
+               original.pid > 0 && grant.uid == original.uid && grant.gid == original.gid &&
+               grant.pid == original.pid && guardAlive();
+    }
     // Private read-only protocol state: unadmitted, ordinary, recovery fenced,
     // or lost/invalid. Lost admission is terminal for this invocation.
     [[nodiscard]] unsigned phase() const noexcept

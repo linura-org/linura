@@ -240,6 +240,30 @@ impl std::fmt::Debug for NativeDisplayRecoveryCheckpoint {
     }
 }
 impl NativeDisplayRecoveryCheckpoint {
+    /// Historical source comparison only. Current output continuity, native
+    /// capabilities, caller authorization and single-use admission are checked
+    /// separately by the retained Guard and native recipient.
+    pub fn validate_restoration_source(
+        payload: &[u8],
+        reservation: &crate::NativeDisplayRestorationReservation,
+    ) -> Result<(), String> {
+        let material = reservation.decoded_material()?;
+        let scope = material.recovery_scope().map_err(|_| invalid())?;
+        let facts = Self::original_protection_facts(payload, &scope)?;
+        let original = linura_core::DisplayLayoutMaterial::decode(facts.original_material())
+            .map_err(|_| invalid())?;
+        if facts.checkpoint_digest() != material.original_checkpoint()
+            || &original != material.original()
+            || facts.outputs().len() != material.mapping().original().outputs().len()
+            || facts
+                .outputs()
+                .keys()
+                .any(|output| !material.mapping().original().outputs().contains(output))
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
     /// Project only typed historical comparison data after the adapter has
     /// freshly authenticated live independent protection. Raw rule bytes never
     /// enter the canonical observation, public reports or model context.

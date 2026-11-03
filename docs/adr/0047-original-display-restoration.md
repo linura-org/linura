@@ -110,8 +110,20 @@ consumed stream; they do not recreate an unread authorization.
 The root mechanism retains reservation and original witnesses on incomplete
 transfer, cancellation, timeout or partial mutation. The protected compositor
 must retain opaque/input fencing independently of the human-review lifetime.
-This handoff is required composition, not a claim established by the current
-read/codec/review component tests.
+The private Guard now accepts `ReserveRestoration` only from the exact supervised
+executor. `LNRR:1` stores the complete fresh execution binding and `LNRI:1`
+material before disclosure of an `LNRG:1` endpoint. It uses the same exclusive,
+synced, strictly validated bounded history directory as original checkpoints;
+original `LNRJ:1` records retain their bytes and meaning. Another binding for the
+same unresolved original cannot supersede it. Failed replies/transfers retain
+that reservation. Transfer has one retained worker slot, a two-second absolute
+budget and a final marker following fresh witness checks. Those mechanisms
+perform no display write, release or recovery orchestration.
+
+The purpose-bound protected Recovery interaction, authenticated native consumer,
+fresh Control handoff and qualified supersession/terminal workflow remain
+unfinished. The endpoint producer and component tests do not establish that
+required composition or native qualification.
 
 ## Terminal sequencing
 

@@ -4,12 +4,20 @@
     <annotation name="org.linura.ContractId" value="dbus.org.linura.DisplayProtection1"/>
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
-    <!-- Private bounded original-witness mechanisms; no effect or recovery authority. -->
+    <!-- Private bounded original-witness and prepared handoff mechanisms.
+         Control owns authority/orchestration; this process never writes outputs. -->
     <method name="ReadOriginal">
       <!-- Supervised Control only; exact historical bytes plus live retained
            witness checks. No credential, restoration grant or output write. -->
       <arg name="recovery_scope" type="s" direction="in"/>
       <arg name="checkpoint" type="ay" direction="out"/>
+    </method>
+    <method name="ReserveRestoration">
+      <!-- Exact supervised executor only, following a fresh Control prepare.
+           Synced one-use reservation precedes the original-root-created
+           endpoint. No root output write, policy or orchestration. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
     </method>
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.

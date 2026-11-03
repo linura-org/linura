@@ -6,16 +6,65 @@ use std::io::{Read, Write};
 use std::os::fd::OwnedFd;
 use std::path::Component;
 
-use linura_linux_session::NativeDisplayRecoveryCheckpoint;
+use linura_linux_session::{NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation};
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
 use sha2::{Digest, Sha256};
 
 const DIRECTORY: &str = "/var/lib/linura/display-recovery";
 const MAGIC: &[u8] = b"LNRJ:1\n";
+const RESTORATION_MAGIC: &[u8] = b"LNRR:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Kind {
+    Original,
+    Restoration,
+}
+impl Kind {
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Original => "attempt-",
+            Self::Restoration => "restoration-",
+        }
+    }
+    fn magic(self) -> &'static [u8] {
+        match self {
+            Self::Original => MAGIC,
+            Self::Restoration => RESTORATION_MAGIC,
+        }
+    }
+    fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
+        match self {
+            Self::Original => NativeDisplayRecoveryCheckpoint::stored_dispatch(payload),
+            Self::Restoration => Ok(NativeDisplayRestorationReservation::decode(payload)?
+                .binding()
+                .dispatch_digest),
+        }
+    }
+    fn name(self, dispatch: &ComponentDigest) -> String {
+        format!("{}{}.checkpoint", self.prefix(), dispatch.to_hex())
+    }
+}
+fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
+    for kind in [Kind::Original, Kind::Restoration] {
+        let prefix = kind.prefix().as_bytes();
+        if name.len() == prefix.len() + 64 + 11
+            && name.starts_with(prefix)
+            && name.ends_with(b".checkpoint")
+        {
+            let hex = std::str::from_utf8(&name[prefix.len()..prefix.len() + 64])
+                .map_err(|_| unavailable())?;
+            let dispatch = ComponentDigest::parse_hex(hex).map_err(|_| unavailable())?;
+            if dispatch.to_hex() == hex {
+                return Ok((kind, dispatch));
+            }
+        }
+    }
+    Err(unavailable())
+}
 
 fn unavailable() -> String {
     "private native display checkpoint unavailable; no dispatch or retry".into()
@@ -49,12 +98,7 @@ fn open() -> Result<OwnedFd, String> {
     Ok(fd)
 }
 fn valid_name(name: &[u8]) -> bool {
-    name.len() == 8 + 64 + 11
-        && name.starts_with(b"attempt-")
-        && name.ends_with(b".checkpoint")
-        && name[8..72]
-            .iter()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c))
+    named_kind(name).is_ok()
 }
 fn record_metadata(stat: &fs::Stat, uid: u32) -> Result<(), String> {
     if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile
@@ -69,6 +113,14 @@ fn record_metadata(stat: &fs::Stat, uid: u32) -> Result<(), String> {
     Ok(())
 }
 fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<Vec<u8>, String> {
+    check_kind_record(fd, uid, dispatch, Kind::Original)
+}
+fn check_kind_record(
+    fd: OwnedFd,
+    uid: u32,
+    dispatch: &ComponentDigest,
+    kind: Kind,
+) -> Result<Vec<u8>, String> {
     let stat = fs::fstat(&fd).map_err(|_| unavailable())?;
     record_metadata(&stat, uid)?;
     let mut bytes = Vec::new();
@@ -76,7 +128,7 @@ fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<Vec
         .take((MAX_PAYLOAD + HEADER + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| unavailable())?;
-    if bytes.len() != stat.st_size as usize || !bytes.starts_with(MAGIC) {
+    if bytes.len() != stat.st_size as usize || !bytes.starts_with(kind.magic()) {
         return Err(unavailable());
     }
     let start = MAGIC.len();
@@ -87,7 +139,7 @@ fn check_record(fd: OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<Vec
     );
     if payload_len != (bytes.len() - HEADER) as u64
         || &bytes[start..start + 32] != Sha256::digest(&bytes[HEADER..]).as_slice()
-        || NativeDisplayRecoveryCheckpoint::stored_dispatch(&bytes[HEADER..])? != *dispatch
+        || kind.dispatch(&bytes[HEADER..])? != *dispatch
     {
         return Err(unavailable());
     }
@@ -146,11 +198,17 @@ fn reserve_at(
     dispatch: &ComponentDigest,
     payload: &[u8],
 ) -> Result<(), String> {
+    reserve_kind_at(fd, uid, dispatch, payload, Kind::Original)
+}
+fn reserve_kind_at(
+    fd: &OwnedFd,
+    uid: u32,
+    dispatch: &ComponentDigest,
+    payload: &[u8],
+    kind: Kind,
+) -> Result<(), String> {
     directory(fd, uid, true)?;
-    if payload.is_empty()
-        || payload.len() > MAX_PAYLOAD
-        || NativeDisplayRecoveryCheckpoint::stored_dispatch(payload)? != *dispatch
-    {
+    if payload.is_empty() || payload.len() > MAX_PAYLOAD || kind.dispatch(payload)? != *dispatch {
         return Err(unavailable());
     }
     // One directory lock serializes quota/integrity checks and exclusive
@@ -186,12 +244,28 @@ fn reserve_at(
             if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) {
                 return Err(unavailable());
             }
-            let dispatch =
-                std::str::from_utf8(&name.to_bytes()[8..72]).map_err(|_| unavailable())?;
-            let dispatch = ComponentDigest::parse_hex(dispatch).map_err(|_| unavailable())?;
-            check_record(old, uid, &dispatch)?;
+            let (old_kind, dispatch) = named_kind(name.to_bytes())?;
+            let previous = check_kind_record(old, uid, &dispatch, old_kind)?;
+            if kind == Kind::Restoration && old_kind == Kind::Restoration {
+                let new = NativeDisplayRestorationReservation::decode(payload)?;
+                let old = NativeDisplayRestorationReservation::decode(&previous)?;
+                let new = new.decoded_material()?;
+                let old = old.decoded_material()?;
+                let new_scope = new.replacement().topology();
+                let old_scope = old.replacement().topology();
+                if new.original_dispatch() == old.original_dispatch()
+                    || (new_scope.session().boot() == old_scope.session().boot()
+                        && new_scope.session().uid() == old_scope.session().uid()
+                        && new_scope.seat() == old_scope.seat())
+                {
+                    // No concurrent attempt or retry can supersede an unresolved
+                    // original or competing seat ownership. Qualified
+                    // supersession requires qualified old-attempt retirement proof.
+                    return Err(unavailable());
+                }
+            }
         }
-        let name = format!("attempt-{}.checkpoint", dispatch.to_hex());
+        let name = kind.name(dispatch);
         let record = fs::openat(
             fd,
             name.as_str(),
@@ -207,7 +281,7 @@ fn reserve_at(
         let mut record = File::from(record);
         // Exclusive creation reserves the attempt first. Any partial write or
         // sync failure leaves an invalid reservation, never an absent attempt.
-        record.write_all(MAGIC).map_err(|_| unavailable())?;
+        record.write_all(kind.magic()).map_err(|_| unavailable())?;
         record
             .write_all(&Sha256::digest(payload))
             .map_err(|_| unavailable())?;
@@ -226,6 +300,18 @@ fn reserve_at(
 pub(super) fn reserve_stored(dispatch: &ComponentDigest, payload: &[u8]) -> Result<(), String> {
     NativeDisplayRecoveryCheckpoint::validate_stored(payload, dispatch)?;
     reserve_at(&open()?, 0, dispatch, payload)
+}
+
+pub(super) fn reserve_restoration(
+    record: &NativeDisplayRestorationReservation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::Restoration,
+    )
 }
 
 fn startup_clear_at(fd: &OwnedFd, uid: u32) -> Result<bool, String> {
@@ -257,4 +343,4 @@ pub(super) fn startup_clear() -> Result<bool, String> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

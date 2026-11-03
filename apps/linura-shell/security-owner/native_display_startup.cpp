@@ -125,21 +125,27 @@ std::optional<QString> nativeImage(quint32 pid)
 }
 } // namespace
 
-bool admitNativeDisplayStartup(PeerGuard &peers, const NativeSessionBinding &binding,
-                               NativeWaylandLock &backend)
+NativeDisplayStartupAdmission admitNativeDisplayStartup(PeerGuard &peers,
+                                                        const NativeSessionBinding &binding,
+                                                        NativeWaylandLock &backend)
 {
     if (!backend.displayStartupRequired())
-        return true; // Preserve S17 on a compositor that never advertised S21.
+        return NativeDisplayStartupAdmission::Ready; // Preserve S17 on a compositor that never
+                                                     // advertised S21.
     const auto sample = backend.displayStartupSample();
-    if (!sample ||
-        inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
-        return false;
+    if (!sample)
+        return NativeDisplayStartupAdmission::NativeSample;
+    if (inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
+        return NativeDisplayStartupAdmission::Session;
     if (sample->startupPhase != 0)
-        return true; // Observe existing admission/loss; never replace its lease.
+        return NativeDisplayStartupAdmission::Ready; // Observe existing admission/loss; never
+                                                     // replace its lease.
     const auto image = nativeImage(binding.compositorPid);
+    if (!image)
+        return NativeDisplayStartupAdmission::NativeImage;
     const auto guard = peers.namedPeer(NativePeerPurpose::DisplayProtection);
-    if (!image || !guard)
-        return false;
+    if (!guard)
+        return NativeDisplayStartupAdmission::OriginalGuard;
     qDBusRegisterMetaType<StartupDetail::Transfer>();
     const StartupDetail::Transfer transfer{binding.lock.resource,
                                            binding.compositorPid,
@@ -155,10 +161,12 @@ bool admitNativeDisplayStartup(PeerGuard &peers, const NativeSessionBinding &bin
     if (reply.type() != QDBusMessage::ReplyMessage || reply.service() != guard->uniqueOwner ||
         reply.signature() != QLatin1String("hb") || reply.arguments().size() != 2 ||
         reply.arguments()[0].metaType() != QMetaType::fromType<QDBusUnixFileDescriptor>() ||
-        reply.arguments()[1].metaType() != QMetaType::fromType<bool>() ||
-        !peers.stillCurrent(NativePeerPurpose::DisplayProtection, *guard) ||
-        inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
-        return false;
+        reply.arguments()[1].metaType() != QMetaType::fromType<bool>())
+        return NativeDisplayStartupAdmission::GuardReply;
+    if (!peers.stillCurrent(NativePeerPurpose::DisplayProtection, *guard))
+        return NativeDisplayStartupAdmission::GuardChanged;
+    if (inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
+        return NativeDisplayStartupAdmission::SessionChanged;
     const auto lease = reply.arguments()[0].value<QDBusUnixFileDescriptor>();
     ucred actual{};
     socklen_t size = sizeof(actual);
@@ -166,8 +174,10 @@ bool admitNativeDisplayStartup(PeerGuard &peers, const NativeSessionBinding &bin
         getsockopt(lease.fileDescriptor(), SOL_SOCKET, SO_PEERCRED, &actual, &size) != 0 ||
         size != sizeof(actual) || actual.uid != 0 || actual.pid <= 0 ||
         static_cast<quint32>(actual.pid) != guard->pid)
-        return false;
-    return backend.admitDisplayStartup(lease.fileDescriptor(), reply.arguments()[1].toBool(),
-                                       guard->pid, sample->compositor);
+        return NativeDisplayStartupAdmission::KernelPeer;
+    if (!backend.admitDisplayStartup(lease.fileDescriptor(), reply.arguments()[1].toBool(),
+                                     guard->pid, sample->compositor))
+        return NativeDisplayStartupAdmission::NativeTransfer;
+    return NativeDisplayStartupAdmission::Ready;
 }
 } // namespace Linura::SecurityOwner

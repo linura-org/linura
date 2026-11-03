@@ -266,14 +266,30 @@ incomplete, and public display mutation remains disabled.
 
 The private `DisplayProtection1` peer is separately supervised with exact immutable
 unit, MainPID, image, fixed `--display-protection` argv and bus-owner attestation.
-It accepts only the current supervised executor, including for root callers.
-Its three methods only start an original subscription, consume it for the same
-executor within the original two-second window and persist the historical
-checkpoint, or verify retained original objects and stored payload hash. It
-cannot write outputs, mint approval, orchestrate recovery or reconstruct lost
-protection. [ADR 0046](adr/0046-independent-original-display-protection.md)
+`Begin`, `Reserve` and `Verify` accept only the current supervised executor,
+including for root callers. They start an original subscription, consume it for
+the same executor within the original two-second window and persist the
+historical checkpoint, or verify retained original objects and stored payload
+hash. `NativeStartup` separately authenticates the exact supervised native
+owner; `ReadOriginal` requires the exact supervised Control process. The sixth
+method, `ReserveRestoration`, has the separate prepared handoff boundary below.
+It cannot write outputs, mint human approval, orchestrate recovery or reconstruct
+lost protection. [ADR 0046](adr/0046-independent-original-display-protection.md)
 records the boundary; public mutation activation still requires complete native
 recovery qualification.
+
+The private restoration endpoint producer requires the exact supervised
+executor after a fresh Control prepare. It compares complete schema-2 original
+source material, retains the original kernel/power witnesses and requires the
+old compositor's actual pidfd exit plus the replacement's healthy fenced lease.
+Exclusive typed reservation publication and both syncs precede endpoint creation.
+A lost reply, malformed history, incomplete transfer or another binding for the
+same unresolved original cannot renew admission. The bounded stream ends with a
+marker only after fresh witness checks. The native recipient must authenticate
+its kernel peer against its continuously held original Root lease and validate a
+fresh protected Recovery scope before any mutation; that consumer and the
+terminal workflow remain unfinished. Neither serialized binding nor file digest
+is authority, and this mechanism does not release outputs or power blockers.
 
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock
