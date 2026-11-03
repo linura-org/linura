@@ -469,3 +469,44 @@ fn recovery_resource_preserves_original_dispatch_and_full_replacement_identity()
     ));
     assert_ne!(changed.resource_id(), scope.resource_id());
 }
+
+#[test]
+fn protected_native_restoration_fixture_matches_canonical_baseline_derivation() {
+    let encoded = include_str!("fixtures/original-baseline.txt")
+        .strip_suffix('\n')
+        .unwrap_or_else(|| unreachable!("canonical fixture needs its final newline"));
+    let material = value(DisplayRestorationMaterial::decode(encoded));
+    let (old, new) = (
+        material.original().topology(),
+        material.replacement().topology(),
+    );
+    let inventory = |topology: &DisplayTopologyId, pairs: &[(u64, u64)]| {
+        value(DisplayOutputSet::new(
+            topology.clone(),
+            pairs
+                .iter()
+                .map(|(handle, generation)| {
+                    value(DisplayOutputId::new(topology.clone(), *handle, *generation))
+                })
+                .collect(),
+        ))
+    };
+    let old = inventory(old, &[(1, 2), (2, 2), (3, 3)]);
+    let new = inventory(new, &[(7, 4), (8, 4), (9, 5)]);
+    let (original, replacement) =
+        value(material.validate_native(&old, &capabilities(&old), &new, &capabilities(&new)));
+    assert_eq!(
+        value(DisplayRestorationMaterial::encode(
+            material.original_request(),
+            material.original_dispatch(),
+            material.original_checkpoint(),
+            material.replacement_baseline_guard(),
+            &original,
+            &replacement,
+            material.mapping(),
+        )),
+        encoded
+    );
+    assert_ne!(original.baseline(), original.desired());
+    assert_ne!(replacement.baseline(), replacement.desired());
+}

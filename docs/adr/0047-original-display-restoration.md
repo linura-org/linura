@@ -64,6 +64,15 @@ resource punctuation as data. These fields are not credentials or proof of live
 continuity. Historical capability validation checks original shape at the
 original timestamp; it does not refresh that evidence.
 
+The protected owner's private native comparison decoder independently checks the
+complete `LNRI:1` framing and old-to-new bijection, including reordered output
+handles, mirrors, disabled heads and a new login epoch on the same boot/user/seat.
+It requires the replacement target to equal the remapped original baseline and
+rechecks the current geometry, capabilities and native baseline guard before a
+future Recovery presentation. A shared canonical vector is validated by both
+Rust's native-capability derivation and the C++ decoder. This decoder is not yet
+wired to a protected Recovery interaction or effect; it grants no authority.
+
 The restoration operation is `ManagedExternalEffect` with a trusted
 `SecuritySensitive` floor. Its fresh canonical `ReconciliationPlan` includes the
 original lineage, current scope, complete target and contributing evidence.
