@@ -19,7 +19,9 @@ pub(super) struct RetainedKeepReview {
 }
 use linura_protocol::{DisplayLayoutReceipt, DisplayLayoutState};
 mod decision;
+mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
+pub use restoration::OriginalDisplayRestorationRequest;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DisplayContinuationAction {
     Confirm,

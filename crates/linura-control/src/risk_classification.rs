@@ -195,6 +195,25 @@ impl RiskPolicy {
 }
 
 pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassification {
+    if plan.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+        let valid_scope = linura_core::DisplayRecoveryScope::from_resource(&plan.resource).is_ok();
+        return RiskPolicy {
+            revision: "risk-policy:v0.10:display-restoration:1",
+            rules: if valid_scope && plan.changes.len() == 1 {
+                vec![RiskRule {
+                    id: "hyprland.original-restoration.security-sensitive",
+                    provider: linura_observation::DISPLAY_RECOVERY_PROVIDER,
+                    capability: linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
+                    resource_prefix: "display:recovery:",
+                    change_keys: &["restore_original"],
+                    risk: RiskClass::SecuritySensitive,
+                }]
+            } else {
+                vec![]
+            },
+        }
+        .classify(plan);
+    }
     if plan.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
         let valid_topology = linura_core::DisplayTopologyId::from_resource(&plan.resource).is_ok();
         return RiskPolicy {

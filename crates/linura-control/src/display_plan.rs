@@ -199,33 +199,35 @@ impl PlanPreviewControl {
     }
 }
 
-fn native_finding(source: &ObservationEnvelope) -> PlanFinding {
+pub(super) fn native_finding(source: &ObservationEnvelope) -> PlanFinding {
     let attributes: BTreeMap<_, _> = source
         .attributes
         .iter()
         .filter(|(key, _)| {
-            source.provider.as_str() == DISPLAY_PROVIDER
-                || matches!(
-                    key.as_str(),
-                    "boot_id"
-                        | "session_id"
-                        | "uid"
-                        | "created_monotonic_us"
-                        | "session_type"
-                        | "session_class"
-                        | "state"
-                        | "active"
-                        | "remote"
-                        | "seat"
-                        | "leader_present"
-                        | "lock_generation"
-                        | "security_owner_invocation"
-                        | "lock_protocol"
-                        | "secure"
-                        | "display_topology"
-                        | "observed_outputs"
-                        | "covered_outputs"
-                )
+            matches!(
+                source.provider.as_str(),
+                DISPLAY_PROVIDER | linura_observation::DISPLAY_RECOVERY_PROVIDER
+            ) || matches!(
+                key.as_str(),
+                "boot_id"
+                    | "session_id"
+                    | "uid"
+                    | "created_monotonic_us"
+                    | "session_type"
+                    | "session_class"
+                    | "state"
+                    | "active"
+                    | "remote"
+                    | "seat"
+                    | "leader_present"
+                    | "lock_generation"
+                    | "security_owner_invocation"
+                    | "lock_protocol"
+                    | "secure"
+                    | "display_topology"
+                    | "observed_outputs"
+                    | "covered_outputs"
+            )
         })
         .collect();
     PlanFinding {

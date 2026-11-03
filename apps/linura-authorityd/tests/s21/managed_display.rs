@@ -93,6 +93,90 @@ fn display_request(operation: &str) -> PlanDesiredStateRequest {
     request.request_id = value(managed_request_id(operation, &request));
     request
 }
+
+#[test]
+fn replacement_review_reloads_authenticated_history_without_replaying_an_apply() {
+    let database = TestDatabase::new();
+    let machine = Arc::new(Mutex::new(Machine::default()));
+    let mut port = Port(machine.clone());
+    let mut verifier = Verifier(machine.clone());
+    let original = display_request("review-original");
+    let replacement = value(DisplayTopologyId::new(
+        s17_managed_lock::lock_id().epoch().clone(),
+        "seat0",
+        value(CompositorInvocationId::new(
+            "22223344-1234-4567-89ab-0123456789ab",
+        )),
+        1,
+    ));
+    let input = linura_control::OriginalDisplayRestorationRequest {
+        operation_id: "review-original-restoration".into(),
+        original_request: original.request_id.clone(),
+        replacement,
+        lock: s17_managed_lock::lock_id(),
+        reason: original.reason.clone(),
+    };
+    {
+        let mut control = open(database.path(), &machine, 0);
+        assert!(
+            control
+                .plan_original_display_restoration(principal(), actor(true), input.clone())
+                .is_err()
+        );
+        value(control.begin_display_layout(
+            principal(),
+            actor(true),
+            original.clone(),
+            &approval(),
+            &mut port,
+            &mut verifier,
+        ));
+    }
+    let mut control = open(database.path(), &machine, 0);
+    // Validated source history survives Control restart. Missing live original
+    // protection still refuses recovery and cannot dispatch either intent.
+    let failure = control
+        .plan_original_display_restoration(principal(), actor(true), input.clone())
+        .err()
+        .unwrap_or_else(|| unreachable!("no original-protection observer"));
+    assert!(
+        failure.to_string().contains("hyprland-recovery"),
+        "{failure}"
+    );
+    for (principal, actor) in [
+        (
+            value(AuthenticatedPrincipal::new("unix:uid:1001")),
+            actor(true),
+        ),
+        (principal(), actor(false)),
+    ] {
+        assert!(
+            control
+                .plan_original_display_restoration(principal, actor, input.clone())
+                .is_err()
+        );
+    }
+    value(control.decide_display_layout(
+        principal(),
+        actor(true),
+        &original.request_id,
+        DisplayContinuationAction::Revert,
+        &Decision::approve(&machine),
+        &mut port,
+        &mut verifier,
+    ));
+    assert!(matches!(
+        control.plan_original_display_restoration(principal(), actor(true), input),
+        Err(ManagedLifecycleError::TerminalState(_))
+    ));
+    assert_eq!(
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .applies,
+        1
+    );
+}
 struct LiveFixtureObserver {
     machine: Arc<Mutex<Machine>>,
     template: ObservationEnvelope,

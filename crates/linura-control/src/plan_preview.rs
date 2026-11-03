@@ -332,6 +332,7 @@ impl PreviewStore {
 pub struct PlanPreviewControl {
     coordinator: ObservationCoordinator,
     previews: PreviewStore,
+    pub(super) restoration_context: crate::display_restoration_plan::OriginalContextSlot,
 }
 
 impl PlanPreviewControl {
@@ -355,6 +356,7 @@ impl PlanPreviewControl {
         Self {
             coordinator,
             previews: PreviewStore::default(),
+            restoration_context: crate::display_restoration_plan::OriginalContextSlot::default(),
         }
     }
 
@@ -424,6 +426,13 @@ impl PlanPreviewControl {
         protective: Option<&crate::protective_lock_execution::ProtectiveLockContext>,
         observe_only_protective: bool,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        if input.request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            return self.build_fresh_original_display_restoration_plan(
+                &input.principal,
+                actor,
+                &input.request,
+            );
+        }
         if input.request.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
             return self.build_fresh_display_plan(&input.principal, actor, &input.request);
         }

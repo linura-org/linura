@@ -69,6 +69,77 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    pub(crate) fn observe_original_display_protection(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err("original display protection observation scope unavailable".into());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|e| e.to_string())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadOriginal",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ay"
+        {
+            return Err("original display protection observation peer or signature differs".into());
+        }
+        let (payload,): (Vec<u8>,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "original checkpoint observation reply is malformed")?;
+        let facts =
+            crate::NativeDisplayRecoveryCheckpoint::original_protection_facts(&payload, scope)?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err("original protection service changed; no witness reacquisition".into());
+        }
+        let now_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        let age = now_boot
+            .checked_sub(began_boot)
+            .ok_or("original protection observation clock regressed")?;
+        if began_boot == 0 || age >= 2000 || started.elapsed() >= Duration::from_secs(2) {
+            return Err(
+                "original display protection observation exceeded its original budget".into(),
+            );
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|e| e.to_string())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
+            )
+            .map_err(|e| e.to_string())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: now
+                .checked_sub(age)
+                .filter(|ms| *ms != 0)
+                .ok_or("original protection wall-clock mapping underflow")?,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        linura_observation::DisplayOriginalProtectionFacts::from_envelope(&observation, scope, now)
+            .map_err(|e| e.to_string())?;
+        Ok(observation)
+    }
     fn display_protection_call<B: serde::Serialize + zbus::zvariant::DynamicType>(
         &self,
         method: &str,
@@ -316,6 +387,23 @@ impl NativeSessionChannel {
                 != sender
         {
             return Err("display protection caller is not the supervised executor".into());
+        }
+        Ok(())
+    }
+
+    /// Read-only original-protection observation admits the exact supervised
+    /// Control invocation, never an arbitrary root or same-account process.
+    pub fn require_trusted_display_control_sender(&self, sender: &str) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        if !crate::owner::unique_name(sender)
+            || self
+                .trusted_service(NativeSessionRole::Control, Instant::now())?
+                .sender
+                != sender
+        {
+            return Err(
+                "original display observation requires the supervised Control owner".into(),
+            );
         }
         Ok(())
     }

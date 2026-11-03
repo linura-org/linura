@@ -99,6 +99,18 @@ grep -Eiq 'supervised owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE
 expect_failure native-display-startup-unqualified-root-denied \
     sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" NativeStartup '(sussss)' "${startup_request[@]}"
 grep -Eiq 'supervised owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# A well-formed replacement scope does not let root or another process under
+# Control's service account read private original checkpoint material.
+recovery_scope="display:recovery:$protection_digest:$(cat /proc/sys/kernel/random/boot_id):$(id -u):c2:1:seat0:22222222-2222-4222-8222-222222222222:1"
+expect_failure native-display-original-ordinary-denied \
+    busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-display-original-root-not-control-denied \
+    sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
+grep -Eiq 'supervised Control owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-display-original-same-account-not-control-denied \
+    sudo -n -u linura-authority busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
+grep -Eiq 'supervised Control owner' <<<"$LAST_FAILURE_OUTPUT"
 # Separate service lifetime, not a claim that a real DRM witness was acquired.
 sudo -n systemctl restart "$service"
 sudo -n systemctl is-active --quiet "$service"

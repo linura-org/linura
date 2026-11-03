@@ -488,6 +488,47 @@ class OperationSemanticsContractTests(unittest.TestCase):
                     )
                 )
 
+    def test_original_restoration_registration_is_not_apply_or_transient_authority(
+        self,
+    ) -> None:
+        for field, replacement in (
+            (
+                'class = "managed-external-effect"',
+                'class = "transient-external-effect"',
+            ),
+            ('risk_floor = "security-sensitive"', 'risk_floor = "user-state"'),
+            ('provider = "hyprland-recovery"', 'provider = "hyprland"'),
+            (
+                'observation_capability = "display.original-protection.observe"',
+                'observation_capability = "display.outputs.observe"',
+            ),
+            ('resource_prefix = "display:recovery:"', 'resource_prefix = "display:"'),
+            ('change_keys = ["restore_original"]', 'change_keys = ["layout"]'),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                contract = root / "contracts/operation-semantics.toml"
+                source = contract.read_text(encoding="utf-8")
+                start = source.index(
+                    "[registered_operations.managed-display-restoration]"
+                )
+                end = source.index("\n[", start + 1)
+                table = source[start:end]
+                self.assertIn(field, table)
+                contract.write_text(
+                    source[:start]
+                    + table.replace(field, replacement, 1)
+                    + source[end:],
+                    encoding="utf-8",
+                )
+                self.assertTrue(
+                    any(
+                        "registered_operations drifted" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+
     def test_registered_managed_systemd_contract_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

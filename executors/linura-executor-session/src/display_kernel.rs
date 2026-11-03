@@ -65,11 +65,35 @@ impl Witnesses {
     ) -> Result<(), String> {
         self.with_witness(dispatch, |protection| protection.verify(channel))
     }
-    fn with_witness(
+    /// Fresh observation of retained original protection. Exact historical
+    /// bytes are returned only while the same live witnesses still verify;
+    /// no restart, cache, digest or file can reconstruct those witnesses.
+    pub(super) fn read_original(
         &self,
         dispatch: &ComponentDigest,
-        verify: impl FnOnce(&mut Protection) -> Result<(), String>,
-    ) -> Result<(), String> {
+        channel: &NativeSessionChannel,
+    ) -> Result<Vec<u8>, String> {
+        self.with_witness(dispatch, |protection| {
+            let result = (|| {
+                protection.verify(channel)?;
+                let payload = super::display_checkpoint::read_original(
+                    dispatch,
+                    &protection.checkpoint_digest,
+                )?;
+                protection.verify(channel)?;
+                Ok(payload)
+            })();
+            if result.is_err() {
+                protection.valid = false;
+            }
+            result
+        })
+    }
+    fn with_witness<T>(
+        &self,
+        dispatch: &ComponentDigest,
+        verify: impl FnOnce(&mut Protection) -> Result<T, String>,
+    ) -> Result<T, String> {
         let mut witnesses = self
             .0
             .try_lock()
@@ -107,8 +131,9 @@ mod tests {
     fn restart_or_unknown_attempt_never_reacquires_a_witness() {
         let witnesses = Witnesses::default();
         let digest = ComponentDigest::from_bytes([1; 32]);
-        let forbidden =
-            |_: &mut Protection| unreachable!("missing/contended witness must never be used");
+        let forbidden = |_: &mut Protection| -> Result<(), String> {
+            unreachable!("missing/contended witness must never be used")
+        };
         assert!(witnesses.with_witness(&digest, forbidden).is_err());
         let _lock = witnesses.0.lock().unwrap_or_else(|_| unreachable!());
         assert!(witnesses.with_witness(&digest, forbidden).is_err());

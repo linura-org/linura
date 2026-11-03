@@ -168,6 +168,66 @@ impl std::fmt::Debug for NativeDisplayRecoveryCheckpoint {
     }
 }
 impl NativeDisplayRecoveryCheckpoint {
+    /// Project only typed historical comparison data after the adapter has
+    /// freshly authenticated live independent protection. Raw rule bytes never
+    /// enter the canonical observation, public reports or model context.
+    pub(crate) fn original_protection_facts(
+        payload: &[u8],
+        scope: &linura_core::DisplayRecoveryScope,
+    ) -> Result<linura_observation::DisplayOriginalProtectionFacts, String> {
+        let dispatch =
+            ComponentDigest::parse_hex(scope.original_dispatch()).map_err(|_| invalid())?;
+        Self::validate_stored(payload, &dispatch)?;
+        let mut rest = payload;
+        let mut fields = Vec::with_capacity(19);
+        for _ in 0..19 {
+            let (length, body) = rest.split_at_checked(8).ok_or_else(invalid)?;
+            let length = usize::try_from(u64::from_be_bytes(
+                length.try_into().map_err(|_| invalid())?,
+            ))
+            .map_err(|_| invalid())?;
+            let (field, tail) = body.split_at_checked(length).ok_or_else(invalid)?;
+            fields.push(std::str::from_utf8(field).map_err(|_| invalid())?);
+            rest = tail;
+        }
+        if !rest.is_empty() {
+            return Err(invalid());
+        }
+        let material =
+            linura_core::DisplayLayoutMaterial::decode(fields[8]).map_err(|_| invalid())?;
+        let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
+        let mut outputs = BTreeMap::new();
+        for row in saved.heads {
+            let id = DisplayOutputId::new(
+                material.topology().clone(),
+                number(&row.handle)?,
+                number(&row.generation)?,
+            )
+            .map_err(|_| invalid())?;
+            let metadata = DisplayRecoveryMetadata::new(
+                row.linura_owned,
+                ComponentDigest::from_bytes(Sha256::digest(row.base_rule.as_bytes()).into())
+                    .to_hex(),
+                row.output_identity_digest,
+            )
+            .map_err(|_| invalid())?;
+            if outputs.insert(id, metadata).is_some() {
+                return Err(invalid());
+            }
+        }
+        linura_observation::DisplayOriginalProtectionFacts::new(
+            scope.clone(),
+            fields[8].into(),
+            fields[1].into(),
+            ComponentDigest::from_bytes(Sha256::digest(payload).into()).to_hex(),
+            fields[17].into(),
+            saved.integration,
+            number(fields[15])?,
+            number(fields[9])?,
+            outputs,
+        )
+        .map_err(|_| invalid())
+    }
     /// Historical scope comparison for the retained native startup lease.
     /// This cannot turn history into current evidence or a recovery permit.
     pub fn original_startup_scope(

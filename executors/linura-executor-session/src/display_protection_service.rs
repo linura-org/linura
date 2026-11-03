@@ -27,6 +27,29 @@ struct StartupLease {
     // original endpoint permanently revokes the compositor's native lease.
     _lease: UnixStream,
 }
+impl StartupLease {
+    fn live(&self) -> Result<(), String> {
+        self.peer.live()?;
+        let mut event = [rustix::event::PollFd::new(
+            &self._lease,
+            rustix::event::PollFlags::IN,
+        )];
+        if rustix::event::poll(
+            &mut event,
+            Some(&rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            }),
+        )
+        .map_err(|_| "native startup lease observation failed")?
+            != 0
+            || !event[0].revents().is_empty()
+        {
+            return Err("original native startup lease unavailable; no reconnection".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Default)]
 struct Admission {
     pending: BTreeMap<String, Pending<NativeDisplayKernelSubscription>>,
@@ -82,6 +105,11 @@ fn consume<T>(
     Ok(original.subscription)
 }
 trait ProtectionPort: Clone + Send + Sync + 'static {
+    fn read_original(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<Vec<u8>>;
     fn startup(
         &self,
         sender: &str,
@@ -96,12 +124,14 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
 struct ProtectionService<P: ProtectionPort> {
     port: P,
     startup_pending: Arc<AtomicBool>,
+    original_pending: Arc<AtomicBool>,
 }
 impl<P: ProtectionPort> ProtectionService<P> {
     fn new(port: P) -> Self {
         Self {
             port,
             startup_pending: Arc::new(AtomicBool::new(false)),
+            original_pending: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -112,7 +142,7 @@ impl StartupSlot {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| {
                 zbus::fdo::Error::LimitsExceeded(
-                    "native startup admission already in progress".into(),
+                    "display protection admission or observation already in progress".into(),
                 )
             })?;
         Ok(Self(Arc::clone(pending)))
@@ -137,6 +167,58 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn read_original(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let admit = || {
+            self.channel
+                .require_trusted_display_control_sender(sender)
+                .map_err(|_| {
+                    zbus::fdo::Error::AccessDenied(
+                        "original display observation requires the supervised Control owner".into(),
+                    )
+                })
+        };
+        admit()?;
+        // Serialize against startup, original reservation and future qualified
+        // retirement. Reading neither consumes a grant nor releases a fence.
+        let admission = self.admission.try_lock().map_err(|_| unavailable())?;
+        let dispatch = dispatch(scope.original_dispatch())?;
+        let payload = self
+            .witnesses
+            .read_original(&dispatch, &self.channel)
+            .map_err(|_| unavailable())?;
+        let (original, integration) =
+            NativeDisplayRecoveryCheckpoint::original_startup_scope(&payload, &dispatch)
+                .map_err(|_| unavailable())?;
+        let current = scope.replacement();
+        if original.session().boot() != current.session().boot()
+            || original.session().uid() != current.session().uid()
+            || original.seat() != current.seat()
+            || original.compositor() == current.compositor()
+        {
+            return Err(unavailable());
+        }
+        let original = admission
+            .startups
+            .iter()
+            .find(|startup| startup.peer.matches_preimage(&original, &integration))
+            .ok_or_else(unavailable)?;
+        let current = admission
+            .startups
+            .iter()
+            .find(|startup| startup.peer.matches_preimage(current, &integration))
+            .ok_or_else(unavailable)?;
+        if !original.ordinary || !original.peer.definitely_exited() || current.ordinary {
+            return Err(unavailable());
+        }
+        current.live().map_err(|_| unavailable())?;
+        admit()?;
+        current.live().map_err(|_| unavailable())?;
+        Ok(payload)
+    }
     fn startup(
         &self,
         sender: &str,
@@ -226,7 +308,7 @@ impl ProtectionPort for NativeProtection {
         if !startup.ordinary {
             return Err(unavailable());
         }
-        startup.peer.live().map_err(|_| unavailable())?;
+        startup.live().map_err(|_| unavailable())?;
         self.witnesses
             .reserve_stored(&digest, payload, subscription, &self.channel)
             .map_err(|_| unavailable())?;
@@ -245,6 +327,28 @@ impl ProtectionPort for NativeProtection {
 
 #[zbus::interface(name = "org.linura.DisplayProtection1")]
 impl<P: ProtectionPort> ProtectionService<P> {
+    #[zbus(out_args("checkpoint"))]
+    async fn read_original(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_original(&sender, scope)
+        })
+        .await
+    }
     #[zbus(out_args("lease", "ordinary_allowed"))]
     async fn native_startup(
         &self,
@@ -347,6 +451,13 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn read_original(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+        ) -> zbus::fdo::Result<Vec<u8>> {
+            Err(unavailable())
+        }
         fn startup(
             &self,
             _: &str,
@@ -374,13 +485,15 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 4);
+            assert_eq!(text.matches("<method ").count(), 5);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
                 "name=\"ordinary_allowed\" type=\"b\" direction=\"out\"",
                 "name=\"dispatch_digest\" type=\"s\" direction=\"in\"",
                 "name=\"checkpoint\" type=\"ay\" direction=\"in\"",
+                "name=\"recovery_scope\" type=\"s\" direction=\"in\"",
+                "name=\"checkpoint\" type=\"ay\" direction=\"out\"",
                 "name=\"accepted\" type=\"b\" direction=\"out\"",
                 "name=\"org.linura.ContractId\" value=\"dbus.org.linura.DisplayProtection1\"",
                 "name=\"org.linura.ContractVersion\" value=\"1\"",
@@ -389,7 +502,7 @@ mod tests {
                 assert!(text.contains(marker), "{marker}");
             }
         }
-        for method in ["Begin", "Reserve", "Verify"] {
+        for method in ["Begin", "Reserve", "Verify", "ReadOriginal"] {
             assert!(xml.contains(&format!("name=\"{method}\"")));
         }
         for forbidden in ["Apply", "Confirm", "Revert", "Execute", "Unlock", "Suspend"] {
@@ -430,6 +543,40 @@ mod tests {
             assert!(dispatch(&raw).is_err());
         }
         assert!(dispatch(&"ab".repeat(32)).is_ok());
+    }
+
+    #[test]
+    fn original_read_requires_transport_sender_exact_bounded_scope_and_live_port_admission() {
+        let service = ProtectionService::new(DenyProtection);
+        let anonymous = zbus::Message::method_call(PATH, "ReadOriginal")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let scope = format!(
+            "display:recovery:{}:11111111-1111-4111-8111-111111111111:1000:c3:99:seat0:44444444-4444-4444-8444-444444444444:1",
+            "a".repeat(64)
+        );
+        assert!(matches!(
+            async_io::block_on(service.read_original(&scope, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let message = zbus::Message::method_call(PATH, "ReadOriginal")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .sender(":1.7")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        for bad in [
+            String::new(),
+            "a".repeat(64),
+            "x".repeat(257),
+            scope.replace(&"a".repeat(64), &"0".repeat(64)),
+        ] {
+            assert!(async_io::block_on(service.read_original(&bad, message.header())).is_err());
+        }
+        // A syntactically valid source and unique sender still cannot turn
+        // comparison identity into native admission or historical bytes.
+        assert!(async_io::block_on(service.read_original(&scope, message.header())).is_err());
     }
     #[test]
     fn original_subscription_is_consumed_once_in_the_same_executor_and_window() {

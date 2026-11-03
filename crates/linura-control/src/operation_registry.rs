@@ -21,6 +21,10 @@ pub(crate) const MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID: &str =
 pub const TRANSIENT_AUDIO_VOLUME_OPERATION_ID: &str = "operation:audio.output.set-session-volume";
 pub const MANAGED_SESSION_LOCK_OPERATION_ID: &str = "operation:session.lock.set-secure";
 pub const MANAGED_DISPLAY_LAYOUT_OPERATION_ID: &str = "operation:display.layout.apply";
+pub(crate) const MANAGED_DISPLAY_RESTORATION_OPERATION_ID: &str =
+    "operation:display.layout.restore-original";
+pub(crate) const MANAGED_DISPLAY_RESTORATION_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-display-restoration.risk-floor";
 pub(crate) const MANAGED_DISPLAY_LAYOUT_RISK_FLOOR_RULE_ID: &str =
     "operation-registry.managed-display-layout.risk-floor";
 pub const MANAGED_SESSION_LOCK_PROVIDER: &str = "session-locker";
@@ -144,6 +148,17 @@ pub(crate) fn trusted_builtin_operation_registry()
             CapabilityId::new(linura_observation::DISPLAY_OUTPUTS_CAPABILITY)?,
             "display:topology:",
             vec!["layout".into()],
+        )?),
+    )?)?;
+    registry.register(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_DISPLAY_RESTORATION_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(OperationEffectBinding::try_new(
+            ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)?,
+            CapabilityId::new(linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY)?,
+            "display:recovery:",
+            vec!["restore_original".into()],
         )?),
     )?)?;
     for (_, operation, prefix, _, risk) in SESSION_TRANSITION_ROUTES {
@@ -293,7 +308,7 @@ mod tests {
             trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
         // Builtin registrations include the S21 managed display operation.
         // Keep verifying the legacy systemd binding below; never drop it.
-        assert_eq!(registry.len(), 8);
+        assert_eq!(registry.len(), 9);
         let display = registry
             .descriptor(
                 &OperationId::new(MANAGED_DISPLAY_LAYOUT_OPERATION_ID)

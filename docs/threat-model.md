@@ -1268,3 +1268,33 @@ protected/quarantined conversation. Startup admission cannot restore a display,
 replay intent, reuse an approval, renew Keep/Revert, reacquire original witnesses
 or manipulate S17 lock state. Native multi-output/first-frame/crash evidence
 remains required; portable transport tests cannot supply it.
+
+### Original-restoration comparison and review
+
+`ReadOriginal` admits only the freshly attested supervised Control invocation.
+An ordinary user, arbitrary root process or another process under the service
+account cannot use it. The original compositor's retained pidfd must prove exit;
+the replacement must retain its original recovery-fenced startup lease with the
+same boot, UID, seat and integration. The original kernel/power witnesses and
+immutable checkpoint bytes must verify before and after readback. Reading or
+decoding a checkpoint never releases a fence or consumes a restoration grant.
+
+Control loads the source request, original baseline and complete phase chain
+from its authenticated journal. Terminal, missing, conflicting or foreign
+history refuses review. Historical facts retain their original timestamp and
+confirmation deadline; fresh protection observation cannot freshen them.
+Control joins that separate bounded observation to fresh output, logind and
+lock-coverage evidence. A complete unique native-identity bijection is required;
+numeric handles, enumeration order, connector names or geometry alone do not
+identify an original output. The target is exclusively the original baseline.
+
+The private planning context binds the exact authenticated principal and new
+request digest, is bounded to one review and retires on scope exit. Generic
+preview without it fails closed before provider probing. The source checkpoint,
+replacement native ownership guard and full bijection enter canonical `LNRI:1`
+material and the canonical reconciliation plan. Equal-geometry rule/overlay
+drift, substituted lineage and stale contributors refuse revalidation. The
+distinct registered managed operation retains SecuritySensitive risk and fresh
+administrator approval/prepare obligations. These review mechanisms do not
+qualify single-use dispatch, native restoration, independent terminal proof or
+cleanup; public display mutation remains disabled pending that composition.

@@ -10,6 +10,8 @@ mod account;
 mod bus;
 mod display_kernel;
 mod display_observer;
+mod original_display_observer;
+pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;
 mod owner;
 mod service;

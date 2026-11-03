@@ -24,7 +24,7 @@ It has no display-write, session-lock, power-transition or approval endpoint.
 This is not a privileged recovery coordinator: Control retains all planning,
 policy, prepare, revalidation, verification, durable phase and retirement work.
 
-The private Experimental `DisplayProtection1` interface has four
+The private Experimental `DisplayProtection1` interface has five
 bounded mechanisms. `Begin` opens the original bounded kernel subscription before native
 sampling. `Reserve` consumes that subscription once, within its original two
 seconds and in the same authenticated executor invocation. It validates the
@@ -34,9 +34,21 @@ the original preimage before returning. `Verify` revalidates the retained
 original objects and exact stored bytes. A dispatch digest is only correlation,
 never caller authentication or an executor permit.
 
-The system bus denies ordinary callers for the original-witness methods. Each
-of those methods independently authenticates the current supervised executor
-before and after the mechanism. The separately bounded `NativeStartup` entry
+`ReadOriginal` is a separate bounded read for the exact supervised Control
+invocation. It authenticates the replacement recovery scope, requires the
+original retained compositor pidfd to prove exit, and requires the original
+healthy startup lease of a recovery-fenced replacement with the same boot, UID,
+seat and integration. Both sides authenticate the current protection service.
+The same retained kernel/power witnesses verify before and after the immutable
+read. Only typed historical intent/metadata/digests enter the canonical
+`hyprland-recovery` observation; native rule bytes remain adapter-private.
+Control owns the separate current-output/session/coverage probes and their join.
+Neither reading history nor constructing this observation authorizes restoration.
+
+The system bus denies ordinary callers for the original-witness methods.
+`Begin`, `Reserve` and `Verify` independently authenticate the current supervised
+executor before and after their mechanism; `ReadOriginal` admits only Control.
+The separately bounded `NativeStartup` entry
 requires the current supervised protected owner and independently bound login. Root UID alone
 is insufficient. The executor authenticates the protection service before and
 after each bounded call. Lost replies are not retried. Pending subscriptions are

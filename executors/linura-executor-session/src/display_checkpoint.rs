@@ -126,11 +126,19 @@ pub(super) fn validate(
     dispatch: &ComponentDigest,
     original_payload_digest: &ComponentDigest,
 ) -> Result<(), String> {
+    read_original(dispatch, original_payload_digest).map(|_| ())
+}
+
+pub(super) fn read_original(
+    dispatch: &ComponentDigest,
+    original_payload_digest: &ComponentDigest,
+) -> Result<Vec<u8>, String> {
     let payload = load_at(&open()?, 0, dispatch)?;
     if ComponentDigest::from_bytes(Sha256::digest(&payload).into()) != *original_payload_digest {
         return Err(unavailable());
     }
-    NativeDisplayRecoveryCheckpoint::validate_stored(&payload, dispatch)
+    NativeDisplayRecoveryCheckpoint::validate_stored(&payload, dispatch)?;
+    Ok(payload)
 }
 fn reserve_at(
     fd: &OwnedFd,

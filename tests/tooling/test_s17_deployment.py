@@ -76,7 +76,20 @@ class S17DeploymentTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            [p.get("user") for p in policy.findall("policy[@user]")], ["root"]
+            [p.get("user") for p in policy.findall("policy[@user]")],
+            ["linura-authority", "root"],
+        )
+        authority = policy.find("policy[@user='linura-authority']")
+        self.assertIsNotNone(authority)
+        self.assertEqual(
+            [dict(rule.attrib) for rule in authority],
+            [
+                {
+                    "send_destination": "org.linura.DisplayProtection1",
+                    "send_interface": "org.linura.DisplayProtection1",
+                    "send_member": "ReadOriginal",
+                }
+            ],
         )
 
     def test_display_kernel_witness_adds_only_local_read_only_observation(self):

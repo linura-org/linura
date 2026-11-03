@@ -75,6 +75,17 @@ remain unclassified. Registration is not native execution or recovery
 qualification; public mutation activation remains blocked until the integrated
 watchdog, S17 fences and exact-source native cases pass.
 
+S21 replacement recovery has a separate registered
+`operation:display.layout.restore-original` managed operation. Its
+`hyprland-recovery/display.original-protection.observe` route binds a canonical
+`display:recovery:` scope and the sole `restore_original` material key. The
+independent SecuritySensitive rule and registry floor preserve fresh approval
+and durable prepare obligations. Its non-executable review derives the complete
+original baseline from authenticated history and fresh replacement facts;
+generic preview without that private context refuses the candidate. Registration
+does not activate a restoration executor or qualify native recovery. See
+[ADR 0047](adr/0047-original-display-restoration.md).
+
 S17 also registers four distinct managed transition candidates:
 `operation:session.suspend`, `operation:session.logout`, `operation:session.reboot`
 and `operation:session.power-off`. Their observation route is

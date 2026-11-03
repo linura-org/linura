@@ -6,10 +6,15 @@ use std::fmt::{Display, Formatter};
 use linura_core::{CapabilityId, ProviderId, ResourceId};
 
 mod display;
+mod display_recovery;
 pub use display::{
     DISPLAY_COVERAGE_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
     DisplayEvidenceError, DisplayObservationFacts, DisplayRecoveryMetadata,
     display_observation_attributes, display_recovery_observation_attributes,
+};
+pub use display_recovery::{
+    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
+    DisplayOriginalProtectionFacts,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

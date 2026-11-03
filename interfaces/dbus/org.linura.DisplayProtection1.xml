@@ -5,6 +5,12 @@
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
     <!-- Private bounded original-witness mechanisms; no effect or recovery authority. -->
+    <method name="ReadOriginal">
+      <!-- Supervised Control only; exact historical bytes plus live retained
+           witness checks. No credential, restoration grant or output write. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="out"/>
+    </method>
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.
            Tuple: original lock/login, native PID, seat, compositor invocation,

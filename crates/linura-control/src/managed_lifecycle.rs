@@ -8,7 +8,7 @@ pub use display::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, DISPLAY_CONFIRMATION_WINDOW_MS,
     DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
     DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
-    IndependentDisplayVerifier, TrustedDisplayDecision,
+    IndependentDisplayVerifier, OriginalDisplayRestorationRequest, TrustedDisplayDecision,
 };
 
 use linura_core::{
@@ -56,6 +56,7 @@ const MANAGED_REQUEST_PREFIX: &str = "request:v06:";
 const SESSION_REQUEST_PREFIX: &str = "request:v010:session-lock:";
 const TRANSITION_REQUEST_PREFIX: &str = "request:v010:session-transition:";
 const DISPLAY_REQUEST_PREFIX: &str = "request:v010:display-layout:";
+const DISPLAY_RESTORATION_REQUEST_PREFIX: &str = "request:v010:display-restoration:";
 const MAX_OPERATION_ID_BYTES: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_ATTEMPTS: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_INTERVAL: Duration = Duration::from_millis(250);
@@ -471,6 +472,8 @@ pub fn managed_request_id(
         TRANSITION_REQUEST_PREFIX
     } else if is_display_request(request) {
         DISPLAY_REQUEST_PREFIX
+    } else if is_display_restoration_request(request) {
+        DISPLAY_RESTORATION_REQUEST_PREFIX
     } else {
         MANAGED_REQUEST_PREFIX
     };
@@ -1984,6 +1987,16 @@ fn registered_route(
     capability: &str,
     resource: &ResourceId,
 ) -> Result<(&'static str, &'static str), ManagedLifecycleError> {
+    if provider == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && capability == linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+    {
+        linura_core::DisplayRecoveryScope::from_resource(resource)
+            .map_err(|e| ManagedLifecycleError::UnsupportedEffect(e.to_string()))?;
+        return Ok((
+            crate::operation_registry::MANAGED_DISPLAY_RESTORATION_OPERATION_ID,
+            crate::operation_registry::MANAGED_DISPLAY_RESTORATION_RISK_FLOOR_RULE_ID,
+        ));
+    }
     if provider == linura_observation::DISPLAY_PROVIDER
         && capability == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
     {
@@ -2048,6 +2061,9 @@ fn required_approval_for_request(
         });
     }
     match (request.provider.as_str(), key.as_str(), value.as_str()) {
+        (linura_observation::DISPLAY_RECOVERY_PROVIDER, "restore_original", _) => {
+            Ok(ApprovalClass::Administrator)
+        }
         (linura_observation::DISPLAY_PROVIDER, "layout", _) => Ok(ApprovalClass::Administrator),
         (MANAGED_SYSTEMD_PROVIDER, "active_state", "active" | "inactive") => {
             Ok(ApprovalClass::Administrator)
@@ -2092,15 +2108,18 @@ fn effect_from_candidate(
         ));
     }
     let change = &subject.changes()[0];
-    let expected_key = if subject.provider().as_str() == linura_observation::DISPLAY_PROVIDER {
-        "layout"
-    } else if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
-        "secure"
-    } else if subject.provider().as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
-        "completed"
-    } else {
-        "active_state"
-    };
+    let expected_key =
+        if subject.provider().as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            "restore_original"
+        } else if subject.provider().as_str() == linura_observation::DISPLAY_PROVIDER {
+            "layout"
+        } else if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+            "secure"
+        } else if subject.provider().as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
+            "completed"
+        } else {
+            "active_state"
+        };
     if change.key != expected_key {
         return Err(ManagedLifecycleError::UnsupportedEffect(
             "trusted plan contains a mutation other than active_state".into(),
@@ -2119,6 +2138,24 @@ fn effect_from_parts(
     resource: ResourceId,
     desired_state: &BTreeMap<String, String>,
 ) -> Result<EffectDescriptor, ManagedLifecycleError> {
+    if provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+        if desired_state.len() != 1 {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "original restoration requires one complete material".into(),
+            ));
+        }
+        let material = desired_state.get("restore_original").ok_or_else(|| {
+            ManagedLifecycleError::UnsupportedEffect("original restoration intent is absent".into())
+        })?;
+        let effect = linura_provider_sdk::display_restoration_effect(material)
+            .map_err(ManagedLifecycleError::UnsupportedEffect)?;
+        if effect.resource != resource {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "original restoration refers to another recovery scope".into(),
+            ));
+        }
+        return Ok(effect);
+    }
     if provider.as_str() == linura_observation::DISPLAY_PROVIDER {
         if desired_state.len() != 1 {
             return Err(ManagedLifecycleError::UnsupportedEffect(
@@ -2295,6 +2332,8 @@ fn validate_request_identity(
         TRANSITION_REQUEST_PREFIX
     } else if is_display_request(request) {
         DISPLAY_REQUEST_PREFIX
+    } else if is_display_restoration_request(request) {
+        DISPLAY_RESTORATION_REQUEST_PREFIX
     } else {
         MANAGED_REQUEST_PREFIX
     };
@@ -2317,6 +2356,11 @@ fn is_session_transition(request: &PlanDesiredStateRequest) -> bool {
 fn is_display_request(request: &PlanDesiredStateRequest) -> bool {
     request.provider.as_str() == linura_observation::DISPLAY_PROVIDER
         && request.observation_capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+}
+fn is_display_restoration_request(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && request.observation_capability.as_str()
+            == linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
 }
 
 fn now_unix_seconds() -> Result<u64, ManagedLifecycleError> {

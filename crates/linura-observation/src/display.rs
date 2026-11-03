@@ -36,13 +36,7 @@ impl DisplayRecoveryMetadata {
     ) -> Result<Self, DisplayEvidenceError> {
         if [&base_configuration_digest, &native_identity_digest]
             .into_iter()
-            .any(|digest| {
-                digest.len() != 64
-                    || digest.bytes().all(|byte| byte == b'0')
-                    || !digest
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-            })
+            .any(|digest| !canonical_digest(digest))
         {
             return Err(DisplayEvidenceError::Shape);
         }
@@ -64,6 +58,14 @@ impl DisplayRecoveryMetadata {
     pub fn native_identity_digest(&self) -> &str {
         &self.native_identity_digest
     }
+}
+
+pub(super) fn canonical_digest(value: &str) -> bool {
+    value.len() == 64
+        && value.bytes().any(|byte| byte != b'0')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -355,7 +357,7 @@ fn parse_modes(value: &str) -> Result<Vec<DisplayMode>, DisplayEvidenceError> {
     Ok(modes)
 }
 
-fn number(
+pub(super) fn number(
     attributes: &BTreeMap<String, ObservedValue>,
     key: &str,
 ) -> Result<u64, DisplayEvidenceError> {
@@ -364,7 +366,7 @@ fn number(
         _ => Err(DisplayEvidenceError::Shape),
     }
 }
-fn text<'a>(
+pub(super) fn text<'a>(
     attributes: &'a BTreeMap<String, ObservedValue>,
     key: &str,
 ) -> Result<&'a str, DisplayEvidenceError> {
@@ -373,7 +375,7 @@ fn text<'a>(
         _ => Err(DisplayEvidenceError::Shape),
     }
 }
-fn boolean(
+pub(super) fn boolean(
     attributes: &BTreeMap<String, ObservedValue>,
     key: &str,
 ) -> Result<bool, DisplayEvidenceError> {

@@ -216,6 +216,31 @@ pub fn display_layout_effect(material: &str) -> Result<EffectDescriptor, String>
     .map_err(|e| e.to_string())
 }
 
+/// Correlate a fresh original-restoration effect, distinct from Apply and old
+/// confirmation. Candidate bytes, checkpoint hashes and an ExecutionBinding
+/// remain insufficient authority: Control must validate history/continuity,
+/// derive the canonical plan and durably prepare a fresh one-use handoff.
+pub fn display_restoration_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let decoded = linura_core::DisplayRestorationMaterial::decode(material)
+        .map_err(|error| error.to_string())?;
+    let resource = decoded
+        .recovery_scope()
+        .map_err(|error| error.to_string())?
+        .resource_id()
+        .map_err(|error| error.to_string())?;
+    let digest = hash_parts(
+        b"linura.display.original-restoration-intent.v1",
+        &[material.as_bytes()],
+    );
+    EffectDescriptor::new(
+        ProviderId::new("hyprland-recovery").map_err(|error| error.to_string())?,
+        resource,
+        "restore-original-display-layout",
+        format!("LNRI-SHA256:1:{}", digest.to_hex()).into_bytes(),
+    )
+    .map_err(|error| error.to_string())
+}
+
 impl EffectDescriptor {
     pub fn new(
         provider: ProviderId,
@@ -470,6 +495,82 @@ mod tests {
         );
         assert!(ComponentDigest::parse_hex("00").is_err());
         assert!(ComponentDigest::parse_hex(&"g".repeat(64)).is_err());
+    }
+
+    #[test]
+    fn original_restoration_has_distinct_effect_identity_and_cannot_reuse_apply_binding() {
+        // Candidate comparison fixture, not a live/native authority grant.
+        let boot = "11111111-1111-4111-8111-111111111111";
+        let owner = "22222222-2222-4222-8222-222222222222";
+        let old = format!(
+            "display:topology:{boot}:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:8"
+        );
+        let new = format!(
+            "display:topology:{boot}:1000:c3:99:seat0:44444444-4444-4444-8444-444444444444:1"
+        );
+        let layout = |scope: &str, key: &str, x| {
+            format!("LNDL:1;{scope};{key}:enabled:1920:1080:60000:1000:0:{x}:0:-;")
+        };
+        let original = format!(
+            "LNDI:1;session:lock:{boot}:1000:c2:42:{owner}:1;{}{}",
+            layout(&old, "1:2", 0),
+            layout(&old, "1:2", 100)
+        );
+        let replacement = format!(
+            "LNDI:1;session:lock:{boot}:1000:c3:99:{owner}:1;{}{}",
+            layout(&new, "9:10", 100),
+            layout(&new, "9:10", 0)
+        );
+        let material = |checkpoint: &str| {
+            let mut out = "LNRI:1;".to_owned();
+            for field in [
+                "request:original",
+                &"a".repeat(64),
+                checkpoint,
+                &"c".repeat(64),
+                &original,
+                &replacement,
+                "1:2:9:10;",
+            ] {
+                out.push_str(&format!("{}:{field};", field.len()));
+            }
+            out
+        };
+        let encoded = material(&"b".repeat(64));
+        let restored = id(display_restoration_effect(&encoded));
+        let apply = id(display_layout_effect(&replacement));
+        assert_eq!(restored.operation, "restore-original-display-layout");
+        assert_eq!(restored.provider.as_str(), "hyprland-recovery");
+        let scope = id(linura_core::DisplayRecoveryScope::from_resource(
+            &restored.resource,
+        ));
+        assert_eq!(
+            scope
+                .replacement()
+                .resource_id()
+                .map(|id| id.as_str().to_owned()),
+            Ok(new)
+        );
+        assert_eq!(scope.original_dispatch(), "a".repeat(64));
+        assert!(restored.canonical_payload.starts_with(b"LNRI-SHA256:1:"));
+        assert!(restored.canonical_payload.len() < MAX_EFFECT_PAYLOAD_BYTES);
+        assert_ne!(restored.digest(), apply.digest());
+        assert_ne!(
+            restored.digest(),
+            id(display_restoration_effect(&material(&"c".repeat(64)))).digest()
+        );
+        let binding = id(ExecutionBinding::new(
+            "transaction:restoration",
+            0,
+            1,
+            digest(1),
+            digest(2),
+            &restored,
+        ));
+        assert!(binding.validate_for(&restored).is_ok());
+        assert!(binding.validate_for(&apply).is_err());
+        assert!(display_restoration_effect(&replacement).is_err());
+        assert!(display_layout_effect(&encoded).is_err());
     }
 
     #[test]

@@ -60,6 +60,9 @@ pub(crate) fn require_baseline(
 pub(crate) struct Checkpoint {
     canonical: Vec<u8>,
     pub(crate) native_guard: linura_provider_sdk::ComponentDigest,
+    // Original timestamp and capabilities were authenticated on decode. These
+    // remain historical comparison data, never a refreshed observation.
+    pub(crate) historical_facts: DisplayObservationFacts,
 }
 
 impl Checkpoint {
@@ -149,6 +152,7 @@ impl Checkpoint {
         Ok(Self {
             canonical,
             native_guard,
+            historical_facts: facts,
         })
     }
 

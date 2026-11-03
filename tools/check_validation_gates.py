@@ -1288,7 +1288,7 @@ REVIEWED_SHELL_EXECUTION = {
     "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
     "tests/acceptance/v06/qualify-guest.sh": "b21a90c51f7a8852ec6cb4225074990bc21abab817546f3acb6331a4d443b81d",
     "tests/acceptance/v06/qualify-host.sh": "16bdd54f2b5ed67461c09773df4b5ec398cfde23d4196256893332ebf94bd28c",
-    "tests/acceptance/v06/qualify-native-session.sh": "8a7bf757ce623406990d78495cd20566ae42e3621a088db7ff481972acb16a71",
+    "tests/acceptance/v06/qualify-native-session.sh": "04a4f269abd3dacae397b7c3bf96878f955f1b718e93385f0590b7b227b6bcf2",
     # Development-only tools run at the caller's existing permissions.
     "scripts/lib/bootstrap_rustup.sh": "60db235ffa3f448b1182665285dc3347f017cbcb5785f087f056c3b30e836ad8",
     # This library executes before validation to protect source integrity even

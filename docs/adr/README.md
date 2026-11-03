@@ -69,3 +69,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0044 — Explicit native development preparation across Ubuntu and Arch](0044-explicit-native-development-preparation.md)
 - [0045 — S21 device effects share trusted Control authority and verified recovery](0045-s21-workstation-device-authority.md)
 - [0046 — Independent original display protection](0046-independent-original-display-protection.md)
+- [0047 — Original display restoration is a fresh managed effect](0047-original-display-restoration.md)

@@ -217,6 +217,48 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         Ok(binding.dispatch_digest)
     );
     assert_eq!(record.kernel_outputs(), &[[226, 0, 1]]);
+    let replacement = DisplayTopologyId::from_resource(&linura_core::ResourceId::new(
+        "display:topology:11111111-1111-4111-8111-111111111111:1000:c3:99:seat0:44444444-4444-4444-8444-444444444444:1",
+    ).unwrap_or_else(|e| unreachable!("{e}"))).unwrap_or_else(|e| unreachable!("{e}"));
+    let scope =
+        linura_core::DisplayRecoveryScope::new(&binding.dispatch_digest.to_hex(), replacement)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    let facts = NativeDisplayRecoveryCheckpoint::original_protection_facts(
+        record.canonical_bytes(),
+        &scope,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(facts.original_material(), material);
+    assert_eq!(facts.original_transaction(), binding.transaction_id);
+    assert_eq!(
+        facts.native_guard(),
+        ComponentDigest::from_bytes([4; 32]).to_hex()
+    );
+    assert_eq!(
+        facts.checkpoint_digest(),
+        ComponentDigest::from_bytes(Sha256::digest(record.canonical_bytes()).into()).to_hex()
+    );
+    assert_eq!(facts.integration_digest(), "a".repeat(64));
+    assert_eq!(facts.outputs().len(), 1);
+    let projection = facts.attributes();
+    for value in projection.values() {
+        if let ObservedValue::Text(text) = value {
+            assert!(!text.contains("LNDR:"));
+            assert!(!text.contains("base_rule"));
+        }
+    }
+    let different = linura_core::DisplayRecoveryScope::new(
+        &ComponentDigest::from_bytes([8; 32]).to_hex(),
+        scope.replacement().clone(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        NativeDisplayRecoveryCheckpoint::original_protection_facts(
+            record.canonical_bytes(),
+            &different
+        )
+        .is_err()
+    );
     assert_eq!(
         NativeDisplayRecoveryCheckpoint::original_startup_scope(
             record.canonical_bytes(),

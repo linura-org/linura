@@ -21,11 +21,15 @@ pub(crate) const MAX_DISPLAY_REPLY_BYTES: usize = 384 * 1024;
 pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
 
 fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &str) -> usize {
-    if path == "/org/linura/SecurityOwner1"
+    let original = path == "/org/linura/DisplayProtection1"
+        && interface == "org.linura.DisplayProtection1"
+        && method == "ReadOriginal"
+        && role == NativeSessionRole::Control;
+    let display = path == "/org/linura/SecurityOwner1"
         && interface == "org.linura.SecurityOwner1"
         && ((method == "ObserveDisplay" && role == NativeSessionRole::Control)
-            || (method == "ObservePreparedDisplay" && role == NativeSessionRole::Executor))
-    {
+            || (method == "ObservePreparedDisplay" && role == NativeSessionRole::Executor));
+    if original || display {
         MAX_DISPLAY_REPLY_BYTES
     } else {
         MAX_REPLY_BYTES
@@ -622,14 +626,27 @@ mod diagnostic_tests {
     #[test]
     fn expanded_display_reply_bound_requires_exact_role_endpoint_and_method() {
         use super::*;
-        for role in [NativeSessionRole::Control, NativeSessionRole::Executor] {
-            for path in ["/org/linura/SecurityOwner1", "/org/linura/Other"] {
-                for interface in ["org.linura.SecurityOwner1", "org.linura.Other"] {
+        for role in [
+            NativeSessionRole::Control,
+            NativeSessionRole::Executor,
+            NativeSessionRole::DisplayProtection,
+        ] {
+            for path in [
+                "/org/linura/SecurityOwner1",
+                "/org/linura/DisplayProtection1",
+                "/org/linura/Other",
+            ] {
+                for interface in [
+                    "org.linura.SecurityOwner1",
+                    "org.linura.DisplayProtection1",
+                    "org.linura.Other",
+                ] {
                     for method in [
                         "ObserveDisplay",
                         "ObservePreparedDisplay",
                         "ObserveLock",
                         "GetAll",
+                        "ReadOriginal",
                     ] {
                         let admitted = path == "/org/linura/SecurityOwner1"
                             && interface == "org.linura.SecurityOwner1"
@@ -637,7 +654,11 @@ mod diagnostic_tests {
                                 (role, method),
                                 (NativeSessionRole::Control, "ObserveDisplay")
                                     | (NativeSessionRole::Executor, "ObservePreparedDisplay")
-                            );
+                            )
+                            || path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && role == NativeSessionRole::Control
+                                && method == "ReadOriginal";
                         assert_eq!(
                             reply_limit(role, path, interface, method),
                             if admitted {
