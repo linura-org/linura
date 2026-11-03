@@ -335,7 +335,23 @@ def provision() -> None:
         shutil.copyfile(fixtures / name, destination)
         destination.chmod(0o644)
     subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=15)
-    subprocess.run(["systemctl", "reload", "dbus.service"], check=True, timeout=15)
+    # Wait for the bus's policy reload acknowledgement before any native
+    # startup RPC. An asynchronous service reload can race the new allow rule.
+    subprocess.run(
+        [
+            "/usr/bin/dbus-send",
+            "--system",
+            "--print-reply",
+            "--reply-timeout=5000",
+            "--type=method_call",
+            "--dest=org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus.ReloadConfig",
+        ],
+        check=True,
+        timeout=10,
+        stdout=subprocess.DEVNULL,
+    )
     subprocess.run(["systemctl", "restart", "polkit.service"], check=True, timeout=15)
     subprocess.run(
         ["systemctl", "start", "linura-authorityd.service"], check=True, timeout=30

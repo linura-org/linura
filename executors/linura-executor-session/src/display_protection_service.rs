@@ -75,6 +75,11 @@ struct NativeProtection {
 fn unavailable() -> zbus::fdo::Error {
     zbus::fdo::Error::Failed("original display protection unavailable; no retry".into())
 }
+fn startup_unavailable(stage: &'static str) -> zbus::fdo::Error {
+    // Only compile-time stage labels, never request data or underlying errors.
+    eprintln!("display-protection: native-startup/{stage}");
+    unavailable()
+}
 fn sender(header: &Header<'_>) -> zbus::fdo::Result<String> {
     header
         .sender()
@@ -342,7 +347,10 @@ impl ProtectionPort for NativeProtection {
                 "native startup requires the supervised owner and its original local session".into()
             )
                 })?;
-        let mut admission = self.admission.try_lock().map_err(|_| unavailable())?;
+        let mut admission = self
+            .admission
+            .try_lock()
+            .map_err(|_| startup_unavailable("busy"))?;
         admission
             .pending
             .retain(|_, pending| pending.started.elapsed() < ORIGINAL_PROBE);
@@ -352,17 +360,19 @@ impl ProtectionPort for NativeProtection {
                     || old.peer.same_login(&peer) && !old.peer.definitely_exited()
             })
         {
-            return Err(unavailable());
+            return Err(startup_unavailable("overlapping-invocation"));
         }
         let ordinary = admission.pending.is_empty()
-            && super::display_checkpoint::startup_clear().map_err(|_| unavailable())?;
-        let (lease, native) = UnixStream::pair().map_err(|_| unavailable())?;
+            && super::display_checkpoint::startup_clear()
+                .map_err(|_| startup_unavailable("history"))?;
+        let (lease, native) = UnixStream::pair().map_err(|_| startup_unavailable("lease"))?;
         // Re-authenticate after the history scan and before publishing. A lost
         // reply leaves this admission consumed; there is no transparent retry.
         self.channel
             .revalidate_display_startup(sender, &request, &peer)
-            .map_err(|_| unavailable())?;
-        peer.live().map_err(|_| unavailable())?;
+            .map_err(|_| startup_unavailable("revalidation"))?;
+        peer.live()
+            .map_err(|_| startup_unavailable("process-changed"))?;
         admission.startups.push(StartupLease {
             peer,
             ordinary,

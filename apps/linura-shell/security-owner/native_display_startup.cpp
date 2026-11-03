@@ -52,6 +52,12 @@ template <std::size_t N> std::nullopt_t unavailableImage(const char (&stage)[N])
     (void)written;
     return std::nullopt;
 }
+template <std::size_t N> NativeDisplayStartupAdmission unavailableReply(const char (&stage)[N])
+{
+    const auto written = write(STDERR_FILENO, stage, N - 1);
+    (void)written;
+    return NativeDisplayStartupAdmission::GuardReply;
+}
 class Descriptor final
 {
   public:
@@ -166,11 +172,27 @@ NativeDisplayStartupAdmission admitNativeDisplayStartup(PeerGuard &peers,
         QStringLiteral("org.linura.DisplayProtection1"), QStringLiteral("NativeStartup"));
     request.setArguments({QVariant::fromValue(transfer)});
     const auto reply = peers.nativeConnection().call(request, QDBus::Block, 2000);
-    if (reply.type() != QDBusMessage::ReplyMessage || reply.service() != guard->uniqueOwner ||
-        reply.signature() != QLatin1String("hb") || reply.arguments().size() != 2 ||
+    if (reply.type() != QDBusMessage::ReplyMessage) {
+        // Classify fixed protocol errors only. Never print the remote message,
+        // unique name, signature, arguments or caller-controlled error text.
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.AccessDenied"))
+            return unavailableReply("linura-security-owner: startup-reply/access-denied\n");
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.InvalidArgs"))
+            return unavailableReply("linura-security-owner: startup-reply/invalid-arguments\n");
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.Failed"))
+            return unavailableReply("linura-security-owner: startup-reply/service-refused\n");
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.NoReply"))
+            return unavailableReply("linura-security-owner: startup-reply/no-reply\n");
+        return unavailableReply("linura-security-owner: startup-reply/other-error\n");
+    }
+    if (reply.service() != guard->uniqueOwner)
+        return unavailableReply("linura-security-owner: startup-reply/sender\n");
+    if (reply.signature() != QLatin1String("hb"))
+        return unavailableReply("linura-security-owner: startup-reply/signature\n");
+    if (reply.arguments().size() != 2 ||
         reply.arguments()[0].metaType() != QMetaType::fromType<QDBusUnixFileDescriptor>() ||
         reply.arguments()[1].metaType() != QMetaType::fromType<bool>())
-        return NativeDisplayStartupAdmission::GuardReply;
+        return unavailableReply("linura-security-owner: startup-reply/argument-types\n");
     if (!peers.stillCurrent(NativePeerPurpose::DisplayProtection, *guard))
         return NativeDisplayStartupAdmission::GuardChanged;
     if (inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
