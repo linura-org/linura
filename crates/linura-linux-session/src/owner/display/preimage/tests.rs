@@ -7,17 +7,26 @@ const RULE: &str = concat!(
     "0;0;0;0;0;0;0;0;0;0;0;0;0;0;",
     "0000000000000000000000000000000000000000000000000000000000000000;;"
 );
+fn lineage_fixture(rule: &str, selector: Option<&str>) -> String {
+    let body = rule
+        .strip_prefix("LNDR:2;")
+        .unwrap_or_else(|| unreachable!("fixture rule"));
+    let selection =
+        selector.map_or_else(|| "0;0;".to_owned(), |selector| format!("1;1;{selector};"));
+    format!("LNRL:1;{selection}{body}{body}0;0;0;")
+}
 fn inputs() -> (Value, Value) {
+    let full_rule = lineage_fixture(RULE, None);
     let (mut native, _) = super::super::tests::inputs();
     native["heads"][0]["base_rule_digest"] =
-        json!(ComponentDigest::from_bytes(Sha256::digest(RULE.as_bytes()).into()).to_hex());
+        json!(ComponentDigest::from_bytes(Sha256::digest(full_rule.as_bytes()).into()).to_hex());
     let head = &native["heads"][0];
-    let saved = json!({"schema":1,"upstream":"efb50993780079460b0cbed1363e2166a2de1d9f",
+    let saved = json!({"schema":2,"upstream":"efb50993780079460b0cbed1363e2166a2de1d9f",
         "integration":"a".repeat(64), "generation":"3", "heads":[{
             "handle":head["handle"],"generation":head["generation"],
             "kernel_drm":head["kernel_drm"],"linura_owned":head["linura_owned"],
             "owned_target":head["owned_target"],"output_identity_digest":head["output_identity_digest"],
-            "base_rule":RULE}]});
+            "base_rule":full_rule}]});
     (saved, native)
 }
 fn accepts(saved: &Value, native: &Value) -> bool {
@@ -44,7 +53,7 @@ fn root_preimage_matches_every_exact_original_native_row() {
         assert!(!accepts(&changed, &native), "{key}");
     }
     for (key, bad) in [
-        ("schema", json!(2)),
+        ("schema", json!(3)),
         ("generation", json!("4")),
         ("upstream", json!("0".repeat(40))),
         ("integration", json!("0".repeat(64))),
@@ -85,7 +94,7 @@ fn root_preimage_matches_every_exact_original_native_row() {
         validate(
             &saved
                 .to_string()
-                .replacen("\"schema\":1", "\"schema\":1,\"schema\":1", 1),
+                .replacen("\"schema\":2", "\"schema\":2,\"schema\":2", 1),
             &native.to_string()
         )
         .is_err()
@@ -119,6 +128,90 @@ fn native_rule_bytes_are_canonical_bounded_and_exactly_reconstructable() {
 }
 
 #[test]
+fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_fields() {
+    let full = lineage_fixture(RULE, None);
+    assert!(lineage(&full).is_ok());
+    for end in 0..full.len() {
+        assert!(lineage(&full[..end]).is_err());
+    }
+    for bad in [
+        full.clone() + ";",
+        full.clone() + "0;",
+        full.replacen("LNRL:1;", "LNRL:01;", 1),
+        full.replacen("LNRL:1;0;0;", "LNRL:1;1;0;", 1),
+        "x".repeat(20 * 1024 + 1),
+    ] {
+        assert!(lineage(&bad).is_err());
+    }
+    let native: Vec<_> = RULE
+        .strip_prefix("LNDR:2;")
+        .and_then(|body| body.strip_suffix(';'))
+        .unwrap_or_else(|| unreachable!("rule"))
+        .split(';')
+        .map(str::to_owned)
+        .collect();
+    let encode = |effective: &[String], mask| {
+        format!(
+            "LNRL:1;0;0;{};{};1;{mask};{};",
+            native.join(";"),
+            effective.join(";"),
+            if mask & 3 != 0 { 60_000 } else { 0 }
+        )
+    };
+    for mask in 0..=31 {
+        let mut effective = native.clone();
+        effective[0] = "1".into();
+        let real = |value: f64| format!("{:016x}", value.to_bits());
+        if mask & 3 != 0 {
+            effective[1] = real(1920.0);
+            effective[2] = real(1080.0);
+            effective[3] = real(60.0);
+        }
+        if mask & 4 != 0 {
+            effective[4] = real(-1920.0);
+            effective[5] = real(1080.0);
+        }
+        if mask & 8 != 0 {
+            effective[8] = "3".into();
+        }
+        if mask & 16 != 0 {
+            effective[6] = real(1.25);
+        }
+        assert!(lineage(&encode(&effective, mask)).is_ok(), "mask {mask}");
+        for bit in [1, 2, 4, 8, 16] {
+            if mask & bit != 0 && (bit > 2 || mask & 3 == bit) {
+                assert!(
+                    lineage(&encode(&effective, mask & !bit)).is_err(),
+                    "uncommitted bit {bit}"
+                );
+            }
+        }
+    }
+    for (index, value) in [(7, "1"), (9, "6162"), (10, "1"), (25, "6162")] {
+        let mut effective = native.clone();
+        effective[index] = value.into();
+        assert!(
+            lineage(&encode(&effective, 31)).is_err(),
+            "native field {index}"
+        );
+    }
+    let mut effective = native.clone();
+    effective[3] = format!("{:016x}", f64::from(u32::MAX as f32 / 1000_f32).to_bits());
+    let exact = |refresh: u64| {
+        format!(
+            "LNRL:1;0;0;{};{};1;1;{refresh};",
+            native.join(";"),
+            effective.join(";")
+        )
+    };
+    assert!(lineage(&exact(u64::from(u32::MAX))).is_ok());
+    assert!(lineage(&exact(u64::from(u32::MAX) - 1)).is_ok());
+    assert_ne!(exact(u64::from(u32::MAX)), exact(u64::from(u32::MAX) - 1));
+    assert!(lineage(&exact(60000)).is_err());
+    assert!(lineage(&exact(u64::from(u32::MAX) + 1)).is_err());
+}
+
+#[test]
 fn selector_lineage_is_bounded_canonical_and_required_for_new_preimages() {
     let with_selector = |selector: &str| format!("{}{selector};", &RULE[..RULE.len() - 1]);
     // Same byte representation as the native codec: arbitrary selector bytes
@@ -147,7 +240,10 @@ fn selector_lineage_is_bounded_canonical_and_required_for_new_preimages() {
     assert!(validate_rule(&RULE.replacen("LNDR:2;", "LNDR:1;", 1), true).is_err());
     assert!(validate_rule(&(legacy + "garbage"), true).is_err());
     let (mut saved, mut native) = inputs();
-    saved["heads"][0]["base_rule"] = json!(with_selector("646573633a44502d31"));
+    saved["heads"][0]["base_rule"] = json!(lineage_fixture(
+        &with_selector("646573633a44502d31"),
+        Some("646573633a44502d31")
+    ));
     assert!(!accepts(&saved, &native)); // Same geometry cannot substitute lineage.
     native["heads"][0]["base_rule_digest"] = json!(
         ComponentDigest::from_bytes(
@@ -244,6 +340,7 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     for value in projection.values() {
         if let ObservedValue::Text(text) = value {
             assert!(!text.contains("LNDR:"));
+            assert!(!text.contains("LNRL:"));
             assert!(!text.contains("base_rule"));
         }
     }
@@ -334,6 +431,7 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     // lacking selector lineage never becomes a new reservation or permission.
     let legacy_rule = RULE[..RULE.len() - 1].replacen("LNDR:2;", "LNDR:1;", 1);
     let mut legacy_preimage = saved.clone();
+    legacy_preimage["schema"] = json!(1);
     legacy_preimage["heads"][0]["base_rule"] = json!(legacy_rule);
     let legacy_preimage = legacy_preimage.to_string();
     let mut legacy_fields = fields.clone();
@@ -346,6 +444,9 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     assert!(
         NativeDisplayRecoveryCheckpoint::validate_stored(&legacy_bytes, &binding.dispatch_digest)
             .is_ok()
+    );
+    assert!(
+        NativeDisplayRecoveryCheckpoint::original_protection_facts(&legacy_bytes, &scope).is_err()
     );
     assert!(
         NativeDisplayRecoveryCheckpoint::reservation_at(

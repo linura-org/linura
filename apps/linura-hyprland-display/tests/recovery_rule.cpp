@@ -1,4 +1,5 @@
 #include "recovery_rule.h"
+#include "recovery_lineage.h"
 
 #include <cassert>
 #include <cstdint>
@@ -147,10 +148,104 @@ void roundTrip()
     bounded.m_transform = 8;
     assert(!RecoveryRule::capture(bounded));
 }
+
+void lineage()
+{
+    Rule native;
+    native.m_name = "desc:original;selector";
+    const auto base = RecoveryRule::capture(native);
+    assert(base);
+    const std::vector<std::string> selectors{"", native.m_name, "unrelated"};
+    const auto saved = RecoveryLineage::capture(*base, *base, selectors, 1, false, 0);
+    assert(saved && saved->native().encode() == base->encode() && !saved->wlr());
+    const auto bytes = saved->encode();
+    assert(RecoveryLineage::decode(bytes));
+    for (std::size_t i = 0; i < bytes.size(); ++i)
+        assert(!RecoveryLineage::decode(std::string_view(bytes).substr(0, i)));
+    for (const auto &suffix : {";", "0;", "\n", "extra"})
+        assert(!RecoveryLineage::decode(bytes + suffix));
+    assert(!RecoveryLineage::decode("LNRL:01;" + bytes.substr(7)));
+    assert(!RecoveryLineage::decode("LNRL:1;02;" + bytes.substr(bytes.find(';', 7) + 1)));
+    assert(!RecoveryLineage::capture(*base, *base, selectors, 0, false, 0));
+    assert(!RecoveryLineage::capture(*base, *base, selectors, 3, false, 0));
+    assert(!RecoveryLineage::capture(*base, *base, selectors, std::nullopt, false, 0));
+    assert(!RecoveryLineage::capture(*base, *base, selectors, 1, false, 1));
+    assert(!RecoveryLineage::capture(*base, *base, selectors, 1, true, 32));
+    auto reordered = selectors;
+    std::swap(reordered[0], reordered[2]);
+    const auto reorderedSaved = RecoveryLineage::capture(*base, *base, reordered, 1, false, 0);
+    assert(reorderedSaved && reorderedSaved->encode() != bytes);
+    assert(saved->sameOverlayCompensationSources(*reorderedSaved));
+    for (std::uint32_t mask = 0; mask <= 31; ++mask) {
+        auto effective = native;
+        effective.m_disabled = true; // wlr enabled state is unconditional.
+        if (mask & 3U) {
+            effective.m_resolution = {1920, 1080};
+            effective.m_refreshRate = 59.94F;
+        }
+        if (mask & 4U)
+            effective.m_offset = {-1920, 1080};
+        if (mask & 8U)
+            effective.m_transform = 3;
+        if (mask & 16U)
+            effective.m_scale = 1.25F;
+        const auto projected = RecoveryRule::capture(effective);
+        assert(projected);
+        const auto withWlr = RecoveryLineage::capture(*base, *projected, selectors, 1, true, mask,
+                                                      (mask & 3U) ? 59940U : 0U);
+        assert(withWlr && withWlr->wlr() && withWlr->wlrMask() == mask);
+        const auto decoded = RecoveryLineage::decode(withWlr->encode());
+        assert(decoded && decoded->encode() == withWlr->encode());
+        assert(decoded->native().encode() == base->encode());
+        assert(decoded->effective().encode() == projected->encode());
+        assert(!RecoveryLineage::capture(*base, *projected, selectors, 1, false, 0));
+    }
+    // Even a purported complete wlr geometry projection cannot change native
+    // automatic placement, mirror source, selector or custom modeline lineage.
+    for (int field = 0; field < 4; ++field) {
+        auto changed = native;
+        if (field == 0)
+            changed.m_autoDir = 1;
+        if (field == 1)
+            changed.m_mirrorOf = "another";
+        if (field == 2)
+            changed.m_name = "different";
+        if (field == 3)
+            changed.m_drmMode.clock = 1;
+        const auto projected = RecoveryRule::capture(changed);
+        assert(projected &&
+               !RecoveryLineage::capture(*base, *projected, selectors, 1, true, 31, 60000));
+    }
+    const auto automatic = RecoveryRule::capture(Rule{});
+    // Native float projection is lossy at large source values. Both exact
+    // integer states must survive distinctly, without a rounded reconstruction.
+    auto quantized = native;
+    const auto raw = std::numeric_limits<std::uint32_t>::max();
+    quantized.m_refreshRate = static_cast<float>(raw) / 1000.F;
+    const auto projected = RecoveryRule::capture(quantized);
+    assert(projected && projected->hasWlrRefresh(raw) && projected->hasWlrRefresh(raw - 1));
+    const auto first = RecoveryLineage::capture(*base, *projected, selectors, 1, true, 1, raw);
+    const auto second = RecoveryLineage::capture(*base, *projected, selectors, 1, true, 1, raw - 1);
+    assert(first && second && first->encode() != second->encode());
+    assert(!first->sameOverlayCompensationSources(*second));
+    assert(RecoveryLineage::decode(first->encode())->wlrRefreshMilliHz() == raw);
+    assert(RecoveryLineage::decode(second->encode())->wlrRefreshMilliHz() == raw - 1);
+    assert(!RecoveryLineage::capture(*base, *projected, selectors, 1, true, 1, 60000));
+    assert(automatic &&
+           RecoveryLineage::capture(*automatic, *automatic, {}, std::nullopt, false, 0));
+    assert(!RecoveryLineage::capture(*automatic, *automatic, {""}, std::nullopt, false, 0));
+    assert(
+        !RecoveryLineage::capture(*base, *base, std::vector<std::string>(257, "x"), 0, false, 0));
+    auto oversized = selectors;
+    oversized[0] = std::string(4097, 'x');
+    assert(!RecoveryLineage::capture(*base, *base, oversized, 1, false, 0));
+    assert(!RecoveryLineage::decode(std::string(RecoveryLineage::MaxBytes + 1, '0')));
+}
 } // namespace
 
 int main()
 {
     malformed();
     roundTrip();
+    lineage();
 }

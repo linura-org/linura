@@ -2,12 +2,18 @@
 // mechanism build. These are actual upstream rule types, not stand-in structs.
 #include "rule_overlay.h"
 #include "recovery_witness.h"
+#include "recovery_lineage.h"
 #include "src/config/shared/monitor/MonitorRule.hpp"
+#include "src/protocols/OutputManagement.hpp"
 
 #include <gtest/gtest.h>
 #include <limits>
 
 using namespace Linura::HyprlandDisplay;
+
+static_assert(OUTPUT_HEAD_COMMITTED_MODE == 1 && OUTPUT_HEAD_COMMITTED_CUSTOM_MODE == 2 &&
+              OUTPUT_HEAD_COMMITTED_POSITION == 4 && OUTPUT_HEAD_COMMITTED_TRANSFORM == 8 &&
+              OUTPUT_HEAD_COMMITTED_SCALE == 16 && OUTPUT_HEAD_COMMITTED_ADAPTIVE_SYNC == 32);
 
 namespace {
 Config::CMonitorRule originalRule()
@@ -225,6 +231,57 @@ TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestor
             << field;
         EXPECT_NE(RecoveryWitness::rule(before), RecoveryWitness::rule(changed)) << field;
     }
+}
+
+TEST(LinuraDisplayPinnedRule, CompleteLineageKeepsUnderlyingRuleAndExactWlrSourceDistinct)
+{
+    const auto original = originalRule();
+    const auto native = RecoveryRule::capture(original);
+    ASSERT_TRUE(native);
+    SWlrManagerSavedOutputState state;
+    state.committedProperties =
+        OUTPUT_HEAD_COMMITTED_MODE | OUTPUT_HEAD_COMMITTED_POSITION | OUTPUT_HEAD_COMMITTED_SCALE;
+    state.resolution = {2560, 1440};
+    state.refresh = 59940;
+    state.position = {-2560, 0};
+    state.scale = 1.25F;
+    state.enabled = true;
+    auto resolved = original;
+    resolved.m_disabled = !state.enabled;
+    resolved.m_resolution = state.resolution;
+    resolved.m_refreshRate = state.refresh / 1000.F;
+    resolved.m_offset = state.position;
+    resolved.m_scale = state.scale;
+    const auto effective = RecoveryRule::capture(resolved);
+    ASSERT_TRUE(effective);
+    const std::vector<std::string> selectors{"", original.m_name};
+    const auto lineage = RecoveryLineage::capture(*native, *effective, selectors, 1, true,
+                                                  state.committedProperties, state.refresh);
+    ASSERT_TRUE(lineage);
+    const auto restored = RecoveryLineage::decode(lineage->encode());
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(restored->native().encode(), native->encode());
+    EXPECT_EQ(restored->effective().encode(), effective->encode());
+    EXPECT_EQ(restored->wlrRefreshMilliHz(), state.refresh);
+    auto changed = original;
+    changed.m_scale = 2.F; // Hidden under the same effective wlr scale.
+    const auto changedNative = RecoveryRule::capture(changed);
+    ASSERT_TRUE(changedNative);
+    const auto drifted = RecoveryLineage::capture(*changedNative, *effective, selectors, 1, true,
+                                                  state.committedProperties, state.refresh);
+    ASSERT_TRUE(drifted);
+    EXPECT_NE(drifted->encode(), lineage->encode());
+    EXPECT_FALSE(lineage->sameOverlayCompensationSources(*drifted));
+    // Unrelated native fields remain live and absent from owned restoration.
+    changed = original;
+    changed.m_vrr = 1;
+    changed.m_iccFile = "new live profile";
+    const auto unrelated = RecoveryRule::capture(changed);
+    ASSERT_TRUE(unrelated);
+    const auto same = RecoveryLineage::capture(*unrelated, *effective, selectors, 1, true,
+                                               state.committedProperties, state.refresh);
+    ASSERT_TRUE(same);
+    EXPECT_EQ(same->encode(), lineage->encode());
 }
 
 TEST(LinuraDisplayPinnedRule, RecoveryWitnessPreservesAutomaticSemanticsAndExcludesUnmanagedDrift)

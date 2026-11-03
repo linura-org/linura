@@ -404,6 +404,13 @@ impl PlanPreviewControl {
             now,
         )
         .map_err(fail)?;
+        // Human review binds material source semantics. Fresh envelope hashes
+        // belong in the precise observation binding below, not in those
+        // semantic findings: re-sampling must not manufacture a changed rule.
+        let findings = [&protection, &display, &session, &coverage]
+            .into_iter()
+            .map(crate::display_plan::native_finding)
+            .collect::<Vec<_>>();
         for source in [&display, &session, &coverage] {
             crate::plan_preview::restrict_session_validity(&mut protection, source, now)?;
         }
@@ -444,11 +451,7 @@ impl PlanPreviewControl {
         let mut plan = DeterministicPlanner
             .plan_resource(request.request_id.clone(), actor, desired, &observation)
             .map_err(fail)?;
-        plan.findings.extend(
-            [&protection, &display, &session, &coverage]
-                .into_iter()
-                .map(crate::display_plan::native_finding),
-        );
+        plan.findings.extend(findings);
         plan.findings.push(PlanFinding { code: "display-original-restoration-source".into(), level: PlanFindingLevel::Pass, message: format!("Original authenticated request {} / {}; restore only its original baseline and ownership", bound.source.original_request.request_id.as_str(), bound.source.original_transaction) });
         Ok((plan, protection))
     }

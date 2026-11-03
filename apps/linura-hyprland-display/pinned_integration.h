@@ -3,6 +3,8 @@
 #include "compositor_display_service.h"
 
 #include <string>
+#include <cstddef>
+#include <optional>
 
 struct wl_display;
 namespace Monitor {
@@ -33,6 +35,10 @@ void commitObserved(Monitor::CMonitor *, bool success);
 [[nodiscard]] bool ownedModesetInProgress();
 [[nodiscard]] bool ownsMonitor(Monitor::CMonitor *);
 [[nodiscard]] Config::CMonitorRule overlayRule(Monitor::CMonitor *, Config::CMonitorRule);
+// Read-only capture at the actual native selection point, before wlr applies.
+// No selected index or source kind is accepted from a client.
+void nativeRuleSource(Monitor::CMonitor *, const Config::CMonitorRule &, std::optional<std::size_t>,
+                      bool wlr, std::uint32_t committed, std::uint32_t refreshMilliHz);
 [[nodiscard]] Backend *nativeBackend();
 [[nodiscard]] CompositorDisplayService *nativeTransactions();
 [[nodiscard]] std::optional<std::string> nativeOutputName(OutputKey);

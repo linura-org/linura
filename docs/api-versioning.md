@@ -280,6 +280,12 @@ their existing limits. This read-only addition does not activate a display write
 
 The preimage has its own schema, exact upstream/integration identity, complete
 native output/kernel bindings, original owned-rule bytes and prior overlays.
+Private preimage schema 2 uses `LNRL:1`: exact native selection index/order,
+underlying and effective `LNDR:2` owned rules, wlr presence/committed fields and
+the original integer refresh. Live receivers do not accept the old rule-only
+witness. Schema-1 durable preimages remain historical bytes of their original
+meaning; they cannot qualify new reservation or complete restoration observation.
+The outer `LNRJ:1` framing and all existing byte limits remain unchanged.
 Rust independently validates its canonical rule encoding and matches every row
 against the sampled topology's hashes/ownership before retention. It stays out
 of ordinary observations. The root executor reserves an immutable private

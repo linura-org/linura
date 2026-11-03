@@ -1,4 +1,4 @@
-#include "recovery_rule.h"
+#include "recovery_lineage.h"
 #include "protected_wire.h"
 #include "linura-protected-display-v1-client-protocol.h"
 #include "tests/wire_scene_fixture.h"
@@ -502,12 +502,14 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
 
 void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
 {
+    const auto lineage = Linura::HyprlandDisplay::RecoveryLineage::decode(Test::RulePreimage);
+    assert(lineage);
     for (const std::string &bad :
          {std::string{}, std::string("LNDR:1;0;"), std::string("LNDR:2;0;"),
-          std::string(Test::RulePreimage) + "0;",
+          lineage->native().encode(), std::string(Test::RulePreimage) + "0;",
           std::string(Test::RulePreimage).replace(7, 1, "2"),
           std::string(Test::RulePreimage).replace(9, 16, "7ff8000000000000"),
-          std::string(Linura::HyprlandDisplay::RecoveryRule::MaxBytes + 1, '0')}) {
+          std::string(Linura::HyprlandDisplay::RecoveryLineage::MaxBytes + 1, '0')}) {
         Harness invalid;
         {
             const std::lock_guard lock(invalid.backend.mutex);
@@ -542,7 +544,7 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
     assert(!serialized.contains("LNDF:") && !serialized.contains("LNDR:"));
     const auto preimage = owned->topology.recoveryPreimage();
     const auto recovery = QJsonDocument::fromJson(preimage.toUtf8()).object();
-    assert(!preimage.isEmpty() && recovery.value("schema").toInt() == 1 &&
+    assert(!preimage.isEmpty() && recovery.value("schema").toInt() == 2 &&
            recovery.value("upstream").toString() ==
                QStringLiteral("efb50993780079460b0cbed1363e2166a2de1d9f") &&
            recovery.value("integration").toString() ==

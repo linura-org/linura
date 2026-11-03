@@ -189,21 +189,29 @@ non-DRM outputs remain read-only without mutation checkpoint qualification.
 These facts are required comparison material for recovery, not proof of kernel
 lifetime across compositor replacement. No new restoration write is enabled.
 
-Native rule witnesses use the bounded, bidirectional `LNDR:2` codec. In addition
-to owned display values, it retains the exact resolved native rule selector as
-comparison data. The protected receiver validates the complete canonical
+Native rule witnesses use bounded `LNRL:1` lineage. The actual native selection
+point captures the selected index and ordered selectors before wlr overrides.
+Separate `LNDR:2` records retain the underlying and effective owned fields,
+including automatic placement/scaling and complete custom modelines. The wlr
+presence, committed owned-field mask and original integer refresh are explicit;
+the lossy float-Hz projection cannot reconstruct its source millihertz.
+The protected receiver validates the complete canonical
 preimage before hashing it; truncated, nonfinite, rounded, out-of-range or
 noncanonical data cannot become a baseline checkpoint. Reconstruction refuses a
 different live selector and copies only owned display fields into the matching
 current rule. It preserves the live rule list/precedence and unrelated settings.
-In-process rollback applies the same selector-lineage check. Prepared native
+In-process rollback compares both actual selected owned sources while changing
+only the Linura overlay. An unrelated selector-list edit need not strand that
+compensation; no native config or wlr state is overwritten by it. Prepared native
 comparison includes all rule, output-identity and ownership witnesses, so equal
 geometry cannot hide drift between capture and mutation. Component tests
 exercise malformed bytes and the actual pinned upstream rule projection.
 
-Older persisted `LNDR:1` records remain historical, bounded, validated bytes;
-they are not migrated, deleted or admitted to a new reservation. Native clients
-accept only `LNDR:2`. The enclosing immutable `LNRJ:1` checkpoint format and
+Older schema-1 preimages with `LNDR:1` or `LNDR:2` remain historical, bounded,
+validated bytes; they are not migrated, deleted, admitted to a new reservation
+or projected as complete restoration sources. Native clients accept only
+`LNRL:1`; the private JSON preimage is schema 2. Per-head and whole-payload
+bounds remain unchanged. The enclosing immutable `LNRJ:1` checkpoint format and
 its dispatch binding are unchanged.
 This codec does not persist a checkpoint, establish kernel continuity or admit
 restoration; the compositor-loss recovery and native acceptance gaps remain.

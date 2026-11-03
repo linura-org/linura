@@ -38,6 +38,7 @@ fn digest(text: &str) -> bool {
 
 // An independently bounded validation of the native LNDR:2 representation. The
 // root adapter retains exact bytes, and never converts them into an effect.
+#[cfg(test)]
 fn rule(raw: &str) -> Result<(), String> {
     validate_rule(raw, false)
 }
@@ -104,13 +105,84 @@ fn validate_rule(raw: &str, historical: bool) -> Result<(), String> {
     Ok(())
 }
 
+// Independent Rust validation of the source-versioned native selection and
+// wlr-owned projection. Keep the same 20 KiB per-head cap as LNDR:2.
+fn lineage(raw: &str) -> Result<(), String> {
+    if raw.len() > 20 * 1024 {
+        return Err(invalid());
+    }
+    let body = raw
+        .strip_prefix("LNRL:1;")
+        .and_then(|value| value.strip_suffix(';'))
+        .ok_or_else(invalid)?;
+    let fields: Vec<_> = body.split(';').collect();
+    if fields.len() < 57 {
+        return Err(invalid());
+    }
+    let selected = usize::try_from(number(fields[0])?).map_err(|_| invalid())?;
+    let count = usize::try_from(number(fields[1])?).map_err(|_| invalid())?;
+    if count > 256 || selected > count || fields.len() != 57 + count {
+        return Err(invalid());
+    }
+    let selectors = &fields[2..2 + count];
+    if selectors.iter().any(|value| {
+        value.len() > 8192
+            || !value.len().is_multiple_of(2)
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }) {
+        return Err(invalid());
+    }
+    let native = &fields[2 + count..28 + count];
+    let effective = &fields[28 + count..54 + count];
+    for rule in [native, effective] {
+        validate_rule(&format!("LNDR:2;{};", rule.join(";")), false)?;
+    }
+    if selected == 0 {
+        if !native[25].is_empty() || selectors.contains(&"") {
+            return Err(invalid());
+        }
+    } else if native[25] != selectors[selected - 1] {
+        return Err(invalid());
+    }
+    let wlr = fields[54 + count];
+    let mask = number(fields[55 + count])?;
+    let refresh = u32::try_from(number(fields[56 + count])?).map_err(|_| invalid())?;
+    if !matches!(wlr, "0" | "1") || mask > 31 {
+        return Err(invalid());
+    }
+    if wlr == "1" && mask & 3 != 0 {
+        let projected = f64::from(refresh as f32 / 1000_f32);
+        if effective[3] != format!("{:016x}", projected.to_bits()) {
+            return Err(invalid());
+        }
+    } else if refresh != 0 {
+        return Err(invalid());
+    }
+    if wlr == "0" {
+        if mask != 0 || native != effective {
+            return Err(invalid());
+        }
+    } else if native[7] != effective[7]
+        || native[9..] != effective[9..]
+        || mask & 3 == 0 && native[1..4] != effective[1..4]
+        || mask & 4 == 0 && native[4..6] != effective[4..6]
+        || mask & 8 == 0 && native[8] != effective[8]
+        || mask & 16 == 0 && native[6] != effective[6]
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
 fn validate(raw: &str, topology: &str) -> Result<Preimage, String> {
     if raw.is_empty() || raw.len() > MAX_PREIMAGE || topology.len() > 64 * 1024 {
         return Err(invalid());
     }
     let saved: Preimage = serde_json::from_str(raw).map_err(|_| invalid())?;
     let native: Topology = serde_json::from_str(topology).map_err(|_| invalid())?;
-    if saved.schema != 1
+    if saved.schema != 2
         || saved.upstream != "efb50993780079460b0cbed1363e2166a2de1d9f"
         || !digest(&saved.integration)
         || number(&saved.generation)? == 0
@@ -147,7 +219,7 @@ fn validate(raw: &str, topology: &str) -> Result<Preimage, String> {
         {
             return Err(invalid());
         }
-        rule(&row.base_rule)?;
+        lineage(&row.base_rule)?;
     }
     Ok(saved)
 }
@@ -196,6 +268,9 @@ impl NativeDisplayRecoveryCheckpoint {
         let material =
             linura_core::DisplayLayoutMaterial::decode(fields[8]).map_err(|_| invalid())?;
         let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
+        if saved.schema != 2 {
+            return Err(invalid());
+        }
         let mut outputs = BTreeMap::new();
         for row in saved.heads {
             let id = DisplayOutputId::new(
@@ -354,7 +429,7 @@ impl NativeDisplayRecoveryCheckpoint {
             return Err(invalid());
         }
         let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
-        if saved.schema != 1
+        if !matches!(saved.schema, 1 | 2)
             || saved.upstream != "efb50993780079460b0cbed1363e2166a2de1d9f"
             || !digest(&saved.integration)
             || number(&saved.generation)? != material.topology().generation()
@@ -379,7 +454,11 @@ impl NativeDisplayRecoveryCheckpoint {
             {
                 return Err(invalid());
             }
-            validate_rule(&head.base_rule, true)?;
+            if saved.schema == 1 {
+                validate_rule(&head.base_rule, true)?;
+            } else {
+                lineage(&head.base_rule)?;
+            }
         }
         Ok(())
     }
@@ -434,11 +513,14 @@ impl NativeDisplayRecoveryCheckpoint {
             return Err(invalid());
         }
         let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
+        if saved.schema != 2 {
+            return Err(invalid());
+        }
         saved
             .heads
             .into_iter()
             .map(|head| {
-                rule(&head.base_rule)?;
+                lineage(&head.base_rule)?;
                 Ok(head.kernel_drm)
             })
             .collect()

@@ -183,16 +183,24 @@ remain observable without mutation checkpoint qualification. These point-in-time
 facts do not prove continuity after replacement or grant a restoration effect.
 Independent retained kernel observation and durable restoration remain required.
 
-The owner accepts a native rule digest only after bounded canonical `LNDR:2`
-decoding. The preimage must reconstruct all owned display fields exactly,
+The owner accepts a native rule digest only after bounded canonical `LNRL:1`
+decoding. The actual selection point captures the selected index and ordered
+selectors before wlr applies. Distinct underlying/effective `LNDR:2` records
+and explicit wlr presence, owned-field mask and original integer refresh prevent
+equal resolved geometry or lossy float projection from hiding source drift.
+The preimage must reconstruct all owned display fields exactly,
 including automatic placement/scaling and the full custom modeline, without
 float rounding, integer truncation or alternate encodings. Reconstruction copies
 those fields into the current native rule only if its resolved selector still
 matches the original lineage; it preserves the current rule list/precedence and
-unrelated settings. In-process rollback also refuses selector substitution.
+unrelated settings. In-process rollback compares actual selected owned sources
+and changes only the Linura overlay; it preserves unrelated selector-list edits.
 Prepared native comparison binds rule, output-identity and ownership witnesses,
-even when numeric geometry is unchanged. Older persisted `LNDR:1` records remain
-validated historical bytes, without migration or admission to new reservations. This codec is not a store or an execution boundary:
+even when numeric geometry is unchanged. Schema-1 preimages containing older
+`LNDR:1` or `LNDR:2` remain validated historical bytes, without migration,
+admission to new reservations or complete restoration-source projection.
+New private preimages use schema 2 without increasing existing size bounds.
+This codec is not a store or an execution boundary:
 durable preimage retention, authenticated continuity and independently verified
 restoration are still required before any replacement compositor may use it.
 

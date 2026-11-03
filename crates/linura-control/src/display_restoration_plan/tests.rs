@@ -596,3 +596,51 @@ fn any_stale_contributor_or_equal_geometry_native_rule_drift_refuses_review() {
         );
     }
 }
+
+#[test]
+fn fresh_probe_nonce_changes_evidence_binding_without_changing_reviewed_material() {
+    let mut results = Vec::new();
+    let now = value(now_ms());
+    for nonce in [1, 2] {
+        let fixture = Fixture::new();
+        let request = fixture.request();
+        let principal = fixture.source.principal.clone();
+        let sources = fixture
+            .sources()
+            .into_iter()
+            .map(|mut source| {
+                source.sequence = nonce;
+                source.observed_at_unix_ms = now - 20 + nonce;
+                source
+            })
+            .collect();
+        let mut control = PlanPreviewControl::new(coordinator(sources));
+        let _context = value(control.enter_original_display_context(fixture.source, &request));
+        results.push(value(control.authority_candidate(
+            principal,
+            actor(),
+            request,
+        )));
+    }
+    // The planner's authoritative-observation finding deliberately changes its
+    // evidence ID. Use the same exact semantic comparison as post-approval
+    // revalidation; it still compares every material native finding.
+    let principal = value(AuthenticatedPrincipal::new("unix:uid:1000"));
+    let left = value(crate::policy_review::review_plan(&principal, &results[0].0));
+    let right = value(crate::policy_review::review_plan(&principal, &results[1].0));
+    assert!(crate::managed_lifecycle::review_semantics_unchanged(
+        &left, &right
+    ));
+    assert_eq!(results[0].0.changes, results[1].0.changes);
+    assert_ne!(
+        value(crate::durable_authority::digest_observation(&results[0].1)),
+        value(crate::durable_authority::digest_observation(&results[1].1))
+    );
+    for key in [
+        "control.replacement_display_digest",
+        "control.replacement_session_digest",
+        "control.replacement_coverage_digest",
+    ] {
+        assert_ne!(results[0].1.attributes[key], results[1].1.attributes[key]);
+    }
+}

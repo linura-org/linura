@@ -76,6 +76,43 @@ partial mutation and repeated requests do not renew or redeliver that admission.
 Control owns orchestration; the root protection process does not choose a plan,
 ask for approval, run a recovery loop or write display rules.
 
+## Native source lineage
+
+The private schema-2 native preimage captures `LNRL:1` at the actual native
+selection point. It binds the selected index and ordered selectors, distinct
+underlying/effective `LNDR:2` owned fields, wlr presence and committed owned-field
+mask, and the original integer refresh before float-Hz projection. Geometry and
+an effective rule alone cannot reconstruct that source. Existing per-head and
+whole-payload bounds remain unchanged. Historical schema-1 records retain their
+original interpretation and cannot qualify a new complete recovery source.
+In-process overlay compensation compares actual selected owned sources and
+preserves unrelated live selector edits; it never writes native config or wlr.
+
+## One-use original-root handoff
+
+The restoration reservation must bind the original dispatch/checkpoint hash,
+complete canonical restoration material, new prepared execution binding and
+replacement invocation. Exclusive durable creation and file/directory sync
+precede disclosure of a grant. A lost reply never redelivers that binding. A
+further replacement requires another fresh reviewed/prepared request; it cannot
+inherit the interrupted restoration's authority.
+
+Native handoff uses a distinct original-root-created Unix endpoint. Its kernel
+peer PID/UID must match the peer of the compositor's retained original startup
+lease, which must remain continuously healthy. Reopened files, root-looking
+metadata, serialized PIDs, hashes and a replacement protection service are not
+grant authentication. The original startup lease remains silent; unexpected
+bytes still poison it. Grant bytes have separate bounded canonical framing and
+must match the exact protected Recovery purpose, native scope and prepared
+binding before any output write. Duplicated endpoint descriptors share the
+consumed stream; they do not recreate an unread authorization.
+
+The root mechanism retains reservation and original witnesses on incomplete
+transfer, cancellation, timeout or partial mutation. The protected compositor
+must retain opaque/input fencing independently of the human-review lifetime.
+This handoff is required composition, not a claim established by the current
+read/codec/review component tests.
+
 ## Terminal sequencing
 
 Restoration acknowledgement is not success. Native opaque/input protection,

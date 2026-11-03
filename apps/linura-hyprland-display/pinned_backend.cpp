@@ -3,6 +3,7 @@
 #include "native_scale.h"
 #include "rule_overlay.h"
 #include "recovery_witness.h"
+#include "recovery_lineage.h"
 #include "wire_endpoint.h"
 #include "native_power_inhibitor.h"
 #include "native_owner_admission.h"
@@ -84,8 +85,18 @@ class PinnedBackend final : public Backend
     std::uint64_t generation = 1, securityEpoch = 1, nextHandle = 1;
     std::vector<Binding> bindings;
     std::map<Monitor::CMonitor *, Target> overlay;
-    using RuleCheckpoint = RuleOverlayCheckpoint<Monitor::CMonitor *, Config::CMonitorRule>;
+    using RuleCheckpoint = RuleOverlayCheckpoint<Monitor::CMonitor *, RecoveryLineage>;
     RuleCheckpoint checkpoint;
+    struct RuleSource final
+    {
+        RecoveryRule native;
+        std::vector<std::string> selectors;
+        std::optional<std::size_t> selected;
+        bool wlr;
+        std::uint32_t mask, refreshMilliHz;
+    };
+    std::map<Monitor::CMonitor *, RuleSource> capturedSources;
+    bool sourceCaptureValid = false;
     const std::string instance = instanceId();
     bool writing = false, commitFailed = false, supported = true, readingBaseRules = false;
     NativePowerInhibitor powerInhibitor;
@@ -163,7 +174,7 @@ class PinnedBackend final : public Backend
             const auto rule = rules->find(monitor.get());
             if (rule == rules->end())
                 return std::nullopt;
-            const auto base = RecoveryWitness::rule(rule->second);
+            const auto base = std::optional{rule->second.encode()};
             const auto identity = RecoveryWitness::identity(binding.identity);
             if (!base || !identity)
                 return std::nullopt;
@@ -256,8 +267,7 @@ class PinnedBackend final : public Backend
         const auto rules = baseRules();
         const auto identities = identitiesFor(*fresh);
         auto prior = rules && identities
-                         ? checkpoint.restoration(targets, *rules, *identities,
-                                                  sameRecoveryRule<Config::CMonitorRule>)
+                         ? checkpoint.restoration(targets, *rules, *identities, sameOverlaySources)
                          : std::nullopt;
         if (!prior)
             return false; // Changed native layout rules cannot be silently overwritten.
@@ -284,8 +294,7 @@ class PinnedBackend final : public Backend
         if (commitFailed || !roots || roots->generation != expected.generation ||
             roots->securityEpoch != expected.securityEpoch ||
             !hasDesiredPoweredRoot(targets, *roots) || !currentRules || !currentIdentities ||
-            !checkpoint.restoration(targets, *currentRules, *currentIdentities,
-                                    sameRecoveryRule<Config::CMonitorRule>))
+            !checkpoint.restoration(targets, *currentRules, *currentIdentities, sameOverlaySources))
             return false;
         overlay = std::move(*prior);
         Config::monitorRuleMgr()->ensureMonitorStatus();
@@ -306,8 +315,7 @@ class PinnedBackend final : public Backend
         const auto identities = sample ? identitiesFor(*sample) : std::nullopt;
         const auto rules = baseRules();
         return rules && identities &&
-               checkpoint.restored(overlay, *rules, *identities,
-                                   sameRecoveryRule<Config::CMonitorRule>);
+               checkpoint.restored(overlay, *rules, *identities, sameOverlaySources);
     }
     [[nodiscard]] PHLMONITOR monitorFor(OutputKey key) const
     {
@@ -323,8 +331,40 @@ class PinnedBackend final : public Backend
     {
         return supported && refresh();
     }
+    void captureRuleSource(Monitor::CMonitor *monitor, const Config::CMonitorRule &native,
+                           std::optional<std::size_t> selected, bool wlr, std::uint32_t committed,
+                           std::uint32_t refreshMilliHz)
+    {
+        if (!readingBaseRules)
+            return;
+        const auto saved = RecoveryRule::capture(native);
+        if (!sourceCaptureValid || !saved || !monitor || !Config::monitorRuleMgr() ||
+            committed > 63 ||
+            Config::monitorRuleMgr()->all().size() > RecoveryLineage::MaxSelectors ||
+            capturedSources.size() >= DisplayTransaction::MaxHeads) {
+            sourceCaptureValid = false;
+            return;
+        }
+        std::vector<std::string> selectors;
+        for (const auto &rule : Config::monitorRuleMgr()->all()) {
+            if (rule.m_name.size() > 4096) {
+                sourceCaptureValid = false;
+                return;
+            }
+            selectors.push_back(rule.m_name);
+        }
+        if (!capturedSources
+                 .emplace(monitor, RuleSource{*saved, std::move(selectors), selected, wlr,
+                                              committed & 31U, refreshMilliHz})
+                 .second)
+            sourceCaptureValid = false;
+    }
 
   private:
+    static bool sameOverlaySources(const RecoveryLineage &left, const RecoveryLineage &right)
+    {
+        return left.sameOverlayCompensationSources(right);
+    }
     [[nodiscard]] std::optional<RuleCheckpoint::Identities>
     identitiesFor(const Snapshot &sample) const
     {
@@ -344,6 +384,8 @@ class PinnedBackend final : public Backend
         if (readingBaseRules || !Config::monitorRuleMgr())
             return std::nullopt;
         readingBaseRules = true;
+        capturedSources.clear();
+        sourceCaptureValid = true;
         struct Finish final
         {
             bool &reading;
@@ -364,7 +406,16 @@ class PinnedBackend final : public Backend
                 rule.m_mirrorOf.size() > 4096 || rule.m_name.size() > 4096 ||
                 rule.m_iccFile.size() > 4096)
                 return std::nullopt;
-            rules.emplace(monitor.get(), std::move(rule));
+            const auto source = capturedSources.find(monitor.get());
+            const auto effective = RecoveryRule::capture(rule);
+            if (!sourceCaptureValid || source == capturedSources.end() || !effective)
+                return std::nullopt;
+            auto lineage = RecoveryLineage::capture(
+                source->second.native, *effective, source->second.selectors,
+                source->second.selected, source->second.wlr, source->second.mask,
+                source->second.refreshMilliHz);
+            if (!lineage || !rules.emplace(monitor.get(), std::move(*lineage)).second)
+                return std::nullopt;
         }
         return rules;
     }
@@ -573,6 +624,13 @@ Config::CMonitorRule overlayRule(Monitor::CMonitor *monitor, Config::CMonitorRul
         mirror = source->m_name;
     }
     return overlayDisplayFields(std::move(current), found->second, mirror);
+}
+void nativeRuleSource(Monitor::CMonitor *monitor, const Config::CMonitorRule &rule,
+                      std::optional<std::size_t> selected, bool wlr, std::uint32_t committed,
+                      std::uint32_t refreshMilliHz)
+{
+    if (backend)
+        backend->captureRuleSource(monitor, rule, selected, wlr, committed, refreshMilliHz);
 }
 bool ownsMonitor(Monitor::CMonitor *monitor)
 {

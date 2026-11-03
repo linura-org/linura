@@ -104,6 +104,31 @@ class RecoveryRule final
         return out;
     }
 
+    [[nodiscard]] const std::string &selector() const noexcept
+    {
+        return selector_;
+    }
+    [[nodiscard]] bool hasWlrRefresh(std::uint32_t milliHz) const noexcept
+    {
+        return reals_[2] == static_cast<double>(static_cast<float>(milliHz) / 1000.F);
+    }
+
+    // Exact projection used by the pinned wlr output manager. Its enabled
+    // state is unconditional; only committed geometry fields may differ.
+    // VRR/color/ICC are outside this owned-field codec and remain live.
+    [[nodiscard]] bool isWlrProjectionOf(const RecoveryRule &base, std::uint32_t mask) const
+    {
+        if (mask > 31 || selector_ != base.selector_ || autoDir_ != base.autoDir_ ||
+            mirror_ != base.mirror_ || mode_ != base.mode_ || modeName_ != base.modeName_)
+            return false;
+        if (!(mask & 3U) && (reals_[0] != base.reals_[0] || reals_[1] != base.reals_[1] ||
+                             reals_[2] != base.reals_[2]))
+            return false;
+        return ((mask & 4U) || (reals_[3] == base.reals_[3] && reals_[4] == base.reals_[4])) &&
+               ((mask & 8U) || transform_ == base.transform_) &&
+               ((mask & 16U) || reals_[5] == base.reals_[5]);
+    }
+
     // Merge into a COPY of the current rule. The selector, precedence, color,
     // VRR, ICC, reserved areas and all other current fields remain untouched.
     // The resolved selector must still match. Never transplant old fields into

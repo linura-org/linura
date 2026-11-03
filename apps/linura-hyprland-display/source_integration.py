@@ -52,6 +52,30 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
         "return Linura::HyprlandDisplay::overlayRule(PMONITOR.get(), std::move(rule));",
         2,
     )
+    getter = replace_exact(
+        getter,
+        "[PMONITOR](CMonitorRule rule) -> CMonitorRule",
+        "[PMONITOR](CMonitorRule rule, std::optional<std::size_t> sourceIndex) -> CMonitorRule",
+    )
+    getter = replace_exact(
+        getter,
+        "        const auto CONFIG = PROTO::outputManagement->getOutputStateFor(PMONITOR);",
+        "        const auto CONFIG = PROTO::outputManagement->getOutputStateFor(PMONITOR);\n"
+        "        Linura::HyprlandDisplay::nativeRuleSource(PMONITOR.get(), rule, sourceIndex,\n"
+        "            static_cast<bool>(CONFIG), CONFIG ? CONFIG->committedProperties : 0U,\n"
+        "            CONFIG && (CONFIG->committedProperties & 3U) ? CONFIG->refresh : 0U);",
+    )
+    getter = replace_exact(
+        getter,
+        "return applyWlrOutputConfig(r);",
+        "return applyWlrOutputConfig(r, static_cast<std::size_t>(&r - m_rules.data()));",
+        2,
+    )
+    getter = replace_exact(
+        getter,
+        "return applyWlrOutputConfig(fallbackRule);",
+        "return applyWlrOutputConfig(fallbackRule, std::nullopt);",
+    )
     outputs[manager] = include + text[:start] + getter + text[end:]
 
     compositor = "src/Compositor.cpp"

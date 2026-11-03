@@ -2,7 +2,7 @@
 #include "native_wayland_readiness.h"
 #include "linura-display-management-v1-client-protocol.h"
 #include "linura-display-integration-build.h"
-#include "recovery_rule.h"
+#include "recovery_lineage.h"
 
 #include <QUuid>
 #include <QCryptographicHash>
@@ -292,12 +292,13 @@ class NativeDisplayConnection::Impl final
     {
         auto &head = *static_cast<Head *>(data);
         callback(*head.owner, [&] {
-            const auto base = witness(baseRule, "LNDR:2;", HyprlandDisplay::RecoveryRule::MaxBytes);
+            const auto base =
+                witness(baseRule, "LNRL:1;", HyprlandDisplay::RecoveryLineage::MaxBytes);
             const auto native = witness(identity, "LNDF:2;", 16 * 1024);
             const auto kernel = native ? kernelBinding(*native) : std::nullopt;
             const auto overlay = owned == 1 ? witness(target, "LNOT:1;", 512)
                                             : std::optional<QByteArray>{QByteArray{}};
-            const auto rule = base ? HyprlandDisplay::RecoveryRule::decode(std::string_view(
+            const auto rule = base ? HyprlandDisplay::RecoveryLineage::decode(std::string_view(
                                          base->constData(), static_cast<std::size_t>(base->size())))
                                    : std::nullopt;
             if (head.done || head.recoveryReceived || !head.currentReceived || owned > 1 || !rule ||

@@ -1,6 +1,6 @@
 #include "native_display_topology.h"
 #include "wlr-output-management-unstable-v1-client-protocol.h"
-#include "recovery_rule.h"
+#include "recovery_lineage.h"
 #include "linura-display-integration-build.h"
 
 #include <QJsonArray>
@@ -103,7 +103,7 @@ QString NativeDisplaySnapshot::recoveryPreimage() const
             head.handle == std::numeric_limits<quint64>::max() ||
             head.generation == std::numeric_limits<quint64>::max() || key[0] != 226 ||
             key[1] > 63 || key[2] == 0 || !devices.insert(key).second ||
-            !HyprlandDisplay::RecoveryRule::decode(
+            !HyprlandDisplay::RecoveryLineage::decode(
                 std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size()))) ||
             QString::fromLatin1(
                 QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) !=
@@ -123,7 +123,7 @@ QString NativeDisplaySnapshot::recoveryPreimage() const
             {"output_identity_digest", head.outputIdentityDigest}});
     }
     const auto bytes =
-        QJsonDocument(QJsonObject{{"schema", 1},
+        QJsonDocument(QJsonObject{{"schema", 2},
                                   {"upstream", "efb50993780079460b0cbed1363e2166a2de1d9f"},
                                   {"integration", HyprlandDisplay::IntegrationSourceDigest},
                                   {"generation", QString::number(generation)},

@@ -128,7 +128,12 @@
     "editor.rulers": [100, 120, 140]
   },
   "C_Cpp.clang_format_style": "file",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "prettier.requireConfig": true,
   "shellformat.flag": "-i 4 -ci",
-  "cmake.sourceDirectory": "${workspaceFolder}/apps/linura-hyprland-display"
+  "cmake.sourceDirectory": "${workspaceFolder}/apps/linura-hyprland-display",
+  "cmake.configureSettings": {
+    "CMAKE_EXPORT_COMPILE_COMMANDS": true
+  }
 }
