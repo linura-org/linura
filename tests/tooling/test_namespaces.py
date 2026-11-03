@@ -161,21 +161,35 @@ class NamespaceContractTests(unittest.TestCase):
                         self.assertIn("runtime binding", result.stderr)
 
     def test_native_display_action_cannot_substitute_another_authority_purpose(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self._copy_fixture(root)
-            source = root / "crates/linura-linux-session/src/owner/display/approval.rs"
-            original = source.read_text(encoding="utf-8")
-            changed = original.replace(
-                'NativeDisplayApprovalPurpose::Apply => "org.linura.authority.apply-display-layout"',
-                'NativeDisplayApprovalPurpose::Apply => "org.linura.authority.reboot-session"',
-            )
-            self.assertNotEqual(original, changed)
-            source.write_text(changed, encoding="utf-8")
-            result = self._run_checker(root)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("org.linura.authority.apply-display-layout", result.stderr)
-            self.assertIn("runtime binding", result.stderr)
+        for purpose, action in (
+            ("Apply", "org.linura.authority.apply-display-layout"),
+            ("RestoreOriginal", "org.linura.authority.restore-original-display-layout"),
+        ):
+            with (
+                self.subTest(purpose=purpose),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                source = (
+                    root / "crates/linura-linux-session/src/owner/display/approval.rs"
+                )
+                original = source.read_text(encoding="utf-8")
+                pattern = rf'NativeDisplayApprovalPurpose::{purpose}\s*=>\s*(?:\{{\s*)?"{re.escape(action)}"'
+                changed, count = re.subn(
+                    pattern,
+                    lambda match: match.group().replace(
+                        action, "org.linura.authority.reboot-session"
+                    ),
+                    original,
+                )
+                self.assertEqual(count, 1)
+                self.assertNotEqual(original, changed)
+                source.write_text(changed, encoding="utf-8")
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(action, result.stderr)
+                self.assertIn("runtime binding", result.stderr)
 
     def test_undeclared_dbus_interface_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -22,6 +22,7 @@ struct Counts final
 {
     std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0}, refresh{0};
     std::atomic<bool> throwAttach{false};
+    std::atomic<unsigned> purpose{99};
 };
 class Scene final : public ProtectedScene
 {
@@ -148,6 +149,7 @@ class Harness final
             },
             [this](const ProtectedInteraction::Scope &scope) {
                 ++counts.begin;
+                counts.purpose.store(static_cast<unsigned>(scope.purpose));
                 return std::make_unique<Scene>(counts, scope);
             });
         assert(endpoint->available());
@@ -343,6 +345,12 @@ int main()
         Harness h;
         Client c(h.descriptor);
         c.begin(nullptr, 3);
+        assert(c.denied == 0 && h.counts.begin == 1 && h.counts.purpose.load() == 3);
+    }
+    {
+        Harness h;
+        Client c(h.descriptor);
+        c.begin(nullptr, 4);
         assert(c.denied == 1 && h.counts.begin == 0);
     }
     {

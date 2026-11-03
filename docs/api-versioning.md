@@ -307,17 +307,25 @@ only `display.layout-attempt.observe` into the canonical envelope; native phase
 is neither independent layout verification, protected approval nor permission to
 replay. Production dispatch and full recovery remain unqualified and unsupported.
 
-The private Experimental `SecurityOwner1` Apply handshake additionally exposes
+The private Experimental `SecurityOwner1` display handshake additionally exposes
 `ArmDisplayApproval`, `DisplayApprovalReady`, `ConsumeDisplayApproval` and
 `CancelDisplayApproval`. Each takes the original `(sssssssu)` comparison scope,
 complete material, bounded reason and original wall/BOOTTIME deadlines as `(sssssssu)sstt`, and
-returns one boolean. Only purpose 8 (Apply) is admitted; the legacy S17 methods
-continue rejecting display scopes. A retired readiness conversation returns the
+returns one boolean. Purpose 8 admits Apply; distinct purpose 11 admits a fresh
+original-restoration review using complete bounded `LNRI:1` material. The latter
+requires the separate non-retained administrator action
+`org.linura.authority.restore-original-display-layout`. Legacy S17 methods
+continue rejecting both display scopes. A retired readiness conversation returns the
 fixed unavailable error rather than indefinite pending. Cancellation compares
 the exact scope even after its deadline and cannot adopt another native owner or
 cancel a newer conversation. These private methods create neither public mutation
 support nor an executor credential. Keep/Revert must continue a retained original
-transaction; they cannot enter through this Apply handshake.
+transaction; they cannot enter through this initial display handshake. The native
+protected protocol uses distinct Recovery purpose 3, with its original absolute
+wall/BOOTTIME review bounds. Only the replacement's continuously healthy original
+Root lease in recovery phase permits that private scene. Ordinary rendering,
+scanout, lock release and Apply redemption stay fenced. Protected approval is
+not a prepared restoration dispatch, terminal proof or release permission.
 
 The private Experimental `DisplayProtection1.ReserveRestoration` takes one
 bounded 16 KiB `ay` reservation and returns one original-root-created Unix

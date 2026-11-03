@@ -68,4 +68,10 @@
     <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
   </action>
+  <action id="org.linura.authority.restore-original-display-layout">
+    <description>Authorize restoring the original reviewed display settings</description>
+    <message>Fresh administrator authentication authorizes restoring the original display rules, layout and ownership after an interrupted change</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
 </policyconfig>

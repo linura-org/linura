@@ -30,7 +30,9 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
-CapabilityBoundingSet=
+# Read only the independently admitted, nondumpable compositor's executable.
+# No ptrace/memory API, arbitrary target or capability in the protected owner.
+CapabilityBoundingSet=CAP_SYS_PTRACE
 AmbientCapabilities=
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM

@@ -29,7 +29,7 @@
       <arg name="resource" type="s" direction="in"/>
       <arg name="ready" type="b" direction="out"/>
     </method>
-    <!-- Separate display Apply handshake. Original canonical scope/review,
+    <!-- Separate display Apply and fresh original-restoration handshake. Original canonical scope/review,
          complete material/reason and original deadline are immutable comparison
          data; no bool or digest becomes prepared execution authority. Keep and
          Revert must continue the retained original native transaction. -->

@@ -59,6 +59,8 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
     [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
     [[nodiscard]] bool displayAllowsSecurityTransition();
+    // Read-only phase check. It grants neither restoration nor lock release.
+    [[nodiscard]] bool displayRecoveryApprovalAvailable();
     [[nodiscard]] std::optional<NativePinnedDisplaySample> displayStartupSample();
     [[nodiscard]] bool displayStartupRequired() const noexcept;
     [[nodiscard]] bool admitDisplayStartup(int lease, bool ordinaryAllowed, quint32 guardPid,

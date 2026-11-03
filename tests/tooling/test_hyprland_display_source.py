@@ -28,6 +28,34 @@ def archive_bytes(entries: list[tuple[str, bytes | str, bytes]]) -> bytes:
 
 
 class HyprlandDisplaySourceTests(unittest.TestCase):
+    def test_native_entry_drops_capabilities_before_runtime_and_rejects_anchor_drift(
+        self,
+    ):
+        main = (
+            '#include "helpers/env/Env.hpp"\n'
+            "int main() {\n    if (!verifyConfig) {\n        gainRealTime();\n    }\n"
+            "    createCompositor();\n}\n"
+        )
+        patched = source.integration.patch_native_startup(main)
+        self.assertIn('#include "native_process_privilege.h"', patched)
+        self.assertLess(
+            patched.index("dropNativeProcessCapabilities"),
+            patched.index("gainRealTime"),
+        )
+        self.assertLess(
+            patched.index("dropNativeProcessCapabilities"),
+            patched.index("createCompositor"),
+        )
+        self.assertIn("return 1;", patched)
+        for changed in (
+            main.replace("    if (!verifyConfig) {", "    if (verifyConfig) {"),
+            main + "    if (!verifyConfig) {\n",
+            patched,
+            main.replace('#include "helpers/env/Env.hpp"', ""),
+        ):
+            with self.subTest(changed=changed), self.assertRaises(source.SourceError):
+                source.integration.patch_native_startup(changed)
+
     def test_recipe_drift_and_symlink_are_refused_before_source_staging(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -13,7 +13,7 @@ int main()
     assert(validPrompt.valid());
     for (const auto purpose :
          {NativeDisplayPromptScope::Purpose::Apply, NativeDisplayPromptScope::Purpose::Keep,
-          NativeDisplayPromptScope::Purpose::Revert}) {
+          NativeDisplayPromptScope::Purpose::Revert, NativeDisplayPromptScope::Purpose::Recovery}) {
         auto prompt = validPrompt;
         prompt.purpose = purpose;
         assert(prompt.valid());
@@ -43,7 +43,7 @@ int main()
             prompt.deadlineBootMs = 0;
             break;
         default:
-            prompt.purpose = static_cast<NativeDisplayPromptScope::Purpose>(3);
+            prompt.purpose = static_cast<NativeDisplayPromptScope::Purpose>(4);
             break;
         }
         assert(!prompt.valid());

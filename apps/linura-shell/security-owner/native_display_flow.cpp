@@ -1,4 +1,5 @@
 #include "native_display_flow.h"
+#include "native_display_restoration.h"
 #include "native_wayland_lock.h"
 #include "native_presentation.h"
 #include "authentication_agent.h"
@@ -32,11 +33,12 @@ NativeDisplayFlow::create(NativeApprovalScope scope, NativeWaylandLock &backend,
     if (backend.thread() != QThread::currentThread() ||
         presentation.thread() != QThread::currentThread() ||
         authentication.thread() != QThread::currentThread() ||
-        scope.purpose != ApprovalPurpose::ApplyDisplay || !scope.valid() || !revalidate ||
-        !revalidate() || !backend.available() || !presentation.ready() ||
-        !authentication.registered())
+        (scope.purpose != ApprovalPurpose::ApplyDisplay &&
+         scope.purpose != ApprovalPurpose::RestoreOriginalDisplay) ||
+        !scope.valid() || !revalidate || !revalidate() || !backend.available() ||
+        !presentation.ready() || !authentication.registered())
         return {};
-    const auto intent = NativeDisplayIntent::parse(scope.display->material);
+    const auto intent = nativeDisplayApprovalIntent(scope);
     const auto snapshot = backend.observeDisplayTopology();
     const auto clock = NativeDisplayClock::sample();
     if (!intent || !snapshot || !clock || scope.display->deadlineUnixMs <= clock->unixMs ||
@@ -44,6 +46,12 @@ NativeDisplayFlow::create(NativeApprovalScope scope, NativeWaylandLock &backend,
         scope.display->deadlineUnixMs - clock->unixMs > 60'000 ||
         scope.display->deadlineBootMs - clock->bootMs > 60'000)
         return {};
+    if (scope.purpose == ApprovalPurpose::RestoreOriginalDisplay) {
+        const auto recovery = NativeDisplayRestorationIntent::parse(scope.display->material);
+        if (!recovery || !backend.displayRecoveryApprovalAvailable() ||
+            !recovery->nativeOptions(*snapshot, intent->baseline.topology, scope.lock))
+            return {};
+    }
     const auto pages = nativeDisplayReviewPages(scope, *snapshot);
     if (!pages || pages->empty())
         return {};
@@ -69,7 +77,10 @@ NativeDisplayFlow::NativeDisplayFlow(NativeApprovalScope scope, NativeDisplayInt
                                      AuthenticationAgent &authentication,
                                      NativePeerIdentity control, Revalidate revalidate)
     : scope_(std::move(scope)), intent_(std::move(intent)), snapshot_(std::move(snapshot)),
-      prompt_{scope_.protectedDisplayDigest(), NativeDisplayPromptScope::Purpose::Apply,
+      prompt_{scope_.protectedDisplayDigest(),
+              scope_.purpose == ApprovalPurpose::RestoreOriginalDisplay
+                  ? NativeDisplayPromptScope::Purpose::Recovery
+                  : NativeDisplayPromptScope::Purpose::Apply,
               scope_.display->deadlineUnixMs, scope_.display->deadlineBootMs},
       backend_(backend), presentation_(presentation), authentication_(authentication),
       revalidate_(std::move(revalidate)), control_(std::move(control))
@@ -114,6 +125,9 @@ bool NativeDisplayFlow::window()
         last_ = *now;
         return true;
     }
+    // Do not start a nested native query from a physical-input callback.
+    // Fresh private status/consume callbacks independently recheck the original
+    // Root lease in the compositor; the absolute clocks remain local here.
     if (failed_ || !now || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
         now->unixMs >= scope_.display->deadlineUnixMs || now->bootMs >= deadlineBoot_)
         return false;
@@ -281,8 +295,8 @@ bool NativeDisplayFlow::consume(const NativeApprovalScope &scope)
 bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
                                const NativeDisplayCorrelation &correlation)
 {
-    if (!consumed_ || spent_ || !window() || !revalidate_() || !correlation.valid() ||
-        intent.encode() != scope_.display->material ||
+    if (scope_.purpose != ApprovalPurpose::ApplyDisplay || !consumed_ || spent_ || !window() ||
+        !revalidate_() || !correlation.valid() || intent.encode() != scope_.display->material ||
         correlation.transaction != transaction(scope_))
         return false;
     const auto status = backend_.protectedDisplayStatus();

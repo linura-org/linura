@@ -8,7 +8,7 @@ namespace Linura::SecurityOwner {
 // human approval or authorizes an effect. Control creates the canonical challenge.
 struct NativeDisplayPromptScope final
 {
-    enum class Purpose : quint32 { Apply = 0, Keep = 1, Revert = 2 };
+    enum class Purpose : quint32 { Apply = 0, Keep = 1, Revert = 2, Recovery = 3 };
     QString digest;
     Purpose purpose = Purpose::Apply;
     // Both original Control deadlines; never remapped at owner/native admission.

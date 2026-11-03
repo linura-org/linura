@@ -10,7 +10,7 @@
       is active, preserving the actual ext-session-lock state independently.
     </description>
     <enum name="purpose">
-      <entry name="apply" value="0"/><entry name="keep" value="1"/><entry name="revert" value="2"/>
+      <entry name="apply" value="0"/><entry name="keep" value="1"/><entry name="revert" value="2"/><entry name="recovery" value="3"/>
     </enum>
     <request name="destroy" type="destructor"/>
     <request name="begin">

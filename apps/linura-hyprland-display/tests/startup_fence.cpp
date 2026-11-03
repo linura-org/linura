@@ -9,16 +9,17 @@ int main()
 {
     StartupFence absent;
     assert(!absent.guardAlive() && !absent.ordinaryAllowed());
-    assert(!absent.authenticatesGrantPeer(-1));
+    assert(!absent.authenticatesGrantPeer(-1) && !absent.recoveryAvailable());
     for (const bool allowed : {false, true}) {
         std::array<int, 2> pair{};
         assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0);
         StartupFence fence;
         assert(fence.retain(pair[0], allowed));
         assert(fence.guardAlive() && fence.ordinaryAllowed() == allowed);
+        assert(fence.recoveryAvailable() == !allowed);
         assert(!fence.retain(pair[1], true)); // Cannot replace even a fenced grant.
         assert(close(pair[1]) == 0);
-        assert(!fence.guardAlive() && !fence.ordinaryAllowed());
+        assert(!fence.guardAlive() && !fence.ordinaryAllowed() && !fence.recoveryAvailable());
         assert(!fence.retain(-1, true));
     }
     std::array<int, 2> pair{};

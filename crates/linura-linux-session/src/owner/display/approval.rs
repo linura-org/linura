@@ -14,6 +14,7 @@ pub enum NativeDisplayApprovalPurpose {
     Apply,
     Keep,
     Revert,
+    RestoreOriginal,
 }
 impl NativeDisplayApprovalPurpose {
     fn wire(self) -> u32 {
@@ -21,12 +22,16 @@ impl NativeDisplayApprovalPurpose {
             Self::Apply => 8,
             Self::Keep => 9,
             Self::Revert => 10,
+            Self::RestoreOriginal => 11,
         }
     }
 
     fn authentication_action(self) -> Result<&'static str, String> {
         Ok(match self {
             NativeDisplayApprovalPurpose::Apply => "org.linura.authority.apply-display-layout",
+            NativeDisplayApprovalPurpose::RestoreOriginal => {
+                "org.linura.authority.restore-original-display-layout"
+            }
             NativeDisplayApprovalPurpose::Keep | NativeDisplayApprovalPurpose::Revert => {
                 return Err("display decisions require the retained native attempt".into());
             }
@@ -40,6 +45,7 @@ impl NativeDisplayApprovalPurpose {
 #[derive(Debug)]
 pub struct NativeDisplayApprovalRequest {
     lock: SessionLockId,
+    purpose: NativeDisplayApprovalPurpose,
     principal: PrincipalId,
     request: RequestId,
     plan: PlanId,
@@ -83,6 +89,38 @@ impl NativeDisplayApprovalRequest {
             budget,
             started_unix_ms,
             started_boot_ms,
+            NativeDisplayApprovalPurpose::Apply,
+        )
+    }
+
+    /// Fresh original restoration purpose only. Material is comparison data;
+    /// Control must independently derive/review it and consume fresh native
+    /// administrator proof before preparing a one-use managed handoff.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_restoration(
+        principal: PrincipalId,
+        request: RequestId,
+        plan: PlanId,
+        request_digest: ComponentDigest,
+        observation_digest: ComponentDigest,
+        review_digest: ComponentDigest,
+        material: &str,
+        reason: &str,
+        budget: Duration,
+    ) -> Result<Self, String> {
+        Self::at(
+            principal,
+            request,
+            plan,
+            request_digest,
+            observation_digest,
+            review_digest,
+            material,
+            reason,
+            budget,
+            unix_ms()?,
+            boot_ms()?,
+            NativeDisplayApprovalPurpose::RestoreOriginal,
         )
     }
 
@@ -99,8 +137,14 @@ impl NativeDisplayApprovalRequest {
         budget: Duration,
         started_unix_ms: u64,
         started_boot_ms: u64,
+        purpose: NativeDisplayApprovalPurpose,
     ) -> Result<Self, String> {
-        if material.len() > linura_core::MAX_DISPLAY_INTENT_BYTES
+        let maximum = if purpose == NativeDisplayApprovalPurpose::RestoreOriginal {
+            linura_core::MAX_DISPLAY_RESTORATION_BYTES
+        } else {
+            linura_core::MAX_DISPLAY_INTENT_BYTES
+        };
+        if material.len() > maximum
             || reason.is_empty()
             || reason.len() > 8192
             || reason.encode_utf16().count() > 2048
@@ -113,23 +157,41 @@ impl NativeDisplayApprovalRequest {
         {
             return Err("native display interaction material/window is unsupported".into());
         }
-        let intent =
-            linura_core::DisplayLayoutMaterial::decode(material).map_err(|e| e.to_string())?;
-        let prefix = "request:v010:display-layout:";
+        let (lock, prefix) = match purpose {
+            NativeDisplayApprovalPurpose::Apply => (
+                linura_core::DisplayLayoutMaterial::decode(material)
+                    .map_err(|e| e.to_string())?
+                    .lock()
+                    .clone(),
+                "request:v010:display-layout:",
+            ),
+            NativeDisplayApprovalPurpose::RestoreOriginal => (
+                linura_core::DisplayRestorationMaterial::decode(material)
+                    .map_err(|e| e.to_string())?
+                    .replacement()
+                    .lock()
+                    .clone(),
+                "request:v010:display-restoration:",
+            ),
+            NativeDisplayApprovalPurpose::Keep | NativeDisplayApprovalPurpose::Revert => {
+                return Err("display decisions require their original retained attempt".into());
+            }
+        };
         let operation = request
             .as_str()
             .strip_prefix(prefix)
             .ok_or("native display approval has another operation purpose")?;
         if !approval_operation_slug(operation)
             || plan.as_str() != request.as_str()
-            || principal.as_str() != format!("unix:uid:{}", intent.lock().epoch().uid())
+            || principal.as_str() != format!("unix:uid:{}", lock.epoch().uid())
         {
             return Err("native display approval principal/plan/request mismatch".into());
         }
         let millis = u64::try_from(budget.as_millis())
             .map_err(|_| "native display interaction window overflow")?;
         Ok(Self {
-            lock: intent.lock().clone(),
+            lock,
+            purpose,
             principal,
             request,
             plan,
@@ -223,7 +285,7 @@ impl NativeDisplayApprovalRequest {
             format!("sha256:{}", self.request_digest.to_hex()),
             format!("sha256:{}", self.observation_digest.to_hex()),
             format!("sha256:{}", self.review_digest.to_hex()),
-            NativeDisplayApprovalPurpose::Apply.wire(),
+            self.purpose.wire(),
         ))
     }
 }
@@ -320,7 +382,7 @@ impl NativeSessionChannel {
         self.authenticate_native_scope(
             &request.lock,
             &request.request,
-            NativeDisplayApprovalPurpose::Apply.authentication_action()?,
+            request.purpose.authentication_action()?,
             "linura-s21-display",
             budget,
         )?;
@@ -352,7 +414,91 @@ mod tests {
             Duration::from_millis(999),
             1,
             1,
+            NativeDisplayApprovalPurpose::Apply,
         ))
+    }
+    #[test]
+    fn fresh_original_restoration_cannot_enter_apply_or_reuse_its_window() {
+        let source = fixture();
+        let replacement = source
+            .material
+            .replace(
+                "33333333-3333-4333-8333-333333333333",
+                "44444444-4444-4444-8444-444444444444",
+            )
+            .replace(
+                "1280:720:59940:1250:1:-100:20",
+                "1920:1080:60000:1000:0:0:0",
+            );
+        let mut material = "LNRI:1;".to_owned();
+        for field in [
+            source.request.as_str(),
+            &"a".repeat(64),
+            &"b".repeat(64),
+            &"c".repeat(64),
+            &source.material,
+            &replacement,
+            "1:2:1:2;",
+        ] {
+            material.push_str(&format!("{}:{field};", field.len()));
+        }
+        let make = |purpose, text: &str, request: &str| {
+            NativeDisplayApprovalRequest::at(
+                source.principal.clone(),
+                value(RequestId::new(request)),
+                value(PlanId::new(request)),
+                source.request_digest,
+                source.observation_digest,
+                source.review_digest,
+                text,
+                "Restore original settings",
+                Duration::from_millis(999),
+                1,
+                1,
+                purpose,
+            )
+        };
+        let request = "request:v010:display-restoration:review";
+        let recovery = value(make(
+            NativeDisplayApprovalPurpose::RestoreOriginal,
+            &material,
+            request,
+        ));
+        assert_eq!(value(recovery.wire()).7, 11);
+        assert_eq!(
+            NativeDisplayApprovalPurpose::RestoreOriginal.authentication_action(),
+            Ok("org.linura.authority.restore-original-display-layout")
+        );
+        assert_ne!(
+            value(recovery.protected_scope_digest()),
+            value(source.protected_scope_digest())
+        );
+        assert!(make(NativeDisplayApprovalPurpose::Apply, &material, request).is_err());
+        assert!(
+            make(
+                NativeDisplayApprovalPurpose::RestoreOriginal,
+                &source.material,
+                request
+            )
+            .is_err()
+        );
+        assert!(
+            make(
+                NativeDisplayApprovalPurpose::RestoreOriginal,
+                &material,
+                source.request.as_str()
+            )
+            .is_err()
+        );
+        for purpose in [
+            NativeDisplayApprovalPurpose::Keep,
+            NativeDisplayApprovalPurpose::Revert,
+        ] {
+            assert!(make(purpose, &material, request).is_err());
+        }
+        assert_eq!(recovery.remaining_at(2, 2), Ok(Duration::from_millis(998)));
+        assert!(recovery.remaining_at(3, 1000).is_err());
+        assert!(recovery.remaining_at(4, 4).is_err());
     }
     #[test]
     fn original_deadline_includes_suspend_and_rollback_is_terminal() {
@@ -468,6 +614,7 @@ mod tests {
                     budget,
                     1,
                     1,
+                    NativeDisplayApprovalPurpose::Apply,
                 )
                 .is_err()
             );

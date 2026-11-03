@@ -20,9 +20,11 @@ std::optional<ProtectedInteraction> ProtectedInteraction::start(Scope scope, con
                                                                 ClockSample clock,
                                                                 std::uint64_t epoch)
 {
-    const auto maximum = scope.purpose == Purpose::Apply ? MaximumWindowMs : DecisionWindowMs;
+    const auto maximum = (scope.purpose == Purpose::Apply || scope.purpose == Purpose::Recovery)
+                             ? MaximumWindowMs
+                             : DecisionWindowMs;
     if ((scope.purpose != Purpose::Apply && scope.purpose != Purpose::Keep &&
-         scope.purpose != Purpose::Revert) ||
+         scope.purpose != Purpose::Revert && scope.purpose != Purpose::Recovery) ||
         !validDigest(scope.digest) || clock.unixMs == 0 || clock.bootMs == 0 || epoch == 0 ||
         epoch >= std::numeric_limits<std::uint64_t>::max() - 1 ||
         scope.deadlineUnixMs <= clock.unixMs || scope.deadlineUnixMs - clock.unixMs > maximum ||

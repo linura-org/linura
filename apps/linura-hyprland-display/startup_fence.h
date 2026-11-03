@@ -58,6 +58,10 @@ class StartupFence final
     {
         return guardAlive() && ordinary_;
     }
+    [[nodiscard]] bool recoveryAvailable() const noexcept
+    {
+        return !ordinary_ && guardAlive();
+    }
     // Private kernel-peer comparison only, never restoration permission. The
     // caller must separately consume the exact fresh protected Recovery scope,
     // prepared binding and complete one-use grant. A replacement root service

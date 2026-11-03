@@ -35,9 +35,28 @@ def stamp_version_template(text: str, upstream_commit: str) -> str:
     )
 
 
+def patch_native_startup(text: str) -> str:
+    if "native_process_privilege.h" in text or "dropNativeProcessCapabilities" in text:
+        raise SourceError("native startup protection is already present")
+    text = replace_exact(
+        text,
+        '#include "helpers/env/Env.hpp"',
+        '#include "helpers/env/Env.hpp"\n#include "native_process_privilege.h"',
+    )
+    return replace_exact(
+        text,
+        "    if (!verifyConfig) {",
+        "    if (!Linura::HyprlandDisplay::dropNativeProcessCapabilities()) {\n"
+        '        std::fputs("Linura compositor capability reset unavailable\\n", stderr);\n'
+        "        return 1;\n    }\n\n"
+        "    if (!verifyConfig) {",
+    )
+
+
 def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str]:
     """Construct all outputs before any write. No fuzzy patches or symbol hooks."""
     outputs = dict(inputs)
+    outputs["src/main.cpp"] = patch_native_startup(outputs["src/main.cpp"])
     outputs["src/version.h.in"] = stamp_version_template(
         outputs["src/version.h.in"], upstream_commit
     )
@@ -352,6 +371,7 @@ target_sources(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_ba
   "${LINURA_DISPLAY_INTEGRATION_DIR}/native_owner_admission.cpp"
   "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_protected.cpp")
 target_include_directories(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_SOURCE_DIR}")
+target_include_directories(Hyprland PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}")
 target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner linura-hyprland-protected-wire PkgConfig::LINURA_DISPLAY_SYSTEMD PkgConfig::LINURA_DISPLAY_UDEV)
 if(TARGET hyprland_gtests)
   target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp"

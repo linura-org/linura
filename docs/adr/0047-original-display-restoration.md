@@ -14,6 +14,20 @@ login nor an expired confirmation window may bypass that fence.
 
 ## Decision
 
+Startup executable attestation belongs to the independent root protection
+boundary after exact supervised-owner and logind leader admission. The native
+entry point first disables dumpability and relinquishes all process capability
+sets, preventing capability removal from exposing the compositor to same-user
+inspection. The owner supplies only an immutable installed-image digest. The
+root guard uses exactly `CAP_SYS_PTRACE` to open the admitted nondumpable
+leader's executable, independently compares the fixed root-immutable installed
+inode and complete bounded hash, and retains the descriptor for ongoing
+metadata/executable checks. It offers no arbitrary inspection interface. The
+mutating executor and protected owner retain no capabilities. Reauthentication
+shares the original startup deadline and retained image; it cannot refresh
+that deadline or hash a second image. This strengthens startup attestation but
+does not replace secure-loader/plugin review or native attack qualification.
+
 Control derives a separate original-restoration candidate from the authenticated
 original request, durable authority/phase chain and immutable native checkpoint.
 It independently obtains current native/logind/coverage and original-protection
@@ -70,8 +84,8 @@ handles, mirrors, disabled heads and a new login epoch on the same boot/user/sea
 It requires the replacement target to equal the remapped original baseline and
 rechecks the current geometry, capabilities and native baseline guard before a
 future Recovery presentation. A shared canonical vector is validated by both
-Rust's native-capability derivation and the C++ decoder. This decoder is not yet
-wired to a protected Recovery interaction or effect; it grants no authority.
+Rust's native-capability derivation and the C++ decoder. It now supplies the
+private Recovery review, but is not an execution capability or native effect.
 
 The restoration operation is `ManagedExternalEffect` with a trusted
 `SecuritySensitive` floor. Its fresh canonical `ReconciliationPlan` includes the
@@ -129,10 +143,27 @@ that reservation. Transfer has one retained worker slot, a two-second absolute
 budget and a final marker following fresh witness checks. Those mechanisms
 perform no display write, release or recovery orchestration.
 
-The purpose-bound protected Recovery interaction, authenticated native consumer,
-fresh Control handoff and qualified supersession/terminal workflow remain
-unfinished. The endpoint producer and component tests do not establish that
-required composition or native qualification.
+The protected owner now admits the separate original-restoration approval
+purpose 11 and native Recovery presentation purpose 3. Its canonical comparison
+scope includes the complete `LNRI:1` material, reviewed bindings, reason and
+original absolute wall/BOOTTIME bounds. Fresh administrator authentication uses
+`org.linura.authority.restore-original-display-layout`, never a retained Polkit
+grant or the original Apply proof. Both review clocks remain bounded to sixty
+seconds; native focus, input, configure or first-frame changes invalidate the
+proof. Legacy S17 approval, ordinary Apply redemption and retained Keep/Revert
+cannot consume it.
+
+Only a replacement with a continuously healthy original Root lease in recovery
+phase admits this private scene. The compositor rechecks that original lease on
+fresh status, input, consume, render and commit paths; unknown/lost state keeps
+opaque/input fencing. Ordinary scene rendering and scanout stay blocked. Native
+input callbacks do not start nested owner snapshot queries: the compositor's
+actual private status/consume paths revalidate the lease independently.
+
+Authenticated native grant consumption/writes, fresh Control prepared handoff
+and qualified supersession/terminal workflow remain unfinished. Component checks
+of the review and endpoint producer do not establish that required composition
+or native qualification.
 
 ## Terminal sequencing
 

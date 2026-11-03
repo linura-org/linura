@@ -568,6 +568,10 @@ void shutdown()
     shutdownProtectedDisplay();
     backend.reset();
 }
+bool startupRecoveryAvailable()
+{
+    return startupFence.recoveryAvailable();
+}
 bool startupBlocked()
 {
     return !startupFence.ordinaryAllowed();

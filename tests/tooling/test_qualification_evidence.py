@@ -957,6 +957,34 @@ jobs:
                                 invalid, count, "v0.6 matrix", filtered_out=filtered
                             )
 
+    def test_v06_original_read_requires_both_transport_and_runtime_proofs(self):
+        parsed = "native-display-original-same-account-malformed-scope"
+        denied = "native-display-original-same-account-not-control-denied"
+        failure = "Error org.freedesktop.DBus.Error.Failed: original display protection unavailable; no retry"
+        refusal = "Error org.freedesktop.DBus.Error.AccessDenied: Access denied"
+
+        def quoted(text):
+            return text.replace(" ", "\\ ").replace(";", "\\;")
+
+        good = (
+            f"{parsed}-rc=1\n{parsed}-output={quoted(failure)}\n"
+            f"{denied}-rc=1\n{denied}-output={quoted(refusal)}\n"
+        )
+        semantic_verifier._require_v06_original_read_admission(good)
+        for bad in (
+            good.replace(quoted(failure), quoted(refusal)),
+            good.replace(quoted(refusal), quoted(failure)),
+            good.replace(f"{parsed}-rc=1", f"{parsed}-rc=0"),
+            good.replace(f"{denied}-rc=1", f"{denied}-rc=0"),
+            good.replace(f"{parsed}-output={quoted(failure)}\n", ""),
+            good + f"{denied}-rc=1\n",
+            good + f"{parsed}-output={quoted(failure)}\n",
+            good.replace("no\\ retry", "unknown"),
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(semantic_verifier.VerificationError):
+                    semantic_verifier._require_v06_original_read_admission(bad)
+
     def test_non_evidence_lanes_cannot_self_promote(self):
         contract = evidence.load_contract(ROOT)
         for lane in contract["non_evidence_lanes"]:

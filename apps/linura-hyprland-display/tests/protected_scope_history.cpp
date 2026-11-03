@@ -18,6 +18,17 @@ ProtectedInteraction::Scope scope(unsigned id, std::uint64_t deadline = 25'000)
 } // namespace
 int main()
 {
+    ProtectedScopeHistory recoveryHistory;
+    auto recovery = scope(2000, 70'000);
+    recovery.purpose = ProtectedInteraction::Purpose::Recovery;
+    assert(recoveryHistory.reserve(recovery, {10'000, 1000}));
+    auto substituted = recovery;
+    substituted.purpose = ProtectedInteraction::Purpose::Apply;
+    assert(!recoveryHistory.reserve(substituted, {10'001, 1001}));
+    auto extended = scope(2001, 70'001);
+    extended.purpose = ProtectedInteraction::Purpose::Recovery;
+    assert(!recoveryHistory.reserve(extended, {10'000, 1000}));
+    assert(!recoveryHistory.reserve(recovery, {70'000, 61'000}));
     ProtectedScopeHistory originalBound;
     auto shortBoot = scope(0);
     shortBoot.deadlineBootMs = 1200;

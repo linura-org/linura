@@ -22,7 +22,9 @@
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.
            Tuple: original lock/login, native PID, seat, compositor invocation,
-           integration digest, installed native image digest. No principal input. -->
+           integration digest, installed native image digest. No principal input.
+           Root independently verifies the admitted leader's actual executable;
+           the installed digest is comparison data, never image authority. -->
       <arg name="request" type="(sussss)" direction="in"/>
       <arg name="lease" type="h" direction="out"/>
       <arg name="ordinary_allowed" type="b" direction="out"/>

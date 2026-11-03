@@ -898,6 +898,21 @@ class NativeWaylandLock::Impl final
     }
 };
 
+bool NativeWaylandLock::displayRecoveryApprovalAvailable()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !impl_->displayConnection)
+        return false;
+    const bool secure = secureCoverage();
+    if (requestedSecure() != secure)
+        return false;
+    const auto current = impl_->displayConnection->sample();
+    return current && current->compositor == impl_->displayInvocation &&
+           current->startupPhase == 2 && current->fenced &&
+           current->coverage == (secure ? 1U : 0U) && requestedSecure() == secure &&
+           secureCoverage() == secure && (!secure || impl_->inputCovered());
+}
+
 bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &scope,
                                              const NativeDisplayIntent &intent)
 {
@@ -909,8 +924,10 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
         return false;
     const auto current = impl_->displayConnection->sample();
     const auto now = NativeDisplayClock::sample();
-    const auto maximum =
-        scope.purpose == NativeDisplayPromptScope::Purpose::Apply ? 60'000U : 15'000U;
+    const auto maximum = (scope.purpose == NativeDisplayPromptScope::Purpose::Apply ||
+                          scope.purpose == NativeDisplayPromptScope::Purpose::Recovery)
+                             ? 60'000U
+                             : 15'000U;
     if (!current || !now || current->compositor != impl_->displayInvocation ||
         current->coverage != (secureCoverage() ? 1U : 0U) ||
         intent.baseline.topology.section(QLatin1Char(':'), 7, 7) != current->compositor ||
@@ -922,8 +939,12 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
         scope.deadlineBootMs - now->bootMs > maximum)
         return false;
     const NativeDisplayLayout *expected = nullptr;
-    if (scope.purpose == NativeDisplayPromptScope::Purpose::Apply) {
-        if (current->fenced)
+    if (scope.purpose == NativeDisplayPromptScope::Purpose::Recovery) {
+        if (current->startupPhase != 2 || !current->fenced)
+            return false;
+        expected = &intent.baseline;
+    } else if (scope.purpose == NativeDisplayPromptScope::Purpose::Apply) {
+        if (current->fenced || current->startupPhase != 1)
             return false;
         expected = &intent.baseline;
     } else {
@@ -1031,7 +1052,9 @@ bool NativeWaylandLock::beginProtectedDisplayDecision(const NativeDisplayPromptS
         impl_->pumping || !impl_->protectedInteraction || !impl_->protectedScope ||
         !impl_->protectedConsumed ||
         impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Apply ||
-        !scope.valid() || scope.purpose == NativeDisplayPromptScope::Purpose::Apply ||
+        !scope.valid() ||
+        (scope.purpose != NativeDisplayPromptScope::Purpose::Keep &&
+         scope.purpose != NativeDisplayPromptScope::Purpose::Revert) ||
         scope.digest == impl_->protectedScope->digest ||
         scope.deadlineUnixMs != bound.deadlineUnixMs || requestedSecure() != secureCoverage())
         return false;

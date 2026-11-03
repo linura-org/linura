@@ -1,4 +1,5 @@
 #include "native_display_review.h"
+#include "native_display_restoration.h"
 
 #include <QTextBoundaryFinder>
 #include <algorithm>
@@ -44,7 +45,7 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
 {
     if (!scope.isDisplay() || !scope.valid())
         return std::nullopt;
-    const auto intent = NativeDisplayIntent::parse(scope.display->material);
+    const auto intent = nativeDisplayApprovalIntent(scope);
     if (!intent || !intent->baseline.nativeOptions(snapshot) ||
         !intent->desired.nativeOptions(snapshot))
         return std::nullopt;
@@ -56,10 +57,17 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
                        n == '-' || n == '_' || n == '.';
             }))
             return std::nullopt;
-    const auto purpose = scope.purpose == ApprovalPurpose::ApplyDisplay  ? QStringLiteral("Apply")
-                         : scope.purpose == ApprovalPurpose::KeepDisplay ? QStringLiteral("Keep")
+    const bool recovery = scope.purpose == ApprovalPurpose::RestoreOriginalDisplay;
+    if (recovery) {
+        const auto material = NativeDisplayRestorationIntent::parse(scope.display->material);
+        if (!material || !material->nativeOptions(snapshot, intent->baseline.topology, scope.lock))
+            return std::nullopt;
+    }
+    const auto purpose = recovery ? QStringLiteral("Restore original")
+                         : scope.purpose == ApprovalPurpose::ApplyDisplay ? QStringLiteral("Apply")
+                         : scope.purpose == ApprovalPurpose::KeepDisplay  ? QStringLiteral("Keep")
                                                                          : QStringLiteral("Revert");
-    if (scope.purpose != ApprovalPurpose::ApplyDisplay) {
+    if (!recovery && scope.purpose != ApprovalPurpose::ApplyDisplay) {
         // Apply already reviewed every setting and authenticated the canonical
         // plan. The fixed confirmation window needs one fresh human decision,
         // not another multi-page review or administrator conversation.
@@ -82,6 +90,13 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
             .arg(scope.lock.uid);
     std::vector<NativeDisplayReviewPage> pages;
     pages.push_back({purpose + QStringLiteral(" display layout?"), introduction});
+    if (recovery)
+        pages.push_back({QStringLiteral("Recover after an interrupted display change"),
+                         QStringLiteral("Authorize restoring the original monitor rules, layout "
+                                        "and ownership. This is a new administrator approval. "
+                                        "It cannot keep the failed layout or reuse an earlier "
+                                        "confirmation. Ordinary content remains protected until "
+                                        "restoration is independently verified.")});
     const auto &reason = scope.display->reason;
     QTextBoundaryFinder boundary(QTextBoundaryFinder::Grapheme, reason);
     qsizetype offset = 0;
@@ -115,7 +130,11 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
                          QStringLiteral("Previous: %1\nRequested: %2").arg(previous, desired)});
     }
     pages.push_back({purpose + QStringLiteral(" this exact layout?"),
-                     scope.purpose == ApprovalPurpose::ApplyDisplay
+                     recovery
+                         ? QStringLiteral("Restore only the original display settings. This "
+                                          "approval cannot apply a different layout, unlock the "
+                                          "session or authorize a power transition.")
+                     : scope.purpose == ApprovalPurpose::ApplyDisplay
                          ? QStringLiteral("Linura will apply the reviewed layout temporarily. "
                                           "Keep requires a separate protected decision within "
                                           "15 seconds; otherwise Linura restores the previous "

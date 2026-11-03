@@ -686,10 +686,13 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
                                        const NativeApprovalScope &scope)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
-    if (!peer || scope.purpose != ApprovalPurpose::ApplyDisplay || !scope.valid() ||
-        scope.lock != identity() || impl_->approvalScope || impl_->displayRetiring ||
-        (impl_->display && impl_->display->fenced()) || impl_->transitionFence.active() ||
-        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest)
+    if (!peer ||
+        (scope.purpose != ApprovalPurpose::ApplyDisplay &&
+         scope.purpose != ApprovalPurpose::RestoreOriginalDisplay) ||
+        !scope.valid() || scope.lock != identity() || impl_->approvalScope ||
+        impl_->displayRetiring || (impl_->display && impl_->display->fenced()) ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest)
         return false;
     NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto independent = impl_->independentState();
@@ -705,7 +708,9 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
     // while the compositor still holds a pending/recovery-failed mutation. Do
     // not present another protected approval over that unresolved native fence.
     // This is a refusal-only current-state check, never new mutation authority.
-    if (!impl_->backend->displayAllowsSecurityTransition()) {
+    const bool recovery = scope.purpose == ApprovalPurpose::RestoreOriginalDisplay;
+    if (recovery ? !impl_->backend->displayRecoveryApprovalAvailable()
+                 : !impl_->backend->displayAllowsSecurityTransition()) {
         // Only the settled locked session exposes the recheck input. In an
         // unlocked session the caller receives an unsupported/blocked result,
         // without a fake interactive confirmation surface.

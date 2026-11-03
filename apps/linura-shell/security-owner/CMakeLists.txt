@@ -24,6 +24,7 @@ add_library(linura-security-owner-foundation STATIC
     session_bootstrap.cpp
     compositor_probe.cpp
     native_display_layout.cpp native_display_layout.h
+    native_display_guard.cpp
     native_display_restoration.cpp native_display_restoration.h
     native_display_prompt.cpp native_display_prompt.h
     native_display_review.cpp native_display_review.h

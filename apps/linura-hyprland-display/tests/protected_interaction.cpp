@@ -106,20 +106,23 @@ void opaqueSafetyCannotPreserveOrRearmInteractionProof()
 }
 void originalBootBoundCannotBeRenewedFromWallTime()
 {
-    auto original = scope(ProtectedInteraction::Purpose::Apply);
-    original.deadlineBootMs = 1200; // Wall time has much more remaining budget.
-    auto value = ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6);
-    assert(value);
-    ready(*value);
-    assert(value->eligible(value->epoch(), inventory(), {10'001, 1199}));
-    assert(!value->eligible(value->epoch(), inventory(), {10'002, 1200}));
-    assert(value->phase() == ProtectedInteraction::Phase::Cancelled);
-    assert(!ProtectedInteraction::start(original, inventory(), {10'002, 1200}, 6));
-    auto extended = original;
-    extended.deadlineBootMs = 61'001;
-    assert(!ProtectedInteraction::start(extended, inventory(), {10'000, 1000}, 6));
-    original.deadlineBootMs = 0;
-    assert(!ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6));
+    for (const auto purpose :
+         {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Recovery}) {
+        auto original = scope(purpose);
+        original.deadlineBootMs = 1200; // Wall time has much more remaining budget.
+        auto value = ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6);
+        assert(value);
+        ready(*value);
+        assert(value->eligible(value->epoch(), inventory(), {10'001, 1199}));
+        assert(!value->eligible(value->epoch(), inventory(), {10'002, 1200}));
+        assert(value->phase() == ProtectedInteraction::Phase::Cancelled);
+        assert(!ProtectedInteraction::start(original, inventory(), {10'002, 1200}, 6));
+        auto extended = original;
+        extended.deadlineBootMs = 61'001;
+        assert(!ProtectedInteraction::start(extended, inventory(), {10'000, 1000}, 6));
+        original.deadlineBootMs = 0;
+        assert(!ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6));
+    }
     auto consumed = conversation();
     ready(consumed);
     auto substituted = scope();
@@ -130,7 +133,7 @@ void purposeAndProofCannotBeSubstitutedOrReused()
 {
     for (const auto purpose :
          {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Keep,
-          ProtectedInteraction::Purpose::Revert}) {
+          ProtectedInteraction::Purpose::Revert, ProtectedInteraction::Purpose::Recovery}) {
         auto expected = scope(purpose);
         auto value = ProtectedInteraction::start(expected, inventory(), {10'000, 1000}, 6);
         assert(value);
@@ -141,6 +144,23 @@ void purposeAndProofCannotBeSubstitutedOrReused()
         assert(!value->eligible(epoch, inventory(), {10'001, 1001}));
         assert(value->phase() == ProtectedInteraction::Phase::Consumed);
         assert(!value->consume(expected, epoch, inventory(), {10'001, 1001}));
+    }
+    for (const auto original :
+         {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Keep,
+          ProtectedInteraction::Purpose::Revert, ProtectedInteraction::Purpose::Recovery}) {
+        for (const auto other :
+             {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Keep,
+              ProtectedInteraction::Purpose::Revert, ProtectedInteraction::Purpose::Recovery}) {
+            if (original == other)
+                continue;
+            auto expected = scope(original);
+            auto value = ProtectedInteraction::start(expected, inventory(), {10'000, 1000}, 6);
+            assert(value);
+            ready(*value);
+            expected.purpose = other;
+            assert(!value->consume(expected, value->epoch(), inventory(), {10'001, 1001}));
+            assert(value->phase() == ProtectedInteraction::Phase::Cancelled);
+        }
     }
     for (unsigned which = 0; which < 4; ++which) {
         auto value = conversation();

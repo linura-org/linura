@@ -903,6 +903,43 @@ def _require_v06_matrix_result(
     )
 
 
+def _require_v06_original_read_admission(text: str) -> None:
+    # These calls share one installed member-specific UID policy and service
+    # invocation. The malformed body's fixed parser failure proves transport
+    # reaches the RPC; only then can AccessDenied prove runtime admission.
+    for label, error, detail in (
+        (
+            "native-display-original-same-account-malformed-scope",
+            "org.freedesktop.DBus.Error.Failed",
+            "original display protection unavailable; no retry",
+        ),
+        (
+            "native-display-original-same-account-not-control-denied",
+            "org.freedesktop.DBus.Error.AccessDenied",
+            None,
+        ),
+    ):
+        exits = re.findall(rf"^{re.escape(label)}-rc=(.*)$", text, re.MULTILINE)
+        outputs = re.findall(rf"^{re.escape(label)}-output=(.*)$", text, re.MULTILINE)
+        _require(
+            exits == ["1"] and len(outputs) == 1,
+            "v0.6 original-read admission proof is missing or ambiguous",
+        )
+        # The guest's printf %q preserves these fixed one-line ASCII errors as
+        # backslash-quoted words. Do not accept a bare denial or another error.
+        prefix = "Error\\ " + error + ":\\ "
+        _require(
+            outputs[0].startswith(prefix),
+            "v0.6 original-read proof came from the wrong failure boundary",
+        )
+        if detail is not None:
+            quoted = detail.replace(" ", "\\ ").replace(";", "\\;")
+            _require(
+                outputs[0] == prefix + quoted,
+                "v0.6 original-read transport route was not proven",
+            )
+
+
 def _verify_v06(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
@@ -966,6 +1003,7 @@ def _verify_v06(
         ],
         "v0.6 live native session transcript",
     )
+    _require_v06_original_read_admission(session)
     _require(
         "native-guest-error " not in session,
         "v0.6 live native session transcript contains a guest error",

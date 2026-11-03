@@ -41,11 +41,15 @@ class S17DeploymentTests(unittest.TestCase):
             "PrivateDevices",
             "ProtectSystem",
             "RestrictAddressFamilies",
-            "CapabilityBoundingSet",
             "AmbientCapabilities",
             "LimitCORE",
         ):
             self.assertEqual(service[key], executor["Service"][key], key)
+        # Nondumpable compositors require this one capability for the guard's
+        # authenticated, fixed-image read. The mutating executor stays cap-free.
+        self.assertEqual(service["CapabilityBoundingSet"], "CAP_SYS_PTRACE")
+        self.assertEqual(executor["Service"]["CapabilityBoundingSet"], "")
+        self.assertEqual(service["AmbientCapabilities"], "")
         for dependency in ("PartOf", "BindsTo", "Requires", "After"):
             self.assertNotIn(
                 "linura-executor-session.service",

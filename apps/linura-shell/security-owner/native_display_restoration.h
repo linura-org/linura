@@ -24,4 +24,9 @@ struct NativeDisplayRestorationIntent final
                                      const NativeLockIdentity &exactLock) const;
 };
 
+// Decode presentation comparison material without recursively treating a
+// native scope as canonical policy approval or executor authority.
+[[nodiscard]] std::optional<NativeDisplayIntent>
+nativeDisplayApprovalIntent(const NativeApprovalScope &);
+
 } // namespace Linura::SecurityOwner

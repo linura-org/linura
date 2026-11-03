@@ -34,6 +34,7 @@ PLAIN = frozenset(
         "apps/linura-shell/security-owner/compose/LICENSE",
         "apps/linura-shell/security-owner/compose/en_US.UTF-8",
         "bindings/python/LICENSE",
+        "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt",
         "qualification/v010/session-security/fixtures/linura-s17-qualification.pam",
         "tools/codex/container/.dockerignore",
         "tools/codex/container/ubuntu-snapshot.list",

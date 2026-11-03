@@ -188,9 +188,15 @@ class NativePresentation::Impl final
             explanation = displayPage->explanation;
             break;
         case State::PreparingDisplay:
-            title = QStringLiteral("Preparing display change");
-            explanation = QStringLiteral("Authentication completed. Linura is checking this "
-                                         "display change before applying it.");
+            if (authenticationPurpose == ApprovalPurpose::RestoreOriginalDisplay) {
+                title = QStringLiteral("Preparing display recovery");
+                explanation = QStringLiteral("Authentication completed. Linura is checking the "
+                                             "original display settings before restoration.");
+            } else {
+                title = QStringLiteral("Preparing display change");
+                explanation = QStringLiteral("Authentication completed. Linura is checking this "
+                                             "display change before applying it.");
+            }
             break;
         case State::ApplyingDisplay:
             title = QStringLiteral("Applying display layout");

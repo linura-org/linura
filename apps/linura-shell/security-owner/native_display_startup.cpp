@@ -71,10 +71,11 @@ class Descriptor final
   private:
     int value_;
 };
-std::optional<QString> nativeImage(quint32 pid)
+std::optional<QString> installedNativeImage()
 {
-    // The protected same-UID owner can inspect its actual kernel Wayland peer.
-    // The root protection service needs no ambient ptrace capability.
+    // Comparison data only: the independent root guard checks the admitted
+    // compositor's actual executable. The compositor is deliberately
+    // nondumpable; this capability-free owner never inspects /proc/PID/exe.
     Descriptor root(open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
     if (root.get() < 0)
         return unavailableImage("linura-security-owner: native-image/root-open\n");
@@ -93,26 +94,19 @@ std::optional<QString> nativeImage(quint32 pid)
         openat(bin.get(), "Hyprland", O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
     if (installed.get() < 0)
         return unavailableImage("linura-security-owner: native-image/installed-open\n");
-    const auto process = QStringLiteral("/proc/%1/exe").arg(pid).toLocal8Bit();
-    Descriptor executing(open(process.constData(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
-    if (executing.get() < 0)
-        return unavailableImage("linura-security-owner: native-image/executing-open\n");
     struct stat before
-    {
-    }, running{};
-    if (fstat(installed.get(), &before) != 0 || fstat(executing.get(), &running) != 0 ||
-        !S_ISREG(before.st_mode) || before.st_uid != 0 || before.st_nlink != 1 ||
-        (before.st_mode & 0022) != 0 || (before.st_mode & S_IXUSR) == 0 || before.st_size <= 0 ||
-        before.st_size > 512LL * 1024 * 1024 || before.st_dev != running.st_dev ||
-        before.st_ino != running.st_ino)
-        return unavailableImage("linura-security-owner: native-image/executing-identity\n");
+    {};
+    if (fstat(installed.get(), &before) != 0 || !S_ISREG(before.st_mode) || before.st_uid != 0 ||
+        before.st_nlink != 1 || (before.st_mode & 06022) != 0 || (before.st_mode & S_IXUSR) == 0 ||
+        before.st_size <= 0 || before.st_size > 512LL * 1024 * 1024)
+        return unavailableImage("linura-security-owner: native-image/installed-identity\n");
     QElapsedTimer budget;
     budget.start();
     QCryptographicHash hash(QCryptographicHash::Sha256);
     std::array<char, 65536> bytes{};
     off_t consumed = 0;
     for (;;) {
-        const ssize_t size = read(executing.get(), bytes.data(), bytes.size());
+        const ssize_t size = read(installed.get(), bytes.data(), bytes.size());
         if (size < 0)
             return unavailableImage("linura-security-owner: native-image/read\n");
         if (budget.elapsed() >= 1000)
@@ -125,12 +119,12 @@ std::optional<QString> nativeImage(quint32 pid)
         hash.addData(QByteArrayView(bytes.data(), size));
     }
     struct stat after
-    {
-    }, current{};
+    {};
     if (consumed != before.st_size || fstat(installed.get(), &after) != 0 ||
-        stat(process.constData(), &current) != 0 || current.st_dev != before.st_dev ||
-        current.st_ino != before.st_ino || after.st_size != before.st_size ||
-        after.st_mtim.tv_sec != before.st_mtim.tv_sec ||
+        after.st_dev != before.st_dev || after.st_ino != before.st_ino ||
+        after.st_mode != before.st_mode || after.st_uid != before.st_uid ||
+        after.st_gid != before.st_gid || after.st_nlink != before.st_nlink ||
+        after.st_size != before.st_size || after.st_mtim.tv_sec != before.st_mtim.tv_sec ||
         after.st_mtim.tv_nsec != before.st_mtim.tv_nsec ||
         after.st_ctim.tv_sec != before.st_ctim.tv_sec ||
         after.st_ctim.tv_nsec != before.st_ctim.tv_nsec)
@@ -154,7 +148,7 @@ NativeDisplayStartupAdmission admitNativeDisplayStartup(PeerGuard &peers,
     if (sample->startupPhase != 0)
         return NativeDisplayStartupAdmission::Ready; // Observe existing admission/loss; never
                                                      // replace its lease.
-    const auto image = nativeImage(binding.compositorPid);
+    const auto image = installedNativeImage();
     if (!image)
         return NativeDisplayStartupAdmission::NativeImage;
     const auto guard = peers.namedPeer(NativePeerPurpose::DisplayProtection);

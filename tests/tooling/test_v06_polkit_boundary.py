@@ -331,19 +331,99 @@ matrix() {
                 encoding="utf-8"
             )
         )
-        actions = root.findall(
-            "action[@id='org.linura.authority.apply-display-layout']"
+        for operation in ("apply-display-layout", "restore-original-display-layout"):
+            with self.subTest(operation=operation):
+                actions = root.findall(
+                    f"action[@id='org.linura.authority.{operation}']"
+                )
+                self.assertEqual(len(actions), 1)
+                action = actions[0]
+                self.assertEqual(action.findtext("defaults/allow_any"), "no")
+                self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+                self.assertEqual(action.findtext("defaults/allow_active"), "auth_admin")
+                self.assertEqual(
+                    action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+                    ACTION_OWNER,
+                )
+                self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
+    def test_original_read_denial_requires_a_reachable_parser_before_runtime_denial(
+        self,
+    ):
+        guest = (ROOT / "tests/acceptance/v06/qualify-native-session.sh").read_text()
+        function = guest.split('LAST_FAILURE_OUTPUT=""\n', 1)[1].split("\nservice=", 1)[
+            0
+        ]
+        proof = guest.split(
+            "expect_failure native-display-original-same-account-malformed-scope", 1
+        )[1].split("# Separate service lifetime", 1)[0]
+        proof = (
+            "expect_failure native-display-original-same-account-malformed-scope"
+            + proof
         )
-        self.assertEqual(len(actions), 1)
-        action = actions[0]
-        self.assertEqual(action.findtext("defaults/allow_any"), "no")
-        self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
-        self.assertEqual(action.findtext("defaults/allow_active"), "auth_admin")
-        self.assertEqual(
-            action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
-            ACTION_OWNER,
+        script = (
+            """set -euo pipefail
+sudo() {
+    local last="${@: -1}"
+    if [[ "$last" == string:invalid-original-scope ]]; then
+        printf '%s\\n' "$LINURA_TEST_PARSE_REPLY"
+        return "$LINURA_TEST_PARSE_EXIT"
+    fi
+    printf '%s\\n' "$LINURA_TEST_READ_REPLY"
+    return "$LINURA_TEST_READ_EXIT"
+}
+protection_destination=org.linura.DisplayProtection1
+protection_path=/org/linura/DisplayProtection1
+recovery_scope=valid-original-scope
+"""
+            + function
+            + proof
         )
-        self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+        parsed = "Error org.freedesktop.DBus.Error.Failed: original display protection unavailable; no retry"
+        denied = "Error org.freedesktop.DBus.Error.AccessDenied: Access denied"
+        for parse_reply, read_reply, parse_exit, read_exit, valid in (
+            (parsed, denied, 1, 1, True),
+            (
+                parsed,
+                denied.replace("Access denied", "supervised Control owner"),
+                1,
+                1,
+                True,
+            ),
+            (denied, denied, 1, 1, False),  # Bus rejection cannot prove runtime.
+            (parsed, parsed, 1, 1, False),  # Parser/history failure is not admission.
+            (parsed, denied, 0, 1, False),
+            (parsed, denied, 1, 0, False),
+            (parsed.replace("no retry", "unknown"), denied, 1, 1, False),
+        ):
+            with self.subTest(
+                parse_reply=parse_reply,
+                read_reply=read_reply,
+                parse_exit=parse_exit,
+                read_exit=read_exit,
+            ):
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env={
+                        **os.environ,
+                        "LINURA_TEST_PARSE_REPLY": parse_reply,
+                        "LINURA_TEST_READ_REPLY": read_reply,
+                        "LINURA_TEST_PARSE_EXIT": str(parse_exit),
+                        "LINURA_TEST_READ_EXIT": str(read_exit),
+                    },
+                )
+                self.assertEqual(
+                    result.returncode == 0, valid, result.stdout + result.stderr
+                )
+        for name in ("qualify-guest.sh", "qualify-native-session.sh"):
+            source = (ROOT / "tests/acceptance/v06" / name).read_text()
+            self.assertIn("--print-reply --reply-timeout=5000", source)
+            self.assertIn(
+                "/org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig", source
+            )
 
     def test_authority_action_owner_matches_unprivileged_service_identity(self) -> None:
         policy_path = ROOT / "packaging/polkit-1/actions/org.linura.authority.policy"

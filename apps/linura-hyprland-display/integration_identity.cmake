@@ -20,6 +20,7 @@ function(linura_display_integration_identity source_dir output_dir)
         native_inhibitor_fd.h
         native_owner_admission.cpp native_owner_admission.h owner_identity.cpp
         native_output_identity.h recovery_witness.h recovery_rule.h recovery_lineage.h startup_fence.h
+        native_process_privilege.h
         wire_endpoint.cpp wire_endpoint.h
         protocols/linura-display-management-v1.xml
     )

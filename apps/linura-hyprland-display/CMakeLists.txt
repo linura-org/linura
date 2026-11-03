@@ -81,6 +81,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-process-privilege-tests tests/native_process_privilege.cpp)
+    target_include_directories(linura-hyprland-process-privilege-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(linura-hyprland-process-privilege-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-native-process-privilege COMMAND linura-hyprland-process-privilege-tests)
+    set_tests_properties(hyprland-native-process-privilege PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-startup-fence-tests tests/startup_fence.cpp)
     target_include_directories(linura-hyprland-startup-fence-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(linura-hyprland-startup-fence-tests PRIVATE

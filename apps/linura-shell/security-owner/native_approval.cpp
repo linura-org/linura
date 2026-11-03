@@ -1,4 +1,5 @@
 #include "native_approval.h"
+#include "native_display_restoration.h"
 #include "native_display_layout.h"
 
 #include <algorithm>
@@ -96,15 +97,17 @@ bool NativeApproval::beginDisplay(const NativeApprovalScope &scope,
                                   quint64 remainingMs)
 {
     const auto time = now();
-    const quint64 maximum =
-        scope.purpose == ApprovalPurpose::ApplyDisplay ? ConversationMs : 15'000;
+    const quint64 maximum = (scope.purpose == ApprovalPurpose::ApplyDisplay ||
+                             scope.purpose == ApprovalPurpose::RestoreOriginalDisplay)
+                                ? ConversationMs
+                                : 15'000;
     if (!time || state_ != State::Idle || !scope.isDisplay() || !scope.valid() ||
         scope.lock != identity_ || remainingMs == 0 || remainingMs > maximum ||
         presentation.phase != NativeDisplayPromptStatus::Phase::Ready ||
         presentation.topology == 0 || presentation.epoch == 0 ||
         presentation.epoch == std::numeric_limits<quint64>::max())
         return false;
-    const auto intent = NativeDisplayIntent::parse(scope.display->material);
+    const auto intent = nativeDisplayApprovalIntent(scope);
     if (!intent || intent->baseline.topology.section(QLatin1Char(':'), 8, 8) !=
                        QString::number(presentation.topology))
         return false;

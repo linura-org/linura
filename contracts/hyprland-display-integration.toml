@@ -18,6 +18,10 @@ unsupported_environment = "fail-closed"
 # Reviewed integration points in the published digest-pinned source archive.
 # The staging tool verifies all of them before constructing any patched source.
 [[upstream_file]]
+path = "src/main.cpp"
+sha256 = "98e5752cd485378c58c2a8cb0ba89265eaea27144925ea059e5564917dd3b645"
+
+[[upstream_file]]
 path = "CMakeLists.txt"
 sha256 = "97b8028aa342cf6ee6f04b5db2e67e6e4fe6adf5d3fd67bad18005193db36516"
 

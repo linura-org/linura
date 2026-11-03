@@ -106,7 +106,7 @@ sudo -n truncate -s 0 "$dispatch_log"
 stage activate-system-integration
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart polkit.service
-sudo -n dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig
+sudo -n dbus-send --system --print-reply --reply-timeout=5000 --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig
 sudo -n systemctl stop "$unit" "$notsatisfied_unit" || true
 sudo -n systemctl start linura-executor-systemd.service
 sudo -n systemctl start linura-authorityd.service

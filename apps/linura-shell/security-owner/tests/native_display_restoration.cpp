@@ -1,4 +1,6 @@
 #include "native_display_restoration.h"
+#include "native_approval.h"
+#include "native_display_review.h"
 
 #include <QFile>
 #include <cassert>
@@ -158,4 +160,61 @@ int main()
     changed.heads.pop_back();
     assert(!current->nativeOptions(changed, newTopology, *lock));
     assert(!current->nativeOptions(snapshot, oldTopology, *lock));
+    NativeApprovalScope scope{*lock,
+                              QStringLiteral("unix:uid:1000"),
+                              QStringLiteral("request:v010:display-restoration:review"),
+                              QStringLiteral("request:v010:display-restoration:review"),
+                              QStringLiteral("sha256:") + QString(64, QLatin1Char('1')),
+                              QStringLiteral("sha256:") + QString(64, QLatin1Char('2')),
+                              QStringLiteral("sha256:") + QString(64, QLatin1Char('3')),
+                              ApprovalPurpose::RestoreOriginalDisplay};
+    scope.display = NativeDisplayApprovalBinding{
+        frame(currentFields), {}, 1000, QStringLiteral("Restore original settings"), 1000};
+    assert(scope.valid() && scope.isDisplay() && !scope.requiresSessionOwnerAuthentication());
+    assert(QString::fromLatin1(scope.authenticationAction()) ==
+           QStringLiteral("org.linura.authority.restore-original-display-layout"));
+    assert(!scope.protectedDisplayDigest().isEmpty());
+    const auto pages = nativeDisplayReviewPages(scope, snapshot);
+    assert(pages && pages->size() == 7);
+    assert(pages->front().heading.contains(QStringLiteral("Restore original")));
+    assert(pages->at(1).explanation.contains(QStringLiteral("new administrator approval")));
+    assert(pages->back().explanation.contains(QStringLiteral("cannot apply a different layout")));
+    for (const auto purpose : {ApprovalPurpose::ApplyDisplay, ApprovalPurpose::KeepDisplay,
+                               ApprovalPurpose::RevertDisplay, ApprovalPurpose::AuthenticateUnlock,
+                               ApprovalPurpose::AuthenticateSuspend}) {
+        auto other = scope;
+        other.purpose = purpose;
+        assert(!other.valid() && other.protectedDisplayDigest().isEmpty());
+    }
+    for (unsigned fault = 0; fault < 4; ++fault) {
+        auto other = scope;
+        if (fault == 0) {
+            other.request = other.plan = QStringLiteral("request:v010:display-layout:review");
+        } else if (fault == 1) {
+            other.display->material = fields[4];
+        } else if (fault == 2) {
+            other.display->decisionDigest =
+                QStringLiteral("sha256:") + QString(64, QLatin1Char('a'));
+        } else {
+            other.lock = *NativeLockIdentity::parse(oldLock);
+        }
+        assert(!other.valid());
+    }
+    quint64 now = 1;
+    const NativeDisplayPromptStatus ready{5, 1, NativeDisplayPromptStatus::Phase::Ready};
+    NativeApproval denied(*lock, [&] { return now; });
+    assert(!denied.begin(scope, false) && !denied.begin(scope, true));
+    assert(denied.beginDisplay(scope, ready, 999));
+    assert(!denied.nativeCompleted(scope, true)); // No fresh PAM conversation.
+    NativeApproval authenticated(*lock, [&] { return now; });
+    assert(authenticated.beginDisplay(scope, ready, 999));
+    assert(authenticated.nativePrompt(scope) && authenticated.nativeCompleted(scope, true));
+    auto other = scope;
+    other.purpose = ApprovalPurpose::ApplyDisplay;
+    assert(!authenticated.consume(other));
+    assert(authenticated.consume(scope) && !authenticated.consume(scope));
+    NativeApproval expired(*lock, [&] { return now; });
+    assert(expired.beginDisplay(scope, ready, 999));
+    now = 1000;
+    assert(!expired.nativePrompt(scope) && !expired.consume(scope));
 }

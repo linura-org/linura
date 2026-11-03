@@ -5,6 +5,7 @@ use linura_core::{CompositorInvocationId, DisplayTopologyId, SessionEpoch};
 use linura_provider_sdk::ComponentDigest;
 use rustix::event::{PollFd, PollFlags, Timespec};
 use std::os::fd::OwnedFd;
+use std::sync::Arc;
 use zbus::zvariant::OwnedObjectPath;
 
 fn unavailable() -> String {
@@ -66,6 +67,8 @@ pub struct NativeDisplayStartupPeer {
     pid: u32,
     start_ticks: u64,
     process: OwnedFd,
+    image: Arc<image::NativeDisplayImage>,
+    admission_started: Instant,
 }
 impl NativeDisplayStartupPeer {
     pub fn same_login(&self, other: &Self) -> bool {
@@ -130,22 +133,43 @@ impl NativeDisplayStartupPeer {
         {
             return Err(unavailable());
         }
-        Ok(())
+        self.image.live(self.pid)
     }
 }
 
 impl NativeSessionChannel {
     /// Only the immutable, root-supervised protected owner can transfer a
-    /// startup scope. It independently inspected the actual Wayland peer and
-    /// installed native image. UID alone and caller-provided process IDs are
-    /// insufficient; logind independently binds the original login and seat.
+    /// startup scope. It inspected its actual Wayland peer and installed image;
+    /// this root boundary independently attests the admitted leader's actual
+    /// executable. UID alone and caller-provided process IDs are insufficient.
     pub fn admit_display_startup(
         &self,
         sender: &str,
         request: &NativeDisplayStartupRequest,
     ) -> Result<NativeDisplayStartupPeer, String> {
+        self.admit_display_startup_inner(sender, request, None)
+    }
+
+    /// Repeat transport/session admission before publishing a lease, retaining
+    /// the originally hashed immutable image rather than hashing it twice.
+    pub fn revalidate_display_startup(
+        &self,
+        sender: &str,
+        request: &NativeDisplayStartupRequest,
+        previous: &NativeDisplayStartupPeer,
+    ) -> Result<(), String> {
+        self.admit_display_startup_inner(sender, request, Some(previous))?;
+        previous.live()
+    }
+
+    fn admit_display_startup_inner(
+        &self,
+        sender: &str,
+        request: &NativeDisplayStartupRequest,
+        previous: Option<&NativeDisplayStartupPeer>,
+    ) -> Result<NativeDisplayStartupPeer, String> {
         self.require_role(NativeSessionRole::DisplayProtection)?;
-        let started = Instant::now();
+        let started = previous.map_or_else(Instant::now, |peer| peer.admission_started);
         let NativeDisplayStartupRequest {
             lock,
             native_pid,
@@ -234,6 +258,18 @@ impl NativeSessionChannel {
             Ok(())
         };
         check(&facts()?)?;
+        // The original pidfd and start ticks bracket executable access. A
+        // recycled PID or exec cannot be promoted into the admitted invocation.
+        if started.elapsed() >= crate::bus::PROBE_BUDGET
+            || process_ready(&process)?
+            || super::super::process_start(native_pid)? != start_ticks
+        {
+            return Err(unavailable());
+        }
+        let image = match previous {
+            Some(previous) => Arc::clone(&previous.image),
+            None => Arc::new(image::NativeDisplayImage::inspect(native_pid, binary)?),
+        };
         let peer = NativeDisplayStartupPeer {
             epoch: lock.epoch().clone(),
             seat: seat.clone(),
@@ -243,7 +279,12 @@ impl NativeSessionChannel {
             pid: native_pid,
             start_ticks,
             process,
+            image,
+            admission_started: started,
         };
+        if previous.is_some_and(|previous| !previous.same_invocation(&peer)) {
+            return Err(unavailable());
+        }
         peer.live()?;
         check(&facts()?)?;
         let fresh_logind: String = self
@@ -258,8 +299,24 @@ impl NativeSessionChannel {
             return Err(unavailable());
         }
         peer.live()?;
+        if started.elapsed() >= crate::bus::PROBE_BUDGET {
+            return Err(unavailable());
+        }
         Ok(peer)
     }
+}
+
+fn process_ready(process: &OwnedFd) -> Result<bool, String> {
+    let mut event = [PollFd::new(process, PollFlags::IN)];
+    let count = rustix::event::poll(
+        &mut event,
+        Some(&Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        }),
+    )
+    .map_err(|_| unavailable())?;
+    Ok(count != 0 || !event[0].revents().is_empty())
 }
 
 #[cfg(test)]
@@ -320,8 +377,8 @@ mod tests {
     fn actual_native_pidfd_distinguishes_live_dead_and_reaped_invocations() {
         // One fixed unprivileged fixture process; no shell, caller program or
         // effect path exists in the production startup mechanism.
-        let mut child = std::process::Command::new("/usr/bin/sleep")
-            .arg("30")
+        let mut child = std::process::Command::new("/usr/bin/python3")
+            .args(["-I", "-S", "-c", "import time; time.sleep(30)"])
             .spawn()
             .unwrap_or_else(|e| unreachable!("{e}"));
         let pid = child.id();
@@ -348,6 +405,8 @@ mod tests {
             start_ticks: super::super::super::process_start(pid)
                 .unwrap_or_else(|e| unreachable!("{e}")),
             process,
+            image: Arc::new(image::NativeDisplayImage::test_process(pid)),
+            admission_started: Instant::now(),
         };
         assert!(peer.live().is_ok());
         assert!(!peer.definitely_exited());
@@ -369,6 +428,8 @@ mod tests {
                 .process
                 .try_clone()
                 .unwrap_or_else(|e| unreachable!("{e}")),
+            image: Arc::clone(&peer.image),
+            admission_started: peer.admission_started,
         };
         assert!(peer.same_login(&other) && peer.reuses_compositor(&other));
         other.binary = ComponentDigest::from_bytes([3; 32]);

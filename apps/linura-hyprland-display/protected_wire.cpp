@@ -198,7 +198,7 @@ class ProtectedWireEndpoint::Impl final
                 return;
             }
             auto *created = wl_client_get_object(client, id);
-            if (digest(scope) && purpose <= 2 && joined(high, low) != 0 &&
+            if (digest(scope) && purpose <= 3 && joined(high, low) != 0 &&
                 joined(bootHigh, bootLow) != 0 && manager.owner.current(manager))
                 state->scene =
                     manager.owner.begin({scope, static_cast<ProtectedInteraction::Purpose>(purpose),

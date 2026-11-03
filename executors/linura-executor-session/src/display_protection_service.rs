@@ -359,13 +359,9 @@ impl ProtectionPort for NativeProtection {
         let (lease, native) = UnixStream::pair().map_err(|_| unavailable())?;
         // Re-authenticate after the history scan and before publishing. A lost
         // reply leaves this admission consumed; there is no transparent retry.
-        let fresh = self
-            .channel
-            .admit_display_startup(sender, &request)
+        self.channel
+            .revalidate_display_startup(sender, &request, &peer)
             .map_err(|_| unavailable())?;
-        if !peer.same_invocation(&fresh) {
-            return Err(unavailable());
-        }
         peer.live().map_err(|_| unavailable())?;
         admission.startups.push(StartupLease {
             peer,

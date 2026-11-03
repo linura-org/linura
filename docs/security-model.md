@@ -231,6 +231,27 @@ authenticates the supervised owner and grants no restoration or executor
 permission. It neither acquires nor releases S17 state. Component checks do not
 qualify the real first-frame and crash matrix; public mutations stay disabled.
 
+Before compositor configuration, plugins or device startup, the native entry
+point disables dumpability and clears ambient, permitted, effective and
+inheritable capabilities. Removing PAM's local-seat ambient capabilities must
+not leave the compositor inspectable by another same-UID process. It does not
+set inherited no-new-privileges on applications or change host ptrace policy.
+The capability-free protected owner hashes only the immutable installed image
+as comparison data. After independent supervisor, logind, seat, leader and
+original-pidfd checks, the root protection service opens that admitted leader's
+actual executable and requires it to match the descriptor-walked immutable
+`/usr/bin/Hyprland` inode and complete bounded SHA-256 bytes. It retains the image
+descriptor and rechecks metadata and the actual executable throughout the
+startup lease. Reauthentication shares the original admission deadline and
+does not hash the image again. PID reuse, exec, mutation, unlink, missing access
+or ambiguous facts refuse admission. Only this service has `CAP_SYS_PTRACE`,
+bounded to its fixed executable inspection; no method accepts an arbitrary
+path, memory address, ptrace operation or process target. The mutating executor
+and protected owner remain capability-free. Compromise of this root service is
+therefore a high-consequence boundary; this capability is not a caller grant.
+This mechanism alone does not qualify loader, plugin or same-account attack
+resistance: native adversarial evidence remains required.
+
 Independent display protection starts a read-only kernel subscription before
 native sampling and binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the
 same kernel multicast socket remain outside executor/compositor memory. Every later check
@@ -241,7 +262,7 @@ never reopens an attribute after loss to discover a replacement. Original
 continuation checks this witness before and after native dispatch. Protection-service
 restart loses continuity and cannot reconstruct it from historical records.
 The service adds AF_NETLINK reception while retaining PrivateDevices, read-only
-kernel protections, no capabilities, no privilege acquisition and no IP socket
+kernel protections, no privilege acquisition and no IP socket
 families. There are no DRM device opens, ioctls, master acquisition, sysfs writes
 or privileged commands. This witness supplies comparison evidence only; it does
 not authorize replacement startup/restoration or supply protected frame proof.
@@ -290,6 +311,17 @@ its kernel peer against its continuously held original Root lease and validate a
 fresh protected Recovery scope before any mutation; that consumer and the
 terminal workflow remain unfinished. Neither serialized binding nor file digest
 is authority, and this mechanism does not release outputs or power blockers.
+
+The separate protected original-restoration review uses private purpose 11
+(native Recovery purpose 3), complete baseline-only `LNRI:1` comparison material
+and fresh non-retained administrator authentication. It preserves both original
+review deadlines and cannot enter Apply redemption, Keep/Revert or S17 approval.
+The replacement's continuously retained original Root lease must be healthy in
+recovery phase. Only its actual protected owner scene/input may appear; ordinary
+content, scanout and lock release remain fenced. Native status, input, consume,
+render and commit recheck the lease. These review proofs remain distinct from a
+canonical prepared restoration handoff and from independent terminal evidence;
+production restoration dispatch/cleanup remains unfinished.
 
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock

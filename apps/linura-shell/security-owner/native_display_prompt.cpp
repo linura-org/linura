@@ -13,6 +13,7 @@ bool NativeDisplayPromptScope::valid() const noexcept
                                   (c >= QLatin1Char('a') && c <= QLatin1Char('f'));
                        }) &&
            deadlineUnixMs != 0 && deadlineBootMs != 0 &&
-           (purpose == Purpose::Apply || purpose == Purpose::Keep || purpose == Purpose::Revert);
+           (purpose == Purpose::Apply || purpose == Purpose::Keep || purpose == Purpose::Revert ||
+            purpose == Purpose::Recovery);
 }
 } // namespace Linura::SecurityOwner

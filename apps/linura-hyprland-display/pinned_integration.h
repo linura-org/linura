@@ -24,6 +24,8 @@ inline constexpr char UpstreamVersion[] = "0.56.2";
 void initialize(wl_display &, wl_event_loop &);
 void shutdown();
 [[nodiscard]] bool startupBlocked();
+// Private presentation eligibility only, never original restoration authority.
+[[nodiscard]] bool startupRecoveryAvailable();
 // Atomic compositor-thread admission: a live/failed display reservation cannot
 // lose protected lock state or change its security epoch before restoration.
 [[nodiscard]] bool lockReleased();

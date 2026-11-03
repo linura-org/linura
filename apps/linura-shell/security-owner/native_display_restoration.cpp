@@ -162,4 +162,14 @@ bool NativeDisplayRestorationIntent::nativeOptions(const NativeDisplaySnapshot &
            snapshot.baselineGuard(replacement.baseline.encode()) ==
                std::optional(replacementBaselineGuard);
 }
+std::optional<NativeDisplayIntent> nativeDisplayApprovalIntent(const NativeApprovalScope &scope)
+{
+    if (!scope.display || !scope.isDisplay())
+        return std::nullopt;
+    if (scope.purpose == ApprovalPurpose::RestoreOriginalDisplay) {
+        const auto recovery = NativeDisplayRestorationIntent::parse(scope.display->material);
+        return recovery ? std::optional(recovery->replacement) : std::nullopt;
+    }
+    return NativeDisplayIntent::parse(scope.display->material);
+}
 } // namespace Linura::SecurityOwner

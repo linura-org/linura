@@ -76,6 +76,17 @@ class TrackedFormatsTests(unittest.TestCase):
         ):
             self.assertEqual(formats.classify(Path(name), b"data\n"), "unclassified")
 
+    def test_canonical_recovery_vector_is_explicit_text_not_a_fixture_exemption(self):
+        path = Path(
+            "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+        )
+        self.assertEqual(formats.classify(path, (ROOT / path).read_bytes()), "text")
+        for neighbor in (
+            path.with_name("unchecked.txt"),
+            Path("crates/other/fixtures/original-baseline.txt"),
+        ):
+            self.assertEqual(formats.classify(neighbor, b"LNRI:1;\n"), "unclassified")
+
     def test_unknown_extension_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

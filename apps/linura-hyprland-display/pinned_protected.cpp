@@ -227,7 +227,10 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     }
     bool refresh()
     {
-        if (closed || !supportedPresentation() || !Pointer::mgr() ||
+        if ((interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery
+                 ? !startupRecoveryAvailable()
+                 : startupBlocked()) ||
+            closed || !supportedPresentation() || !Pointer::mgr() ||
             !Pointer::mgr()->protectedCursorFenceReady())
             return false;
         auto *backend = nativeBackend();
@@ -841,7 +844,10 @@ void initializeProtectedDisplay(wl_display &display)
     endpoint = std::make_unique<ProtectedWireEndpoint>(
         display, attestDisplayOwner,
         [](const ProtectedInteraction::Scope &scope) -> std::unique_ptr<ProtectedScene> {
-            if (!supportedPresentation() || !active.expired() || draining() || !nativeBackend() ||
+            if ((scope.purpose == ProtectedInteraction::Purpose::Recovery
+                     ? !startupRecoveryAvailable()
+                     : startupBlocked()) ||
+                !supportedPresentation() || !active.expired() || draining() || !nativeBackend() ||
                 !g_pInputManager || !g_pSeatManager || !Pointer::mgr() || keysHeld() ||
                 !g_pInputManager->getKeysFromAllKBs().empty() ||
                 g_pInputManager->hasHeldButtons() || g_pInputManager->m_keyboards.empty() ||
@@ -920,6 +926,15 @@ void shutdownProtectedDisplay()
         drainTimer = nullptr;
     }
 }
+namespace {
+bool startupBlocksProtectedScene()
+{
+    const auto data = active.lock();
+    return startupBlocked() &&
+           !(data && data->interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery &&
+             startupRecoveryAvailable());
+}
+} // namespace
 bool protectedDisplayActive()
 {
     return startupBlocked() || !active.expired();
@@ -953,7 +968,7 @@ bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &n
     black.box = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
     black.color = CHyprColor(0, 0, 0, 1);
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(black));
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     auto *surface = data->forMonitor(monitor);
     if (surface) {
@@ -998,7 +1013,7 @@ void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buf
 }
 std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
 {
-    if (startupBlocked()) {
+    if (startupBlocksProtectedScene()) {
         if (!monitor || !monitor->m_output)
             return false;
         const auto &state = monitor->m_output->state->state();
@@ -1065,7 +1080,7 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
 }
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
 {
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return !resource;
     const auto data = active.lock();
     if (!resource) {
@@ -1096,7 +1111,7 @@ bool protectedPointerFocusAllowed(const SP<CWLSurfaceResource> &surface)
 }
 bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard> &keyboard)
 {
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     const auto data = active.lock();
     if (!data) {
@@ -1158,7 +1173,7 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
 }
 bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
 {
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     const auto data = active.lock();
     if (!data)
@@ -1186,7 +1201,7 @@ bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
 }
 bool protectedPointerRefocus(std::uint32_t time)
 {
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     const auto data = active.lock();
     if (!data)
@@ -1215,7 +1230,7 @@ bool protectedPointerRefocus(std::uint32_t time)
 }
 bool protectedPointerMove(const IPointer::SMotionEvent &event)
 {
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     const auto data = active.lock();
     if (!data)
@@ -1230,7 +1245,7 @@ bool protectedPointerMove(const IPointer::SMotionEvent &event)
 }
 bool protectedPointerWarp(const IPointer::SMotionAbsoluteEvent &event)
 {
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     const auto data = active.lock();
     if (!data)
@@ -1264,7 +1279,7 @@ bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPoint
     } else
         heldButtons.erase(key);
     inputRetirement.poll(heldInput());
-    if (startupBlocked())
+    if (startupBlocksProtectedScene())
         return true;
     if (!data) {
         if (!draining())

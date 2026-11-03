@@ -50,7 +50,7 @@ sudo -n install -o root -g root -m 0644 /tmp/50-linura-protective-lock.conf "$sl
 sudo -n install -o root -g root -m 0644 /tmp/50-linura-qualified-sleep.conf "$sleep_conf"
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart polkit.service
-sudo -n dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig
+sudo -n dbus-send --system --print-reply --reply-timeout=5000 --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig
 
 stage active-native-session-executor
 sudo -n systemctl start "$service"
@@ -108,9 +108,18 @@ grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 expect_failure native-display-original-root-not-control-denied \
     sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
 grep -Eiq 'supervised Control owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# Prove the account's member-specific transport route reaches the actual RPC
+# parser BEFORE interpreting a well-formed denial as supervised-PID admission.
+# Bus policy ignores argument bodies: a transport-denied account cannot produce
+# this fixed malformed-scope error. Keep both the route proof and typed denial.
+expect_failure native-display-original-same-account-malformed-scope \
+    sudo -n -u linura-authority dbus-send --system --print-reply --reply-timeout=5000 \
+    --dest="$protection_destination" "$protection_path" "${protection_destination}.ReadOriginal" string:invalid-original-scope
+grep -Fq 'org.freedesktop.DBus.Error.Failed: original display protection unavailable; no retry' <<<"$LAST_FAILURE_OUTPUT"
 expect_failure native-display-original-same-account-not-control-denied \
-    sudo -n -u linura-authority busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
-grep -Eiq 'supervised Control owner' <<<"$LAST_FAILURE_OUTPUT"
+    sudo -n -u linura-authority dbus-send --system --print-reply --reply-timeout=5000 \
+    --dest="$protection_destination" "$protection_path" "${protection_destination}.ReadOriginal" "string:$recovery_scope"
+grep -Fq 'org.freedesktop.DBus.Error.AccessDenied:' <<<"$LAST_FAILURE_OUTPUT"
 # Separate service lifetime, not a claim that a real DRM witness was acquired.
 sudo -n systemctl restart "$service"
 sudo -n systemctl is-active --quiet "$service"

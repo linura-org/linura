@@ -1,5 +1,6 @@
 #include "native_scope.h"
 #include "native_display_layout.h"
+#include "native_display_restoration.h"
 
 #include <QCryptographicHash>
 #include <QtEndian>
@@ -157,14 +158,17 @@ bool NativeApprovalScope::valid() const
                                    c.category() == QChar::Other_Format;
                         }) ||
             QString::fromUtf8(display->reason.toUtf8()) != display->reason ||
-            (purpose == ApprovalPurpose::ApplyDisplay
+            ((purpose == ApprovalPurpose::ApplyDisplay ||
+              purpose == ApprovalPurpose::RestoreOriginalDisplay)
                  ? !display->decisionDigest.isEmpty()
                  : (!digest(display->decisionDigest) ||
                     display->decisionDigest ==
                         QStringLiteral("sha256:") + QString(64, QLatin1Char('0')))))
             return false;
-        const auto intent = NativeDisplayIntent::parse(display->material);
-        if (!intent || intent->lock != lock || intent->encode() != display->material)
+        const auto intent = nativeDisplayApprovalIntent(*this);
+        if (!intent || intent->lock != lock ||
+            (purpose != ApprovalPurpose::RestoreOriginalDisplay &&
+             intent->encode() != display->material))
             return false;
     } else if (display)
         return false;
@@ -202,10 +206,12 @@ bool NativeApprovalScope::valid() const
         }
     } else if (transition)
         return false;
-    const QString prefix = isDisplay() ? QStringLiteral("request:v010:display-layout:")
-                           : power     ? QStringLiteral("request:v010:session-transition:")
-                           : setting   ? QStringLiteral("request:v010:protective-lock-setting:")
-                                       : QStringLiteral("request:v010:session-lock:");
+    const QString prefix = purpose == ApprovalPurpose::RestoreOriginalDisplay
+                               ? QStringLiteral("request:v010:display-restoration:")
+                           : isDisplay() ? QStringLiteral("request:v010:display-layout:")
+                           : power       ? QStringLiteral("request:v010:session-transition:")
+                           : setting     ? QStringLiteral("request:v010:protective-lock-setting:")
+                                         : QStringLiteral("request:v010:session-lock:");
     const QStringView slug = QStringView(request).mid(prefix.size());
     if (!request.startsWith(prefix) || slug.isEmpty() || slug.size() > 64 ||
         slug.startsWith(QLatin1Char('-')) || slug.endsWith(QLatin1Char('-')) ||
@@ -229,6 +235,7 @@ bool NativeApprovalScope::valid() const
     case ApprovalPurpose::ApplyDisplay:
     case ApprovalPurpose::KeepDisplay:
     case ApprovalPurpose::RevertDisplay:
+    case ApprovalPurpose::RestoreOriginalDisplay:
         return true;
     }
     return false;
@@ -253,6 +260,8 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
         return "org.linura.authority.enable-protective-lock";
     case ApprovalPurpose::RevokeProtectiveLock:
         return "org.linura.authority.revoke-protective-lock";
+    case ApprovalPurpose::RestoreOriginalDisplay:
+        return "org.linura.authority.restore-original-display-layout";
     case ApprovalPurpose::ApplyDisplay:
         return "org.linura.authority.apply-display-layout";
     case ApprovalPurpose::KeepDisplay:
@@ -266,7 +275,8 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
 bool NativeApprovalScope::isDisplay() const noexcept
 {
     return purpose == ApprovalPurpose::ApplyDisplay || purpose == ApprovalPurpose::KeepDisplay ||
-           purpose == ApprovalPurpose::RevertDisplay;
+           purpose == ApprovalPurpose::RevertDisplay ||
+           purpose == ApprovalPurpose::RestoreOriginalDisplay;
 }
 
 QString NativeApprovalScope::protectedDisplayDigest() const

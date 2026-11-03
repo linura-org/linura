@@ -28,6 +28,7 @@ mod decision;
 mod safety;
 pub use decision::NativeDisplayDecisionRequest;
 pub use safety::NativeDisplaySafetyRequest;
+mod image;
 mod power;
 mod preimage;
 mod startup;

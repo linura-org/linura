@@ -73,8 +73,8 @@ std::optional<NativeApprovalScope> NativeApprovalWire::displayScope(const QStrin
                                                                     quint64 deadlineUnixMs,
                                                                     quint64 deadlineBootMs) const
 {
-    if (purpose != 8 || material.size() > 4096 || reason.size() > 2048 || principal.size() > 64 ||
-        request.size() > 128 || plan.size() > 128)
+    if ((purpose != 8 && purpose != 11) || material.size() > (purpose == 11 ? 12 * 1024 : 4096) ||
+        reason.size() > 2048 || principal.size() > 64 || request.size() > 128 || plan.size() > 128)
         return std::nullopt;
     const auto lock = NativeLockIdentity::parse(resource);
     if (!lock)
@@ -87,7 +87,7 @@ std::optional<NativeApprovalScope> NativeApprovalWire::displayScope(const QStrin
         requestDigest,
         observationDigest,
         reviewDigest,
-        ApprovalPurpose::ApplyDisplay,
+        static_cast<ApprovalPurpose>(purpose),
         std::nullopt,
         NativeDisplayApprovalBinding{material, {}, deadlineUnixMs, reason, deadlineBootMs}};
     return candidate.valid() ? std::optional(candidate) : std::nullopt;
