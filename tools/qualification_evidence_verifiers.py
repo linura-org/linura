@@ -935,7 +935,7 @@ def _verify_v06(
             "real-idempotency=qualified",
             "real-verification-not-satisfied-explicit-recovery=qualified",
             "real-crash-restart-explicit-no-effect-recovery=qualified",
-            "deterministic-fault-matrix=59/59",
+            "deterministic-fault-matrix=60/60",
         ],
         "v0.6 qualification transcript",
     )
@@ -978,9 +978,9 @@ def _verify_v06(
         },
         "v0.6 native session boundary claim drifted",
     )
-    _require_v06_matrix_result(matrix, 59, "v0.6 complete fault matrix", filtered_out=0)
+    _require_v06_matrix_result(matrix, 60, "v0.6 complete fault matrix", filtered_out=0)
     _require_v06_matrix_result(
-        legacy_matrix, 11, "v0.6 original fault matrix", filtered_out=48
+        legacy_matrix, 11, "v0.6 original fault matrix", filtered_out=49
     )
     fault_matrix = primary.get("fault_matrix")
     _require(
@@ -990,7 +990,7 @@ def _verify_v06(
     expanded_matrix = primary.get("expanded_fault_matrix")
     _require(
         isinstance(expanded_matrix, dict)
-        and expanded_matrix.get("cases") == 59
+        and expanded_matrix.get("cases") == 60
         and expanded_matrix.get("includes_original_cases") == 11,
         "v0.6 expanded fault-matrix cardinality mismatch",
     )
@@ -1049,13 +1049,13 @@ def _verify_v06(
             "crash-restart-no-blind-replay-proved",
             "sqlite-integrity-proved",
             "fault-matrix-11-of-11-passed",
-            "expanded-fault-matrix-59-of-59-passed",
+            "expanded-fault-matrix-60-of-60-passed",
             "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
         details={
             "fault_matrix_cases": 11,
-            "expanded_fault_matrix_cases": 59,
+            "expanded_fault_matrix_cases": 60,
             "repository_artifacts": len(artifacts),
         },
     )

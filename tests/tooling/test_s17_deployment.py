@@ -81,6 +81,7 @@ class S17DeploymentTests(unittest.TestCase):
         )
         authority = policy.find("policy[@user='linura-authority']")
         self.assertIsNotNone(authority)
+        assert authority is not None
         self.assertEqual(
             [dict(rule.attrib) for rule in authority],
             [

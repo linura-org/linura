@@ -41,7 +41,7 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             "| tee /tmp/v06-legacy-matrix.log",
             script,
         )
-        self.assertIn("59 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("60 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
@@ -56,19 +56,20 @@ matrix() {
 }
 """
         for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
-            (59, 11, 0, 0, 0, 0, True),
+            (60, 11, 0, 0, 0, 0, True),
             (49, 11, 0, 0, 0, 0, False),
             (55, 11, 0, 0, 0, 0, False),
             (56, 11, 0, 0, 0, 0, False),
             (57, 11, 0, 0, 0, 0, False),
             (58, 11, 0, 0, 0, 0, False),
-            (60, 11, 0, 0, 0, 0, False),
-            (59, 10, 0, 0, 0, 0, False),
-            (59, 12, 0, 0, 0, 0, False),
-            (59, 11, 1, 0, 0, 0, False),
-            (59, 11, 0, 1, 0, 0, False),
-            (59, 11, 0, 0, 1, 0, False),
-            (59, 11, 0, 0, 0, 1, False),
+            (59, 11, 0, 0, 0, 0, False),
+            (61, 11, 0, 0, 0, 0, False),
+            (60, 10, 0, 0, 0, 0, False),
+            (60, 12, 0, 0, 0, 0, False),
+            (60, 11, 1, 0, 0, 0, False),
+            (60, 11, 0, 1, 0, 0, False),
+            (60, 11, 0, 0, 1, 0, False),
+            (60, 11, 0, 0, 0, 1, False),
         ):
             with (
                 self.subTest(

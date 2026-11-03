@@ -44,6 +44,14 @@ Q_DECLARE_METATYPE(Linura::SecurityOwner::StartupDetail::Transfer)
 
 namespace Linura::SecurityOwner {
 namespace {
+template <std::size_t N> std::nullopt_t unavailableImage(const char (&stage)[N])
+{
+    // Fixed stage identifiers only. Never log proc paths, native identities,
+    // image bytes or an OS error that could contain caller-controlled text.
+    const auto written = write(STDERR_FILENO, stage, N - 1);
+    (void)written;
+    return std::nullopt;
+}
 class Descriptor final
 {
   public:
@@ -69,7 +77,7 @@ std::optional<QString> nativeImage(quint32 pid)
     // The root protection service needs no ambient ptrace capability.
     Descriptor root(open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
     if (root.get() < 0)
-        return std::nullopt;
+        return unavailableImage("linura-security-owner: native-image/root-open\n");
     Descriptor usr(openat(root.get(), "usr", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
     Descriptor bin(usr.get() < 0
                        ? -1
@@ -79,21 +87,25 @@ std::optional<QString> nativeImage(quint32 pid)
         {};
         if (directory < 0 || fstat(directory, &info) != 0 || !S_ISDIR(info.st_mode) ||
             info.st_uid != 0 || (info.st_mode & 0022) != 0)
-            return std::nullopt;
+            return unavailableImage("linura-security-owner: native-image/installed-directory\n");
     }
     Descriptor installed(
         openat(bin.get(), "Hyprland", O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
+    if (installed.get() < 0)
+        return unavailableImage("linura-security-owner: native-image/installed-open\n");
     const auto process = QStringLiteral("/proc/%1/exe").arg(pid).toLocal8Bit();
     Descriptor executing(open(process.constData(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+    if (executing.get() < 0)
+        return unavailableImage("linura-security-owner: native-image/executing-open\n");
     struct stat before
     {
     }, running{};
-    if (installed.get() < 0 || executing.get() < 0 || fstat(installed.get(), &before) != 0 ||
-        fstat(executing.get(), &running) != 0 || !S_ISREG(before.st_mode) || before.st_uid != 0 ||
-        before.st_nlink != 1 || (before.st_mode & 0022) != 0 || (before.st_mode & S_IXUSR) == 0 ||
-        before.st_size <= 0 || before.st_size > 512LL * 1024 * 1024 ||
-        before.st_dev != running.st_dev || before.st_ino != running.st_ino)
-        return std::nullopt;
+    if (fstat(installed.get(), &before) != 0 || fstat(executing.get(), &running) != 0 ||
+        !S_ISREG(before.st_mode) || before.st_uid != 0 || before.st_nlink != 1 ||
+        (before.st_mode & 0022) != 0 || (before.st_mode & S_IXUSR) == 0 || before.st_size <= 0 ||
+        before.st_size > 512LL * 1024 * 1024 || before.st_dev != running.st_dev ||
+        before.st_ino != running.st_ino)
+        return unavailableImage("linura-security-owner: native-image/executing-identity\n");
     QElapsedTimer budget;
     budget.start();
     QCryptographicHash hash(QCryptographicHash::Sha256);
@@ -101,13 +113,15 @@ std::optional<QString> nativeImage(quint32 pid)
     off_t consumed = 0;
     for (;;) {
         const ssize_t size = read(executing.get(), bytes.data(), bytes.size());
-        if (size < 0 || budget.elapsed() >= 1000)
-            return std::nullopt;
+        if (size < 0)
+            return unavailableImage("linura-security-owner: native-image/read\n");
+        if (budget.elapsed() >= 1000)
+            return unavailableImage("linura-security-owner: native-image/deadline\n");
         if (size == 0)
             break;
         consumed += size;
         if (consumed > before.st_size)
-            return std::nullopt;
+            return unavailableImage("linura-security-owner: native-image/size\n");
         hash.addData(QByteArrayView(bytes.data(), size));
     }
     struct stat after
@@ -120,7 +134,7 @@ std::optional<QString> nativeImage(quint32 pid)
         after.st_mtim.tv_nsec != before.st_mtim.tv_nsec ||
         after.st_ctim.tv_sec != before.st_ctim.tv_sec ||
         after.st_ctim.tv_nsec != before.st_ctim.tv_nsec)
-        return std::nullopt;
+        return unavailableImage("linura-security-owner: native-image/changed\n");
     return QString::fromLatin1(hash.result().toHex());
 }
 } // namespace
