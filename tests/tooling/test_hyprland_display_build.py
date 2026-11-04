@@ -247,6 +247,12 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
         self.assertIn("FETCHCONTENT_FULLY_DISCONNECTED=ON", script)
         self.assertIn("FETCHCONTENT_UPDATES_DISCONNECTED=ON", script)
         self.assertIn("-DCMAKE_SKIP_RPATH=ON", script)
+        self.assertEqual(
+            script.count(
+                "-DLINURA_DISPLAY_RECOVERY_FIXTURE=/home/linura/s21/original-baseline.txt"
+            ),
+            2,
+        )
         self.assertIn("ctest --test-dir mechanism-build --output-on-failure", script)
         self.assertIn("ctest --test-dir compositor-build --output-on-failure", script)
         self.assertIn("cmake --build compositor-build --parallel 1", script)
@@ -319,6 +325,79 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                 retained[3]["staged-source.json"],
                 root / "upstream/linura-display-source.json",
             )
+
+    def test_shared_original_baseline_is_packaged_without_repository_relative_paths(
+        self,
+    ) -> None:
+        canonical = (
+            build.ROOT
+            / "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+        ).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            native = root / "apps/linura-hyprland-display"
+            native.mkdir(parents=True)
+            (native / "backend.cpp").write_text("native source")
+            fixture = (
+                root
+                / "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+            )
+            fixture.parent.mkdir(parents=True)
+            fixture.write_bytes(canonical)
+            temporary = root / "outputs"
+            (temporary / "upstream/hyprland-source").mkdir(parents=True)
+            with patch.object(build, "ROOT", root), patch.object(build.source, "stage"):
+                packed = build.package_inputs(
+                    root / "verified-source.tar.gz", temporary
+                )
+            with tarfile.open(packed) as archive:
+                member = archive.getmember("original-baseline.txt")
+                self.assertTrue(member.isfile())
+                payload = archive.extractfile(member)
+                self.assertIsNotNone(payload)
+                assert payload is not None
+                self.assertEqual(payload.read(), canonical)
+                self.assertTrue(
+                    all(
+                        not name.startswith("/") and ".." not in Path(name).parts
+                        for name in archive.getnames()
+                    )
+                )
+
+    def test_missing_substituted_or_oversized_original_fixture_refuses_packaging(
+        self,
+    ) -> None:
+        for failure in ("missing", "symlink", "empty", "oversized"):
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                native = root / "apps/linura-hyprland-display"
+                native.mkdir(parents=True)
+                (native / "backend.cpp").write_text("native source")
+                fixture = (
+                    root
+                    / "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+                )
+                fixture.parent.mkdir(parents=True)
+                if failure == "symlink":
+                    fixture.symlink_to(native / "backend.cpp")
+                elif failure != "missing":
+                    fixture.write_bytes(
+                        b"" if failure == "empty" else b"x" * (12 * 1024 + 1)
+                    )
+                temporary = root / "outputs"
+                temporary.mkdir()
+                with (
+                    patch.object(build, "ROOT", root),
+                    patch.object(build.source, "stage"),
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "canonical original display fixture"
+                    ):
+                        build.package_inputs(root / "verified-source.tar.gz", temporary)
+                self.assertFalse((temporary / "build-input.tar").exists())
 
     def test_native_symlink_is_never_copied_into_guest_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

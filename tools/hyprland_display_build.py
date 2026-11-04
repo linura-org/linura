@@ -216,12 +216,14 @@ def build_script(jobs: int) -> str:
         raise ValueError("build jobs must be bounded between one and four")
     return f"""set -euo pipefail
 cd /home/linura/s21
-cmake -S native -B mechanism-build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake -S native -B mechanism-build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \\
+    -DLINURA_DISPLAY_RECOVERY_FIXTURE=/home/linura/s21/original-baseline.txt
 cmake --build mechanism-build --parallel {jobs}
 ctest --test-dir mechanism-build --output-on-failure
 cmake -S upstream/hyprland-source -B compositor-build -G Ninja \\
     -DCMAKE_BUILD_TYPE=Debug '-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g1' \\
     -DCMAKE_SKIP_RPATH=ON \\
+    -DLINURA_DISPLAY_RECOVERY_FIXTURE=/home/linura/s21/original-baseline.txt \\
     -DLINURA_DISPLAY_INTEGRATION_DIR=/home/linura/s21/native \\
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 # Compile the integration against real private headers first for useful SDK
@@ -262,6 +264,17 @@ def package_inputs(archive: Path, temporary: Path) -> Path:
             or path.stat().st_size > 2 * 1024 * 1024
         ):
             raise ValueError("native source must contain only bounded regular files")
+    fixture = (
+        ROOT / "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+    )
+    if (
+        any(part.is_symlink() for part in (fixture, *fixture.parents))
+        or not fixture.is_file()
+        or not 0 < fixture.stat().st_size <= 12 * 1024
+    ):
+        raise ValueError(
+            "canonical original display fixture must be a bounded regular file"
+        )
     packed = temporary / "build-input.tar"
     with tarfile.open(packed, "x") as output:
         output.add(
@@ -275,6 +288,7 @@ def package_inputs(archive: Path, temporary: Path) -> Path:
                 arcname="native/" + path.relative_to(native).as_posix(),
                 recursive=False,
             )
+        output.add(fixture, arcname="original-baseline.txt", recursive=False)
     return packed
 
 
