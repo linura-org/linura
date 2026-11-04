@@ -19,6 +19,9 @@ use super::*;
 use crate::schema::{APPLICATION_ID, MIGRATION_ID, MIGRATION_V1, MIGRATION_V2_ID, SCHEMA_VERSION};
 use crate::validation::{pragma_i64, reservation_bytes};
 
+#[path = "tests/verified_compensation.rs"]
+mod verified_compensation;
+
 static NEXT_DB: AtomicU64 = AtomicU64::new(0);
 
 struct TestDatabase {

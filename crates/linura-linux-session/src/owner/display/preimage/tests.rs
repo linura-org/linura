@@ -186,6 +186,14 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
             "a".repeat(64)
         );
         assert!(lineage(&restored).is_ok(), "restored mask {mask}");
+        assert_eq!(
+            restored_lineage(&encode(&effective, mask), &"a".repeat(64)),
+            Ok(restored.clone())
+        );
+        assert_eq!(
+            restored_lineage(&restored, &"b".repeat(64)),
+            Ok(restored.replace(&"a".repeat(64), &"b".repeat(64)))
+        );
 
         for bit in [1, 2, 4, 8, 16] {
             if mask & bit != 0 && (bit > 2 || mask & 3 == bit) {
@@ -223,6 +231,11 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
 #[test]
 fn restored_projection_is_not_a_live_wlr_owner_or_unexplained_source() {
     let fresh = lineage_fixture(RULE, None);
+    assert_eq!(restored_lineage(&fresh, &"a".repeat(64)), Ok(fresh.clone()));
+    for origin in ["".into(), "0".repeat(64), "A".repeat(64), "a".repeat(63)] {
+        assert!(restored_lineage(&fresh, &origin).is_err());
+    }
+    assert!(restored_lineage(&fresh.replacen("LNRL:2;", "LNRL:1;", 1), &"a".repeat(64)).is_err());
     let legacy = fresh.replacen("LNRL:2;", "LNRL:1;", 1);
     let legacy = legacy.strip_suffix(';').unwrap_or_else(|| unreachable!());
     assert!(historical_lineage(legacy).is_ok());
@@ -372,6 +385,24 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     );
     assert_eq!(facts.integration_digest(), "a".repeat(64));
     assert_eq!(facts.outputs().len(), 1);
+    // A source without a wlr projection retains its exact bytes/hash. The map
+    // is still complete and separately carried as the expected postcondition.
+    assert_eq!(
+        facts.restored_source_digests().get(
+            &facts
+                .outputs()
+                .keys()
+                .next()
+                .unwrap_or_else(|| unreachable!("output"))
+                .clone()
+        ),
+        facts
+            .outputs()
+            .values()
+            .next()
+            .map(|row| row.base_configuration_digest().to_owned())
+            .as_ref()
+    );
     let reservation = |original: &str, checkpoint: &str, mapping: &str| {
         let replacement = material
             .replace("c2:42", "c3:99")

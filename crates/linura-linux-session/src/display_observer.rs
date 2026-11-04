@@ -1,10 +1,11 @@
 use crate::{NativeSessionChannel, NativeSessionRole};
 use linura_core::{
-    Capability, CapabilityId, DisplayTopologyId, ProviderId, ResourceId, SupportLevel,
+    Capability, CapabilityId, DisplayRecoveryScope, DisplayTopologyId, ProviderId, ResourceId,
+    SupportLevel,
 };
 use linura_observation::{
-    DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER, ObservationEnvelope, ProviderAvailability,
-    ProviderHealth,
+    DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
+    ObservationEnvelope, ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,10 +35,17 @@ impl Observer for NativeDisplayObserver {
             provider: Some(self.observer_id()),
             support: SupportLevel::Supported,
             reason: Some("exact own-session native output inventory; no dispatch authority".into()),
+        }, Capability {
+            id: CapabilityId::new(DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY).unwrap_or_else(|e| unreachable!("fixed capability: {e}")),
+            provider: Some(self.observer_id()), support: SupportLevel::Supported,
+            reason: Some("read-only original-restoration KMS/post-write frame probe; no release authority".into()),
         }]
     }
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
-        capability.as_str() == DISPLAY_OUTPUTS_CAPABILITY
+        matches!(
+            capability.as_str(),
+            DISPLAY_OUTPUTS_CAPABILITY | DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY
+        )
     }
     fn requires_live_health_preflight(&self) -> bool {
         false
@@ -69,14 +77,22 @@ impl Observer for NativeDisplayObserver {
                 "native display capability is unsupported".into(),
             ));
         }
-        let target = DisplayTopologyId::from_resource(resource)
-            .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
         let sequence = self
             .sequence
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 value.checked_add(1)
             })
             .map_err(|_| ProviderError::Unavailable("native display sequence exhausted".into()))?;
+        if capability.as_str() == DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY {
+            let scope = DisplayRecoveryScope::from_resource(resource)
+                .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
+            return self
+                .channel
+                .observe_original_display_presentation(&scope, sequence + 1)
+                .map_err(ProviderError::Unavailable);
+        }
+        let target = DisplayTopologyId::from_resource(resource)
+            .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
         self.channel
             .observe_display(&target, sequence + 1)
             .map_err(ProviderError::Unavailable)

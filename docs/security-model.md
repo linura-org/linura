@@ -715,6 +715,13 @@ the write; Apply and Keep/Revert cannot redeem it. The compositor merges only
 owned fields into current selected rules, preserves unrelated live settings,
 restores selective original wlr fields and exact remapped prior overlays, and
 latches every partial fault. It retains all startup/input/power/Root fences and
-returns only nonterminal status. Independent terminal proof, durable linked
-result, qualified release and retention cleanup remain separate unfinished work;
-this implementation does not activate public production display mutations.
+returns only nonterminal status. The independent proof path now derives expected
+restored sources from the immutable Root checkpoint and separately observes actual
+post-write opaque KMS frames or detached disabled connectors. Control joins those
+fresh facts with native layout/source, logind, coverage and retained Root
+continuity in the same canonical restoration recipe. Only the authenticated
+already-dispatched verification context can yield NoChange and commit the new
+restoration transaction without replay. A restart still needs fresh proof;
+historical Committed state never releases a fence. Durable linked original
+retirement, qualified release and retention cleanup remain unfinished. This
+implementation does not activate public production display mutations.

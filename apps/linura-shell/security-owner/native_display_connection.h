@@ -20,6 +20,9 @@ struct NativePinnedDisplaySample final
     quint32 coverage = 3;
     bool fenced = true;
     quint32 startupPhase = 3;
+    // Private native comparison facts. Never serialized into public topology,
+    // interpreted as an effect acknowledgement or treated as release authority.
+    QByteArray originalRestorationPresentation;
 };
 struct NativeDisplayCorrelation final
 {

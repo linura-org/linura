@@ -39,6 +39,10 @@ struct Machine {
     restoration_calls: usize,
     restoration_outcome: u8,
     lose_restoration_dispatch: bool,
+    restoration_binding: Option<ExecutionBinding>,
+    restoration_material: Option<String>,
+    restoration_native_verified: bool,
+    restoration_proof_fault: u8,
 }
 fn layouts() -> (
     DisplayLayout,

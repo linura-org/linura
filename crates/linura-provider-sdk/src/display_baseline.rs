@@ -1,7 +1,8 @@
 //! Pure comparison of the canonical native baseline. This digest is a bounded
 //! precondition of an already authorized effect, never a credential or plan.
-use linura_core::DisplayOutputLayout;
-use linura_observation::DisplayObservationFacts;
+use linura_core::{DisplayLayout, DisplayOutputId, DisplayOutputLayout};
+use linura_observation::{DisplayObservationFacts, DisplayRecoveryMetadata};
+use std::collections::BTreeMap;
 
 use crate::ComponentDigest;
 
@@ -9,14 +10,23 @@ pub fn display_baseline_guard(facts: &DisplayObservationFacts) -> Result<Compone
     let recovery = facts
         .recovery_metadata()
         .ok_or("native baseline ownership evidence is unavailable")?;
-    let layout = facts
-        .layout()
-        .canonical_text()
-        .map_err(|error| error.to_string())?;
+    display_layout_source_guard(facts.layout(), recovery)
+}
+
+/// Comparison-only guard for a complete layout and source projection. This may
+/// describe an independently derived expected postcondition; constructing it
+/// never creates an observation, verification result or execution credential.
+pub fn display_layout_source_guard(
+    layout: &DisplayLayout,
+    recovery: &BTreeMap<DisplayOutputId, DisplayRecoveryMetadata>,
+) -> Result<ComponentDigest, String> {
+    if recovery.len() != layout.outputs().len() || recovery.is_empty() {
+        return Err("native source inventory differs from layout".into());
+    }
+    let canonical = layout.canonical_text().map_err(|error| error.to_string())?;
     let mut rows = Vec::new();
     for (output, metadata) in recovery {
-        let target = facts
-            .layout()
+        let target = layout
             .outputs()
             .iter()
             .find(|row| row.output() == output)
@@ -75,6 +85,6 @@ pub fn display_baseline_guard(facts: &DisplayObservationFacts) -> Result<Compone
     }
     Ok(super::provider_contract::hash_parts(
         b"linura.display.native-baseline-guard.v1",
-        &[layout.as_bytes(), &rows],
+        &[canonical.as_bytes(), &rows],
     ))
 }

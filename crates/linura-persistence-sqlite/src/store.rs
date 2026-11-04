@@ -733,7 +733,13 @@ impl TransactionStore for SqliteTransactionStore {
             request.expected_generation(),
             request.expected_state_version(),
             request.expected_binding_digest(),
-            TransactionState::Indeterminate,
+            if matches!(
+                request.resolution(), RecoveryResolution::VerifiedCompensated { .. }
+            ) {
+                TransactionState::Verified
+            } else {
+                TransactionState::Indeterminate
+            },
         )?;
         let next_version = snapshot
             .state_version
@@ -741,6 +747,63 @@ impl TransactionStore for SqliteTransactionStore {
             .ok_or(TransactionStoreError::CapacityExceeded)?;
 
         let outcome = match request.resolution() {
+            RecoveryResolution::VerifiedCompensated {
+                observation_digest, terminal_link_digest,
+            } => {
+                // The distinct Control-signed resolution cannot reprepare or
+                // commit. Preserve the original verified provenance material;
+                // the new authenticated audit kind explicitly marks it retired.
+                if observation_digest == &ContentDigest::zero()
+                    || terminal_link_digest == &ContentDigest::zero()
+                    || request.expires_at_unix_ms()
+                        .checked_sub(request.authorized_at_unix_ms())
+                        .is_none_or(|window| window == 0 || window > 2000)
+                    || generation_record.desired_state_digest.is_none()
+                    || generation_record.graph_digest.is_none()
+                    || generation_record.provenance_digest.is_none()
+                {
+                    return Err(TransactionStoreError::AuthorityRejected);
+                }
+                check_logical_audit_reserve(&transaction, limits, 1, -1)?;
+                Self::ensure_audit_reservations(&transaction, request.transaction_id(), 1)?;
+                Self::update_generation_state(
+                    &transaction,
+                    integrity_key,
+                    &generation_record,
+                    TransactionState::Verified,
+                    TransactionState::RecoveryBlocked,
+                )?;
+                Self::update_transaction_pointer(
+                    &transaction,
+                    integrity_key,
+                    &transaction_record,
+                    snapshot.current_generation,
+                    next_version,
+                )?;
+                let payload = digest_parts(
+                    "linura.sqlite.verified-compensation-payload.v1",
+                    [
+                        observation_digest.as_str().as_bytes(),
+                        terminal_link_digest.as_str().as_bytes(),
+                    ],
+                );
+                Self::append_audit(
+                    &transaction,
+                    limits,
+                    integrity_key,
+                    request.transaction_id(),
+                    snapshot.current_generation,
+                    next_version,
+                    "verified-compensated-v1",
+                    &payload,
+                    true,
+                )?;
+                RecoveryOutcome::Blocked(TransactionSnapshot {
+                    state: TransactionState::RecoveryBlocked,
+                    state_version: next_version,
+                    ..snapshot.clone()
+                })
+            }
             RecoveryResolution::IntendedStateVerified {
                 observation_digest,
                 desired_state_digest,

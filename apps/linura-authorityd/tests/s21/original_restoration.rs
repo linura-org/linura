@@ -7,7 +7,7 @@ use linura_control::{
 };
 use linura_core::DisplayRecoveryScope;
 use linura_observation::{DisplayObservationFacts, DisplayOriginalProtectionFacts};
-use linura_transaction::TransactionStore;
+use linura_transaction::{TransactionId, TransactionStore};
 
 fn input(original: &PlanDesiredStateRequest) -> OriginalDisplayRestorationRequest {
     OriginalDisplayRestorationRequest {
@@ -81,7 +81,12 @@ fn replacement_previews(
         "f".repeat(64),
         1,
         m.deadline,
-        metadata,
+        metadata.clone(),
+        metadata
+            .keys()
+            .cloned()
+            .map(|id| (id, "9".repeat(64)))
+            .collect(),
     ));
     drop(m);
     let mut root = old.clone();
@@ -151,13 +156,212 @@ fn replacement_previews(
         coverage,
         s17_managed_lock::session_observation(1),
     ] {
-        value(coordinator.register_observer(Box::new(LiveFixtureObserver {
-            machine: machine.clone(),
-            template,
-            replacement: true,
-        })));
+        if template.provider.as_str() == "hyprland" {
+            value(coordinator.register_observer(Box::new(RestorationObserver {
+                machine: machine.clone(),
+                template,
+                scope: scope.clone(),
+            })));
+        } else {
+            value(coordinator.register_observer(Box::new(LiveFixtureObserver {
+                machine: machine.clone(),
+                template,
+                replacement: true,
+            })));
+        }
     }
     PlanPreviewControl::new(coordinator)
+}
+
+// Simulated native observation remains separate from the executor reply. Tests
+// explicitly advance its independent physical/source evidence; no real KMS,
+// Root/PAM or frame qualification is claimed by this fixture.
+struct RestorationObserver {
+    machine: Arc<Mutex<Machine>>,
+    template: ObservationEnvelope,
+    scope: DisplayRecoveryScope,
+}
+impl Observer for RestorationObserver {
+    fn observer_id(&self) -> ProviderId {
+        self.template.provider.clone()
+    }
+    fn observation_capabilities(&self) -> Vec<Capability> {
+        [
+            linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
+            linura_observation::DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY,
+        ]
+        .into_iter()
+        .map(|id| Capability {
+            id: value(CapabilityId::new(id)),
+            provider: Some(self.observer_id()),
+            support: SupportLevel::Supported,
+            reason: None,
+        })
+        .collect()
+    }
+    fn health(&self) -> ProviderHealth {
+        ProviderHealth {
+            provider: self.observer_id(),
+            availability: ProviderAvailability::Available,
+            reason: None,
+        }
+    }
+    fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
+        Ok(vec![
+            self.template.resource.clone(),
+            value(self.scope.resource_id()),
+        ])
+    }
+    fn observe_authoritative(
+        &self,
+        resource: &ResourceId,
+        capability: &CapabilityId,
+    ) -> Result<ObservationEnvelope, ProviderError> {
+        let base = LiveFixtureObserver {
+            machine: self.machine.clone(),
+            template: self.template.clone(),
+            replacement: true,
+        };
+        let mut sample =
+            base.observe_authoritative(&self.template.resource, &self.template.capability)?;
+        let m = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        if m.restoration_native_verified {
+            let text = m
+                .restoration_material
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("restoration material"));
+            let material = value(linura_core::DisplayRestorationMaterial::decode(text));
+            let current = value(DisplayObservationFacts::from_envelope(
+                &sample,
+                self.scope.replacement(),
+                now_unix_ms(),
+            ));
+            let (_, _, historical, caps) = layouts();
+            let (_, restored) = value(material.validate_native(
+                &historical,
+                &caps,
+                current.inventory(),
+                current.capabilities(),
+            ));
+            sample.attributes.insert(
+                "layout".into(),
+                ObservedValue::Text(value(restored.desired().canonical_text())),
+            );
+            if !m.native_base_drift {
+                sample.attributes.insert(
+                    "output.0.base_configuration_digest".into(),
+                    ObservedValue::Text("9".repeat(64)),
+                );
+            }
+        }
+        if capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+            && resource == &sample.resource
+        {
+            return Ok(sample);
+        }
+        if capability.as_str() != linura_observation::DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY
+            || resource != &value(self.scope.resource_id())
+            || !m.restoration_native_verified
+        {
+            return Err(ProviderError::Unavailable(
+                "simulated independent restoration proof is unavailable".into(),
+            ));
+        }
+        let binding = m
+            .restoration_binding
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("restoration binding"));
+        let material = value(linura_core::DisplayRestorationMaterial::decode(
+            m.restoration_material
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("material")),
+        ));
+        let facts = value(DisplayObservationFacts::from_envelope(
+            &sample,
+            self.scope.replacement(),
+            now_unix_ms(),
+        ));
+        let frames = facts
+            .inventory()
+            .outputs()
+            .iter()
+            .cloned()
+            .map(|output| {
+                (
+                    output,
+                    linura_observation::DisplayPostWriteFrame::Presented {
+                        crtc: 7,
+                        framebuffer: 42,
+                        commit: 99,
+                    },
+                )
+            })
+            .collect();
+        let proof = value(linura_observation::DisplayOriginalPresentationFacts::new(
+            self.scope.clone(),
+            material.original_checkpoint().into(),
+            binding.transaction_id.clone(),
+            binding.effect_digest.to_hex(),
+            binding.dispatch_digest.to_hex(),
+            value(linura_provider_sdk::display_baseline_guard(&facts)).to_hex(),
+            1,
+            frames,
+        ));
+        sample.resource = resource.clone();
+        sample.capability = capability.clone();
+        sample.attributes = proof.attributes();
+        match m.restoration_proof_fault {
+            1 => {
+                sample.attributes.insert(
+                    "dispatch_digest".into(),
+                    ObservedValue::Text("f".repeat(64)),
+                );
+            }
+            2 => {
+                sample
+                    .attributes
+                    .insert("source_guard".into(), ObservedValue::Text("f".repeat(64)));
+            }
+            3 => {
+                sample.attributes.insert(
+                    "checkpoint_digest".into(),
+                    ObservedValue::Text("f".repeat(64)),
+                );
+            }
+            4 => {
+                sample
+                    .attributes
+                    .insert("effect_digest".into(), ObservedValue::Text("f".repeat(64)));
+            }
+            5 => {
+                sample.attributes.insert(
+                    "transaction".into(),
+                    ObservedValue::Text("transaction:foreign".into()),
+                );
+            }
+            6 => {
+                sample
+                    .attributes
+                    .insert("post_write_epoch".into(), ObservedValue::U64(0));
+            }
+            7 => {
+                sample
+                    .attributes
+                    .insert("output.0.commit".into(), ObservedValue::U64(0));
+            }
+            8 => {
+                sample.observed_at_unix_ms = now_unix_ms() - 2001;
+            }
+            9 => {
+                sample.authority = ObservationAuthority::SyntheticTest;
+            }
+            _ => {}
+        }
+        Ok(sample)
+    }
 }
 fn prepare_original(
     database: &TestDatabase,
@@ -197,6 +401,8 @@ impl OriginalDisplayRestorationPort for Executor {
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
         m.restoration_calls += 1;
+        m.restoration_binding = Some(binding.clone());
+        m.restoration_material = Some(material);
         if m.restoration_outcome == 1 {
             return Err("simulated lost native reply after grant consumption".into());
         }
@@ -399,5 +605,160 @@ fn restoration_persistence_failures_and_missing_readback_cannot_dispatch() {
                 .restoration_calls,
             0
         );
+    }
+}
+
+fn snapshot(
+    database: &TestDatabase,
+    transaction: &TransactionId,
+) -> linura_transaction::TransactionSnapshot {
+    let (_, verifier) = authority_material();
+    let store = value(SqliteTransactionStore::open(
+        database.path(),
+        verifier,
+        value(SqliteIntegrityKey::new(fixture_key(5))),
+    ));
+    value(store.snapshot(transaction))
+}
+
+#[test]
+fn restoration_reconciliation_needs_independent_proof_and_never_replays_after_restart() {
+    for outcome in [0, 1] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine {
+            restoration_outcome: outcome,
+            ..Machine::default()
+        }));
+        let (original, input) = prepare_original(&database, &machine);
+        let original_transaction = TransactionId::for_namespace(
+            &value(PrincipalId::new(principal().as_str())),
+            &original.request_id,
+        );
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, 0, previews);
+        let receipt = value(control.begin_original_display_restoration(
+            principal(),
+            actor(true),
+            input.clone(),
+            &approval(),
+            &mut Executor(machine.clone()),
+        ));
+        // Neither a successful executor reply nor a lost reply is verification.
+        assert!(
+            control
+                .reconcile_original_display_restoration(
+                    principal(),
+                    actor(true),
+                    &receipt.request_id,
+                )
+                .is_err()
+        );
+        assert_eq!(
+            snapshot(&database, &receipt.transaction_id).state,
+            linura_transaction::TransactionState::Indeterminate
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_native_verified = true;
+        let committed = value(control.reconcile_original_display_restoration(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        assert_eq!(
+            committed.state,
+            linura_transaction::TransactionState::Committed
+        );
+        // Committing restoration does not claim the original desired layout was
+        // applied, retire its checkpoint, or release any native/Root fence.
+        assert_eq!(
+            snapshot(&database, &original_transaction).state,
+            linura_transaction::TransactionState::Indeterminate
+        );
+        drop(control);
+        let mut unavailable = open(database.path(), &machine, 0);
+        assert!(
+            unavailable
+                .reconcile_original_display_restoration(
+                    principal(),
+                    actor(true),
+                    &receipt.request_id,
+                )
+                .is_err()
+        );
+        drop(unavailable);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        assert_eq!(
+            value(restarted.reconcile_original_display_restoration(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+            )),
+            committed
+        );
+        let m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(m.restoration_calls, 1);
+        assert_eq!(m.applies, 1);
+        assert_eq!(m.decisions, 0);
+    }
+}
+
+#[test]
+fn restoration_reconciliation_refuses_substituted_stale_or_lost_protection() {
+    for fault in 1..=11 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (original, input) = prepare_original(&database, &machine);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, 0, previews);
+        let receipt = value(control.begin_original_display_restoration(
+            principal(),
+            actor(true),
+            input,
+            &approval(),
+            &mut Executor(machine.clone()),
+        ));
+        {
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.restoration_native_verified = true;
+            m.restoration_proof_fault = if fault <= 9 { fault } else { 0 };
+            m.native_base_drift = fault == 10;
+            m.original_protection_lost = fault == 11;
+        }
+        assert!(
+            control
+                .reconcile_original_display_restoration(
+                    principal(),
+                    actor(true),
+                    &receipt.request_id,
+                )
+                .is_err(),
+            "fault {fault} must not become a commit"
+        );
+        assert_eq!(
+            snapshot(&database, &receipt.transaction_id).state,
+            linura_transaction::TransactionState::Indeterminate
+        );
+        assert!(
+            control
+                .reconcile_original_display_restoration(
+                    value(AuthenticatedPrincipal::new("unix:uid:1001")),
+                    actor(true),
+                    &receipt.request_id,
+                )
+                .is_err()
+        );
+        let m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(m.restoration_calls, 1);
+        assert_eq!(m.applies, 1);
+        assert_eq!(m.decisions, 0);
     }
 }

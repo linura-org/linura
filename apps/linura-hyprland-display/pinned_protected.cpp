@@ -172,6 +172,20 @@ void scheduleRefocus()
             g_pInputManager->refocus();
         });
 }
+struct ImmutablePresentationBuffer final
+{
+    explicit ImmutablePresentationBuffer(SP<Aquamarine::IBuffer> value) : buffer(std::move(value))
+    {
+        buffer->lock();
+    }
+    ~ImmutablePresentationBuffer()
+    {
+        buffer->unlock();
+    }
+    ImmutablePresentationBuffer(const ImmutablePresentationBuffer &) = delete;
+    ImmutablePresentationBuffer &operator=(const ImmutablePresentationBuffer &) = delete;
+    SP<Aquamarine::IBuffer> buffer;
+};
 struct NativeData final : std::enable_shared_from_this<NativeData>
 {
     struct Surface final
@@ -187,6 +201,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         std::uint64_t disableCommit = 0;
         bool disableSubmitted = false;
         SP<Aquamarine::IBuffer> renderedBuffer;
+        std::shared_ptr<const ImmutablePresentationBuffer> submittedBuffer;
         CHyprSignalListener commit, destroy, present, result;
     };
     ProtectedInteraction interaction;
@@ -206,6 +221,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::map<OutputKey, std::string> restoredSources;
     std::function<bool()> originalAlive;
     bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
+    std::uint64_t postWriteEpoch = 0;
     bool decisionActive = false, decisionStarted = false, decisionUsed = false;
     MutationProtection::Write lastWrite = MutationProtection::Write::Apply;
     Snapshot mutationInventory, stableInventory;
@@ -323,6 +339,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
             surface.frame.invalidate();
             surface.renderedBuffer.reset();
+            surface.submittedBuffer.reset();
         }
         if (g_pSeatManager) {
             g_pSeatManager->setKeyboardFocus(nullptr);
@@ -523,6 +540,10 @@ class PinnedMutation final : public MutationProtection
                     data_->mutationInventory = *sample;
             }
             data_->invalidateFrames();
+            if (data_->postWriteEpoch == std::numeric_limits<std::uint64_t>::max())
+                data_->mutationFault = true;
+            else
+                ++data_->postWriteEpoch;
         } catch (...) {
             data_->mutationFault = true;
         }
@@ -1140,7 +1161,27 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
         data->cancelInput();
         return false;
     }
+    if (data->originalRestoration)
+        surface->submittedBuffer = std::make_shared<ImmutablePresentationBuffer>(buffer);
     return true;
+}
+std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonitor *monitor,
+                                                                 const Correlation &bound)
+{
+    const auto data = mutationFence;
+    if (!data || !data->originalRestoration || !data->mutation || data->writing ||
+        data->bound != bound || data->postWriteEpoch == 0 || data->mutationFault ||
+        data->ownerLost || data->lastWrite != MutationProtection::Write::Restore ||
+        !data->refresh())
+        return std::nullopt;
+    const auto *surface = data->forMonitor(monitor);
+    if (!surface || !surface->submittedBuffer ||
+        surface->frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+        surface->frame.completedBuffer() != surface->submittedBuffer->buffer.get() ||
+        surface->frame.completedCommit() == 0)
+        return std::nullopt;
+    return OriginalRestorationFrame{surface->submittedBuffer->buffer,
+                                    surface->frame.completedCommit(), data->postWriteEpoch};
 }
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
 {

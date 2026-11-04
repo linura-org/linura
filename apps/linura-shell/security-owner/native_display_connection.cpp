@@ -365,6 +365,22 @@ class NativeDisplayConnection::Impl final
             capture.heads.emplace(head->facts.handle, std::move(head));
         });
     }
+    static void originalRestorationPresentation(void *data, linura_display_snapshot_v1 *,
+                                                const char *facts)
+    {
+        auto &capture = *static_cast<Capture *>(data);
+        callback(capture, [&] {
+            const auto size = facts ? strnlen(facts, 16 * 1024 + 1) : 0;
+            if (!capture.identityReceived || capture.done ||
+                !capture.sample.originalRestorationPresentation.isEmpty() || size == 0 ||
+                size > 16 * 1024 || capture.sample.startupPhase != 2 || !capture.sample.fenced) {
+                capture.invalid = true;
+                return;
+            }
+            capture.sample.originalRestorationPresentation =
+                QByteArray(facts, static_cast<qsizetype>(size));
+        });
+    }
     static void done(void *data, linura_display_snapshot_v1 *)
     {
         auto &capture = *static_cast<Capture *>(data);
@@ -501,8 +517,9 @@ std::optional<NativePinnedDisplaySample> NativeDisplayConnection::sample()
     impl_->capture = std::make_unique<Impl::Capture>(*impl_);
     auto &capture = *impl_->capture;
     capture.native = linura_display_manager_v1_get_snapshot(impl_->manager);
-    static const linura_display_snapshot_v1_listener listener{Impl::identity, Impl::head,
-                                                              Impl::done, Impl::unavailable};
+    static const linura_display_snapshot_v1_listener listener{
+        Impl::identity, Impl::head, Impl::done, Impl::unavailable,
+        Impl::originalRestorationPresentation};
     if (!capture.native ||
         linura_display_snapshot_v1_add_listener(capture.native, &listener, &capture) != 0 ||
         !impl_->sync() || capture.invalid || !capture.done) {

@@ -1005,6 +1005,35 @@ NativeRuntime::observePreparedDisplay(const QDBusMessage &received)
     return displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
 }
 
+std::optional<QString>
+NativeRuntime::observeOriginalDisplayPresentation(const QDBusMessage &received)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->binding || impl_->binding->seat.isEmpty())
+        return std::nullopt;
+    const auto sample = impl_->backend->displayStartupSample();
+    const auto independent = impl_->independentState();
+    if (!sample || !independent || !sample->fenced || sample->startupPhase != 2 ||
+        sample->originalRestorationPresentation.isEmpty() ||
+        sample->originalRestorationPresentation.size() > 16 * 1024 ||
+        sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!settled ||
+        (*settled != NativeObservedLockState::Secure &&
+         *settled != NativeObservedLockState::Unlocked) ||
+        sample->coverage != (*settled == NativeObservedLockState::Secure ? 1U : 0U))
+        return std::nullopt;
+    const auto text = QString::fromUtf8(sample->originalRestorationPresentation);
+    return text.toUtf8() == sample->originalRestorationPresentation ? std::optional{text}
+                                                                    : std::nullopt;
+}
+
 QString NativeDisplaySample::correlationDigest() const
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);

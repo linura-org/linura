@@ -17,6 +17,16 @@ namespace Monitor {
 class CMonitor;
 }
 namespace Linura::HyprlandDisplay {
+struct Correlation;
+struct OriginalRestorationFrame final
+{
+    SP<Aquamarine::IBuffer> buffer;
+    std::uint64_t commit = 0, postWriteEpoch = 0;
+};
+// Read-only post-write hardware completion on the retained actual output. A
+// startup frame, retired commit or owner-content frame cannot satisfy this.
+[[nodiscard]] std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonitor *,
+                                                                               const Correlation &);
 void initializeProtectedDisplay(wl_display &);
 void shutdownProtectedDisplay();
 void startupAdmissionChanged();

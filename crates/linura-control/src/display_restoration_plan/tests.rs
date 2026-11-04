@@ -1,5 +1,7 @@
 //! Simulated canonical NativeApi envelopes exercise Control's joins, not native
 //! continuity or compositor acceptance.
+#[path = "verification_tests.rs"]
+mod verification_tests;
 use super::*;
 use linura_core::{
     ActorId, ActorKind, DisplayLayout, DisplayMode, DisplayOutputId, DisplayOutputSet,
@@ -167,6 +169,13 @@ impl Fixture {
                 .recovery_metadata()
                 .cloned()
                 .unwrap_or_else(|| unreachable!("metadata")),
+            historical
+                .recovery_metadata()
+                .unwrap_or_else(|| unreachable!("metadata"))
+                .keys()
+                .cloned()
+                .map(|id| (id, "9".repeat(64)))
+                .collect(),
         ));
         // Replacement enumeration is deliberately reversed. Full native identity,
         // not numeric ordering or handle equality, establishes the candidate.
@@ -244,6 +253,88 @@ fn candidate_restores_original_baseline_with_exact_native_identity_bijection() {
         .operation,
         "restore-original-display-layout"
     );
+}
+
+#[test]
+fn expected_postcondition_uses_original_sources_and_remaps_prior_overlay_ownership() {
+    let fixture = Fixture::new();
+    let request = fixture.request();
+    let material = value(DisplayRestorationMaterial::decode(
+        &request.desired_state["restore_original"],
+    ));
+    let current = value(DisplayObservationFacts::from_envelope(
+        &fixture.current,
+        material.replacement().topology(),
+        value(now_ms()),
+    ));
+    let expected = value(fixture.source.restored_source_guard(
+        &material,
+        &fixture.protection,
+        &current,
+    ));
+    assert_ne!(
+        expected,
+        value(linura_provider_sdk::display_baseline_guard(&current))
+    );
+
+    // Freshly observed postcondition: reordered handles, original baseline
+    // positions, original overlay ownership and the independently projected hash.
+    let mut observed = native(
+        material.replacement().topology(),
+        [(10, 1), (20, 2)],
+        [1920, 0],
+        ["b", "a"],
+    );
+    for i in 0..2 {
+        observed.attributes.insert(
+            format!("output.{i}.base_configuration_digest"),
+            ObservedValue::Text("9".repeat(64)),
+        );
+        observed.attributes.insert(
+            format!("output.{i}.linura_owned"),
+            ObservedValue::Bool(i == 0),
+        );
+    }
+    let check = |sample: &ObservationEnvelope| {
+        value(linura_provider_sdk::display_baseline_guard(&value(
+            DisplayObservationFacts::from_envelope(
+                sample,
+                material.replacement().topology(),
+                value(now_ms()),
+            ),
+        )))
+    };
+    assert_eq!(check(&observed), expected);
+    for (key, replacement) in [
+        ("output.0.linura_owned", ObservedValue::Bool(false)),
+        ("output.1.linura_owned", ObservedValue::Bool(true)),
+        (
+            "output.0.base_configuration_digest",
+            ObservedValue::Text("c".repeat(64)),
+        ),
+        (
+            "output.0.native_identity_digest",
+            ObservedValue::Text("f".repeat(64)),
+        ),
+    ] {
+        let mut changed = observed.clone();
+        changed.attributes.insert(key.into(), replacement);
+        assert_ne!(check(&changed), expected, "{key}");
+        // The expectation never changes to match a native current-state hash.
+        let facts = value(DisplayObservationFacts::from_envelope(
+            &changed,
+            material.replacement().topology(),
+            value(now_ms()),
+        ));
+        assert_eq!(
+            value(
+                fixture
+                    .source
+                    .restored_source_guard(&material, &fixture.protection, &facts)
+            ),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -373,18 +464,21 @@ fn private_context_is_bounded_exact_principal_request_and_raii_retired() {
 }
 
 #[derive(Debug)]
-struct FixtureObserver(ObservationEnvelope);
+struct FixtureObserver(Vec<ObservationEnvelope>);
 impl Observer for FixtureObserver {
     fn observer_id(&self) -> ProviderId {
-        self.0.provider.clone()
+        self.0[0].provider.clone()
     }
     fn observation_capabilities(&self) -> Vec<linura_core::Capability> {
-        vec![linura_core::Capability {
-            id: self.0.capability.clone(),
-            provider: Some(self.observer_id()),
-            support: linura_core::SupportLevel::Supported,
-            reason: None,
-        }]
+        self.0
+            .iter()
+            .map(|source| linura_core::Capability {
+                id: source.capability.clone(),
+                provider: Some(self.observer_id()),
+                support: linura_core::SupportLevel::Supported,
+                reason: None,
+            })
+            .collect()
     }
     fn health(&self) -> ProviderHealth {
         ProviderHealth {
@@ -394,17 +488,22 @@ impl Observer for FixtureObserver {
         }
     }
     fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
-        Ok(vec![self.0.resource.clone()])
+        Ok(self
+            .0
+            .iter()
+            .map(|source| source.resource.clone())
+            .collect())
     }
     fn observe_authoritative(
         &self,
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
-        if resource != &self.0.resource || capability != &self.0.capability {
-            return Err(ProviderError::Unsupported("fixture exact scope".into()));
-        }
-        Ok(self.0.clone())
+        self.0
+            .iter()
+            .find(|source| resource == &source.resource && capability == &source.capability)
+            .cloned()
+            .ok_or_else(|| ProviderError::Unsupported("fixture exact scope".into()))
     }
 }
 impl Fixture {
@@ -486,8 +585,15 @@ impl Fixture {
 }
 fn coordinator(sources: Vec<ObservationEnvelope>) -> ObservationCoordinator {
     let mut coordinator = ObservationCoordinator::new();
+    let mut groups: BTreeMap<ProviderId, Vec<ObservationEnvelope>> = BTreeMap::new();
     for source in sources {
-        value(coordinator.register_observer(Box::new(FixtureObserver(source))));
+        groups
+            .entry(source.provider.clone())
+            .or_default()
+            .push(source);
+    }
+    for sources in groups.into_values() {
+        value(coordinator.register_observer(Box::new(FixtureObserver(sources))));
     }
     coordinator
 }

@@ -29,13 +29,14 @@ fn fixture() -> (DisplayOriginalProtectionFacts, ObservationEnvelope) {
         1,
         10,
         BTreeMap::from([(
-            row,
+            row.clone(),
             value(DisplayRecoveryMetadata::new(
                 false,
                 "e".repeat(64),
                 "f".repeat(64),
             )),
         )]),
+        BTreeMap::from([(row, "9".repeat(64))]),
     ));
     let envelope = ObservationEnvelope {
         provider: value(ProviderId::new(DISPLAY_RECOVERY_PROVIDER)),
@@ -93,7 +94,7 @@ fn every_original_attribute_is_closed_typed_and_canonically_reencoded() {
     }
     for (key, value) in [
         ("unexpected", ObservedValue::Bool(true)),
-        ("original_protection_schema", ObservedValue::U64(2)),
+        ("original_protection_schema", ObservedValue::U64(1)),
         ("original_dispatch", ObservedValue::Text("b".repeat(64))),
         (
             "original_checkpoint_digest",
@@ -175,4 +176,49 @@ fn duplicate_native_identities_or_recycled_handle_generations_fail_closed() {
             DisplayOriginalProtectionFacts::from_envelope(&changed, facts.scope(), 1001).is_err()
         );
     }
+}
+
+#[test]
+fn expected_restored_sources_are_complete_canonical_and_separate_from_original_hashes() {
+    let (facts, envelope) = fixture();
+    let output = facts
+        .outputs
+        .keys()
+        .next()
+        .unwrap_or_else(|| unreachable!("output"));
+    assert_ne!(
+        facts.restored_source_digests[output],
+        facts.outputs[output].base_configuration_digest()
+    );
+    for digest in ["".into(), "0".repeat(64), "A".repeat(64), "a".repeat(63)] {
+        let mut changed = envelope.clone();
+        changed.attributes.insert(
+            "original_output.0.restored_source_digest".into(),
+            ObservedValue::Text(digest),
+        );
+        assert!(
+            DisplayOriginalProtectionFacts::from_envelope(&changed, facts.scope(), 1001).is_err()
+        );
+    }
+    let build = |digests| {
+        DisplayOriginalProtectionFacts::new(
+            facts.scope.clone(),
+            facts.original_material.clone(),
+            facts.original_transaction.clone(),
+            facts.checkpoint_digest.clone(),
+            facts.native_guard.clone(),
+            facts.integration_digest.clone(),
+            facts.sampled_boot_ms,
+            facts.confirmation_deadline_unix_ms,
+            facts.outputs.clone(),
+            digests,
+        )
+    };
+    assert!(build(BTreeMap::new()).is_err());
+    let mut extra = facts.restored_source_digests.clone();
+    extra.insert(
+        value(DisplayOutputId::new(output.topology().clone(), 99, 2)),
+        "9".repeat(64),
+    );
+    assert!(build(extra).is_err());
 }

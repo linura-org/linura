@@ -33,6 +33,7 @@ class ProtectedFrame final
             return false;
         }
         pending_ = nullptr;
+        buffer_ = buffer;
         kind_ = pendingKind_;
         id_ = highWater_ = id;
         submitted_ = presented_ = false;
@@ -72,6 +73,16 @@ class ProtectedFrame final
     {
         return !failed_ && id_ != 0 && submitted_ && presented_;
     }
+    // Native comparison only. Callers must retain the actual immutable buffer
+    // lease, match the current post-write epoch and independently read scanout.
+    [[nodiscard]] const void *completedBuffer() const noexcept
+    {
+        return completed() ? buffer_ : nullptr;
+    }
+    [[nodiscard]] std::uint64_t completedCommit() const noexcept
+    {
+        return completed() ? id_ : 0;
+    }
     [[nodiscard]] Kind pendingKind() const noexcept
     {
         return pendingKind_;
@@ -79,6 +90,7 @@ class ProtectedFrame final
     void invalidate() noexcept
     {
         pending_ = nullptr;
+        buffer_ = nullptr;
         id_ = 0;
         submitted_ = presented_ = false;
         // Failure is terminal for this native output lifetime.
@@ -90,7 +102,7 @@ class ProtectedFrame final
         failed_ = true;
         invalidate();
     }
-    const void *pending_ = nullptr;
+    const void *pending_ = nullptr, *buffer_ = nullptr;
     Kind pendingKind_ = Kind::Safety, kind_ = Kind::Safety;
     std::uint64_t id_ = 0, highWater_ = 0;
     bool submitted_ = false, presented_ = false, failed_ = false;

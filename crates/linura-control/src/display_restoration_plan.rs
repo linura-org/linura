@@ -11,9 +11,10 @@ use linura_core::{
     DisplayRestorationMaterial, PrincipalId, ProviderId, RequestId, SemanticReason, SessionLockId,
 };
 use linura_observation::{
-    DISPLAY_COVERAGE_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
-    DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER, DISPLAY_RECOVERY_PROVIDER,
-    DisplayObservationFacts, DisplayOriginalProtectionFacts, ObservationEnvelope, ObservedValue,
+    DISPLAY_COVERAGE_CAPABILITY, DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY,
+    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
+    DISPLAY_RECOVERY_PROVIDER, DisplayObservationFacts, DisplayOriginalPresentationFacts,
+    DisplayOriginalProtectionFacts, ObservationEnvelope, ObservedValue,
 };
 use linura_planner::{
     DesiredResource, DeterministicPlanner, PlanFinding, PlanFindingLevel, PlanningFreshness,
@@ -200,6 +201,62 @@ impl OriginalDisplayPlanningContext {
         self.original_dispatch.to_hex()
     }
 
+    // Derive the postcondition from authenticated ORIGINAL source facts. The
+    // replacement supplies only fresh inventory/capabilities, never the expected
+    // rule hashes. This comparison digest is not terminal presentation evidence.
+    fn restored_source_guard(
+        &self,
+        material: &DisplayRestorationMaterial<'_>,
+        protection: &DisplayOriginalProtectionFacts,
+        current: &DisplayObservationFacts,
+    ) -> Result<ComponentDigest, PlanPreviewControlError> {
+        let original = self.require_original(protection)?;
+        if material.original_request() != &self.original_request.request_id
+            || material.original_dispatch() != self.original_dispatch.to_hex()
+            || material.original_checkpoint() != protection.checkpoint_digest()
+            || material.recovery_scope().map_err(fail)? != *protection.scope()
+        {
+            return Err(fail(
+                "restored source projection has another original binding",
+            ));
+        }
+        let (source, restored) = material
+            .validate_native(
+                self.historical.inventory(),
+                self.historical.capabilities(),
+                current.inventory(),
+                current.capabilities(),
+            )
+            .map_err(fail)?;
+        if source != original {
+            return Err(fail(
+                "restored source projection substituted the original intent",
+            ));
+        }
+        let mut expected = BTreeMap::new();
+        for (old, new) in material.mapping().outputs() {
+            let metadata = protection
+                .outputs()
+                .get(old)
+                .ok_or_else(|| fail("original source is absent"))?;
+            let digest = protection
+                .restored_source_digests()
+                .get(old)
+                .ok_or_else(|| fail("restored source projection is absent"))?;
+            let row = linura_observation::DisplayRecoveryMetadata::new(
+                metadata.linura_owned(),
+                digest.clone(),
+                metadata.native_identity_digest().into(),
+            )
+            .map_err(fail)?;
+            if expected.insert(new.clone(), row).is_some() {
+                return Err(fail("restored source mapping is ambiguous"));
+            }
+        }
+        linura_provider_sdk::display_layout_source_guard(restored.desired(), &expected)
+            .map_err(fail)
+    }
+
     pub(crate) fn form_request(
         &self,
         request_id: RequestId,
@@ -263,6 +320,14 @@ pub(crate) fn inherit_original_reason(
 struct BoundContext {
     source: OriginalDisplayPlanningContext,
     request: ContentDigest,
+    verification: Option<RestorationDispatch>,
+}
+#[derive(Debug)]
+struct RestorationDispatch {
+    transaction: String,
+    effect: ComponentDigest,
+    dispatch: ComponentDigest,
+    recorded_at_unix_ms: u64,
 }
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OriginalContextSlot(Arc<Mutex<Option<Arc<BoundContext>>>>);
@@ -288,9 +353,72 @@ impl PlanPreviewControl {
         source: OriginalDisplayPlanningContext,
         request: &PlanDesiredStateRequest,
     ) -> Result<OriginalContextGuard, PlanPreviewControlError> {
+        self.enter_original_context(source, request, None)
+    }
+
+    // Only the managed controller loads these authenticated immutable records.
+    // This context permits observe-only NoChange derivation, never reprepare,
+    // another display write or native release from an acknowledgement.
+    pub(crate) fn enter_original_display_verification_context(
+        &mut self,
+        source: OriginalDisplayPlanningContext,
+        request: &PlanDesiredStateRequest,
+        snapshot: &TransactionSnapshot,
+        record: &crate::display_recovery_journal::Record,
+    ) -> Result<OriginalContextGuard, PlanPreviewControlError> {
+        let principal = PrincipalId::new(source.principal.as_str()).map_err(fail)?;
+        if snapshot.principal != principal
+            || snapshot.request_id != request.request_id
+            || snapshot.transaction_id
+                != linura_transaction::TransactionId::for_namespace(&principal, &request.request_id)
+            || !matches!(
+                snapshot.state,
+                TransactionState::Indeterminate
+                    | TransactionState::Verified
+                    | TransactionState::Committed
+            )
+            || record.phase != crate::display_recovery_journal::Phase::Dispatched
+            || record.transaction_id != snapshot.transaction_id
+            || record.request_digest
+                != crate::durable_authority::digest_request(request).map_err(fail)?
+        {
+            return Err(fail(
+                "original restoration verification differs from authenticated dispatch history",
+            ));
+        }
+        let text = request
+            .desired_state
+            .get("restore_original")
+            .ok_or_else(|| fail("original restoration material is absent"))?;
+        let effect = linura_provider_sdk::display_restoration_effect(text)
+            .map_err(fail)?
+            .digest();
+        let dispatch = ComponentDigest::parse_hex(
+            record
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(|| fail("original restoration dispatch is absent"))?,
+        )
+        .map_err(fail)?;
+        let verification = RestorationDispatch {
+            transaction: snapshot.transaction_id.as_str().into(),
+            effect,
+            dispatch,
+            recorded_at_unix_ms: record.recorded_at_unix_ms,
+        };
+        self.enter_original_context(source, request, Some(verification))
+    }
+
+    fn enter_original_context(
+        &mut self,
+        source: OriginalDisplayPlanningContext,
+        request: &PlanDesiredStateRequest,
+        verification: Option<RestorationDispatch>,
+    ) -> Result<OriginalContextGuard, PlanPreviewControlError> {
         let context = Arc::new(BoundContext {
             source,
             request: crate::durable_authority::digest_request(request).map_err(fail)?,
+            verification,
         });
         let mut slot = self
             .restoration_context
@@ -377,6 +505,19 @@ impl PlanPreviewControl {
                 resource: current.lock().resource_id().map_err(fail)?,
             })?
             .observation;
+        let presentation = if bound.verification.is_some() {
+            Some(
+                self.observe(&ObservationRequest {
+                    provider: ProviderId::new(DISPLAY_PROVIDER).map_err(fail)?,
+                    capability: CapabilityId::new(DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY)
+                        .map_err(fail)?,
+                    resource: scope.resource_id().map_err(fail)?,
+                })?
+                .observation,
+            )
+        } else {
+            None
+        };
         let now = now_ms()?;
         let original = DisplayOriginalProtectionFacts::from_envelope(&protection, &scope, now)
             .map_err(fail)?;
@@ -398,10 +539,60 @@ impl PlanPreviewControl {
             &mapping,
         )
         .map_err(fail)?;
-        if canonical != *text {
+        if bound.verification.is_none() && canonical != *text {
             return Err(fail(
                 "original restoration candidate changed in native baseline, checkpoint or complete mapping",
             ));
+        }
+        let restored_source_guard = bound
+            .source
+            .restored_source_guard(&material, &original, &facts)?;
+        if let Some(verification) = &bound.verification {
+            let presentation = presentation
+                .as_ref()
+                .ok_or_else(|| fail("post-write presentation is absent"))?;
+            let observed =
+                DisplayOriginalPresentationFacts::from_envelope(presentation, &scope, now)
+                    .map_err(fail)?;
+            for (valid, label) in [
+                // Inventories preserve provider enumeration order; the decoded
+                // candidate reconstructs them in original-key order. Compare
+                // the complete typed bijection, including both scoped IDs,
+                // rather than incidental replacement vector ordering.
+                (
+                    material.mapping().outputs() == mapping.outputs(),
+                    "output-mapping",
+                ),
+                (facts.layout() == restored.desired(), "native-layout"),
+                (guard == restored_source_guard, "native-source-guard"),
+                (
+                    observed.source_guard() == restored_source_guard.to_hex(),
+                    "frame-source-guard",
+                ),
+                (
+                    observed.matches_layout(restored.desired()),
+                    "frame-inventory",
+                ),
+                (
+                    observed.matches_binding(
+                        material.original_checkpoint(),
+                        &verification.transaction,
+                        &verification.effect.to_hex(),
+                        &verification.dispatch.to_hex(),
+                    ),
+                    "restoration-dispatch",
+                ),
+                (
+                    presentation.observed_at_unix_ms >= verification.recorded_at_unix_ms,
+                    "post-dispatch-sample",
+                ),
+            ] {
+                if !valid {
+                    return Err(fail(format!(
+                        "original restoration postcondition mismatch: {label}"
+                    )));
+                }
+            }
         }
         DisplayLayoutSafetyReview::review(
             principal,
@@ -415,12 +606,25 @@ impl PlanPreviewControl {
         // Human review binds material source semantics. Fresh envelope hashes
         // belong in the precise observation binding below, not in those
         // semantic findings: re-sampling must not manufacture a changed rule.
-        let findings = [&protection, &display, &session, &coverage]
+        let mut findings = [&protection, &display, &session, &coverage]
             .into_iter()
             .map(crate::display_plan::native_finding)
             .collect::<Vec<_>>();
         for source in [&display, &session, &coverage] {
             crate::plan_preview::restrict_session_validity(&mut protection, source, now)?;
+        }
+        if let Some(presentation) = &presentation {
+            findings.push(crate::display_plan::native_finding(presentation));
+            crate::plan_preview::restrict_session_validity(&mut protection, presentation, now)?;
+            protection.attributes.insert(
+                "control.replacement_presentation_digest".into(),
+                ObservedValue::Text(
+                    crate::durable_authority::digest_observation(presentation)
+                        .map_err(fail)?
+                        .as_str()
+                        .into(),
+                ),
+            );
         }
         for (key, source) in [
             ("control.replacement_display_digest", &display),
@@ -446,7 +650,11 @@ impl PlanPreviewControl {
             freshness: PlanningFreshness::Current,
             attributes: BTreeMap::from([(
                 "restore_original".into(),
-                "original restoration unresolved".into(),
+                if bound.verification.is_some() {
+                    text.clone()
+                } else {
+                    "original restoration unresolved".into()
+                },
             )]),
         };
         let desired = DesiredResource {
@@ -461,6 +669,11 @@ impl PlanPreviewControl {
             .map_err(fail)?;
         plan.findings.extend(findings);
         plan.findings.push(PlanFinding { code: "display-original-restoration-source".into(), level: PlanFindingLevel::Pass, message: format!("Original authenticated request {} / {}; restore only its original baseline and ownership", bound.source.original_request.request_id.as_str(), bound.source.original_transaction) });
+        plan.findings.push(PlanFinding {
+            code: "display-original-restoration-postcondition".into(),
+            level: PlanFindingLevel::Pass,
+            message: format!("Expected checkpoint-derived restored layout/source guard {}; terminal hardware presentation remains independently required", restored_source_guard.to_hex()),
+        });
         Ok((plan, protection))
     }
 }

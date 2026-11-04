@@ -736,6 +736,7 @@ impl TransactionAuthoritySigner {
         expires_at_unix_ms: u64,
     ) -> Result<RecoveryRequest, TransactionValidationError> {
         if snapshot.state != TransactionState::Indeterminate
+            || matches!(resolution, RecoveryResolution::VerifiedCompensated { .. })
             || authorized_at_unix_ms == 0
             || expires_at_unix_ms < authorized_at_unix_ms
         {
@@ -766,6 +767,49 @@ impl TransactionAuthoritySigner {
             authorized_at_unix_ms,
             expires_at_unix_ms,
             resolution,
+            authority_tag: [0; AUTHORITY_MUTATION_TAG_BYTES],
+        };
+        request.authority_tag = authority_tag(
+            &self.bytes,
+            "linura.transaction-authority.recovery.v1",
+            &request.canonical_bytes(),
+        )?;
+        Ok(request)
+    }
+
+    /// Retire an uncommitted verified result after Control independently proves
+    /// compensation and durably records its exact linked result. This is a
+    /// terminal bookkeeping mutation, never reprepare, commit or an effect grant.
+    /// Ordinary recovery remains restricted to Indeterminate transactions.
+    pub fn authorize_verified_compensation(
+        &self,
+        snapshot: &TransactionSnapshot,
+        observation_digest: ContentDigest,
+        terminal_link_digest: ContentDigest,
+        authorized_at_unix_ms: u64,
+        expires_at_unix_ms: u64,
+    ) -> Result<RecoveryRequest, TransactionValidationError> {
+        if snapshot.state != TransactionState::Verified
+            || observation_digest == ContentDigest::zero()
+            || terminal_link_digest == ContentDigest::zero()
+            || authorized_at_unix_ms == 0
+            || expires_at_unix_ms
+                .checked_sub(authorized_at_unix_ms)
+                .is_none_or(|window| window == 0 || window > 2000)
+        {
+            return Err(TransactionValidationError::InvalidAuthorityMutation);
+        }
+        let mut request = RecoveryRequest {
+            transaction_id: snapshot.transaction_id.clone(),
+            expected_generation: snapshot.current_generation,
+            expected_state_version: snapshot.state_version,
+            expected_binding_digest: snapshot.binding_digest.clone(),
+            authorized_at_unix_ms,
+            expires_at_unix_ms,
+            resolution: RecoveryResolution::VerifiedCompensated {
+                observation_digest,
+                terminal_link_digest,
+            },
             authority_tag: [0; AUTHORITY_MUTATION_TAG_BYTES],
         };
         request.authority_tag = authority_tag(
@@ -883,6 +927,13 @@ pub enum RecoveryResolution {
     Ambiguous {
         observation_digest: ContentDigest,
     },
+    /// A separately authorized terminal transition from Verified only. The
+    /// immutable link retains compensation/provenance; this never reports the
+    /// original desired state as committed or authorizes another effect.
+    VerifiedCompensated {
+        observation_digest: ContentDigest,
+        terminal_link_digest: ContentDigest,
+    },
 }
 
 impl RecoveryResolution {
@@ -915,6 +966,14 @@ impl RecoveryResolution {
             Self::Ambiguous { observation_digest } => {
                 mutation_field(canonical, b"ambiguous");
                 mutation_field(canonical, observation_digest.as_str().as_bytes());
+            }
+            Self::VerifiedCompensated {
+                observation_digest,
+                terminal_link_digest,
+            } => {
+                mutation_field(canonical, b"verified-compensated:v1");
+                mutation_field(canonical, observation_digest.as_str().as_bytes());
+                mutation_field(canonical, terminal_link_digest.as_str().as_bytes());
             }
         }
     }
@@ -1345,5 +1404,125 @@ mod tests {
             Err(TransactionValidationError::InvalidAuthorityKey)
         ));
         assert!(rejected.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn verified_compensation_has_a_distinct_sealed_terminal_only_resolution() {
+        use std::io::Read;
+        let mut bytes = vec![0; 32];
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut file| file.read_exact(&mut bytes))
+            .unwrap_or_else(|_| unreachable!("test entropy unavailable"));
+        let (signer, verifier) = TransactionAuthorityKey::new(bytes)
+            .unwrap_or_else(|_| unreachable!("test authority unavailable"))
+            .split();
+        let binding = binding();
+        let mut snapshot = TransactionSnapshot {
+            transaction_id: binding.transaction_id(),
+            principal: binding.principal().clone(),
+            request_id: binding.request_id().clone(),
+            current_generation: 0,
+            state_version: 3,
+            state: TransactionState::Verified,
+            binding_digest: binding.digest().clone(),
+        };
+        let observation = digest("fresh compensation");
+        let link = digest("durable linked result");
+        let request = signer
+            .authorize_verified_compensation(
+                &snapshot,
+                observation.clone(),
+                link.clone(),
+                100,
+                2100,
+            )
+            .unwrap_or_else(|_| unreachable!("valid compensation"));
+        assert!(verifier.verify_recovery(&request));
+        for changed in 0..4 {
+            let mut substituted = request.clone();
+            match changed {
+                0 => substituted.expected_state_version += 1,
+                1 => {
+                    substituted.resolution = RecoveryResolution::ConflictingState {
+                        observation_digest: observation.clone(),
+                    }
+                }
+                2 => {
+                    substituted.resolution = RecoveryResolution::VerifiedCompensated {
+                        observation_digest: digest("other"),
+                        terminal_link_digest: link.clone(),
+                    }
+                }
+                _ => {
+                    substituted.resolution = RecoveryResolution::VerifiedCompensated {
+                        observation_digest: observation.clone(),
+                        terminal_link_digest: digest("other"),
+                    }
+                }
+            }
+            assert!(!verifier.verify_recovery(&substituted));
+        }
+        for (observed, linked, start, end) in [
+            (ContentDigest::zero(), link.clone(), 100, 200),
+            (observation.clone(), ContentDigest::zero(), 100, 200),
+            (observation.clone(), link.clone(), 0, 200),
+            (observation.clone(), link.clone(), 100, 100),
+            (observation.clone(), link.clone(), 100, 99),
+            (observation.clone(), link.clone(), 100, 2101),
+        ] {
+            assert!(
+                signer
+                    .authorize_verified_compensation(&snapshot, observed, linked, start, end)
+                    .is_err()
+            );
+        }
+        for state in [
+            TransactionState::Prepared,
+            TransactionState::Indeterminate,
+            TransactionState::Verified,
+            TransactionState::Committed,
+            TransactionState::Aborted,
+            TransactionState::RecoveryBlocked,
+        ] {
+            snapshot.state = state;
+            assert!(
+                signer
+                    .authorize_recovery(
+                        &snapshot,
+                        RecoveryResolution::VerifiedCompensated {
+                            observation_digest: observation.clone(),
+                            terminal_link_digest: link.clone(),
+                        },
+                        100,
+                        200
+                    )
+                    .is_err()
+            );
+            assert_eq!(
+                signer
+                    .authorize_verified_compensation(
+                        &snapshot,
+                        observation.clone(),
+                        link.clone(),
+                        100,
+                        200,
+                    )
+                    .is_ok(),
+                state == TransactionState::Verified
+            );
+            assert_eq!(
+                signer
+                    .authorize_recovery(
+                        &snapshot,
+                        RecoveryResolution::ConflictingState {
+                            observation_digest: observation.clone(),
+                        },
+                        100,
+                        200
+                    )
+                    .is_ok(),
+                state == TransactionState::Indeterminate
+            );
+        }
     }
 }

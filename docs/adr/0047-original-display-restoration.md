@@ -242,11 +242,78 @@ A failed write permanently latches the fault; no successful return clears it.
 
 The native mechanism returns only nonterminal Restoring or RecoveryFailed.
 Opaque rendering, input, original Root witnesses and power remain fenced;
-there is no terminal release or cleanup here. Qualified supersession, independent
-terminal proof and terminal workflow remain unfinished. Component checks and
-code composition do not establish pinned SDK/native qualification.
+there is no terminal release or cleanup here. Qualified supersession and the
+linked terminal workflow remain unfinished. Component checks and code composition
+do not establish pinned SDK/native qualification.
+
+## Independent restoration observation
+
+Original-protection observation schema 2 adds the complete expected restored
+source digest for each historical output. Root derives these digests from its
+immutable original checkpoint, projecting a historical wlr source into an explicit
+restored projection anchored to that checkpoint. It does not copy the replacement
+compositor's claimed post-write digest. Control derives the complete expected
+replacement source/ownership guard from those digests and the authenticated
+baseline/bijection. Current numeric layout, native identity, original prior overlay
+ownership and source lineage must all agree. Historical checkpoint bytes and their
+version remain unchanged.
+
+The compositor separately samples actual atomic KMS properties through its
+already-owned DRM descriptor. Every enabled connector must have an active exact
+mode and one primary plane scanning the retained immutable opaque buffer from the
+current restoration write epoch. The current frame must have completed through
+the native hardware-presentation path; a queued commit, an old protected review
+frame, a reused buffer identity or an acknowledgement is insufficient. Active
+cursor/overlay planes refuse evidence. Disabled outputs require an actually
+detached connector, rather than a cached desired disable. Enumeration and property
+counts are bounded, with one absolute two-second probe budget and no retries,
+device reopen, import, modeset or cached-state fallback. Original Root witnesses
+are checked before and after the native probe, and source/layout snapshots must
+remain identical around it.
+
+The optional private Wayland snapshot event and the supervised-Control-only
+`SecurityOwner1.ObserveOriginalDisplayPresentation` method carry this bounded
+sample. Its typed projection uses the existing authoritative
+`ObservationEnvelope`, provider `hyprland`, capability
+`display.original-presentation.observe` and the exact recovery resource. It binds
+the checkpoint, transaction, effect, dispatch, complete output/frame inventory,
+post-write epoch and actual source guard. The Linux adapter validates the exact
+attested owner and both clocks without renewing the original probe lifetime.
+This is an observation, never an execution or release credential.
+
+Only an authenticated, already-dispatched restoration can enter Control's private
+verification context. The same canonical recipe then joins fresh original Root,
+native source/layout, logind, coverage and presentation envelopes. It produces
+`NoChange` only for that exact retained restoration material and dispatch after
+all comparisons succeed. A pre-effect context cannot use this mode to skip
+approval or prepare. `reconcile_original_display_restoration` uses the existing
+observe-only durable recovery path and commits only the restoration transaction;
+it cannot replay a write, retire the original transaction/checkpoint or release a
+fence. Restart after Verified or Committed still requires the same fresh canonical
+proof. The separate linked terminal continuation described below remains required.
 
 ## Terminal sequencing
+
+An original transaction can be Verified but not Committed when its compositor
+dies. Ordinary Indeterminate recovery must not acquire permission to mutate
+Verified or Committed state. A distinct Control-signed `VerifiedCompensated`
+resolution therefore permits only Verified → RecoveryBlocked after independently
+proven compensation and a durable linked terminal result. Its exact generation,
+version and binding use the same persistence CAS; nonzero observation/link digests
+and a fixed window of at most two seconds are mandatory. It creates no execution,
+reprepare or commit authority. Ordinary `authorize_recovery` cannot mint this
+resolution, and the distinct signer method cannot authorize any other state.
+
+SQLite retains the original verified desired/graph/provenance material and appends
+the explicit `verified-compensated-v1` audit kind. Validation accepts that retained
+material only with this authenticated terminal kind following the exact same
+generation's Verified audit event. Existing blocked histories keep their previous
+shape and meaning. Old readers fail closed on the new audit kind; no old row or
+audit event is relabeled. The prior commit request loses its CAS, and replay,
+expired/foreign authority and changed generation/version/binding refuse mutation.
+This mechanism is bookkeeping only: Control's linked terminal workflow and native
+finalization must still consume it through the qualified path below. It is not yet
+used to release any fence.
 
 Restoration acknowledgement is not success. Native opaque/input protection,
 original witnesses and power blockers must remain retained until independent

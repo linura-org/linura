@@ -30,7 +30,7 @@ struct OriginalRestorationSource final
         std::optional<Target> priorOverlay;
         std::string identityDigest;
     };
-    std::string material, integration, replacementTopology, baselineText;
+    std::string material, integration, replacementTopology, baselineText, desiredText;
     Layout baseline, desired;
     std::uint64_t originalGeneration = 0;
     std::vector<Head> heads;
@@ -166,7 +166,7 @@ inline std::optional<Target> target(std::string_view text)
 }
 struct Intent final
 {
-    std::string_view topology, baselineText;
+    std::string_view topology, baselineText, desiredText;
     Layout baseline, desired;
 };
 inline std::optional<std::pair<std::string_view, Layout>> layout(std::string_view text)
@@ -263,7 +263,8 @@ inline std::optional<Intent> intent(std::string_view text)
     for (std::size_t i = 0; i < before->second.size(); ++i)
         if (before->second[i].output != after->second[i].output)
             return std::nullopt;
-    return Intent{before->first, text.substr(0, next), before->second, after->second};
+    return Intent{before->first, text.substr(0, next), text.substr(next), before->second,
+                  after->second};
 }
 inline std::optional<OriginalRestorationSource>
 decode(std::string_view reservation, std::string_view projection, const Correlation &expected)
@@ -296,6 +297,7 @@ decode(std::string_view reservation, std::string_view projection, const Correlat
     result.material = fields[8];
     result.replacementTopology = replacementIntent->topology;
     result.baselineText = replacementIntent->baselineText;
+    result.desiredText = replacementIntent->desiredText;
     result.baseline = replacementIntent->baseline;
     result.desired = replacementIntent->desired;
     std::array<std::string_view, 5> header{};

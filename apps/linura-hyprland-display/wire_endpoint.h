@@ -38,6 +38,9 @@ struct NativeOriginalRestorationPort final
                                                wl_client *)>
         dispatch;
     std::function<std::optional<std::uint32_t>(const Correlation &)> status;
+    // Fresh actual KMS/post-write frame facts only. Not acknowledgement,
+    // commit authority, startup release or a cached desired layout.
+    std::function<std::optional<std::string>()> presentation;
 };
 
 // Adapter-private Wayland mechanism. Its native session scoping and ownership

@@ -75,6 +75,16 @@
     </event>
     <event name="done"/>
     <event name="unavailable"/>
+    <event name="original_restoration_presentation">
+      <description summary="independent post-write native comparison facts">
+        At most one bounded private JSON object, before done. Requires fresh
+        actual KMS state and hardware completion of current immutable opaque
+        buffers after the final source write. Startup/retired frames, queued
+        disable acknowledgements and desired-state caches cannot supply it.
+        This is observation only and cannot release any fence or retire history.
+      </description>
+      <arg name="facts" type="string"/>
+    </event>
   </interface>
   <interface name="linura_display_head_v1" version="1">
     <description summary="native output lifetime in one snapshot">

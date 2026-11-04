@@ -113,6 +113,28 @@ fn lineage(raw: &str) -> Result<(), String> {
 fn historical_lineage(raw: &str) -> Result<(), String> {
     validate_lineage(raw, true)
 }
+// Exact comparison projection of RecoveryLineage::replacementProjection. The
+// historical bytes are never rewritten. A restored source is explicitly tied
+// to THIS checkpoint, not reported as a reconstructed live Wayland client.
+fn restored_lineage(raw: &str, checkpoint: &str) -> Result<String, String> {
+    lineage(raw)?;
+    if !digest(checkpoint) {
+        return Err(invalid());
+    }
+    let body = raw
+        .strip_prefix("LNRL:2;")
+        .and_then(|v| v.strip_suffix(';'))
+        .ok_or_else(invalid)?;
+    let mut fields: Vec<_> = body.split(';').collect();
+    let count = usize::try_from(number(fields[1])?).map_err(|_| invalid())?;
+    if fields[54 + count] != "0" {
+        fields[54 + count] = "2";
+        fields[57 + count] = checkpoint;
+    }
+    let projected = format!("LNRL:2;{};", fields.join(";"));
+    lineage(&projected)?;
+    Ok(projected)
+}
 fn validate_lineage(raw: &str, historical: bool) -> Result<(), String> {
     let legacy = historical && raw.starts_with("LNRL:1;");
     if raw.len() > 20 * 1024 {
@@ -386,7 +408,10 @@ impl NativeDisplayRecoveryCheckpoint {
         if saved.schema != 2 {
             return Err(invalid());
         }
+        let checkpoint_digest =
+            ComponentDigest::from_bytes(Sha256::digest(payload).into()).to_hex();
         let mut outputs = BTreeMap::new();
+        let mut restored_source_digests = BTreeMap::new();
         for row in saved.heads {
             let id = DisplayOutputId::new(
                 material.topology().clone(),
@@ -401,6 +426,11 @@ impl NativeDisplayRecoveryCheckpoint {
                 row.output_identity_digest,
             )
             .map_err(|_| invalid())?;
+            let restored = restored_lineage(&row.base_rule, &checkpoint_digest)?;
+            restored_source_digests.insert(
+                id.clone(),
+                ComponentDigest::from_bytes(Sha256::digest(restored.as_bytes()).into()).to_hex(),
+            );
             if outputs.insert(id, metadata).is_some() {
                 return Err(invalid());
             }
@@ -409,12 +439,13 @@ impl NativeDisplayRecoveryCheckpoint {
             scope.clone(),
             fields[8].into(),
             fields[1].into(),
-            ComponentDigest::from_bytes(Sha256::digest(payload).into()).to_hex(),
+            checkpoint_digest,
             fields[17].into(),
             saved.integration,
             number(fields[15])?,
             number(fields[9])?,
             outputs,
+            restored_source_digests,
         )
         .map_err(|_| invalid())
     }

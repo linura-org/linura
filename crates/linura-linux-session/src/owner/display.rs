@@ -35,6 +35,7 @@ mod startup;
 pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
 mod original;
 mod prepared;
+mod presentation;
 pub use continuation::NativeDisplayContinuation;
 pub use power::NativeDisplayPowerFence;
 pub use preimage::NativeDisplayRecoveryCheckpoint;

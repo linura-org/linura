@@ -499,4 +499,146 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         self.validate_registered_managed_plan(&plan, RiskClass::SecuritySensitive)?;
         Ok(plan)
     }
+
+    /// Observe-only reconciliation of the restoration's intended baseline.
+    /// Canonical NoChange requires independently fresh original Root protection,
+    /// complete native sources/layout, logind/coverage and actual post-write
+    /// KMS/frame facts bound to this durable dispatch. This cannot reprepare or
+    /// dispatch, and it never retires the ORIGINAL transaction/checkpoint or
+    /// releases any native fence. A committed snapshot is historical Control
+    /// state, not a credential for that separate qualified terminal continuation.
+    pub fn reconcile_original_display_restoration(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request_id: &RequestId,
+    ) -> Result<linura_transaction::TransactionSnapshot, ManagedLifecycleError> {
+        let suffix = request_id
+            .as_str()
+            .strip_prefix(DISPLAY_RESTORATION_REQUEST_PREFIX)
+            .ok_or_else(|| {
+                ManagedLifecycleError::InvalidRequestIdentity(
+                    "not an original restoration request".into(),
+                )
+            })?;
+        validate_operation_id(suffix)?;
+        self.display_journal()?
+            .integrity_check()
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        self.authority.integrity_check()?;
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let retained = self
+            .display_journal()?
+            .load(&principal_id, request_id)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(ManagedLifecycleError::Authority(
+                "restoration journal substituted request identity".into(),
+            ));
+        }
+        let request = crate::retained_request::decode(&retained)?;
+        validate_public_request(&request)?;
+        validate_request_identity(&request)?;
+        self.authority
+            .assert_request_matches(&principal, &request)?;
+        if retained.digest() != &crate::durable_authority::digest_request(&request)? {
+            return Err(ManagedLifecycleError::Authority(
+                "restoration retained request digest differs".into(),
+            ));
+        }
+        let text = request
+            .desired_state
+            .get("restore_original")
+            .ok_or_else(|| {
+                ManagedLifecycleError::Contract("restoration material is missing".into())
+            })?;
+        let material = DisplayRestorationMaterial::decode(text)
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        if principal.as_str()
+            != format!(
+                "unix:uid:{}",
+                material.replacement().topology().session().uid()
+            )
+        {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "restoration reconciliation requires its authenticated owner".into(),
+            ));
+        }
+        effect_from_request(&request)?;
+        let transaction = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction)?;
+        let reserved = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Reserved,
+        )?
+        .ok_or_else(|| {
+            ManagedLifecycleError::Authority("restoration reservation is absent".into())
+        })?;
+        reserved.validate_after(None)?;
+        let dispatched = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Dispatched,
+        )?
+        .ok_or_else(|| ManagedLifecycleError::Authority("restoration dispatch is absent".into()))?;
+        dispatched.validate_after(Some(&reserved))?;
+        let source = self.original_display_context(&principal, material.original_request())?;
+        let _context = self
+            .previews
+            .enter_original_display_verification_context(source, &request, &snapshot, &dispatched)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        if snapshot.state == TransactionState::Indeterminate {
+            let floor = self.registered_managed_risk_floor(&request)?;
+            let recovered = self.authority.recover_indeterminate_without_replay(
+                &mut self.previews,
+                principal.clone(),
+                actor,
+                request,
+                floor,
+            )?;
+            let DurableRecoveryOutcome::Verified(verified) = recovered else {
+                return Err(ManagedLifecycleError::Authority(
+                    "restoration postcondition remains unresolved".into(),
+                ));
+            };
+            self.authority.commit_verified(&principal, verified)?;
+        } else {
+            // A restart after durable verification/commit still performs the
+            // SAME fresh canonical proof. An old commit is never current state.
+            let (plan, observed) = self
+                .previews
+                .build_fresh_original_display_restoration_plan(&principal, actor, &request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            if plan.status != linura_planner::PlanStatus::NoChange || plan.execution_authorized() {
+                return Err(ManagedLifecycleError::Authority(
+                    "restoration postcondition is not independently satisfied".into(),
+                ));
+            }
+            observed
+                .require_current(now_ms()?)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            if snapshot.state == TransactionState::Verified {
+                let verified = self.authority.resume_verified(&principal, &transaction)?;
+                self.authority.commit_verified(&principal, verified)?;
+            } else if snapshot.state != TransactionState::Committed {
+                return Err(ManagedLifecycleError::TerminalState(
+                    "restoration is not a dispatched observe-only transaction".into(),
+                ));
+            }
+        }
+        let terminal = self.authority.snapshot(&transaction)?;
+        if terminal.state != TransactionState::Committed
+            || terminal.principal != principal_id
+            || terminal.request_id != *request_id
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "restoration commit readback differs".into(),
+            ));
+        }
+        Ok(terminal)
+    }
 }

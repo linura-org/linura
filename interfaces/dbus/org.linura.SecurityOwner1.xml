@@ -114,6 +114,11 @@
     <method name="ObservePreparedDisplay">
       <arg name="observation" type="((ssstssb)ss)" direction="out"/>
     </method>
+    <!-- Read-only; independently supervised Control only. Fresh private KMS and
+         immutable post-write hardware frame facts. Never release authority. -->
+    <method name="ObserveOriginalDisplayPresentation">
+      <arg name="facts" type="s" direction="out"/>
+    </method>
     <!-- Read-only; supervised Control only. Complete canonical intent and
          immutable native correlation scope this get_status probe. Phases are
          native facts, never verified layout, approval or replay permission. -->

@@ -7,7 +7,7 @@
 mod provider_contract;
 pub use provider_contract::*;
 mod display_baseline;
-pub use display_baseline::display_baseline_guard;
+pub use display_baseline::{display_baseline_guard, display_layout_source_guard};
 
 mod capabilityless_adapter;
 pub use capabilityless_adapter::CapabilitylessInterpretationAdapter;

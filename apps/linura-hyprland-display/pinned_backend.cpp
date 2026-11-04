@@ -12,6 +12,7 @@
 #include "startup_fence.h"
 #include "original_restoration_grant.h"
 #include "native_baseline_guard.h"
+#include "native_kernel_scanout.h"
 #include "protected_wire.h"
 
 #include "src/Compositor.hpp"
@@ -575,6 +576,102 @@ class PinnedBackend final : public Backend
             active.failed = true;
         return active.failed ? 6U : 3U;
     }
+    [[nodiscard]] std::optional<std::string> originalPresentation()
+    {
+        if (!originalRecovery || writing || commitFailed || originalRecovery->failed ||
+            !startupFence.recoveryAvailable() || !originalRecovery->protection->healthy())
+            return std::nullopt;
+        auto &active = *originalRecovery;
+        if (!active.bound.transaction.starts_with("transaction:") ||
+            active.bound.transaction.size() > 256 ||
+            !std::all_of(
+                active.bound.transaction.begin(), active.bound.transaction.end(), [](char c) {
+                    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ':' || c == '-';
+                }))
+            return std::nullopt;
+        const auto started = clock();
+        const auto budget = [&] {
+            const auto now = clock();
+            return started && now && now->unixMs >= started->unixMs &&
+                   now->bootMs >= started->bootMs && now->unixMs - started->unixMs < 2000 &&
+                   now->bootMs - started->bootMs < 2000;
+        };
+        if (!budget() || !active.grant->verify() || !budget())
+            return std::nullopt;
+        const auto &source = active.grant->source();
+        const auto fields = OriginalGrantCodec::materialFields(source.material);
+        const auto sample = snapshot();
+        const auto guard = sample ? nativeBaselineGuard(*sample, source.desiredText) : std::nullopt;
+        if (!fields || !sample || !guard || sample->heads.size() != active.targets.size() ||
+            !hasDesiredPoweredRoot(active.targets, *sample) || !budget())
+            return std::nullopt;
+        // Every emitted string is bounded canonical material authenticated by
+        // the original grant. Raw native rules and buffer handles stay private.
+        std::string heads;
+        std::uint64_t postWriteEpoch = 0;
+        for (std::size_t i = 0; i < active.targets.size(); ++i) {
+            const auto &target = active.targets[i];
+            const auto &head = sample->heads[i];
+            const auto monitor = monitorFor(target.output);
+            if (target != head.current || !monitor || !budget())
+                return std::nullopt;
+            auto *output = dynamic_cast<Aquamarine::CDRMOutput *>(monitor->m_output.get());
+            const auto implementation = output ? output->getBackend() : nullptr;
+            auto *drm = dynamic_cast<Aquamarine::CDRMBackend *>(implementation.get());
+            const auto kernel =
+                drm ? readNativeKernelScanout(drm->drmFD(),
+                                              static_cast<std::uint32_t>(output->getConnectorID()),
+                                              budget)
+                    : std::nullopt;
+            if (!kernel || !budget())
+                return std::nullopt;
+            std::uint64_t commit = 0;
+            if (target.enabled) {
+                const auto frame = originalRestorationFrame(monitor.get(), active.bound);
+                const auto currentMode = monitor->m_currentMode;
+                if (!kernel->active || !frame || !frame->buffer || !currentMode ||
+                    !currentMode->modeInfo || mode(currentMode) != std::optional{target.mode} ||
+                    !sameKernelMode(kernel->mode, *currentMode->modeInfo))
+                    return std::nullopt;
+                const auto attachment =
+                    frame->buffer->attachments.get<Aquamarine::CDRMBufferAttachment>();
+                if (!attachment || !attachment->fb || attachment->fb->dead ||
+                    attachment->fb->backend.lock().get() != drm ||
+                    attachment->fb->buffer.lock() != frame->buffer ||
+                    attachment->fb->id != kernel->framebuffer ||
+                    (postWriteEpoch && postWriteEpoch != frame->postWriteEpoch))
+                    return std::nullopt;
+                postWriteEpoch = frame->postWriteEpoch;
+                commit = frame->commit;
+            } else if (kernel->active || kernel->crtc || kernel->framebuffer || kernel->plane)
+                return std::nullopt;
+            if (!heads.empty())
+                heads += ',';
+            heads += "{\"handle\":\"" + std::to_string(head.key.handle) + "\",\"generation\":\"" +
+                     std::to_string(head.key.generation) +
+                     "\",\"enabled\":" + (target.enabled ? "true" : "false") +
+                     ",\"crtc\":" + std::to_string(kernel->crtc) +
+                     ",\"framebuffer\":" + std::to_string(kernel->framebuffer) + ",\"commit\":\"" +
+                     std::to_string(commit) + "\"}";
+        }
+        // A successful independent powered root necessarily supplied a fresh
+        // post-write opaque hardware frame. All source/geometry facts remain
+        // unchanged across kernel probing, and original Root continuity is fresh.
+        const auto final = snapshot();
+        if (!postWriteEpoch || !final || *final != *sample || !budget() ||
+            !active.protection->healthy() || !active.grant->verify() || !budget())
+            return std::nullopt;
+        std::string proof = "{\"schema\":1,\"topology\":\"" + source.replacementTopology +
+                            "\",\"original_dispatch\":\"" + std::string((*fields)[1]) +
+                            "\",\"checkpoint\":\"" + std::string((*fields)[2]) +
+                            "\",\"transaction\":\"" + active.bound.transaction +
+                            "\",\"effect\":\"" + active.bound.effectDigest + "\",\"dispatch\":\"" +
+                            active.bound.dispatchDigest + "\",\"source_guard\":\"" + *guard +
+                            "\",\"sampled_boot_ms\":\"" + std::to_string(started->bootMs) +
+                            "\",\"post_write_epoch\":\"" + std::to_string(postWriteEpoch) +
+                            "\",\"heads\":[" + heads + "]}";
+        return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;
+    }
     [[nodiscard]] PHLMONITOR monitorFor(OutputKey key) const
     {
         const auto found = std::find_if(bindings.begin(), bindings.end(),
@@ -841,7 +938,8 @@ void initialize(wl_display &display, wl_event_loop &loop)
                 startupAdmissionChanged();
                 return true; // Ownership transferred, even if event setup failed.
             }},
-        NativeOriginalRestorationPort{restoreOriginalNative, originalNativeStatus});
+        NativeOriginalRestorationPort{restoreOriginalNative, originalNativeStatus,
+                                      [] { return backend->originalPresentation(); }});
     initializeProtectedDisplay(display);
 }
 void shutdown()

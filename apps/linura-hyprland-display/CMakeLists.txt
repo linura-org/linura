@@ -131,6 +131,14 @@ if(BUILD_TESTING)
     # Mandatory in the real pinned compositor build. Portable mechanism suites
     # alone do not exercise GLES or qualify actual rendered scanout storage.
     if(TARGET hyprland_lib)
+        pkg_check_modules(NATIVE_DRM REQUIRED IMPORTED_TARGET libdrm)
+        add_executable(linura-native-kernel-scanout-tests tests/native_kernel_scanout.cpp)
+        target_include_directories(linura-native-kernel-scanout-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(linura-native-kernel-scanout-tests PRIVATE PkgConfig::NATIVE_DRM)
+        target_compile_options(linura-native-kernel-scanout-tests PRIVATE
+            -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+        add_test(NAME hyprland-native-kernel-scanout COMMAND linura-native-kernel-scanout-tests)
+        set_tests_properties(hyprland-native-kernel-scanout PROPERTIES TIMEOUT 5)
         pkg_check_modules(PROTECTED_EGL REQUIRED IMPORTED_TARGET egl>=1.5 glesv2>=3.2)
         add_executable(linura-hyprland-protected-opaque-buffer-tests tests/protected_opaque_buffer.cpp)
         target_include_directories(linura-hyprland-protected-opaque-buffer-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

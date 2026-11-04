@@ -25,6 +25,7 @@ pub struct DisplayOriginalProtectionFacts {
     sampled_boot_ms: u64,
     confirmation_deadline_unix_ms: u64,
     outputs: BTreeMap<DisplayOutputId, DisplayRecoveryMetadata>,
+    restored_source_digests: BTreeMap<DisplayOutputId, String>,
 }
 
 impl DisplayOriginalProtectionFacts {
@@ -39,6 +40,7 @@ impl DisplayOriginalProtectionFacts {
         sampled_boot_ms: u64,
         confirmation_deadline_unix_ms: u64,
         outputs: BTreeMap<DisplayOutputId, DisplayRecoveryMetadata>,
+        restored_source_digests: BTreeMap<DisplayOutputId, String>,
     ) -> Result<Self, DisplayEvidenceError> {
         let material = DisplayLayoutMaterial::decode(&original_material)
             .map_err(|_| DisplayEvidenceError::Shape)?;
@@ -51,6 +53,10 @@ impl DisplayOriginalProtectionFacts {
             || outputs.is_empty()
             || outputs.len() > 16
             || outputs.keys().any(|id| id.topology() != old)
+            || !outputs.keys().eq(restored_source_digests.keys())
+            || restored_source_digests
+                .values()
+                .any(|value| !canonical_digest(value))
         {
             return Err(DisplayEvidenceError::Identity);
         }
@@ -89,12 +95,13 @@ impl DisplayOriginalProtectionFacts {
             sampled_boot_ms,
             confirmation_deadline_unix_ms,
             outputs,
+            restored_source_digests,
         })
     }
 
     pub fn attributes(&self) -> BTreeMap<String, ObservedValue> {
         let mut attrs = BTreeMap::from([
-            ("original_protection_schema".into(), ObservedValue::U64(1)),
+            ("original_protection_schema".into(), ObservedValue::U64(2)),
             (
                 "original_material".into(),
                 ObservedValue::Text(self.original_material.clone()),
@@ -146,6 +153,10 @@ impl DisplayOriginalProtectionFacts {
                     "native_identity_digest",
                     ObservedValue::Text(metadata.native_identity_digest().into()),
                 ),
+                (
+                    "restored_source_digest",
+                    ObservedValue::Text(self.restored_source_digests[output].clone()),
+                ),
             ] {
                 attrs.insert(format!("{prefix}.{key}"), value);
             }
@@ -183,8 +194,8 @@ impl DisplayOriginalProtectionFacts {
             return Err(DisplayEvidenceError::Freshness);
         }
         let attrs = &observation.attributes;
-        if attrs.len() > 90
-            || number(attrs, "original_protection_schema")? != 1
+        if attrs.len() > 106
+            || number(attrs, "original_protection_schema")? != 2
             || text(attrs, "original_dispatch")? != scope.original_dispatch()
         {
             return Err(DisplayEvidenceError::Shape);
@@ -196,6 +207,7 @@ impl DisplayOriginalProtectionFacts {
         let material = DisplayLayoutMaterial::decode(text(attrs, "original_material")?)
             .map_err(|_| DisplayEvidenceError::Shape)?;
         let mut outputs = BTreeMap::new();
+        let mut restored_source_digests = BTreeMap::new();
         for index in 0..count {
             let prefix = format!("original_output.{index}");
             let output = DisplayOutputId::new(
@@ -209,6 +221,10 @@ impl DisplayOriginalProtectionFacts {
                 text(attrs, &format!("{prefix}.base_configuration_digest"))?.into(),
                 text(attrs, &format!("{prefix}.native_identity_digest"))?.into(),
             )?;
+            restored_source_digests.insert(
+                output.clone(),
+                text(attrs, &format!("{prefix}.restored_source_digest"))?.into(),
+            );
             if outputs.insert(output, metadata).is_some() {
                 return Err(DisplayEvidenceError::Identity);
             }
@@ -223,6 +239,7 @@ impl DisplayOriginalProtectionFacts {
             number(attrs, "original_sampled_boot_ms")?,
             number(attrs, "original_confirmation_deadline_unix_ms")?,
             outputs,
+            restored_source_digests,
         )?;
         if result.attributes() != *attrs {
             return Err(DisplayEvidenceError::Shape);
@@ -261,6 +278,13 @@ impl DisplayOriginalProtectionFacts {
     #[must_use]
     pub const fn outputs(&self) -> &BTreeMap<DisplayOutputId, DisplayRecoveryMetadata> {
         &self.outputs
+    }
+    /// Expected source hashes mechanically projected from the immutable original
+    /// checkpoint, never from the replacement's desired or current rule cache.
+    /// The authenticated adapter supplies comparison facts, not release authority.
+    #[must_use]
+    pub const fn restored_source_digests(&self) -> &BTreeMap<DisplayOutputId, String> {
+        &self.restored_source_digests
     }
 }
 

@@ -141,7 +141,8 @@ class Harness final
                        wl_client *) -> std::optional<std::uint32_t> { return std::nullopt; },
                     [](const Correlation &) -> std::optional<std::uint32_t> {
                         return std::nullopt;
-                    }});
+                    },
+                    []() -> std::optional<std::string> { return std::nullopt; }});
         assert(!publishIntegration || (endpoint && endpoint->available()));
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
             *display,

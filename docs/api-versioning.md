@@ -364,6 +364,30 @@ partial faults remain latched and every recovery fence remains held. Independent
 terminal composition and native qualification remain unfinished; these private
 changes create no public mutation support or qualification claim.
 
+Original-protection observation schema 2 additionally carries a complete map of
+expected restored source digests derived from the same immutable original
+checkpoint; it does not rewrite durable checkpoint history. The optional
+`original_restoration_presentation` event on the private display snapshot and
+supervised-Control-only `SecurityOwner1.ObserveOriginalDisplayPresentation` method
+expose a bounded post-write KMS/frame sample. The Linux adapter projects that
+sample into the canonical `display.original-presentation.observe` envelope for
+the exact recovery resource, including its complete output inventory and exact
+checkpoint/transaction/effect/dispatch/source bindings. All in-repository native,
+Rust, generated-protocol and introspection consumers change together. These
+Experimental observations are neither execution credentials nor terminal release
+permission. The observe-only Control reconciliation API commits the restoration
+only after the same fresh canonical proof, including after restart; linked
+original retirement and native/Root finalization remain separate required work.
+
+The internal transaction signer adds a distinct terminal-only Verified compensation
+resolution for the replacement-recovery crash gap. It preserves ordinary
+Indeterminate-only recovery and all existing persistence formats. New SQLite
+history explicitly uses `verified-compensated-v1`, retaining the prior verified
+provenance while closing authority as RecoveryBlocked. Old readers reject the new
+audit kind instead of misinterpreting it. No schema migration, historical event
+rewrite, desired-state commit, public method or executor credential is introduced.
+The linked Control/native terminal workflow remains required before activation.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

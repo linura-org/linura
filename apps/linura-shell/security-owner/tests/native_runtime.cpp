@@ -554,6 +554,8 @@ int main(int argc, char **argv)
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("retainedVerifiedRelease()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("observeOriginalDisplayPresentation()") ==
+           -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("restoreOriginalDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
@@ -584,7 +586,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 28 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 29 && signals == 1 && annotations == 3);
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
           "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",
