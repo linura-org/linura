@@ -45,6 +45,7 @@ struct Machine {
     restoration_proof_fault: u8,
     restoration_link_fault: u8,
     restoration_link_reads: usize,
+    restoration_link_fail_read: Option<usize>,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -384,6 +385,11 @@ impl ApprovedRequestJournal for FailingJournal {
                 .lock()
                 .unwrap_or_else(|_| unreachable!("fixture poisoned"));
             m.restoration_link_reads += 1;
+            if m.restoration_link_fail_read == Some(m.restoration_link_reads) {
+                return Err(TransactionStoreError::Storage(
+                    "simulated finalization history readback loss".into(),
+                ));
+            }
             if m.restoration_link_fault == 3 && m.restoration_link_reads == 3 {
                 return Err(TransactionStoreError::Storage(
                     "simulated terminal readback loss".into(),

@@ -397,6 +397,20 @@ restart repair. Its returned receipt is historical correlation, with no public
 D-Bus/SDK mutation activation or native/Root release authority. This additional
 opaque journal payload does not reinterpret prior phase records or checkpoints.
 
+The separate private Experimental `LNRF:1` material preserves the complete original
+`LNRI:1` bytes and adds bounded terminal comparison bindings. Its purpose-separated
+`finalize-original-display-restoration` SDK descriptor and
+`linura.native-display.finalization-reservation.v1` adapter codec accept neither
+old Apply nor restoration bindings. They activate no registered operation,
+protected purpose or executor/native endpoint and change no durable record.
+
+The internal read-only `inspect_original_display_finalization` API returns an
+expiring material/evidence report only after exact authenticated linked retirement
+and a new independent canonical restoration proof. It reads history again after
+probing, never repairs or appends history, and cannot issue a release credential.
+Its initial same-lock scope refuses owner/generation changes. There is no new
+public D-Bus/SDK method, production mutation support or native qualification claim.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

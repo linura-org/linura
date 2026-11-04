@@ -14,6 +14,10 @@ mod display_restoration_reservation;
 pub use display_restoration_reservation::{
     MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayRestorationReservation,
 };
+mod display_finalization_reservation;
+pub use display_finalization_reservation::{
+    MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, NativeDisplayFinalizationReservation,
+};
 mod original_display_observer;
 pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;

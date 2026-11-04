@@ -70,3 +70,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0045 — S21 device effects share trusted Control authority and verified recovery](0045-s21-workstation-device-authority.md)
 - [0046 — Independent original display protection](0046-independent-original-display-protection.md)
 - [0047 — Original display restoration is a fresh managed effect](0047-original-display-restoration.md)
+- [0048 — Authorize display terminal finalization separately](0048-qualified-display-terminal-finalization.md)

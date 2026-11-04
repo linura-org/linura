@@ -67,7 +67,7 @@ pub trait OriginalDisplayRestorationPort: Debug + Send {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn original_display_context(
+    pub(super) fn original_display_context(
         &self,
         principal: &AuthenticatedPrincipal,
         original_request: &RequestId,

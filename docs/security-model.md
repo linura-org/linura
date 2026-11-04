@@ -754,3 +754,23 @@ desired layout as committed. Missing/substituted link data, changed authority,
 stale post-link evidence or a lost final readback cannot release a native/Root
 fence or repeat the effect. The returned historical receipt is not permission
 for the still-required qualified release and cleanup continuation.
+
+Terminal finalization has a separate bounded `LNRF:1` comparison intent. It nests
+unchanged nonterminal `LNRI:1` history and binds the restoration request/dispatch,
+immutable link, restored source guard, post-write epoch and current login/lock.
+Its purpose-separated SDK effect and adapter reservation cannot validate an old
+Apply or restoration binding. A codec or reservation is never execution authority.
+The terminal operation and privileged/native endpoints remain unavailable.
+
+Control's read-only `inspect_original_display_finalization` authenticates both
+actual requests, exact committed restoration, reserved/dispatched history, link,
+original checkpoint and exact linked original retirement before provider probes.
+It obtains the same independent fresh five-source canonical restoration proof,
+then re-reads the durable anchors and checks the original combined expiry. It
+cannot append a link, complete a CAS, prepare, dispatch, clean up or release any
+protection. A missing readback still refuses the report. This initial query
+requires fresh coverage for the restoration's exact lock identity; a replaced
+owner/generation is unsupported until separately qualified current-lock admission.
+Reports are expiring comparison data, never reusable terminal authority. Fresh
+protected review, durable prepare/revalidation, native/Root quiescence and release,
+independent completion proof and ownership-aware cleanup remain required.

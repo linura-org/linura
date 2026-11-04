@@ -250,6 +250,18 @@ impl RestorationLink {
         }
         Ok(snapshot)
     }
+    /// Exact authenticated anchors for a later terminal inspection. Neither
+    /// matching state names nor a link written before the original CAS suffice.
+    pub(crate) fn require_retired(
+        &self,
+        original: &TransactionSnapshot,
+        restoration: &TransactionSnapshot,
+    ) -> Result<(), ManagedLifecycleError> {
+        if original != &self.retired_original()? || restoration != &self.restoration {
+            return Err(invalid());
+        }
+        Ok(())
+    }
 }
 
 struct Reader<'a>(&'a [u8]);

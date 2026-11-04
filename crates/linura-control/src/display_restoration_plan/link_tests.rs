@@ -88,6 +88,39 @@ fn link_is_exact_write_once_historical_data_with_a_single_retirement_version() {
         link.original().current_generation
     );
     assert_eq!(retired.transaction_id, link.original().transaction_id);
+    value(link.require_retired(&retired, link.restoration()));
+    assert!(
+        link.require_retired(link.original(), link.restoration())
+            .is_err()
+    );
+    for original in [true, false] {
+        for field in 0..7 {
+            let mut old = retired.clone();
+            let mut restored = link.restoration().clone();
+            let changed = if original { &mut old } else { &mut restored };
+            match field {
+                0 => changed.current_generation += 1,
+                1 => changed.state_version += 1,
+                2 => {
+                    changed.binding_digest =
+                        linura_transaction::digest_bytes("fixture:other", b"binding")
+                }
+                3 => changed.state = TransactionState::Verified,
+                4 => changed.principal = value(PrincipalId::new("unix:uid:1001")),
+                5 => changed.request_id = value(RequestId::new("request:other")),
+                _ => {
+                    changed.transaction_id = TransactionId::for_namespace(
+                        &changed.principal,
+                        &value(RequestId::new("request:other")),
+                    )
+                }
+            }
+            assert!(
+                link.require_retired(&old, &restored).is_err(),
+                "original={original} field={field}"
+            );
+        }
+    }
 }
 
 #[test]

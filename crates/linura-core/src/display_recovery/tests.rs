@@ -325,6 +325,35 @@ fn restoration_material_binds_original_request_checkpoint_and_new_intent() {
         value(material.validate_native(&old, &capabilities(&old), &new, &capabilities(&new)));
     assert_eq!(retained, original);
     assert_eq!(restored.desired(), &layout(&new, 100, true));
+    let terminal_text = value(crate::DisplayFinalizationMaterial::encode(
+        &value(RequestId::new("request:restored")),
+        &"1".repeat(64),
+        &"2".repeat(64),
+        &"3".repeat(64),
+        29,
+        restored.lock(),
+        &encoded,
+    ));
+    let terminal = value(crate::DisplayFinalizationMaterial::decode(&terminal_text));
+    assert_eq!(
+        value(terminal.validate_native(&old, &capabilities(&old), &new, &capabilities(&new))),
+        *restored.desired()
+    );
+    assert!(
+        terminal
+            .validate_native(&old, &capabilities(&old), &old, &capabilities(&old))
+            .is_err()
+    );
+    let mut unsupported = capabilities(&new);
+    unsupported[0] = value(NativeOutputCapabilities::new(
+        new.outputs()[0].clone(),
+        vec![value(DisplayMode::new(1280, 720, 60_000))],
+        true,
+    ));
+    assert_eq!(
+        terminal.validate_native(&old, &capabilities(&old), &new, &unsupported),
+        Err(DisplayLayoutError::UnsupportedMode)
+    );
     assert_eq!(
         encoded,
         value(DisplayRestorationMaterial::encode(

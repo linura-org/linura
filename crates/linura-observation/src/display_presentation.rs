@@ -255,6 +255,10 @@ impl DisplayOriginalPresentationFacts {
         &self.source_guard
     }
     #[must_use]
+    pub const fn post_write_epoch(&self) -> u64 {
+        self.epoch
+    }
+    #[must_use]
     pub fn matches_layout(&self, layout: &DisplayLayout) -> bool {
         layout.topology() == self.scope.replacement()
             && layout.outputs().len() == self.frames.len()

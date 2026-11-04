@@ -1323,3 +1323,30 @@ distinct registered managed operation retains SecuritySensitive risk and fresh
 administrator approval/prepare obligations. These review mechanisms do not
 qualify single-use dispatch, native restoration, independent terminal proof or
 cleanup; public display mutation remains disabled pending that composition.
+
+### Terminal comparison and linked-history inspection
+
+An attacker may present old restoration approval, a committed snapshot, a copied
+terminal receipt, forged digests or a truncated/oversized terminal intent as
+permission to release protection. Separate bounded `LNRF:1` material preserves
+the old `LNRI:1` bytes and uses a distinct effect/reservation domain; none of these
+data formats is an approval or executor credential. The terminal operation and
+Root/native release endpoints remain unavailable.
+
+The read-only Control inspection loads actual authenticated requests, exact
+committed restoration and linked original retirement, complete phase history and
+original checkpoint before requesting current facts. A link published before its
+original CAS fails inspection. Both snapshots must match every linked identity,
+generation, version, state and binding; state names alone cannot pass. A fresh
+independent five-source canonical proof is mandatory, followed by durable anchor
+readback and the original combined expiry. Missing history/readback, stale or
+synthetic evidence, source/checkpoint/frame/dispatch substitution and lost Root
+continuity refuse the report without effects or implicit bookkeeping repair.
+The current same-lock query refuses a replaced owner/generation. A previous
+successful report cannot freshen any contributor or authorize later release.
+
+Fresh protected terminal review, canonical prepare/revalidation, authenticated
+native/Root quiescence and one-use release, lost-ack repair, current lock/input
+preservation and shared-ownership-aware retention still require implementation
+and native qualification. No report, parser test or simulated SQLite fixture is
+that qualification.

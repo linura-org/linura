@@ -9,9 +9,9 @@ pub use display::{
     AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
     DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
     DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
-    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    TrustedDisplayDecision,
+    OriginalDisplayFinalizationInspection, OriginalDisplayRestorationPort,
+    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
+    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
 };
 
 use linura_core::{

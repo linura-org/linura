@@ -822,6 +822,35 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"))
             .restoration_native_verified = true;
+        // Committed restoration alone is insufficient. Inspection must not
+        // create the missing link or silently perform original retirement.
+        let committed = value(control.reconcile_original_display_restoration(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        let sampled = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .sequence;
+        assert!(
+            control
+                .inspect_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    &receipt.request_id
+                )
+                .is_err()
+        );
+        assert_eq!(snapshot(&database, &original_transaction), before);
+        assert_eq!(snapshot(&database, &receipt.transaction_id), committed);
+        assert_eq!(
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .sequence,
+            sampled
+        );
         let terminal = value(control.retire_original_display_restoration(
             principal(),
             actor(true),
@@ -836,6 +865,49 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
             terminal.restoration.state,
             linura_transaction::TransactionState::Committed
         );
+        let inspection = value(control.inspect_original_display_finalization(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        let material = value(linura_core::DisplayFinalizationMaterial::decode(
+            inspection.material(),
+        ));
+        assert_eq!(inspection.original(), &terminal.original);
+        assert_eq!(inspection.restoration(), &terminal.restoration);
+        assert_eq!(material.restoration_request(), &receipt.request_id);
+        assert_eq!(
+            Some(material.restoration_dispatch()),
+            receipt.dispatch_digest.as_deref()
+        );
+        assert_eq!(
+            material.terminal_link(),
+            terminal
+                .link_digest
+                .strip_prefix("sha256:")
+                .unwrap_or_else(|| unreachable!("canonical link"))
+        );
+        assert_eq!(material.current_lock(), &input.lock);
+        assert_eq!(material.post_write_epoch(), 1);
+        assert_eq!(
+            material.restoration_text(),
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .restoration_material
+                .as_deref()
+                .unwrap_or_else(|| unreachable!("material"))
+        );
+        value(inspection.observation().require_current(now_unix_ms()));
+        assert_eq!(
+            snapshot(&database, &original_transaction),
+            terminal.original
+        );
+        assert_eq!(
+            snapshot(&database, &receipt.transaction_id),
+            terminal.restoration
+        );
+        let expected_material = inspection.material().to_owned();
         drop(control);
         let previews = replacement_previews(&machine, &original, &input);
         let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
@@ -847,6 +919,49 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
             )),
             terminal
         );
+        let fresh = value(restarted.inspect_original_display_finalization(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        assert_eq!(fresh.material(), expected_material);
+        assert!(fresh.observation().sequence > inspection.observation().sequence);
+        assert!(
+            restarted
+                .inspect_original_display_finalization(
+                    value(AuthenticatedPrincipal::new("unix:uid:1001")),
+                    actor(true),
+                    &receipt.request_id,
+                )
+                .is_err()
+        );
+        for fail_after in [1, 2] {
+            let sequence = {
+                let mut m = machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                m.restoration_link_fail_read = Some(m.restoration_link_reads + fail_after);
+                m.sequence
+            };
+            assert!(
+                restarted
+                    .inspect_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                    )
+                    .is_err()
+            );
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            if fail_after == 1 {
+                assert_eq!(m.sequence, sequence); // Authenticate history before provider calls.
+            } else {
+                assert!(m.sequence > sequence); // Failure after the independent join still refuses.
+            }
+            m.restoration_link_fail_read = None;
+        }
         machine
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"))
@@ -856,6 +971,36 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
                 .retire_original_display_restoration(principal(), actor(true), &receipt.request_id)
                 .is_err()
         );
+        // A retained successful inspection cannot freshen missing/substituted
+        // current proof. These faults never authorize or dispatch any effect.
+        for fault in 1..=11 {
+            {
+                let mut m = machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                m.restoration_proof_fault = if fault <= 9 { fault } else { 0 };
+                m.native_base_drift = fault == 10;
+                m.original_protection_lost = fault == 11;
+            }
+            assert!(
+                restarted
+                    .inspect_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                    )
+                    .is_err(),
+                "terminal inspection fault {fault}"
+            );
+            assert_eq!(
+                snapshot(&database, &original_transaction),
+                terminal.original
+            );
+            assert_eq!(
+                snapshot(&database, &receipt.transaction_id),
+                terminal.restoration
+            );
+        }
         let m = machine
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
@@ -908,6 +1053,31 @@ fn lost_link_or_post_link_proof_and_terminal_readback_cannot_release_or_repeat_e
                 linura_transaction::TransactionState::Indeterminate
             }
         );
+        // Inspection never repairs a missing link or completes a missing CAS.
+        // A lost terminal readback can be resolved only by reading the actual
+        // committed history and independently probing the native state again.
+        let inspected = control.inspect_original_display_finalization(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        );
+        if fault == 3 {
+            let inspected = value(inspected);
+            assert_eq!(
+                inspected.original(),
+                &snapshot(&database, &original_transaction)
+            );
+            assert_eq!(
+                inspected.restoration(),
+                &snapshot(&database, &receipt.transaction_id)
+            );
+        } else {
+            assert!(inspected.is_err());
+            assert_eq!(
+                snapshot(&database, &original_transaction).state,
+                linura_transaction::TransactionState::Indeterminate
+            );
+        }
         drop(control);
         {
             let mut m = machine

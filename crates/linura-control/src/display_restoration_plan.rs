@@ -29,7 +29,7 @@ use crate::{
     PlanPreviewControlError,
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct OriginalDisplayPlanningContext {
     principal: AuthenticatedPrincipal,
     original_request: PlanDesiredStateRequest,
@@ -335,6 +335,16 @@ pub(crate) struct OriginalContextGuard {
     slot: OriginalContextSlot,
     context: Arc<BoundContext>,
 }
+
+/// One freshly joined canonical restoration proof. Presentation is populated
+/// only in authenticated dispatched verification context, after every binding,
+/// source, layout, frame and safety check has succeeded. This is not authority
+/// for a terminal effect or permission to release a fence.
+pub(crate) struct OriginalDisplayRestorationProof {
+    pub(crate) plan: ReconciliationPlan,
+    pub(crate) observation: ObservationEnvelope,
+    pub(crate) presentation: Option<DisplayOriginalPresentationFacts>,
+}
 impl Drop for OriginalContextGuard {
     fn drop(&mut self) {
         if let Ok(mut slot) = self.slot.0.lock()
@@ -443,6 +453,17 @@ impl PlanPreviewControl {
         actor: Actor,
         request: &PlanDesiredStateRequest,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        let proof =
+            self.build_fresh_original_display_restoration_proof(principal, actor, request)?;
+        Ok((proof.plan, proof.observation))
+    }
+
+    pub(crate) fn build_fresh_original_display_restoration_proof(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        actor: Actor,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<OriginalDisplayRestorationProof, PlanPreviewControlError> {
         let bound = self
             .restoration_context
             .0
@@ -547,6 +568,7 @@ impl PlanPreviewControl {
         let restored_source_guard = bound
             .source
             .restored_source_guard(&material, &original, &facts)?;
+        let mut verified_presentation = None;
         if let Some(verification) = &bound.verification {
             let presentation = presentation
                 .as_ref()
@@ -593,6 +615,7 @@ impl PlanPreviewControl {
                     )));
                 }
             }
+            verified_presentation = Some(observed);
         }
         DisplayLayoutSafetyReview::review(
             principal,
@@ -674,7 +697,11 @@ impl PlanPreviewControl {
             level: PlanFindingLevel::Pass,
             message: format!("Expected checkpoint-derived restored layout/source guard {}; terminal hardware presentation remains independently required", restored_source_guard.to_hex()),
         });
-        Ok((plan, protection))
+        Ok(OriginalDisplayRestorationProof {
+            plan,
+            observation: protection,
+            presentation: verified_presentation,
+        })
     }
 }
 

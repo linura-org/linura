@@ -241,6 +241,31 @@ pub fn display_restoration_effect(material: &str) -> Result<EffectDescriptor, St
     .map_err(|error| error.to_string())
 }
 
+/// Correlation for a separately authorized terminal operation, never a release
+/// credential. The canonical managed path must freshly review linked history
+/// and current proof, durably prepare and consume its own sealed one-use port.
+/// Neither the restoration effect nor its old ExecutionBinding can substitute.
+pub fn display_finalization_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let decoded = linura_core::DisplayFinalizationMaterial::decode(material)
+        .map_err(|error| error.to_string())?;
+    let resource = decoded
+        .recovery_scope()
+        .map_err(|error| error.to_string())?
+        .resource_id()
+        .map_err(|error| error.to_string())?;
+    let digest = hash_parts(
+        b"linura.display.original-finalization-intent.v1",
+        &[material.as_bytes()],
+    );
+    EffectDescriptor::new(
+        ProviderId::new("hyprland-recovery").map_err(|error| error.to_string())?,
+        resource,
+        "finalize-original-display-restoration",
+        format!("LNRF-SHA256:1:{}", digest.to_hex()).into_bytes(),
+    )
+    .map_err(|error| error.to_string())
+}
+
 impl EffectDescriptor {
     pub fn new(
         provider: ProviderId,
@@ -570,6 +595,51 @@ mod tests {
         assert!(binding.validate_for(&restored).is_ok());
         assert!(binding.validate_for(&apply).is_err());
         assert!(display_restoration_effect(&replacement).is_err());
+        let lock = id(linura_core::DisplayLayoutMaterial::decode(&replacement))
+            .lock()
+            .clone();
+        let finalization = |guard: &str, epoch| {
+            id(linura_core::DisplayFinalizationMaterial::encode(
+                &id(linura_core::RequestId::new(
+                    "request:restoration-for-terminal",
+                )),
+                &binding.dispatch_digest.to_hex(),
+                &"d".repeat(64),
+                guard,
+                epoch,
+                &lock,
+                &encoded,
+            ))
+        };
+        let terminal_text = finalization(&"e".repeat(64), 2);
+        let terminal = id(display_finalization_effect(&terminal_text));
+        assert_eq!(terminal.resource, restored.resource);
+        assert_eq!(terminal.operation, "finalize-original-display-restoration");
+        assert!(terminal.canonical_payload.starts_with(b"LNRF-SHA256:1:"));
+        assert_ne!(terminal.digest(), restored.digest());
+        assert_ne!(terminal.digest(), apply.digest());
+        assert!(binding.validate_for(&terminal).is_err());
+        let terminal_binding = id(ExecutionBinding::new(
+            "transaction:finalization",
+            0,
+            1,
+            digest(3),
+            digest(4),
+            &terminal,
+        ));
+        assert!(terminal_binding.validate_for(&terminal).is_ok());
+        assert!(terminal_binding.validate_for(&restored).is_err());
+        for changed in [
+            finalization(&"f".repeat(64), 2),
+            finalization(&"e".repeat(64), 3),
+        ] {
+            assert_ne!(
+                terminal.digest(),
+                id(display_finalization_effect(&changed)).digest()
+            );
+        }
+        assert!(display_finalization_effect(&encoded).is_err());
+        assert!(display_restoration_effect(&terminal_text).is_err());
         assert!(display_layout_effect(&encoded).is_err());
     }
 
