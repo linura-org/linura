@@ -1,7 +1,9 @@
 //! Independently supervised, bounded protection mechanisms. No output writes,
 //! planning, policy, human approval, desired state or recovery orchestration.
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+#[cfg(test)]
+use std::io::Read;
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -151,6 +153,29 @@ fn consume<T>(
     }
     Ok(original.subscription)
 }
+// These are the protection service's own serialized mechanism states. No
+// client may supply them or turn an empty directory into current authority.
+fn ordinary_startup<T>(
+    pending: &BTreeMap<String, Pending<T>>,
+    witnesses_clear: impl FnOnce() -> Result<bool, String>,
+    storage_clear: impl FnOnce() -> Result<bool, String>,
+) -> Result<bool, String> {
+    Ok(pending.is_empty() && witnesses_clear()? && storage_clear()?)
+}
+
+fn retire_unused_startups<T>(
+    startups: &mut Vec<T>,
+    ordinary: bool,
+    mut unused: impl FnMut(&T) -> bool,
+) {
+    // No unresolved history may be cleaned up here. This closes only unused
+    // ordinary leases for definitely exited native processes. Live, unknown
+    // and recovery scopes remain retained, with the original bound unchanged.
+    if ordinary {
+        startups.retain(|startup| !unused(startup));
+    }
+}
+
 trait ProtectionPort: Clone + Send + Sync + 'static {
     fn reserve_restoration(
         &self,
@@ -233,6 +258,7 @@ impl Drop for GrantSlot {
 // retry/regrant, timer renewal or terminal release is offered on this channel.
 fn serve_grant_witness(
     writer: &mut UnixStream,
+    mut authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     mut verify: impl FnMut() -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     writer.set_nonblocking(false).map_err(|_| unavailable())?;
@@ -258,9 +284,8 @@ fn serve_grant_witness(
             writer
                 .set_read_timeout(Some(remaining))
                 .map_err(|_| unavailable())?;
-            match writer.read(&mut request[read..]) {
-                Ok(0) => return Err(unavailable()),
-                Ok(size) => {
+            match super::native_message::read_chunk(writer, &mut request[read..]) {
+                Ok((size, sender)) => {
                     if pending_deadline.is_none() {
                         pending_deadline = Some(
                             Instant::now()
@@ -268,6 +293,7 @@ fn serve_grant_witness(
                                 .ok_or_else(unavailable)?,
                         );
                     }
+                    authenticate(&sender)?;
                     read += size;
                 }
                 Err(error)
@@ -286,6 +312,13 @@ fn serve_grant_witness(
             return Err(unavailable());
         }
         verify()?;
+        let remaining = pending_deadline
+            .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
+            .filter(|value| !value.is_zero())
+            .ok_or_else(unavailable)?;
+        writer
+            .set_write_timeout(Some(remaining))
+            .map_err(|_| unavailable())?;
         writer.write_all(&request).map_err(|_| unavailable())?;
         sequence = sequence.checked_add(1).ok_or_else(unavailable)?;
     }
@@ -412,6 +445,11 @@ impl ProtectionPort for NativeProtection {
             super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
                 .map_err(|_| unavailable())?;
         let payload = self.original_for_scope(&admission, &scope)?;
+        let (_, integration) = NativeDisplayRecoveryCheckpoint::original_startup_scope(
+            &payload,
+            &dispatch(scope.original_dispatch())?,
+        )
+        .map_err(|_| unavailable())?;
         let projection =
             NativeDisplayRecoveryCheckpoint::restoration_native_projection(&payload, &record)
                 .map_err(|_| unavailable())?;
@@ -427,6 +465,9 @@ impl ProtectionPort for NativeProtection {
         self.admit(sender)?;
         self.original_for_scope(&admission, &scope)?;
         let (mut writer, native) = UnixStream::pair().map_err(|_| unavailable())?;
+        // Enable before the endpoint can leave Root; queued uncredentialed
+        // fragments cannot be retroactively authenticated.
+        rustix::net::sockopt::set_socket_passcred(&writer, true).map_err(|_| unavailable())?;
         writer.set_nonblocking(true).map_err(|_| unavailable())?;
         let encoded = record.canonical_bytes();
         let mut grant = b"LNRG:2\n".to_vec();
@@ -461,7 +502,28 @@ impl ProtectionPort for NativeProtection {
                 });
                 drop(slot); // Only the bounded transfer occupies the transfer slot.
                 if result.is_ok() {
-                    let _result = serve_grant_witness(&mut writer, &mut verify);
+                    let authenticate = |sender: &rustix::net::UCred| {
+                        let admission = super::protection_lock::acquire(
+                            &service.admission,
+                            super::protection_lock::BUDGET,
+                        )
+                        .map_err(|_| unavailable())?;
+                        let startup = admission
+                            .startups
+                            .iter()
+                            .find(|startup| {
+                                startup
+                                    .peer
+                                    .matches_preimage(scope.replacement(), &integration)
+                            })
+                            .ok_or_else(unavailable)?;
+                        startup.live().map_err(|_| unavailable())?;
+                        startup
+                            .peer
+                            .require_message_sender(sender)
+                            .map_err(|_| unavailable())
+                    };
+                    let _result = serve_grant_witness(&mut writer, authenticate, &mut verify);
                 }
             })
             .map_err(|_| unavailable())?;
@@ -513,17 +575,25 @@ impl ProtectionPort for NativeProtection {
         admission
             .pending
             .retain(|_, pending| pending.started.elapsed() < ORIGINAL_PROBE);
-        if admission.startups.len() >= MAX_STARTUPS
-            || admission.startups.iter().any(|old| {
-                old.peer.reuses_compositor(&peer)
-                    || old.peer.same_login(&peer) && !old.peer.definitely_exited()
-            })
-        {
+        // Check identity conflicts before any unused-lease retirement.
+        if admission.startups.iter().any(|old| {
+            old.peer.reuses_compositor(&peer)
+                || old.peer.same_login(&peer) && !old.peer.definitely_exited()
+        }) {
             return Err(startup_unavailable("overlapping-invocation"));
         }
-        let ordinary = admission.pending.is_empty()
-            && super::display_checkpoint::startup_clear()
-                .map_err(|_| startup_unavailable("history"))?;
+        let ordinary = ordinary_startup(
+            &admission.pending,
+            || self.witnesses.clear_for_startup(),
+            super::display_checkpoint::startup_clear,
+        )
+        .map_err(|_| startup_unavailable("history"))?;
+        retire_unused_startups(&mut admission.startups, ordinary, |old| {
+            old.ordinary && old.peer.definitely_exited()
+        });
+        if admission.startups.len() >= MAX_STARTUPS {
+            return Err(startup_unavailable("retained-invocation-limit"));
+        }
         let (lease, native) = UnixStream::pair().map_err(|_| startup_unavailable("lease"))?;
         // Re-authenticate after the history scan and before publishing. A lost
         // reply leaves this admission consumed; there is no transparent retry.
@@ -833,6 +903,130 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_startup_requires_no_pending_memory_or_storage_history() {
+        use std::cell::Cell;
+        for pending in [false, true] {
+            for memory_clear in [false, true] {
+                for disk_clear in [false, true] {
+                    let mut subscriptions = BTreeMap::new();
+                    if pending {
+                        subscriptions.insert(
+                            "fixture".into(),
+                            Pending {
+                                started: Instant::now(),
+                                sender: ":1.7".into(),
+                                subscription: (),
+                            },
+                        );
+                    }
+                    let memory_calls = Cell::new(0);
+                    let disk_calls = Cell::new(0);
+                    let ordinary = ordinary_startup(
+                        &subscriptions,
+                        || {
+                            memory_calls.set(memory_calls.get() + 1);
+                            Ok(memory_clear)
+                        },
+                        || {
+                            disk_calls.set(disk_calls.get() + 1);
+                            Ok(disk_clear)
+                        },
+                    )
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+                    assert_eq!(ordinary, !pending && memory_clear && disk_clear);
+                    assert_eq!(memory_calls.get(), u32::from(!pending));
+                    assert_eq!(disk_calls.get(), u32::from(!pending && memory_clear));
+                }
+            }
+        }
+        let pending = BTreeMap::<String, Pending<()>>::new();
+        assert!(
+            ordinary_startup(
+                &pending,
+                || Err("synthetic busy witness history".into()),
+                || unreachable!("unknown memory cannot be overridden by empty storage"),
+            )
+            .is_err()
+        );
+        assert!(
+            ordinary_startup(
+                &pending,
+                || Ok(true),
+                || Err("synthetic unavailable storage".into()),
+            )
+            .is_err()
+        );
+        // A vanished record can make the directory empty. The retained witness,
+        // including a poisoned/lost one, still prevents ordinary admission.
+        assert_eq!(
+            ordinary_startup(&pending, || Ok(false), || Ok(true)),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn unused_lease_retirement_preserves_live_unknown_and_recovery_endpoints() {
+        struct Lease {
+            ordinary: bool,
+            exited: Option<bool>,
+            _lease: UnixStream,
+        }
+        let mut leases = Vec::new();
+        let mut peers = Vec::new();
+        for (ordinary, exited) in [
+            (true, Some(false)),
+            (true, Some(true)),
+            (false, Some(true)),
+            (true, None),
+        ] {
+            let (lease, peer) = UnixStream::pair().unwrap_or_else(|e| unreachable!("{e}"));
+            peer.set_nonblocking(true)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            leases.push(Lease {
+                ordinary,
+                exited,
+                _lease: lease,
+            });
+            peers.push(peer);
+        }
+        retire_unused_startups(&mut leases, false, |_| {
+            unreachable!("unresolved history cannot retire any startup");
+        });
+        assert_eq!(leases.len(), 4);
+        retire_unused_startups(&mut leases, true, |entry| {
+            entry.ordinary && entry.exited == Some(true)
+        });
+        assert_eq!(leases.len(), 3);
+        for (index, mut peer) in peers.into_iter().enumerate() {
+            let result = peer.read(&mut [0_u8; 1]);
+            if index == 1 {
+                assert_eq!(result.unwrap_or_else(|e| unreachable!("{e}")), 0);
+            } else {
+                assert_eq!(
+                    result.err().map(|e| e.kind()),
+                    Some(std::io::ErrorKind::WouldBlock)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn startup_bound_is_preserved_for_referenced_scopes_without_accumulating_unused_leases() {
+        let mut referenced = vec![(); MAX_STARTUPS];
+        retire_unused_startups(&mut referenced, false, |_| true);
+        assert_eq!(referenced.len(), MAX_STARTUPS);
+        let mut unknown = vec![(); MAX_STARTUPS];
+        retire_unused_startups(&mut unknown, true, |_| false);
+        assert_eq!(unknown.len(), MAX_STARTUPS);
+        let mut unused = vec![(); MAX_STARTUPS];
+        for _ in 0..MAX_STARTUPS * 3 {
+            retire_unused_startups(&mut unused, true, |_| true);
+            assert!(unused.len() < MAX_STARTUPS);
+            unused.push(());
+        }
+    }
+
+    #[test]
     fn startup_work_remains_bounded_until_the_worker_releases_its_slot() {
         let pending = Arc::new(AtomicBool::new(false));
         let slot = StartupSlot::enter(&pending).unwrap_or_else(|e| unreachable!("{e}"));
@@ -1131,16 +1325,26 @@ mod grant_tests {
     fn completed_grant_requires_fresh_witness_checks_and_rejects_replay() {
         for lost in [false, true] {
             let (mut root, mut native) = UnixStream::pair().unwrap_or_else(|_| unreachable!());
+            rustix::net::sockopt::set_socket_passcred(&root, true)
+                .unwrap_or_else(|_| unreachable!());
             let worker = std::thread::spawn(move || {
                 let mut checks = 0;
-                let result = serve_grant_witness(&mut root, || {
-                    checks += 1;
-                    if lost && checks == 2 {
-                        Err(unavailable())
-                    } else {
+                let result = serve_grant_witness(
+                    &mut root,
+                    |sender| {
+                        assert_eq!(sender.pid, rustix::process::getpid());
+                        assert_eq!(sender.uid, rustix::process::getuid());
                         Ok(())
-                    }
-                });
+                    },
+                    || {
+                        checks += 1;
+                        if lost && checks == 2 {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                );
                 assert!(result.is_err());
                 checks
             });
@@ -1169,6 +1373,59 @@ mod grant_tests {
             assert_eq!(
                 worker.join().unwrap_or_else(|_| unreachable!()),
                 if lost { 2 } else { 1 }
+            );
+        }
+    }
+    #[test]
+    fn every_probe_fragment_requires_identity_and_verification_cannot_extend_its_budget() {
+        for slow_verification in [false, true] {
+            let (mut root, mut native) = UnixStream::pair().unwrap_or_else(|_| unreachable!());
+            rustix::net::sockopt::set_socket_passcred(&root, true)
+                .unwrap_or_else(|_| unreachable!());
+            native
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap_or_else(|_| unreachable!());
+            let (sent, received) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let mut fragments = 0;
+                let mut checks = 0;
+                let result = serve_grant_witness(
+                    &mut root,
+                    |_| {
+                        fragments += 1;
+                        sent.send(()).unwrap_or_else(|_| unreachable!());
+                        if fragments > 1 && !slow_verification {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    || {
+                        checks += 1;
+                        std::thread::sleep(Duration::from_millis(1100));
+                        Ok(())
+                    },
+                );
+                assert!(result.is_err());
+                (fragments, checks)
+            });
+            // Force two independently received fragments. Rejecting the second
+            // must happen before postcondition verification or acknowledgement.
+            let request = probe(1);
+            native
+                .write_all(&request[..8])
+                .unwrap_or_else(|_| unreachable!());
+            received
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap_or_else(|_| unreachable!());
+            native
+                .write_all(&request[8..])
+                .unwrap_or_else(|_| unreachable!());
+            let mut response = [0; 16];
+            assert!(native.read_exact(&mut response).is_err());
+            assert_eq!(
+                worker.join().unwrap_or_else(|_| unreachable!()),
+                (2, usize::from(slow_verification))
             );
         }
     }

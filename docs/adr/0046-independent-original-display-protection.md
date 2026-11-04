@@ -142,3 +142,37 @@ or compositor-crash qualification. Canonical purpose-bound single-use
 restoration, native rule/overlay reconstruction, independent terminal evidence,
 retirement and the real S21-2 multi-output crash matrix remain required before
 public mutation activation. This decision does not replace those requirements.
+
+## Startup history and unused process-handle retention
+
+Ordinary startup requires no never-dispatched subscription, no retained original
+witness in the protection service, and no disk history. A missing disk record does
+not erase an original witness, even if its continuity was lost. Unknown/busy/poisoned
+memory fails closed. These are the protection service's own serialized mechanism
+states; no caller supplies them and they are not a new observation authority.
+
+After invocation-conflict checks, only complete absence of all that history permits
+closing ordinary startup endpoints for which the original pidfd proves process
+exit. Every live/unknown peer and recovery admission remains retained. The existing
+startup bound, immutable records, original witnesses, fixed deadlines and fresh
+pre-publication authentication remain. No intent, original checkpoint or reserved
+restoration is retired by this process-handle cleanup. It does not implement the
+still-required Control-qualified terminal recovery/supersession workflow or claim
+native acceptance.
+
+## Forwarded witness-message sender authentication
+
+The original Root-created witness socket remains a read-only mechanism. Before
+its endpoint leaves Root, enable `SO_PASSCRED` on the receiving side. Require
+exactly one kernel credential record per received fragment and match its PID/UID
+against the continuously retained native startup process/session. Recheck the
+original pidfd/start identity and immutable image as well as the existing original
+protection before acknowledgement. A forwarded pair's `SO_PEERCRED` identifies
+its creator and cannot authenticate the later sender. Reject missing, extra or
+truncated ancillary controls and close any received descriptors. The absolute
+partial-probe budget includes authentication and verification, without renewal.
+
+This changes no framing, durable checkpoint interpretation or public interface.
+It does not create a terminal continuation, privilege grant or cleanup permission.
+Those operations still require the separate qualified Control workflow and actual
+native acceptance; portable credential tests cannot supply that qualification.

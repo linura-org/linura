@@ -120,6 +120,16 @@ impl NativeDisplayStartupPeer {
         self.process_live()?;
         self.image.live(self.pid)
     }
+    /// Kernel message credentials are comparison evidence only. Recheck the
+    /// original pidfd/start identity and immutable image before accepting them.
+    pub fn require_message_sender(&self, sender: &rustix::net::UCred) -> Result<(), String> {
+        if sender.pid.as_raw_nonzero().get() as u32 != self.pid
+            || sender.uid.as_raw() != self.epoch.uid()
+        {
+            return Err(unavailable());
+        }
+        self.live()
+    }
     fn process_live(&self) -> Result<(), String> {
         let mut event = [PollFd::new(&self.process, PollFlags::IN)];
         if rustix::event::poll(
@@ -414,6 +424,28 @@ mod tests {
         };
         assert!(peer.process_live().is_ok());
         assert!(peer.live().is_err()); // A live PID alone is not secure executable admission.
+        let credentials = rustix::net::UCred {
+            pid: rustix::process::Pid::from_raw(pid as i32).unwrap_or_else(|| unreachable!()),
+            uid: rustix::process::Uid::from_raw(peer.epoch.uid()),
+            gid: rustix::process::getgid(),
+        };
+        // Even the matching kernel identity cannot replace immutable image
+        // admission; an unqualified fixture executable must still be refused.
+        assert!(peer.require_message_sender(&credentials).is_err());
+        assert!(
+            peer.require_message_sender(&rustix::net::UCred {
+                pid: rustix::process::getpid(),
+                ..credentials
+            })
+            .is_err()
+        );
+        assert!(
+            peer.require_message_sender(&rustix::net::UCred {
+                uid: rustix::process::Uid::from_raw(peer.epoch.uid() + 1),
+                ..credentials
+            })
+            .is_err()
+        );
         assert!(!peer.definitely_exited());
         assert!(peer.same_invocation(&peer));
         let topology =

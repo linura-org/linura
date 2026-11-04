@@ -22,6 +22,11 @@ struct Protection {
     power: NativeDisplayPowerFence,
 }
 impl Witnesses {
+    /// Ordinary startup must consider retained in-memory history even when a
+    /// checkpoint disappeared. Invalid/lost witnesses remain unresolved too.
+    pub(super) fn clear_for_startup(&self) -> Result<bool, String> {
+        history_empty(&self.0)
+    }
     pub(super) fn reserve_stored(
         &self,
         dispatch: &ComponentDigest,
@@ -103,6 +108,13 @@ impl Witnesses {
         )
     }
 }
+fn history_empty<T>(history: &Mutex<BTreeMap<String, T>>) -> Result<bool, String> {
+    history
+        .try_lock()
+        .map(|entries| entries.is_empty())
+        .map_err(|_| "original witness history busy or unavailable".into())
+}
+
 impl Protection {
     fn verify(&mut self, channel: &NativeSessionChannel) -> Result<(), String> {
         let result = (|| {
@@ -125,6 +137,32 @@ impl Protection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_cannot_ignore_retained_invalid_busy_or_poisoned_witness_history() {
+        // Comparison-only history contents; constructing kernel witnesses is
+        // deliberately unavailable to this unit fixture.
+        let history = Mutex::new(BTreeMap::<String, bool>::new());
+        assert_eq!(history_empty(&history), Ok(true));
+        for valid in [true, false] {
+            history
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .insert("retained-original".into(), valid);
+            assert_eq!(history_empty(&history), Ok(false));
+        }
+        {
+            let _guard = history.lock().unwrap_or_else(|_| unreachable!());
+            assert!(history_empty(&history).is_err());
+        }
+        let result = std::panic::catch_unwind(|| {
+            let _guard = history.lock().unwrap_or_else(|_| unreachable!());
+            std::panic::resume_unwind(Box::new(()));
+        });
+        assert!(result.is_err());
+        assert!(history_empty(&history).is_err());
+        assert_eq!(Witnesses::default().clear_for_startup(), Ok(true));
+    }
+
     #[test]
     fn restart_or_unknown_attempt_never_reacquires_a_witness() {
         let witnesses = Witnesses::default();

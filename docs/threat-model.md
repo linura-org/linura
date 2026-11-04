@@ -1258,6 +1258,18 @@ checks bind the protected owner's actual executing native peer and integration;
 ordinary callers and arbitrary root processes cannot select a startup principal.
 A single worker bounds the newly callable endpoint before blocking attestation.
 
+The service also checks its retained witness map before ordinary admission. Missing
+on-disk records do not erase known original work; invalid witnesses remain known
+unresolved history. Busy or poisoned memory cannot become an empty-history fact.
+No stored checkpoint/reservation or original witness is automatically removed.
+When subscriptions, witness memory and disk history are all empty, only unused
+ordinary startup endpoints with definite original pidfd exit can be retired. This
+prevents those dead unused admissions from exhausting the unchanged startup bound;
+live/unknown peers and recovery admissions retain their endpoints. A conflicting
+invocation is rejected before this cleanup, followed by the original fresh peer
+revalidation before any new lease publication. Component coverage does not qualify
+the native crash/first-frame or pending-history cleanup workflow.
+
 The native presentation fence exists before the first backend/frame. Initial
 scanout storage is rendered opaque, and unavailable rendering refuses the commit.
 Normal scene composition, direct scanout, late callbacks, hardware cursors and
@@ -1270,6 +1282,19 @@ or manipulate S17 lock state. Native multi-output/first-frame/crash evidence
 remains required; portable transport tests cannot supply it.
 
 ### Original-restoration comparison and review
+
+The Root-created grant stream can pass through other processes before reaching
+the admitted native compositor. Its socket-pair peer credentials identify Root,
+not the later writer. Root therefore enables per-message credentials before
+disclosure and checks every received fragment against the exact retained native
+PID, session UID, original pidfd/start identity and immutable installed image.
+A same-UID process holding a copied endpoint is insufficient. Missing/extra or
+truncated ancillary data, descriptor payloads, foreign writers and stale original
+witnesses close the channel without acknowledgement. The fixed partial-frame
+budget covers authentication and final verification without per-fragment renewal.
+The witness echo remains comparison evidence; it cannot retire protection,
+release startup/input/power fences or authorize an effect. Cross-process portable
+tests prove credential delivery, not accepted native recovery or finalization.
 
 `ReadOriginal` admits only the freshly attested supervised Control invocation.
 An ordinary user, arbitrary root process or another process under the service

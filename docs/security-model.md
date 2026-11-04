@@ -226,7 +226,14 @@ ordinary frame or input. A one-use original descriptor from independent display
 protection can admit ordinary startup only after the supervised protected owner
 and protection service bind the actual native process, installed image, source
 integration, active login epoch and seat. Startup publication shares the original
-checkpoint admission mutex; pending or retained/unknown history keeps it fenced.
+checkpoint admission mutex; pending subscriptions, retained in-memory witnesses
+(including invalid/lost ones), or retained/unknown on-disk history keep it fenced.
+An empty directory cannot override a retained original witness after record loss;
+busy or poisoned memory also refuses admission. Only after all three sources are
+clear may the service close ordinary startup leases whose original pidfds prove
+process exit. It preserves current/live/unknown peers and every recovery lease,
+checks invocation conflicts before retirement and keeps the same admission bound.
+This retires no checkpoint, restoration reservation, witness or semantic intent.
 Native rendering/scanout, focus, cursor and input paths enforce that fence, drain
 suppressed held input and permanently refuse a lost or replaced lease. The new
 private startup endpoint has one bounded authentication worker, independently
@@ -370,6 +377,17 @@ strictly increasing witness acknowledgements on that endpoint. Its completed
 transfer is not a reusable file credential. Root retains bounded worker slots;
 idle loss, malformed/replayed/slow probes and witness loss close the endpoint.
 The compositor's input/render lifetime checks remain nonblocking.
+
+Before disclosing that endpoint, Root enables `SO_PASSCRED` on its receiving
+side. Each probe fragment requires exactly one kernel `SCM_CREDENTIALS` record
+matching the retained replacement's actual PID and session UID, followed by its
+original pidfd/start-time and immutable-image checks. Socket-pair `SO_PEERCRED`
+identifies its creator and cannot identify a process receiving a forwarded
+descriptor. Ancillary truncation, extra controls/descriptors, missing credentials
+or a foreign sender refuse acknowledgement; all received descriptors are closed.
+One absolute partial-probe budget includes sender and witness checks; fragments
+cannot renew it. These messages remain read-only continuity evidence and confer
+no terminal release, cleanup or execution authority.
 
 Control's separate original-restoration handoff reloads authenticated original
 history, re-observes contributing facts after protected approval and uses the
@@ -722,8 +740,9 @@ fresh facts with native layout/source, logind, coverage and retained Root
 continuity in the same canonical restoration recipe. Only the authenticated
 already-dispatched verification context can yield NoChange and commit the new
 restoration transaction without replay. A restart still needs fresh proof;
-historical Committed state never releases a fence. Durable linked original
-retirement, qualified release and retention cleanup remain unfinished. This
+historical Committed state never releases a fence. Linked original authority
+retirement is described below; qualified native/Root release and retention cleanup
+remain unfinished. This
 implementation does not activate public production display mutations.
 
 Linked retirement separately persists and reads back an immutable authenticated

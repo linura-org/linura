@@ -17,6 +17,7 @@ mod display_checkpoint;
 mod display_kernel;
 mod display_protection_service;
 mod introspection;
+mod native_message;
 mod protection_lock;
 
 const ACTION: &str = "org.linura.executor.session.set-secure";
