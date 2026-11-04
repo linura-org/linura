@@ -1414,7 +1414,10 @@ mod tests {
         // interpret as an embedded signing secret.
         let mut bytes = Vec::new();
         std::fs::File::open("/dev/urandom")
-            .and_then(|file| file.take(AUTHORITY_MUTATION_KEY_BYTES as u64).read_to_end(&mut bytes))
+            .and_then(|file| {
+                file.take(AUTHORITY_MUTATION_KEY_BYTES as u64)
+                    .read_to_end(&mut bytes)
+            })
             .unwrap_or_else(|_| unreachable!("test entropy unavailable"));
         assert_eq!(bytes.len(), AUTHORITY_MUTATION_KEY_BYTES);
         let (signer, verifier) = TransactionAuthorityKey::new(bytes)
