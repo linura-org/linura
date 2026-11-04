@@ -448,6 +448,14 @@ if(BUILD_TESTING)
     set_tests_properties(security-owner-launch-wire-boundary PROPERTIES TIMEOUT 20)
 
     find_program(LINURA_TEST_DBUS_DAEMON dbus-daemon REQUIRED)
+    add_executable(linura-security-owner-display-startup-reply-tests tests/native_display_startup_reply.cpp)
+    target_link_libraries(linura-security-owner-display-startup-reply-tests PRIVATE linura-security-owner-mechanisms)
+    target_compile_definitions(linura-security-owner-display-startup-reply-tests PRIVATE
+        LINURA_TEST_DBUS_DAEMON="${LINURA_TEST_DBUS_DAEMON}")
+    target_compile_options(linura-security-owner-display-startup-reply-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME security-owner-display-startup-reply-boundary COMMAND linura-security-owner-display-startup-reply-tests)
+    set_tests_properties(security-owner-display-startup-reply-boundary PROPERTIES TIMEOUT 15)
     add_executable(linura-security-owner-sleep-supervisor-tests tests/native_sleep_supervisor.cpp)
     target_link_libraries(linura-security-owner-sleep-supervisor-tests PRIVATE
         linura-security-owner-mechanisms)

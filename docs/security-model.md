@@ -231,6 +231,17 @@ authenticates the supervised owner and grants no restoration or executor
 permission. It neither acquires nor releases S17 state. Component checks do not
 qualify the real first-frame and crash matrix; public mutations stay disabled.
 
+The startup RPC is addressed to the original independently attested unique bus
+owner, never its replaceable well-known name. Qt 6.11 intentionally returns an
+empty `QDBusMessage::service()` for reply messages; an exposed sender must match,
+but absence of that API field is not proof of a substituted response. System-bus
+requested-reply restrictions bind the response to the pending call. Independently,
+the returned Unix socket must have kernel `SO_PEERCRED` for the original root
+service MainPID. Exact reply signature/types, fresh service/session revalidation
+and native single-use lease admission remain mandatory. A malformed response,
+wrong socket/process, disappeared service or lost response fails closed; an
+already consumed admission cannot be retried by restarting the owner.
+
 Before compositor configuration, plugins or device startup, the native entry
 point disables dumpability and clears ambient, permitted, effective and
 inheritable capabilities. Removing PAM's local-seat ambient capabilities must

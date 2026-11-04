@@ -1,4 +1,5 @@
 #include "native_display_startup.h"
+#include "native_display_startup_reply.h"
 #include "native_display_connection.h"
 #include "native_wayland_lock.h"
 #include "peer_guard.h"
@@ -185,26 +186,23 @@ NativeDisplayStartupAdmission admitNativeDisplayStartup(PeerGuard &peers,
             return unavailableReply("linura-security-owner: startup-reply/no-reply\n");
         return unavailableReply("linura-security-owner: startup-reply/other-error\n");
     }
-    if (reply.service() != guard->uniqueOwner)
+    switch (inspectNativeDisplayStartupReply(reply, *guard)) {
+    case NativeDisplayStartupReplyFault::None:
+        break;
+    case NativeDisplayStartupReplyFault::Sender:
         return unavailableReply("linura-security-owner: startup-reply/sender\n");
-    if (reply.signature() != QLatin1String("hb"))
+    case NativeDisplayStartupReplyFault::Signature:
         return unavailableReply("linura-security-owner: startup-reply/signature\n");
-    if (reply.arguments().size() != 2 ||
-        reply.arguments()[0].metaType() != QMetaType::fromType<QDBusUnixFileDescriptor>() ||
-        reply.arguments()[1].metaType() != QMetaType::fromType<bool>())
+    case NativeDisplayStartupReplyFault::ArgumentTypes:
         return unavailableReply("linura-security-owner: startup-reply/argument-types\n");
+    case NativeDisplayStartupReplyFault::KernelPeer:
+        return NativeDisplayStartupAdmission::KernelPeer;
+    }
     if (!peers.stillCurrent(NativePeerPurpose::DisplayProtection, *guard))
         return NativeDisplayStartupAdmission::GuardChanged;
     if (inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
         return NativeDisplayStartupAdmission::SessionChanged;
     const auto lease = reply.arguments()[0].value<QDBusUnixFileDescriptor>();
-    ucred actual{};
-    socklen_t size = sizeof(actual);
-    if (!lease.isValid() ||
-        getsockopt(lease.fileDescriptor(), SOL_SOCKET, SO_PEERCRED, &actual, &size) != 0 ||
-        size != sizeof(actual) || actual.uid != 0 || actual.pid <= 0 ||
-        static_cast<quint32>(actual.pid) != guard->pid)
-        return NativeDisplayStartupAdmission::KernelPeer;
     if (!backend.admitDisplayStartup(lease.fileDescriptor(), reply.arguments()[1].toBool(),
                                      guard->pid, sample->compositor))
         return NativeDisplayStartupAdmission::NativeTransfer;
