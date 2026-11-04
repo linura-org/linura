@@ -146,6 +146,32 @@ fn check_kind_record(
     Ok(bytes.split_off(HEADER))
 }
 
+fn read_named_record(
+    fd: &OwnedFd,
+    uid: u32,
+    name: &std::ffi::CStr,
+) -> Result<(Kind, ComponentDigest, Vec<u8>), String> {
+    let (kind, dispatch) = named_kind(name.to_bytes())?;
+    let before = fs::statat(fd, name, fs::AtFlags::SYMLINK_NOFOLLOW).map_err(|_| unavailable())?;
+    record_metadata(&before, uid)?;
+    let record = fs::openat(
+        fd,
+        name,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|_| unavailable())?;
+    let after = fs::fstat(&record).map_err(|_| unavailable())?;
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) {
+        return Err(unavailable());
+    }
+    Ok((
+        kind,
+        dispatch,
+        check_kind_record(record, uid, &dispatch, kind)?,
+    ))
+}
+
 fn load_at(fd: &OwnedFd, uid: u32, dispatch: &ComponentDigest) -> Result<Vec<u8>, String> {
     directory(fd, uid, true)?;
     fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
@@ -230,22 +256,7 @@ fn reserve_kind_at(
             // unexpected ownership fences future writes. Never clean it up.
             // Inspect type before opening, so a malformed device/FIFO entry
             // cannot turn a history scan into a native device operation.
-            let before =
-                fs::statat(fd, name, fs::AtFlags::SYMLINK_NOFOLLOW).map_err(|_| unavailable())?;
-            record_metadata(&before, uid)?;
-            let old = fs::openat(
-                fd,
-                name,
-                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
-                Mode::empty(),
-            )
-            .map_err(|_| unavailable())?;
-            let after = fs::fstat(&old).map_err(|_| unavailable())?;
-            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) {
-                return Err(unavailable());
-            }
-            let (old_kind, dispatch) = named_kind(name.to_bytes())?;
-            let previous = check_kind_record(old, uid, &dispatch, old_kind)?;
+            let (old_kind, _, previous) = read_named_record(fd, uid, name)?;
             if kind == Kind::Restoration && old_kind == Kind::Restoration {
                 let new = NativeDisplayRestorationReservation::decode(payload)?;
                 let old = NativeDisplayRestorationReservation::decode(&previous)?;
@@ -312,6 +323,62 @@ pub(super) fn reserve_restoration(
         &record.canonical_bytes(),
         Kind::Restoration,
     )
+}
+
+fn read_restoration_at(
+    fd: &OwnedFd,
+    uid: u32,
+    scope: &linura_core::DisplayRecoveryScope,
+) -> Result<NativeDisplayRestorationReservation, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut found = None;
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            // Validate every retained/unknown entry, including unrelated ones.
+            // This query never repairs history or makes room for another write.
+            let (kind, _, payload) = read_named_record(fd, uid, name)?;
+            if kind != Kind::Restoration {
+                continue;
+            }
+            let record = NativeDisplayRestorationReservation::decode(&payload)?;
+            if record
+                .decoded_material()?
+                .recovery_scope()
+                .map_err(|_| unavailable())?
+                == *scope
+            {
+                if found.is_some() {
+                    return Err(unavailable());
+                }
+                found = Some(record);
+            }
+        }
+        found.ok_or_else(unavailable)
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        _ => Err(unavailable()),
+    }
+}
+
+/// Immutable comparison data only. The caller separately verifies the live
+/// original witnesses and current recovery startup before and after this read.
+pub(super) fn read_restoration(
+    scope: &linura_core::DisplayRecoveryScope,
+) -> Result<NativeDisplayRestorationReservation, String> {
+    read_restoration_at(&open()?, 0, scope)
 }
 
 fn startup_clear_at(fd: &OwnedFd, uid: u32) -> Result<bool, String> {

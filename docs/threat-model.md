@@ -1345,6 +1345,20 @@ continuity refuse the report without effects or implicit bookkeeping repair.
 The current same-lock query refuses a replaced owner/generation. A previous
 successful report cannot freshen any contributor or authorize later release.
 
+Root separately exposes only retained `protected` state through authenticated
+`ReadFinalization`, sharing the existing bounded read worker. It checks the same
+live original witnesses and replacement recovery admission before and after
+reading the complete immutable restoration reservation. Every retained directory
+entry is bounded and validated; duplicate scope, corruption, unsafe metadata and
+unknown history refuse without repair. The adapter authenticates the Root owner
+before and after the call within one probe budget and checks full nested codec
+identity. Control independently matches transaction, effect, dispatch and
+checkpoint to durable history, then intersects this observation's expiry with the
+fresh canonical restoration proof. Neither a substituted reservation nor a forged
+released phase without terminal lineage can pass inspection. No current producer
+reports quiescence, retirement or release; future released-current evidence must
+also prove this Root invocation's live ordinary admission.
+
 Fresh protected terminal review, canonical prepare/revalidation, authenticated
 native/Root quiescence and one-use release, lost-ack repair, current lock/input
 preservation and shared-ownership-aware retention still require implementation

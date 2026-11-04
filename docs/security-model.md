@@ -354,8 +354,9 @@ including for root callers. They start an original subscription, consume it for
 the same executor within the original two-second window and persist the
 historical checkpoint, or verify retained original objects and stored payload
 hash. `NativeStartup` separately authenticates the exact supervised native
-owner; `ReadOriginal` requires the exact supervised Control process. The sixth
-method, `ReserveRestoration`, has the separate prepared handoff boundary below.
+owner; `ReadOriginal` and `ReadFinalization` require the exact supervised Control
+process and share one bounded read worker. `ReserveRestoration` has the separate
+prepared handoff boundary below.
 It cannot write outputs, mint human approval, orchestrate recovery or reconstruct
 lost protection. [ADR 0046](adr/0046-independent-original-display-protection.md)
 records the boundary; public mutation activation still requires complete native
@@ -765,8 +766,14 @@ The terminal operation and privileged/native endpoints remain unavailable.
 Control's read-only `inspect_original_display_finalization` authenticates both
 actual requests, exact committed restoration, reserved/dispatched history, link,
 original checkpoint and exact linked original retirement before provider probes.
-It obtains the same independent fresh five-source canonical restoration proof,
-then re-reads the durable anchors and checks the original combined expiry. It
+It separately queries Root's immutable restoration reservation through the bounded
+`ReadFinalization` mechanism. Root checks the original live kernel/power witnesses,
+exited original compositor and healthy replacement recovery admission before and
+after reading strictly validated retained history. This producer reports only
+`protected`, with no terminal reservation; a file alone never reports release.
+Control matches the actual restoration transaction, effect, dispatch and checkpoint,
+obtains the same independent fresh five-source canonical restoration proof,
+then re-reads the durable anchors and checks every contributor's original expiry. It
 cannot append a link, complete a CAS, prepare, dispatch, clean up or release any
 protection. A missing readback still refuses the report. This initial query
 requires fresh coverage for the restoration's exact lock identity; a replaced

@@ -46,6 +46,7 @@ struct Machine {
     restoration_link_fault: u8,
     restoration_link_reads: usize,
     restoration_link_fail_read: Option<usize>,
+    restoration_root_state_fault: u8,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -200,12 +201,23 @@ impl Observer for LiveFixtureObserver {
         self.template.provider.clone()
     }
     fn observation_capabilities(&self) -> Vec<Capability> {
-        vec![Capability {
+        let mut capabilities = vec![Capability {
             id: self.template.capability.clone(),
             support: SupportLevel::Supported,
             provider: Some(self.template.provider.clone()),
             reason: None,
-        }]
+        }];
+        if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+                )),
+                support: SupportLevel::Supported,
+                provider: Some(self.template.provider.clone()),
+                reason: None,
+            });
+        }
+        capabilities
     }
     fn health(&self) -> ProviderHealth {
         ProviderHealth {
@@ -222,7 +234,12 @@ impl Observer for LiveFixtureObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
-        if resource != &self.template.resource || capability != &self.template.capability {
+        let finalization = self.template.provider.as_str()
+            == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY;
+        if resource != &self.template.resource
+            || (capability != &self.template.capability && !finalization)
+        {
             return Err(ProviderError::Unsupported("fixture route mismatch".into()));
         }
         let mut machine = self
@@ -240,6 +257,70 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if finalization {
+            let binding = machine.restoration_binding.as_ref().ok_or_else(|| {
+                ProviderError::Unavailable("no simulated Root restoration reservation".into())
+            })?;
+            let material = value(linura_core::DisplayRestorationMaterial::decode(
+                machine
+                    .restoration_material
+                    .as_deref()
+                    .unwrap_or_else(|| unreachable!("restoration material")),
+            ));
+            let facts = value(linura_observation::DisplayOriginalFinalizationFacts::new(
+                value(material.recovery_scope()),
+                material.original_checkpoint().into(),
+                binding.transaction_id.clone(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+                linura_observation::DisplayFinalizationPhase::Protected,
+                None,
+            ));
+            sample.capability = capability.clone();
+            sample.attributes = facts.attributes();
+            match machine.restoration_root_state_fault {
+                1 => sample.observed_at_unix_ms = now_unix_ms() - 2001,
+                2 => sample.authority = ObservationAuthority::SyntheticTest,
+                3 => {
+                    sample.attributes.insert(
+                        "original_checkpoint_digest".into(),
+                        ObservedValue::Text("f".repeat(64)),
+                    );
+                }
+                4 => {
+                    sample.attributes.insert(
+                        "restoration_effect".into(),
+                        ObservedValue::Text("f".repeat(64)),
+                    );
+                }
+                5 => {
+                    sample.attributes.insert(
+                        "restoration_dispatch".into(),
+                        ObservedValue::Text("f".repeat(64)),
+                    );
+                }
+                6 => {
+                    sample.attributes.insert(
+                        "restoration_transaction".into(),
+                        ObservedValue::Text("transaction:other".into()),
+                    );
+                }
+                7 => {
+                    sample.attributes.insert(
+                        "phase".into(),
+                        ObservedValue::Text("released-current".into()),
+                    );
+                }
+                8 => {
+                    return Err(ProviderError::Unavailable(
+                        "simulated Root state unavailable".into(),
+                    ));
+                }
+                9 => sample.resource = value(material.replacement().topology().resource_id()),
+                _ => {}
+            }
+            return Ok(sample);
+        }
         if machine.read_only_outputs && sample.provider.as_str() == "hyprland" {
             sample
                 .attributes

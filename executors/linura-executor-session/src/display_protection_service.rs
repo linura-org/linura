@@ -189,6 +189,11 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sender: &str,
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<Vec<u8>>;
+    fn read_finalization(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)>;
     fn startup(
         &self,
         sender: &str,
@@ -420,6 +425,15 @@ impl NativeProtection {
                 )
             })
     }
+    fn admit_control(&self, sender: &str) -> zbus::fdo::Result<()> {
+        self.channel
+            .require_trusted_display_control_sender(sender)
+            .map_err(|_| {
+                zbus::fdo::Error::AccessDenied(
+                    "original display observation requires the supervised Control owner".into(),
+                )
+            })
+    }
 }
 
 impl ProtectionPort for NativeProtection {
@@ -534,23 +548,34 @@ impl ProtectionPort for NativeProtection {
         sender: &str,
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<Vec<u8>> {
-        let admit = || {
-            self.channel
-                .require_trusted_display_control_sender(sender)
-                .map_err(|_| {
-                    zbus::fdo::Error::AccessDenied(
-                        "original display observation requires the supervised Control owner".into(),
-                    )
-                })
-        };
-        admit()?;
+        self.admit_control(sender)?;
         let admission =
             super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
                 .map_err(|_| unavailable())?;
         let payload = self.original_for_scope(&admission, &scope)?;
-        admit()?;
+        self.admit_control(sender)?;
         self.original_for_scope(&admission, &scope)?;
         Ok(payload)
+    }
+    fn read_finalization(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
+        self.admit_control(sender)?;
+        let admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
+        let payload = self.original_for_scope(&admission, &scope)?;
+        let record =
+            super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
+        NativeDisplayRecoveryCheckpoint::validate_restoration_source(&payload, &record)
+            .map_err(|_| unavailable())?;
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        // Only the protected branch exists at present. This is not a terminal
+        // completion producer: retained files alone never yield release state.
+        Ok((record.canonical_bytes(), 0, Vec::new()))
     }
     fn startup(
         &self,
@@ -721,6 +746,30 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
+    #[zbus(out_args("restoration", "phase", "terminal"))]
+    async fn read_finalization(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        // Share the original bounded read slot; a second method does not create
+        // another worker budget or turn this mechanism into an aggregator.
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_finalization(&sender, scope)
+        })
+        .await
+    }
     #[zbus(out_args("lease", "ordinary_allowed"))]
     async fn native_startup(
         &self,
@@ -841,6 +890,13 @@ mod tests {
         ) -> zbus::fdo::Result<Vec<u8>> {
             Err(unavailable())
         }
+        fn read_finalization(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
+            Err(unavailable())
+        }
         fn startup(
             &self,
             _: &str,
@@ -868,7 +924,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 6);
+            assert_eq!(text.matches("<method ").count(), 7);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -877,6 +933,9 @@ mod tests {
                 "name=\"checkpoint\" type=\"ay\" direction=\"in\"",
                 "name=\"recovery_scope\" type=\"s\" direction=\"in\"",
                 "name=\"checkpoint\" type=\"ay\" direction=\"out\"",
+                "name=\"restoration\" type=\"ay\" direction=\"out\"",
+                "name=\"phase\" type=\"u\" direction=\"out\"",
+                "name=\"terminal\" type=\"ay\" direction=\"out\"",
                 "name=\"reservation\" type=\"ay\" direction=\"in\"",
                 "name=\"dispatch_deadline_unix_ms\" type=\"t\" direction=\"in\"",
                 "name=\"grant\" type=\"h\" direction=\"out\"",
@@ -893,6 +952,7 @@ mod tests {
             "Reserve",
             "Verify",
             "ReadOriginal",
+            "ReadFinalization",
             "ReserveRestoration",
         ] {
             assert!(xml.contains(&format!("name=\"{method}\"")));
@@ -1076,6 +1136,10 @@ mod tests {
             async_io::block_on(service.read_original(&scope, anonymous.header())),
             Err(zbus::fdo::Error::AccessDenied(_))
         ));
+        assert!(matches!(
+            async_io::block_on(service.read_finalization(&scope, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
         let message = zbus::Message::method_call(PATH, "ReadOriginal")
             .unwrap_or_else(|e| unreachable!("{e}"))
             .sender(":1.7")
@@ -1089,10 +1153,17 @@ mod tests {
             scope.replace(&"a".repeat(64), &"0".repeat(64)),
         ] {
             assert!(async_io::block_on(service.read_original(&bad, message.header())).is_err());
+            assert!(async_io::block_on(service.read_finalization(&bad, message.header())).is_err());
         }
         // A syntactically valid source and unique sender still cannot turn
         // comparison identity into native admission or historical bytes.
         assert!(async_io::block_on(service.read_original(&scope, message.header())).is_err());
+        assert!(async_io::block_on(service.read_finalization(&scope, message.header())).is_err());
+        let slot =
+            StartupSlot::enter(&service.original_pending).unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(async_io::block_on(service.read_original(&scope, message.header())).is_err());
+        assert!(async_io::block_on(service.read_finalization(&scope, message.header())).is_err());
+        drop(slot);
     }
     #[test]
     fn original_subscription_is_consumed_once_in_the_same_executor_and_window() {

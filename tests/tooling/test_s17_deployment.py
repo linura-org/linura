@@ -206,6 +206,11 @@ class S17DeploymentTests(unittest.TestCase):
                     "send_destination": "org.linura.DisplayProtection1",
                     "send_interface": "org.linura.DisplayProtection1",
                     "send_member": "ReadOriginal",
+                },
+                {
+                    "send_destination": "org.linura.DisplayProtection1",
+                    "send_interface": "org.linura.DisplayProtection1",
+                    "send_member": "ReadFinalization",
                 }
             ],
         )

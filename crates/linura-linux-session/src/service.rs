@@ -69,6 +69,87 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    pub(crate) fn observe_original_display_finalization(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err("original finalization observation scope unavailable".into());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|e| e.to_string())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadFinalization",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayuay"
+        {
+            return Err("original finalization observation peer or signature differs".into());
+        }
+        // This reply remains within the ordinary 64KiB transport limit; no
+        // display-preimage size exception or another probe clock is introduced.
+        let (restoration, phase, terminal): (Vec<u8>, u32, Vec<u8>) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "original finalization observation reply is malformed")?;
+        let facts = crate::original_display_observer::finalization_facts(
+            scope,
+            &restoration,
+            phase,
+            &terminal,
+        )?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err(
+                "original finalization service changed; no admission reconstruction".into(),
+            );
+        }
+        let age = crate::owner::boot_ms()?
+            .checked_sub(began_boot)
+            .ok_or("original finalization observation clock regressed")?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0 || age >= 2000 || started.elapsed() >= Duration::from_secs(2) {
+            return Err("original finalization observation exceeded its original budget".into());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|e| e.to_string())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            )
+            .map_err(|e| e.to_string())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: now
+                .checked_sub(age)
+                .filter(|ms| *ms != 0)
+                .ok_or("original finalization wall-clock mapping underflow")?,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        linura_observation::DisplayOriginalFinalizationFacts::from_envelope(
+            &observation,
+            scope,
+            now,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_original_display_protection(
         &self,
         scope: &linura_core::DisplayRecoveryScope,

@@ -12,6 +12,15 @@
       <arg name="recovery_scope" type="s" direction="in"/>
       <arg name="checkpoint" type="ay" direction="out"/>
     </method>
+    <method name="ReadFinalization">
+      <!-- Supervised Control only; immutable restoration correlation plus live
+           Root mechanism state, with no mutation or release credential. Only
+           protected state is currently produced; completion remains unavailable. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="restoration" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+      <arg name="terminal" type="ay" direction="out"/>
+    </method>
     <method name="ReserveRestoration">
       <!-- Exact supervised executor only, following a fresh Control prepare.
            Synced one-use reservation precedes the original-root-created

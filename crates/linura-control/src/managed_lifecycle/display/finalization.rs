@@ -5,6 +5,10 @@ use super::*;
 use crate::display_restoration_link::RestorationLink;
 use crate::display_restoration_plan::OriginalDisplayPlanningContext;
 use linura_core::{DisplayFinalizationMaterial, DisplayRestorationMaterial};
+use linura_observation::{
+    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, DisplayFinalizationPhase,
+    DisplayOriginalFinalizationFacts,
+};
 use linura_transaction::TransactionSnapshot;
 
 /// Fresh restoration evidence joined to exact authenticated linked history.
@@ -169,6 +173,34 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
         // Authenticate every durable anchor before contacting any provider.
         let history = self.finalization_history(&principal, restoration_request)?;
+        let text = &history.restoration.desired_state["restore_original"];
+        let restoration = DisplayRestorationMaterial::decode(text).map_err(|_| invalid())?;
+        let scope = restoration.recovery_scope().map_err(|_| invalid())?;
+        let mut mechanism = self
+            .previews
+            .observe(&linura_protocol::ObservationRequest {
+                provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+                capability: linura_core::CapabilityId::new(
+                    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+                )
+                .map_err(|_| invalid())?,
+                resource: scope.resource_id().map_err(|_| invalid())?,
+            })
+            .map_err(|_| invalid())?
+            .observation;
+        let state = DisplayOriginalFinalizationFacts::from_envelope(&mechanism, &scope, now_ms()?)
+            .map_err(|_| invalid())?;
+        if state.phase() != DisplayFinalizationPhase::Protected
+            || state.terminal().is_some()
+            || state.checkpoint() != restoration.original_checkpoint()
+            || state.restoration_transaction()
+                != history.restoration_snapshot.transaction_id.as_str()
+            || state.restoration_effect()
+                != effect_from_request(&history.restoration)?.digest().to_hex()
+            || Some(state.restoration_dispatch()) != history.dispatched.dispatch_digest.as_deref()
+        {
+            return Err(invalid());
+        }
         let proof = {
             let _context = self
                 .previews
@@ -194,8 +226,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(invalid());
         }
         let presentation = proof.presentation.ok_or_else(invalid)?;
-        let text = &history.restoration.desired_state["restore_original"];
-        let restoration = DisplayRestorationMaterial::decode(text).map_err(|_| invalid())?;
         let material = DisplayFinalizationMaterial::encode(
             restoration_request,
             history
@@ -219,9 +249,26 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .observation
             .require_current(now_ms()?)
             .map_err(|_| invalid())?;
+        crate::plan_preview::restrict_session_validity(
+            &mut mechanism,
+            &proof.observation,
+            now_ms()?,
+        )
+        .map_err(|_| invalid())?;
+        mechanism.attributes.insert(
+            "control.restoration_postcondition_digest".into(),
+            ObservedValue::Text(
+                crate::durable_authority::digest_observation(&proof.observation)?
+                    .as_str()
+                    .into(),
+            ),
+        );
+        mechanism
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
         Ok(OriginalDisplayFinalizationInspection {
             material,
-            observation: proof.observation,
+            observation: mechanism,
             original: history.original_snapshot,
             restoration: history.restoration_snapshot,
         })

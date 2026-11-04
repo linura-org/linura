@@ -900,6 +900,16 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
         );
         value(inspection.observation().require_current(now_unix_ms()));
         assert_eq!(
+            inspection.observation().capability.as_str(),
+            linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+        );
+        assert!(
+            inspection
+                .observation()
+                .attributes
+                .contains_key("control.restoration_postcondition_digest")
+        );
+        assert_eq!(
             snapshot(&database, &original_transaction),
             terminal.original
         );
@@ -973,6 +983,48 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
         );
         // A retained successful inspection cannot freshen missing/substituted
         // current proof. These faults never authorize or dispatch any effect.
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_proof_fault = 0;
+        value(restarted.inspect_original_display_finalization(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        for fault in 1..=9 {
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .restoration_root_state_fault = fault;
+            assert!(
+                restarted
+                    .inspect_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                    )
+                    .is_err(),
+                "Root mechanism fault {fault}"
+            );
+            assert_eq!(
+                snapshot(&database, &original_transaction),
+                terminal.original
+            );
+            assert_eq!(
+                snapshot(&database, &receipt.transaction_id),
+                terminal.restoration
+            );
+        }
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_root_state_fault = 0;
+        value(restarted.inspect_original_display_finalization(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
         for fault in 1..=11 {
             {
                 let mut m = machine

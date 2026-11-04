@@ -452,7 +452,21 @@ fn restoration_is_exclusive_durable_and_cannot_supersede_an_unresolved_attempt()
     );
     let before = std::fs::read(fixture.name(1)).unwrap_or_else(|e| unreachable!("{e}"));
     let record = restoration(1, 2);
+    let scope = record
+        .decoded_material()
+        .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_restoration_at(&fixture.fd, fixture.uid, &scope).is_err());
     assert!(reserve_recovery(&fixture, &record).is_ok());
+    let observed = read_restoration_at(&fixture.fd, fixture.uid, &scope)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(observed.canonical_bytes(), record.canonical_bytes());
+    assert!(read_restoration_at(&fixture.fd, fixture.uid + 1, &scope).is_err());
+    let other = restoration(4, 5)
+        .decoded_material()
+        .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_restoration_at(&fixture.fd, fixture.uid, &other).is_err());
     let path = fixture
         .path
         .join(Kind::Restoration.name(&record.binding().dispatch_digest));
@@ -521,6 +535,73 @@ fn corruption_or_type_substitution_of_restoration_history_fences_all_new_reserva
         }
         assert!(fixture.reserve(9, b"no dispatch").is_err());
         assert!(reserve_recovery(&fixture, &restoration(4, 5)).is_err());
+        let scope = record
+            .decoded_material()
+            .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(read_restoration_at(&fixture.fd, fixture.uid, &scope).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+        );
+    }
+}
+
+#[test]
+fn read_only_restoration_lookup_refuses_unknown_or_duplicate_history_without_repair() {
+    use std::os::unix::fs::OpenOptionsExt;
+    for duplicate in [false, true] {
+        let fixture = Fixture::new();
+        let record = restoration(1, 2);
+        assert!(reserve_recovery(&fixture, &record).is_ok());
+        let saved = std::fs::read(
+            fixture
+                .path
+                .join(Kind::Restoration.name(&record.binding().dispatch_digest)),
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let scope = record
+            .decoded_material()
+            .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let next = restoration(1, 3);
+        let name = if duplicate {
+            Kind::Restoration.name(&next.binding().dispatch_digest)
+        } else {
+            "unknown-history".into()
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(fixture.path.join(name))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let payload = next.canonical_bytes();
+        for bytes in [
+            RESTORATION_MAGIC,
+            &Sha256::digest(&payload),
+            &(payload.len() as u64).to_be_bytes(),
+            &payload,
+        ] {
+            file.write_all(bytes)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+        }
+        file.sync_all().unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(read_restoration_at(&fixture.fd, fixture.uid, &scope).is_err());
+        assert_eq!(
+            std::fs::read(
+                fixture
+                    .path
+                    .join(Kind::Restoration.name(&record.binding().dispatch_digest))
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+            saved
+        );
+        assert_eq!(
+            std::fs::read_dir(&fixture.path)
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .count(),
+            2
+        );
         assert!(
             !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
         );

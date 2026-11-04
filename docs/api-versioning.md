@@ -335,7 +335,8 @@ The private Experimental `DisplayProtection1.ReserveRestoration` takes one
 bounded 16 KiB `ay` reservation, the exact absolute dispatch deadline (`t`) and
 original native sample BOOTTIME (`t`), and returns one original-root-created Unix
 endpoint (`h`). Runtime admission requires the exact supervised executor; Control
-retains only its member-specific `ReadOriginal` access. The reservation binds a
+retains member-specific read access, including the bounded `ReadFinalization`
+query described below. The reservation binds a
 fresh execution binding and complete `LNRI:1` material, not an old Apply/Keep
 approval. Typed `LNRR:1` files share the existing private quota and strict history
 checks; original `LNRJ:1` and `LNRR:1` files are unchanged. The unconsumed
@@ -410,6 +411,25 @@ and a new independent canonical restoration proof. It reads history again after
 probing, never repairs or appends history, and cannot issue a release credential.
 Its initial same-lock scope refuses owner/generation changes. There is no new
 public D-Bus/SDK method, production mutation support or native qualification claim.
+
+The private Experimental `DisplayProtection1.ReadFinalization` takes a recovery
+scope (`s`) and returns the complete immutable restoration reservation (`ay`),
+closed phase (`u`) and optional terminal reservation (`ay`). It admits only the
+freshly attested supervised Control process, shares the existing original-read
+worker limit, and uses the ordinary 64 KiB reply limit and original two-second
+probe budget. The current Root producer returns only phase 0 (`protected`) with
+empty terminal bytes after checking live original witnesses and replacement
+recovery admission before and after strict history readback. Unknown, duplicate,
+corrupt or unsafe history refuses without repair or deletion.
+
+The adapter emits the canonical `display.original-finalization.observe`
+`ObservationEnvelope`; full restoration/terminal codecs and unchanged nested
+restoration bytes are mandatory for future terminal phases. Reserved, quiesced,
+retired and released-current are comparison states only, with no current Root
+producer. A historical spent record cannot supply released-current admission.
+Control's inspection matches these new Root facts to actual authenticated history
+and joins the independent five-source proof without extending either expiry.
+The report includes the canonical restoration postcondition digest, not a permit.
 
 ### Session1 bounded transient-effect contract
 

@@ -70,6 +70,13 @@ actual requests, exact linked snapshots, phase records and original checkpoint
 before provider probes, joins the same fresh five-source canonical restoration
 proof, and reads the durable anchors again before returning an expiring report.
 It performs no durable transition and cannot repair missing linked retirement.
+An additional bounded Root query reads the actual immutable restoration
+reservation while checking original live witnesses and current recovery admission
+before and after readback. It shares the existing original-read worker and emits
+only protected state. Control independently matches transaction/effect/dispatch
+and checkpoint to authenticated history, joins the fresh canonical restoration
+proof and preserves both original expiries. Closed future terminal comparison
+states do not activate a Root completion producer or supply release authority.
 This initial inspection requires the exact restoration lock identity; current
 owner/generation replacement fails closed. A fresh lock in the codec alone does
 not qualify that path.

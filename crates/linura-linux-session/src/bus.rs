@@ -647,6 +647,7 @@ mod diagnostic_tests {
                         "ObserveLock",
                         "GetAll",
                         "ReadOriginal",
+                        "ReadFinalization",
                     ] {
                         let admitted = path == "/org/linura/SecurityOwner1"
                             && interface == "org.linura.SecurityOwner1"
