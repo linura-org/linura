@@ -1,5 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod network_identity;
+pub use network_identity::{
+    NetworkAccessPointId, NetworkActiveConnectionId, NetworkDeviceId, NetworkDeviceInventory,
+    NetworkIdentityError, NetworkInterfaceName, NetworkManagerEpoch, NetworkManagerOwner,
+    NetworkObjectId, NetworkObjectKind, NetworkObservationId, NetworkProfileRevision,
+    SystemBusInstanceId,
+};
 mod session_epoch;
 pub use session_epoch::{
     BootId, SecurityOwnerInvocationId, SessionEpoch, SessionEpochError, SessionLockId,
