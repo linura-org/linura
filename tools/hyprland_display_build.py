@@ -221,6 +221,7 @@ cmake --build mechanism-build --parallel {jobs}
 ctest --test-dir mechanism-build --output-on-failure
 cmake -S upstream/hyprland-source -B compositor-build -G Ninja \\
     -DCMAKE_BUILD_TYPE=Debug '-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g1' \\
+    -DCMAKE_SKIP_RPATH=ON \\
     -DLINURA_DISPLAY_INTEGRATION_DIR=/home/linura/s21/native \\
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 # Compile the integration against real private headers first for useful SDK

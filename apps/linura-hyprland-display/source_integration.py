@@ -41,22 +41,91 @@ def patch_native_startup(text: str) -> str:
     text = replace_exact(
         text,
         '#include "helpers/env/Env.hpp"',
-        '#include "helpers/env/Env.hpp"\n#include "native_process_privilege.h"',
+        '#include "helpers/env/Env.hpp"\n#include "native_process_privilege.h"\n'
+        '#include "native_environment.h"\n'
+        "namespace {\nusing LinuraNativePreinit = void (*)(int, char**, char**);\n"
+        '[[gnu::used, gnu::section(".preinit_array")]]\n'
+        "LinuraNativePreinit const linuraNativePreinit = &Linura::HyprlandDisplay::initializeNativeEnvironment;\n}\n",
     )
+    text = replace_exact(
+        text,
+        "int main(int argc, char** argv) {",
+        "int main(int argc, char** argv) {\n"
+        "    if (!Linura::HyprlandDisplay::dropNativeProcessCapabilities()) {\n"
+        '        std::fputs("Linura compositor capability reset unavailable\\n", stderr);\n'
+        "        return 1;\n    }\n",
+    )
+    # Information-only CLI exits remain usable in an unprivileged builder.
+    # No configuration/device/runtime path can pass without secure execution.
     return replace_exact(
         text,
         "    if (!verifyConfig) {",
-        "    if (!Linura::HyprlandDisplay::dropNativeProcessCapabilities()) {\n"
-        '        std::fputs("Linura compositor capability reset unavailable\\n", stderr);\n'
-        "        return 1;\n    }\n\n"
-        "    if (!verifyConfig) {",
+        "    if (!Linura::HyprlandDisplay::secureNativeEntry()) {\n"
+        '        std::fputs("Linura compositor secure entry unavailable\\n", stderr);\n'
+        "        return 1;\n    }\n\n    if (!verifyConfig) {",
     )
+
+
+def reject_in_process_code_loading(
+    plugin: str, config: str, legacy: str
+) -> tuple[str, str, str]:
+    if (
+        "Linura protected compositor" in plugin
+        or "Linura protected compositor" in config
+    ):
+        raise SourceError("native code-loading rejection is already present")
+    start = "std::expected<CPlugin*, std::string> CPluginSystem::loadPluginInternal(const std::string& path) {"
+    following = "void CPluginSystem::unloadPlugin(const CPlugin* plugin, bool eject) {"
+    if plugin.count(start) != 1 or plugin.count(following) != 1:
+        raise SourceError("reviewed plugin loading boundary no longer matches")
+    before, after = plugin.index(start), plugin.index(following)
+    if before >= after:
+        raise SourceError("reviewed plugin loading boundary is reordered")
+    plugin = (
+        plugin[:before]
+        + start
+        + '\n    (void)path;\n    return std::unexpected("Linura protected compositor does not admit native plugins");\n}\n\n'
+        + plugin[after:]
+    )
+    config = replace_exact(
+        config,
+        "g_mgr = makeUnique<Lua::CConfigManager>();",
+        'Log::logger->log(Log::CRIT, "Linura protected compositor does not admit in-process Lua configuration");\n            return false;',
+        2,
+    )
+    start = "std::optional<std::string> CConfigManager::handleEnv(const std::string& command, const std::string& value) {"
+    following = "std::optional<std::string> CConfigManager::handlePlugin(const std::string& command, const std::string& path) {"
+    if (
+        legacy.count(start) != 1
+        or legacy.count(following) != 1
+        or "Linura protected compositor" in legacy
+    ):
+        raise SourceError("reviewed process environment boundary no longer matches")
+    before, after = legacy.index(start), legacy.index(following)
+    if before >= after:
+        raise SourceError("reviewed process environment boundary is reordered")
+    legacy = (
+        legacy[:before]
+        + start
+        + '\n    (void)command;\n    (void)value;\n    return "Linura protected compositor does not admit process environment changes";\n}\n\n'
+        + legacy[after:]
+    )
+    return plugin, config, legacy
 
 
 def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str]:
     """Construct all outputs before any write. No fuzzy patches or symbol hooks."""
     outputs = dict(inputs)
     outputs["src/main.cpp"] = patch_native_startup(outputs["src/main.cpp"])
+    (
+        outputs["src/plugins/PluginSystem.cpp"],
+        outputs["src/config/ConfigManager.cpp"],
+        outputs["src/config/legacy/ConfigManager.cpp"],
+    ) = reject_in_process_code_loading(
+        outputs["src/plugins/PluginSystem.cpp"],
+        outputs["src/config/ConfigManager.cpp"],
+        outputs["src/config/legacy/ConfigManager.cpp"],
+    )
     outputs["src/version.h.in"] = stamp_version_template(
         outputs["src/version.h.in"], upstream_commit
     )

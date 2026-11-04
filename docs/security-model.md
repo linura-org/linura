@@ -242,9 +242,46 @@ and native single-use lease admission remain mandatory. A malformed response,
 wrong socket/process, disappeared service or lost response fails closed; an
 already consumed admission cannot be retried by restarting the owner.
 
-Before compositor configuration, plugins or device startup, the native entry
-point disables dumpability and clears ambient, permitted, effective and
-inheritable capabilities. Removing PAM's local-seat ambient capabilities must
+The pinned compositor's package transaction uses the fixed
+`linura-hyprland-install-secure-entry` helper to install mode 2755 with the
+dedicated local `linura-display-entry` group. The group owns no Linura resources;
+aliases, explicit members and primary-account membership are refused. This is
+an exec-time loader boundary, not runtime execution authority. The kernel must
+set `AT_SECURE=1` before constructors; the root guard independently reads that
+marker from the admitted process's bounded auxiliary vector and requires the
+installed file's exact dedicated group and setgid mode. A `nosuid` mount,
+no-new-privileges suppression or an ordinary unqualified installation cannot
+satisfy startup admission. The build omits build-directory library search paths.
+
+The executable's bounded ELF preinit hook removes inherited environment keys
+outside a fixed allowlist before ordinary dependency and C++ constructors. This
+is separate from secure dynamic-loader entry: pinned libglvnd 1.7.0 checks current
+UID/GID equality for EGL vendor overrides, so dropping the temporary group would
+otherwise re-enable caller-selected vendor libraries. Software-renderer and
+logind-backend flags accept only fixed values. Duplicate retained keys, malformed
+entries or count/size exhaustion refuse startup before partially rewriting envp.
+Legacy `env`/`envd` directives are refused to prevent later reintroduction of those
+native-code selectors; application-specific variables belong to separately
+launched application environments. This restriction changes the Experimental
+pinned integration coherently; it is not a universal qualification of every
+library/configuration loader. Constructor ordering, the pinned dependency graph
+and actual native graphics startup still require adversarial qualification.
+
+At the first statement of main, the native entry point requires a single thread,
+drops real/effective/saved groups to the original login group, disables
+dumpability and clears ambient, permitted, effective and inheritable
+capabilities. A constructor-created thread is refused because `capset` cannot
+clear another thread's retained capabilities. Information-only CLI exits remain
+available to unprivileged builders; configuration and runtime require secure
+entry. Native plugin loading is permanently refused, as is in-process Lua
+configuration, whose standard libraries could otherwise execute native code.
+The pinned integration retains its legacy Hyprlang configuration path.
+Before changing groups it requires kernel `fs.suid_dumpable` policy 0 or 2;
+policy 1 would reset dumpability during that transition and expose an attach
+window before a later explicit reset. Unknown/unreadable policy refuses the
+group drop. No code changes that host policy. See the kernel's
+[credential-change dumpability rules](https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html).
+Removing PAM's local-seat ambient capabilities must
 not leave the compositor inspectable by another same-UID process. It does not
 set inherited no-new-privileges on applications or change host ptrace policy.
 The capability-free protected owner hashes only the immutable installed image
@@ -260,8 +297,12 @@ bounded to its fixed executable inspection; no method accepts an arbitrary
 path, memory address, ptrace operation or process target. The mutating executor
 and protected owner remain capability-free. Compromise of this root service is
 therefore a high-consequence boundary; this capability is not a caller grant.
-This mechanism alone does not qualify loader, plugin or same-account attack
-resistance: native adversarial evidence remains required.
+Native qualification separately checks the kernel marker, dropped groups and
+capabilities, unchanged application no-new-privileges behavior, a working loader
+canary positive control and its rejection by the actual compositor, and
+same-account process-access denial with guest Yama restrictions removed.
+Implemented checks are not executed evidence: native startup, plugin/Lua denial
+and the complete adversarial first-frame matrix still require qualification.
 
 Independent display protection starts a read-only kernel subscription before
 native sampling and binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the

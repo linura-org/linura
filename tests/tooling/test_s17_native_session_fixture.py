@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import subprocess
 import stat
+import struct
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -39,6 +40,57 @@ same_uid_runner = load("run-same-uid-probes")
 
 
 class S17NativeSessionFixtureTests(unittest.TestCase):
+    def test_compositor_secure_entry_requires_kernel_flag_and_complete_credential_drop(
+        self,
+    ):
+        status = {
+            "Uid": "1000 1000 1000 1000",
+            "Gid": "1000 1000 1000 1000",
+            "TracerPid": "0",
+            "NoNewPrivs": "0",
+            **{
+                key: "0000000000000000"
+                for key in ("CapInh", "CapPrm", "CapEff", "CapAmb")
+            },
+        }
+
+        def wire(pairs):
+            return b"".join(struct.pack("<QQ", *pair) for pair in pairs)
+
+        good = wire([(6, 4096), (23, 1), (0, 0)])
+        probe.validate_native_compositor_entry(status, good, 1000, 1000, b"2\n")
+        for policy in (b"", b"1\n", b"3\n", b"00\n", b"2", b"2\n0"):
+            with self.subTest(policy=policy), self.assertRaises(RuntimeError):
+                probe.validate_native_compositor_entry(status, good, 1000, 1000, policy)
+        for key, value in (
+            ("Uid", "0 0 0 0"),
+            ("Gid", "1000 991 991 991"),
+            ("TracerPid", "1"),
+            ("NoNewPrivs", "1"),
+            *(
+                (key, "0000000000000001")
+                for key in ("CapInh", "CapPrm", "CapEff", "CapAmb")
+            ),
+        ):
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                probe.validate_native_compositor_entry(
+                    {**status, key: value}, good, 1000, 1000, b"2\n"
+                )
+        for auxiliary in (
+            b"",
+            good[:-1],
+            bytes(1025),
+            wire([(23, 0), (0, 0)]),
+            wire([(23, 1)]),
+            wire([(23, 1), (23, 1), (0, 0)]),
+            wire([(23, 1), (0, 0), (6, 4096)]),
+            wire([(23, 1), (0, 1)]),
+        ):
+            with self.subTest(auxiliary=auxiliary), self.assertRaises(RuntimeError):
+                probe.validate_native_compositor_entry(
+                    status, auxiliary, 1000, 1000, b"2\n"
+                )
+
     def test_candidate_installer_refuses_host_before_loading_or_copying(self):
         with (
             patch.object(
@@ -73,6 +125,14 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                     }
                 }
             }
+
+            def install_secure_entry(*args):
+                self.assertEqual(
+                    args, ("/usr/lib/linura/linura-hyprland-install-secure-entry",)
+                )
+                installed.chmod(0o2755)
+                return ""
+
             with (
                 patch.object(provision, "require_disposable_guest"),
                 patch.object(provision, "require_root_file"),
@@ -85,12 +145,18 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                 patch.object(provision, "CANDIDATE_ROOT", built),
                 patch.object(provision, "OWNER_BUILD_HEADER", owner_header),
                 patch.object(provision.Path, "glob", return_value=[]),
+                patch.object(
+                    provision, "command", side_effect=install_secure_entry
+                ) as secure,
             ):
                 provision.install_display_candidate(header)
             verify.assert_called_once_with(header)
             self.assertEqual(installed.read_bytes(), binary.read_bytes())
             self.assertNotEqual(installed.stat().st_ino, old_inode)
-            self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
+            secure.assert_called_once_with(
+                "/usr/lib/linura/linura-hyprland-install-secure-entry"
+            )
+            self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o2755)
             self.assertEqual(owner_header.read_bytes(), header.read_bytes())
             self.assertEqual(stat.S_IMODE(owner_header.stat().st_mode), 0o644)
 
@@ -270,21 +336,177 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
 
     def same_uid_report(self):
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "claim": "native-same-uid-process-access-cases-only",
             "native_owner_pid": 100,
             "native_owner_invocation": "a" * 32,
             "owner_start_ticks": "12345",
+            "native_compositor_pid": 99,
+            "native_compositor_invocation": "b" * 32,
+            "compositor_start_ticks": "12340",
             "ptrace_scope": 0,
             "checks": {
-                f"same-uid-{name}-open-denied": True
+                f"{prefix}{name}-open-denied": True
+                for prefix in ("same-uid-", "compositor-same-uid-")
                 for name in ("mem", "environ", "auxv")
             }
-            | {"same-uid-ptrace-seize-denied": True},
+            | {
+                "same-uid-ptrace-seize-denied": True,
+                "compositor-same-uid-ptrace-seize-denied": True,
+                "loader-canary-positive-control": True,
+                "compositor-loader-preload-refused": True,
+                "egl-vendor-override-positive-control": True,
+            },
             "s17_complete": False,
             "native_authentication_qualified": False,
             "release_support_promotion": False,
         }
+
+    def test_loader_refusal_requires_working_positive_control_and_successful_compositor(
+        self,
+    ):
+        library = Path("/usr/lib/linura/qualification/liblinura-s21-loader-canary.so")
+        directory = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+        regular = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o644, st_uid=0, st_nlink=1, st_size=1234
+        )
+        marker = b"linura-loader-canary:loaded\n"
+        good = subprocess.CompletedProcess([], 0, stderr=marker)
+        refused = subprocess.CompletedProcess([], 0, stderr=b"")
+        for positive, negative, succeeds in (
+            (good, refused, True),
+            (refused, refused, False),
+            (good, good, False),
+            (good, subprocess.CompletedProcess([], 1, stderr=b""), False),
+            (good, subprocess.CompletedProcess([], 0, stderr=b"x" * 65537), False),
+        ):
+            with (
+                self.subTest(succeeds=succeeds),
+                patch.object(
+                    same_uid.Path,
+                    "lstat",
+                    side_effect=[directory] * len(library.parents) + [regular],
+                ),
+                patch.object(
+                    same_uid.subprocess, "run", side_effect=[positive, negative]
+                ),
+            ):
+                if succeeds:
+                    self.assertEqual(
+                        same_uid.probe_secure_loader(),
+                        {
+                            "loader-canary-positive-control": True,
+                            "compositor-loader-preload-refused": True,
+                        },
+                    )
+                else:
+                    with self.assertRaises(RuntimeError):
+                        same_uid.probe_secure_loader()
+
+    def test_egl_vendor_override_requires_a_working_native_positive_control(self):
+        directory = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+        regular = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o755, st_uid=0, st_nlink=1, st_size=1234
+        )
+        marker = b"linura-loader-canary:loaded\n"
+        for status, output, succeeds in (
+            (0, marker, True),
+            (0, b"", False),
+            (1, marker, False),
+            (0, b"x" * 65537, False),
+        ):
+            with (
+                self.subTest(status=status, succeeds=succeeds),
+                patch.object(
+                    same_uid.Path,
+                    "lstat",
+                    side_effect=lambda path: (
+                        regular
+                        if path.name
+                        in {"linura-s21-egl-loader-probe", "linura-s21-egl-vendor.json"}
+                        else directory
+                    ),
+                    autospec=True,
+                ),
+                patch.object(
+                    same_uid.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], status, stderr=output),
+                ) as run,
+            ):
+                if succeeds:
+                    self.assertEqual(
+                        same_uid.probe_egl_vendor_override(),
+                        {"egl-vendor-override-positive-control": True},
+                    )
+                    environment = run.call_args.kwargs["env"]
+                    self.assertNotIn("LD_PRELOAD", environment)
+                    self.assertEqual(
+                        environment["__EGL_VENDOR_LIBRARY_FILENAMES"],
+                        "/usr/lib/linura/qualification/linura-s21-egl-vendor.json",
+                    )
+                else:
+                    with self.assertRaises(RuntimeError):
+                        same_uid.probe_egl_vendor_override()
+
+    def test_native_egl_refusal_requires_original_service_journal_and_no_marker(self):
+        unit = b"Environment=__EGL_VENDOR_LIBRARY_FILENAMES=/usr/lib/linura/qualification/linura-s21-egl-vendor.json\n"
+        facts = {
+            "MainPID": "1234",
+            "InvocationID": "a" * 32,
+            "ActiveState": "active",
+            "SubState": "running",
+        }
+        for status, output, error, changed, succeeds in (
+            (0, b"", b"", False, True),
+            (1, b"", b"", False, True),
+            (0, b"linura-loader-canary:loaded\n", b"", False, False),
+            (1, b"", b"journal failed", False, False),
+            (2, b"", b"", False, False),
+            (0, b"", b"", True, False),
+        ):
+            with (
+                self.subTest(status=status, changed=changed, succeeds=succeeds),
+                patch.object(probe, "bounded_asset", return_value=unit),
+                patch.object(
+                    probe,
+                    "properties",
+                    side_effect=[
+                        facts,
+                        {**facts, "InvocationID": "b" * 32} if changed else facts,
+                    ],
+                ),
+                patch.object(
+                    probe, "command", return_value="native compositor startup"
+                ),
+                patch.object(
+                    probe.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        [], status, stdout=output, stderr=error
+                    ),
+                ),
+            ):
+                if succeeds:
+                    self.assertEqual(
+                        probe.inspect_native_egl_override_refusal(1234),
+                        {
+                            "egl_vendor_override_refused": True,
+                            "compositor_invocation": "a" * 32,
+                        },
+                    )
+                else:
+                    with self.assertRaises(RuntimeError):
+                        probe.inspect_native_egl_override_refusal(1234)
+        with (
+            patch.object(probe, "bounded_asset", return_value=unit),
+            patch.object(probe, "properties", return_value=facts),
+            patch.object(probe, "command", return_value=""),
+            patch.object(probe.subprocess, "run") as run,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "journal is unavailable"):
+                probe.inspect_native_egl_override_refusal(1234)
+            run.assert_not_called()
 
     def test_native_process_attack_probe_cannot_attach_before_guest_guard(self):
         with (
@@ -384,6 +606,11 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
             with self.subTest(missing=field), self.assertRaises(RuntimeError):
                 same_uid_runner.validate_report(changed)
         for field, value in (
+            ("schema_version", 1),
+            ("native_compositor_pid", 100),
+            ("native_compositor_pid", True),
+            ("native_compositor_invocation", "0" * 32),
+            ("compositor_start_ticks", "0"),
             ("s17_complete", True),
             ("native_authentication_qualified", True),
             ("release_support_promotion", True),
@@ -955,6 +1182,19 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                     ),
                     patch.object(probe, "properties", return_value=facts),
                     patch.object(probe, "properties_from_proc", return_value=status),
+                    patch.object(
+                        probe,
+                        "inspect_native_compositor_entry",
+                        return_value={"kernel_secure_exec": True},
+                    ) as secure_entry,
+                    patch.object(
+                        probe,
+                        "inspect_native_egl_override_refusal",
+                        return_value={
+                            "egl_vendor_override_refused": True,
+                            "compositor_invocation": "d" * 32,
+                        },
+                    ) as loader_refusal,
                     patch.object(probe, "wait_for_automatic_watcher") as watcher,
                     patch.object(
                         probe, "inspect_native_polkit", side_effect=attest_polkit
@@ -981,8 +1221,18 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                             compositor_candidate,
                         )
                     candidate_probe.assert_called_once_with(123)
+                    secure_entry.assert_called_once_with(123, 1000)
                     watcher.assert_called_once_with(1000)
                     polkit.assert_called_once()
+                    if failure:
+                        loader_refusal.assert_not_called()
+                    else:
+                        loader_refusal.assert_called_once_with(123)
+                        self.assertTrue(
+                            report["native_compositor_loader_refusal"][
+                                "egl_vendor_override_refused"
+                            ]
+                        )
                 self.assertFalse(
                     any(
                         args[0] == "systemctl"

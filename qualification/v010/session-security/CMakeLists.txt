@@ -15,6 +15,13 @@ target_compile_options(linura-s17-assistive-probe PRIVATE
 # Host AT-SPI component checks do not install or borrow a second development SDK.
 option(LINURA_DISPLAY_OWNER_ADMISSION_PROBE "Build guest-only native display admission probe" OFF)
 if(LINURA_DISPLAY_OWNER_ADMISSION_PROBE)
+    add_library(linura-s21-loader-canary MODULE native-loader-canary.cpp)
+    target_compile_options(linura-s21-loader-canary PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_executable(linura-s21-egl-loader-probe native-egl-loader-probe.cpp)
+    target_link_libraries(linura-s21-egl-loader-probe PRIVATE ${CMAKE_DL_LIBS})
+    target_compile_options(linura-s21-egl-loader-probe PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(DISPLAY_SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
     get_filename_component(DISPLAY_NATIVE_SOURCE

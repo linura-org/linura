@@ -397,6 +397,34 @@ environment-selected bus, local/root caller exemption or POSIX SID assumption ca
 replace this evidence. Admission loss cannot stop automatic compositor recovery;
 admission itself never substitutes for prepared canonical Control authority.
 
+The pinned compositor also requires secure loader entry before native
+constructors. A fixed package-time operation assigns the otherwise unused local
+`linura-display-entry` group and mode 2755; it grants no root UID, capability or
+Linura resource access. The first main statement refuses pre-existing threads,
+drops all saved/effective group elevation to the login group and removes process
+capabilities behind explicit nondumpability. Group changes require observed
+`fs.suid_dumpable` policy 0 or 2 before releasing the setgid inspection barrier;
+policy 1 or unknown state fails closed without changing host policy.
+Root independently checks the
+executing image, dedicated installed group and kernel `AT_SECURE` throughout the
+lease. Runtime and configuration refuse missing secure entry; unprivileged
+information-only build checks still work. The compositor build omits RPATH, and
+the integration permanently refuses native plugins and in-process Lua config.
+These restrictions replace an insufficient instantaneous plugin-count check:
+unloading code cannot undo its earlier access to the trusted compositor.
+Before dependency/C++ constructors, a bounded executable ELF preinit hook
+filters inherited environment keys against fixed names and constrained native
+backend/software values. Secure-loader entry alone is insufficient: pinned
+libglvnd checks current UID/GID equality and would honor injected vendor paths
+after group drop. Legacy compositor `env`/`envd` directives are therefore refused,
+preventing later reintroduction; application environments remain separate.
+Real native qualification requires a working EGL-vendor canary positive control
+and no canary marker in the actual compositor's original invocation journal,
+in addition to successful exact-source bootstrap and independent first frames.
+Legacy Hyprlang without those directives remains the supported configuration
+mechanism for this pinned integration. These source changes require actual native qualification; neither
+unit tests nor a successful build establish secure first-frame admission.
+
 The compositor mechanism owns a native logind block inhibitor for both sleep and
 shutdown before its first layout write. It verifies the canonical system bus,
 root logind owner and both preparation facts under one 250 ms probe budget,

@@ -77,6 +77,7 @@ CONF_KINDS = {
     "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",
     "qualification/v010/session-security/fixtures/s17-hyprland.conf": "text",
     "packaging/sysusers.d/linura-authority.conf": "sysusers",
+    "packaging/sysusers.d/linura-display-entry.conf": "sysusers-display-entry",
     "tests/acceptance/v05/49-linura-v05-qualification-dbus.conf": "xml",
 }
 POLKIT_RULES = frozenset(
@@ -306,6 +307,16 @@ def format_errors(path: Path, content: bytes, kind: str) -> list[str]:
                             section == "Action" and option == "abortonfail"
                         ):
                             raise ValueError("unsupported bare Arch hook directive")
+        elif kind == "sysusers-display-entry":
+            entries = [
+                shlex.split(line, comments=True, posix=True)
+                for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            if entries != [["g", "linura-display-entry", "-", "-"]]:
+                raise ValueError(
+                    "expected the dedicated display-entry group without members"
+                )
         elif kind == "sysusers":
             entries = [
                 shlex.split(line, comments=True, posix=True)

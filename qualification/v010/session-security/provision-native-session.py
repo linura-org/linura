@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -181,6 +182,11 @@ def install_display_candidate(owner_header: Path) -> None:
     OWNER_BUILD_HEADER.chmod(0o644)
     staged.chmod(0o755)
     os.replace(staged, COMPOSITOR)
+    # Use the product's fixed package-time secure-entry operation; the guest
+    # fixture must not invent a different loader or privilege configuration.
+    secure_entry = Path("/usr/lib/linura/linura-hyprland-install-secure-entry")
+    require_root_file(secure_entry)
+    command(str(secure_entry))
     descriptor = os.open(COMPOSITOR.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(descriptor)
@@ -308,6 +314,24 @@ def provision() -> None:
         probe_destination.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         shutil.copyfile(probe_build / "linura-s17-assistive-probe", probe_destination)
         probe_destination.chmod(0o755)
+        loader_canary = probe_destination.parent / "liblinura-s21-loader-canary.so"
+        shutil.copyfile(probe_build / loader_canary.name, loader_canary)
+        loader_canary.chmod(0o644)
+        egl_probe = probe_destination.parent / "linura-s21-egl-loader-probe"
+        shutil.copyfile(probe_build / egl_probe.name, egl_probe)
+        egl_probe.chmod(0o755)
+        egl_vendor = probe_destination.parent / "linura-s21-egl-vendor.json"
+        egl_vendor.write_text(
+            json.dumps(
+                {
+                    "file_format_version": "1.0.0",
+                    "ICD": {"library_path": str(loader_canary)},
+                }
+            )
+            + "\n",
+            encoding="ascii",
+        )
+        egl_vendor.chmod(0o644)
         admission_destination = (
             probe_destination.parent / "linura-s21-owner-admission-probe"
         )

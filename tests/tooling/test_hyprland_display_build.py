@@ -246,6 +246,7 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("FETCHCONTENT_FULLY_DISCONNECTED=ON", script)
         self.assertIn("FETCHCONTENT_UPDATES_DISCONNECTED=ON", script)
+        self.assertIn("-DCMAKE_SKIP_RPATH=ON", script)
         self.assertIn("ctest --test-dir mechanism-build --output-on-failure", script)
         self.assertIn("ctest --test-dir compositor-build --output-on-failure", script)
         self.assertIn("cmake --build compositor-build --parallel 1", script)

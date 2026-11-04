@@ -104,8 +104,9 @@ std::optional<QString> installedNativeImage()
     struct stat before
     {};
     if (fstat(installed.get(), &before) != 0 || !S_ISREG(before.st_mode) || before.st_uid != 0 ||
-        before.st_nlink != 1 || (before.st_mode & 06022) != 0 || (before.st_mode & S_IXUSR) == 0 ||
-        before.st_size <= 0 || before.st_size > 512LL * 1024 * 1024)
+        before.st_nlink != 1 || (before.st_mode & 04022) != 0 || (before.st_mode & S_ISGID) == 0 ||
+        before.st_gid == 0 || (before.st_mode & S_IXUSR) == 0 || before.st_size <= 0 ||
+        before.st_size > 512LL * 1024 * 1024)
         return unavailableImage("linura-security-owner: native-image/installed-identity\n");
     QElapsedTimer budget;
     budget.start();

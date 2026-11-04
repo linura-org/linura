@@ -91,6 +91,10 @@ BINARIES = {
 
 RUNTIME_ASSETS = {
     ROOT
+    / "packaging/hyprland-display/install-secure-entry.sh": "usr/lib/linura/linura-hyprland-install-secure-entry",
+    ROOT
+    / "packaging/sysusers.d/linura-display-entry.conf": "usr/lib/sysusers.d/linura-display-entry.conf",
+    ROOT
     / "packaging/security-owner/install-capability.sh": "usr/lib/linura/linura-security-owner-install-capability",
     ROOT
     / "packaging/arch/hooks/90-linura-security-owner-capability.hook": "etc/pacman.d/hooks/90-linura-security-owner-capability.hook",
@@ -355,7 +359,11 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         shutil.copy2(source, destination)
         destination.chmod(
             0o755
-            if relative == "usr/lib/linura/linura-security-owner-install-capability"
+            if relative
+            in {
+                "usr/lib/linura/linura-security-owner-install-capability",
+                "usr/lib/linura/linura-hyprland-install-secure-entry",
+            }
             else 0o644
         )
 

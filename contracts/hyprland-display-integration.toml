@@ -76,3 +76,15 @@ sha256 = "83c69d93f09088f1e2383a9c85a54cf3f55718d9506a1121058afef77911223a"
 [[upstream_file]]
 path = "src/pointer/PointerManager.hpp"
 sha256 = "af62bde2f8cf14e0440a99d0e81b361d3845eb95873be549e4ce44f45edb345e"
+
+[[upstream_file]]
+path = "src/plugins/PluginSystem.cpp"
+sha256 = "966d00f8bda2f254a8f19c375218b9049a07f3b7893af3270abdce457d81f7f9"
+
+[[upstream_file]]
+path = "src/config/ConfigManager.cpp"
+sha256 = "c10dc1ce6602a854121a79fb0192c9f43aa836a35f9acb98ff1789541b01f366"
+
+[[upstream_file]]
+path = "src/config/legacy/ConfigManager.cpp"
+sha256 = "9db68cf44048d86557d8a53068dcc40b9bd7347c7d95f38edc501565f65be62b"

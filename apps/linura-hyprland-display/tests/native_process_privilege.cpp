@@ -1,14 +1,19 @@
 #include "native_process_privilege.h"
 
 #include <cassert>
+#include <atomic>
 #include <cerrno>
 #include <fcntl.h>
 #include <string>
 #include <sys/wait.h>
+#include <thread>
 
 using namespace Linura::HyprlandDisplay;
 int main()
 {
+    assert(safeGroupDropPolicy("0\n") && safeGroupDropPolicy("2\n"));
+    for (const auto value : {"", "1\n", "3\n", "0", "00\n", "2\nextra", " 0\n"})
+        assert(!safeGroupDropPolicy(value));
     if (getuid() == 0) {
         assert(!dropNativeProcessCapabilities());
         return 0;
@@ -31,6 +36,34 @@ int main()
     for (const auto &set : caps)
         assert(set.effective == 0 && set.permitted == 0 && set.inheritable == 0);
     assert(dropNativeProcessCapabilities()); // Already empty remains empty.
+    const auto group = getgid();
+    gid_t realGroup = 0, effectiveGroup = 0, savedGroup = 0;
+    assert(getresgid(&realGroup, &effectiveGroup, &savedGroup) == 0);
+    assert(realGroup == group && effectiveGroup == group && savedGroup == group);
+    const auto threaded = fork();
+    assert(threaded >= 0);
+    if (threaded == 0) {
+        std::atomic<bool> readyThread{false}, finishThread{false};
+        std::thread worker([&] {
+            readyThread.store(true);
+            while (!finishThread.load())
+                std::this_thread::yield();
+        });
+        while (!readyThread.load())
+            std::this_thread::yield();
+        assert(!singleNativeThread());
+        assert(!dropNativeProcessCapabilities());
+        finishThread.store(true);
+        worker.join();
+        _exit(0);
+    }
+    int threadedStatus = 0;
+    assert(waitpid(threaded, &threadedStatus, 0) == threaded && WIFEXITED(threadedStatus) &&
+           WEXITSTATUS(threadedStatus) == 0);
+    // The parent never created a thread. pthread_join alone cannot prove that
+    // procfs has already removed a terminated task; production never retries.
+    assert(singleNativeThread());
+    assert(dropNativeProcessCapabilities());
 
     // Even a parent with matching UID and no Yama child restriction cannot
     // inspect the protected child's actual image after capability removal.

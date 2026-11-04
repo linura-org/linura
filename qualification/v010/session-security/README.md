@@ -85,6 +85,26 @@ the observed post-logout watcher failure.
 
 `check-native-session.py` checks automatic first-login owner activation, native
 identity, installed capability and post-drop process state. It independently
+checks the compositor's kernel secure-exec vector, complete UID/GID restoration,
+empty capabilities and unchanged no-new-privileges behavior. The same-UID report
+uses schema 2 and requires both owner and compositor memory/environment/auxiliary
+vector/ptrace denial with guest Yama restrictions removed and restored afterward.
+A guest-only loader canary must first load into `/usr/bin/true`, then fail to
+load into the exact installed compositor using the same absolute `LD_PRELOAD`
+value. A missing/broken positive control or a failed compositor invocation is
+never accepted as secure-loader evidence. The canary is not a product asset.
+A separate ordinary unprivileged executable invokes real libEGL vendor discovery
+with a fixed JSON override and must load the same canary. The actual compositor
+fixture receives that override before exec. Bootstrap requires its exact installed
+fixture, current service MainPID/invocation, an available invocation journal and
+absence of the constructor marker, rechecking service identity afterward. This
+is an EGL environment-path check, not proof for every graphics/plugin loader.
+The bounded preinit environment allowlist and permanent legacy `env`/`envd`
+refusal prevent reintroducing those selectors after temporary group removal.
+The fixed product package helper establishes secure entry after candidate-byte
+verification; qualification does not invent another privilege configuration.
+These added cases remain unqualified until a new exact-head native execution.
+The checker independently
 revalidates the pinned Polkit 127 systemd service fragment, absence of drop-ins,
 current invocation/PID, exact running argv and local daemon UID after automatic
 owner startup and before accepting the bootstrap report. The production owner's

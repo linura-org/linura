@@ -407,6 +407,24 @@ class ValidationGateTests(unittest.TestCase):
         target.write_text("printf '%s\\n' changed\n", encoding="utf-8")
         self.assertIn(relative + ": unreviewed shell execution", gates.check(self.root))
 
+    def test_display_entry_installer_review_binds_fixed_paths_and_complete_body(self):
+        relative = "packaging/hyprland-display/install-secure-entry.sh"
+        target = self.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        original = (ROOT / relative).read_text(encoding="utf-8")
+        target.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        for changed in (
+            original.replace("image=/usr/bin/Hyprland", 'image="$1"', 1),
+            original.replace('"+$entry_gid"', '"$entry_gid"', 1),
+            original + "exit 0\n",
+        ):
+            with self.subTest(changed=changed):
+                target.write_text(changed, encoding="utf-8")
+                self.assertIn(
+                    relative + ": unreviewed shell execution", gates.check(self.root)
+                )
+
     def test_dynamic_shell_interpreters_require_review_for_every_input(self):
         commands = (
             'bash < "$contract"',

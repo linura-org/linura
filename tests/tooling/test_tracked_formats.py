@@ -267,6 +267,35 @@ class TrackedFormatsTests(unittest.TestCase):
                     "text",
                 )
 
+    def test_display_entry_sysusers_contract_is_exact_and_memberless(self):
+        path = Path("packaging/sysusers.d/linura-display-entry.conf")
+        content = (ROOT / path).read_bytes()
+        self.assertEqual(formats.classify(path, content), "sysusers-display-entry")
+        self.assertEqual(
+            formats.format_errors(path, content, "sysusers-display-entry"), []
+        )
+        for invalid in (
+            b"g linura-display-entry 0 -\n",
+            b"u linura-display-entry - -\n",
+            b"g other - -\n",
+            b"g linura-display-entry - - user\n",
+            b"g linura-display-entry - -\ng other - -\n",
+            b"",
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertTrue(
+                    formats.format_errors(path, invalid, "sysusers-display-entry")
+                )
+        self.assertEqual(
+            formats.classify(Path("packaging/sysusers.d/unreviewed.conf"), content),
+            "unclassified",
+        )
+        self.assertTrue(
+            formats.format_errors(
+                Path("packaging/sysusers.d/linura-authority.conf"), content, "sysusers"
+            )
+        )
+
     def test_s17_inputs_are_narrowly_classified(self) -> None:
         expected = {
             "qualification/v010/session-security/CMakeLists.txt": "build",

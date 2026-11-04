@@ -1274,6 +1274,8 @@ def dynamic_shell_execution(
 # Digests bind exceptions to complete reviewed files, including every variable
 # definition. Adding an invocation or changing a variable invalidates review.
 REVIEWED_SHELL_EXECUTION = {
+    # Fixed package-only commands and local account parsers, no runtime caller inputs.
+    "packaging/hyprland-display/install-secure-entry.sh": "99b79bc2be6878ffac5f122a5950c82c238e4f3c4c82b80896a2c761aadde035",
     # Qualification entrypoints retain their exact reviewed guest commands,
     # recorder paths and callback helpers. Here-doc data is conservatively
     # included in the scan; the digest also binds those opaque bodies.

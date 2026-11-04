@@ -117,6 +117,10 @@ impl NativeDisplayStartupPeer {
         })
     }
     pub fn live(&self) -> Result<(), String> {
+        self.process_live()?;
+        self.image.live(self.pid)
+    }
+    fn process_live(&self) -> Result<(), String> {
         let mut event = [PollFd::new(&self.process, PollFlags::IN)];
         if rustix::event::poll(
             &mut event,
@@ -133,7 +137,7 @@ impl NativeDisplayStartupPeer {
         {
             return Err(unavailable());
         }
-        self.image.live(self.pid)
+        Ok(())
     }
 }
 
@@ -408,7 +412,8 @@ mod tests {
             image: Arc::new(image::NativeDisplayImage::test_process(pid)),
             admission_started: Instant::now(),
         };
-        assert!(peer.live().is_ok());
+        assert!(peer.process_live().is_ok());
+        assert!(peer.live().is_err()); // A live PID alone is not secure executable admission.
         assert!(!peer.definitely_exited());
         assert!(peer.same_invocation(&peer));
         let topology =

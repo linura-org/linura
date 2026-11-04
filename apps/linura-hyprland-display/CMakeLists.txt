@@ -81,6 +81,20 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    # A real DSO constructor and an executable C++ constructor must both
+    # observe the filtered vector, before main or any native group reset.
+    add_library(linura-native-environment-constructor SHARED tests/native_environment_constructor.cpp)
+    add_executable(linura-native-environment-tests tests/native_environment.cpp)
+    target_include_directories(linura-native-environment-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(linura-native-environment-tests PRIVATE linura-native-environment-constructor)
+    foreach(target IN ITEMS linura-native-environment-constructor linura-native-environment-tests)
+        target_compile_options(${target} PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    endforeach()
+    add_test(NAME hyprland-native-environment-before-constructors COMMAND linura-native-environment-tests)
+    # This known test-only DSO must also resolve when the product build disables
+    # RPATH. The preinit hook removes LD_LIBRARY_PATH before either constructor.
+    set_tests_properties(hyprland-native-environment-before-constructors PROPERTIES TIMEOUT 5
+        ENVIRONMENT "LANG=C;__EGL_VENDOR_LIBRARY_FILENAMES=/untrusted/vendor.json;__EGL_VENDOR_LIBRARY_DIRS=/untrusted;GBM_BACKENDS_PATH=/untrusted;LINURA_NATIVE_ENV_TEST=discard;LD_LIBRARY_PATH=$<TARGET_FILE_DIR:linura-native-environment-constructor>")
     add_executable(linura-hyprland-process-privilege-tests tests/native_process_privilege.cpp)
     target_include_directories(linura-hyprland-process-privilege-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(linura-hyprland-process-privilege-tests PRIVATE

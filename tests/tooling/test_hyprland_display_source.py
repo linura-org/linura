@@ -33,11 +33,14 @@ class HyprlandDisplaySourceTests(unittest.TestCase):
     ):
         main = (
             '#include "helpers/env/Env.hpp"\n'
-            "int main() {\n    if (!verifyConfig) {\n        gainRealTime();\n    }\n"
+            "int main(int argc, char** argv) {\n    parseArguments();\n"
+            "    if (!verifyConfig) {\n        gainRealTime();\n    }\n"
             "    createCompositor();\n}\n"
         )
         patched = source.integration.patch_native_startup(main)
         self.assertIn('#include "native_process_privilege.h"', patched)
+        self.assertIn('gnu::section(".preinit_array")', patched)
+        self.assertIn("initializeNativeEnvironment", patched)
         self.assertLess(
             patched.index("dropNativeProcessCapabilities"),
             patched.index("gainRealTime"),
@@ -47,14 +50,81 @@ class HyprlandDisplaySourceTests(unittest.TestCase):
             patched.index("createCompositor"),
         )
         self.assertIn("return 1;", patched)
+        self.assertLess(
+            patched.index("dropNativeProcessCapabilities"),
+            patched.index("parseArguments"),
+        )
+        self.assertLess(
+            patched.index("secureNativeEntry"), patched.index("gainRealTime")
+        )
         for changed in (
+            main.replace("int main(int argc, char** argv) {", "int main() {"),
+            main + "int main(int argc, char** argv) {\n",
             main.replace("    if (!verifyConfig) {", "    if (verifyConfig) {"),
-            main + "    if (!verifyConfig) {\n",
             patched,
             main.replace('#include "helpers/env/Env.hpp"', ""),
         ):
             with self.subTest(changed=changed), self.assertRaises(source.SourceError):
                 source.integration.patch_native_startup(changed)
+
+    def test_native_plugin_loading_and_lua_construction_are_permanently_refused(self):
+        start = "std::expected<CPlugin*, std::string> CPluginSystem::loadPluginInternal(const std::string& path) {"
+        following = (
+            "void CPluginSystem::unloadPlugin(const CPlugin* plugin, bool eject) {"
+        )
+        plugin = (
+            start + "\n dlopen(path.c_str(), RTLD_LAZY);\n}\n\n" + following + "\n}\n"
+        )
+        config = "g_mgr = makeUnique<Lua::CConfigManager>();\n" * 2
+        env_start = "std::optional<std::string> CConfigManager::handleEnv(const std::string& command, const std::string& value) {"
+        env_next = "std::optional<std::string> CConfigManager::handlePlugin(const std::string& command, const std::string& path) {"
+        environment = env_start + "\nsetenv(name, value, 1);\n}\n" + env_next + "\n}\n"
+        disabled, legacy, safe_environment = (
+            source.integration.reject_in_process_code_loading(
+                plugin, config, environment
+            )
+        )
+        self.assertNotIn("setenv(", safe_environment)
+        self.assertNotIn("dlopen(", disabled)
+        self.assertIn("return std::unexpected(", disabled)
+        self.assertNotIn("makeUnique<Lua::CConfigManager>", legacy)
+        self.assertEqual(legacy.count("return false;"), 2)
+        for bad_plugin, bad_config in [
+            (plugin.replace(start, ""), config),
+            (plugin + start, config),
+            (plugin, config + config),
+            (disabled, legacy),
+        ]:
+            with self.assertRaises(source.SourceError):
+                source.integration.reject_in_process_code_loading(
+                    bad_plugin, bad_config, environment
+                )
+
+    def test_native_environment_refusal_rejects_missing_reordered_or_patched_anchors(
+        self,
+    ):
+        plugin_start = "std::expected<CPlugin*, std::string> CPluginSystem::loadPluginInternal(const std::string& path) {"
+        plugin_next = (
+            "void CPluginSystem::unloadPlugin(const CPlugin* plugin, bool eject) {"
+        )
+        plugin = plugin_start + "\n}\n" + plugin_next + "\n}\n"
+        config = "g_mgr = makeUnique<Lua::CConfigManager>();\n" * 2
+        start = "std::optional<std::string> CConfigManager::handleEnv(const std::string& command, const std::string& value) {"
+        following = "std::optional<std::string> CConfigManager::handlePlugin(const std::string& command, const std::string& path) {"
+        legacy = start + "\nsetenv(name, value, 1);\n}\n" + following + "\n}\n"
+        _, _, patched = source.integration.reject_in_process_code_loading(
+            plugin, config, legacy
+        )
+        for invalid in (
+            legacy.replace(start, ""),
+            legacy + start,
+            following + start,
+            patched,
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(source.SourceError):
+                source.integration.reject_in_process_code_loading(
+                    plugin, config, invalid
+                )
 
     def test_recipe_drift_and_symlink_are_refused_before_source_staging(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
