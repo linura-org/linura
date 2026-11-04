@@ -1409,10 +1409,14 @@ mod tests {
     #[test]
     fn verified_compensation_has_a_distinct_sealed_terminal_only_resolution() {
         use std::io::Read;
-        let mut bytes = vec![0; 32];
+        // Test-only authority material comes entirely from the kernel RNG;
+        // never create a literal key-shaped buffer that a scanner could
+        // interpret as an embedded signing secret.
+        let mut bytes = Vec::new();
         std::fs::File::open("/dev/urandom")
-            .and_then(|mut file| file.read_exact(&mut bytes))
+            .and_then(|file| file.take(AUTHORITY_MUTATION_KEY_BYTES as u64).read_to_end(&mut bytes))
             .unwrap_or_else(|_| unreachable!("test entropy unavailable"));
+        assert_eq!(bytes.len(), AUTHORITY_MUTATION_KEY_BYTES);
         let (signer, verifier) = TransactionAuthorityKey::new(bytes)
             .unwrap_or_else(|_| unreachable!("test authority unavailable"))
             .split();
