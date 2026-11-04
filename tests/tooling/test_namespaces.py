@@ -160,6 +160,26 @@ class NamespaceContractTests(unittest.TestCase):
                         self.assertIn(f"unregistered-{action}", result.stderr)
                         self.assertIn("runtime binding", result.stderr)
 
+    def test_original_display_executor_cannot_substitute_apply_service_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = root / "executors/linura-executor-session/src/lib.rs"
+            original = source.read_text(encoding="utf-8")
+            old = 'const ORIGINAL_DISPLAY_ACTION: &str = "org.linura.executor.session.restore-original-display-layout";'
+            # rustfmt may wrap the fixed constant after its equals sign.
+            pattern = r'const ORIGINAL_DISPLAY_ACTION: &str =\s*"org\.linura\.executor\.session\.restore-original-display-layout";'
+            changed, count = re.subn(
+                pattern,
+                old.replace("restore-original-display-layout", "apply-display-layout"),
+                original,
+            )
+            self.assertEqual(count, 1)
+            source.write_text(changed, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Polkit", result.stderr)
+
     def test_native_display_action_cannot_substitute_another_authority_purpose(self):
         for purpose, action in (
             ("Apply", "org.linura.authority.apply-display-layout"),

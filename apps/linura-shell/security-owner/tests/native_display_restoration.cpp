@@ -27,6 +27,20 @@ QString intent(const QString &lock, const QString &baseline, const QString &desi
 } // namespace
 int main()
 {
+    // Same bounded comparison vector as the native compositor guard test.
+    // No synthetic witness here attests a current native output or authority.
+    NativeDisplaySnapshot guardSample;
+    NativeDisplayHead guardHead;
+    guardHead.handle = 1;
+    guardHead.generation = 2;
+    guardHead.baseRuleDigest =
+        QStringLiteral("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    guardHead.outputIdentityDigest =
+        QStringLiteral("689f6a627384c7dcb2dcc1487e540223e77bdf9dcd0d8be8a326eda65b0ce9a4");
+    guardSample.heads.push_back(guardHead);
+    assert(guardSample.baselineGuard(QStringLiteral("bounded comparison baseline")) ==
+           std::optional<QString>{
+               QStringLiteral("ec6b56a675dc3e1dc66237ae9807dcf0b5f687369012e83b85caa903edba86a3")});
     const auto oldLock = QStringLiteral("session:lock:11111111-1111-4111-8111-111111111111:1000:"
                                         "c2:42:22222222-2222-4222-8222-222222222222:1");
     const auto newLock = QStringLiteral("session:lock:11111111-1111-4111-8111-111111111111:1000:"

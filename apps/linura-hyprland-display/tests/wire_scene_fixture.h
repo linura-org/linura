@@ -35,6 +35,12 @@ class WireSceneFixture final : public ProtectedScene
         consumed = true;
         return true;
     }
+    std::shared_ptr<MutationProtection> reserveOriginalRestoration(
+        const Correlation &, const Layout &, const Layout &, const Snapshot &, ClockSample,
+        const std::map<OutputKey, std::string> &, std::function<bool()>) override
+    {
+        return {}; // This fixture has no authenticated original-Root recovery.
+    }
     std::shared_ptr<MutationProtection> reserveMutation(const Correlation &, const Layout &,
                                                         const Layout &, const Snapshot &,
                                                         ClockSample) override

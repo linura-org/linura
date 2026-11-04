@@ -129,6 +129,11 @@ class WireEndpoint::Impl final
                                                       LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
                 return;
             }
+            const auto original = owner.originalRestoration.status(bound);
+            if (original) {
+                linura_display_attempt_v1_send_status(native, *original);
+                return;
+            }
             const auto phase = owner.service.status(bound);
             linura_display_attempt_v1_send_status(
                 native, phase ? wirePhase(*phase)
@@ -158,6 +163,7 @@ class WireEndpoint::Impl final
     OutputName outputName;
     AdmitOwner admitOwner;
     NativeStartupPort startup;
+    NativeOriginalRestorationPort originalRestoration;
     wl_global *global = nullptr;
     std::map<wl_client *, std::shared_ptr<Client>> clients;
     std::set<wl_resource *> resources;
@@ -176,16 +182,17 @@ class WireEndpoint::Impl final
 
     Impl(wl_display &display, Backend &native, CompositorDisplayService &attempts,
          NativeBuildIdentity build, OutputName names, AdmitOwner admission,
-         NativeStartupPort startupPort)
+         NativeStartupPort startupPort, NativeOriginalRestorationPort originalPort)
         : backend(native), service(attempts), identity(std::move(build)),
           outputName(std::move(names)), admitOwner(std::move(admission)),
-          startup(std::move(startupPort))
+          startup(std::move(startupPort)), originalRestoration(std::move(originalPort))
     {
         if (getuid() == 0 || getuid() != geteuid() || identity.compositorInstance.size() != 36 ||
             identity.upstreamCommit.size() != 40 || identity.integrationDigest.size() != 64 ||
             !scalar(identity.upstreamCommit.c_str(), 40, true) ||
             !scalar(identity.integrationDigest.c_str(), 64, true) || !outputName || !admitOwner ||
-            !startup.phase || !startup.admit)
+            !startup.phase || !startup.admit || !originalRestoration.dispatch ||
+            !originalRestoration.status)
             return;
         global = wl_global_create(&display, &linura_display_manager_v1_interface, 1, this, bind);
     }
@@ -385,7 +392,8 @@ class WireEndpoint::Impl final
             }
             result->bound = {transaction, effect, dispatch,
                              (static_cast<std::uint64_t>(deadlineHi) << 32) | deadlineLo};
-            result->used = manager.owner.service.status(result->bound).has_value();
+            result->used = manager.owner.service.status(result->bound).has_value() ||
+                           manager.owner.originalRestoration.status(result->bound).has_value();
             result->status();
         } catch (...) {
             wl_client_post_no_memory(client);
@@ -509,6 +517,52 @@ class WireEndpoint::Impl final
             wl_client_post_no_memory(client);
         }
     }
+    static void restoreOriginal(wl_client *client, wl_resource *resource, int descriptor,
+                                wl_resource *protection)
+    {
+        OwnedNativeFd grant{descriptor};
+        auto &attempt = object<Attempt>(resource);
+        if (attempt.used || attempt.invalid || attempt.owner.startup.phase() != 2 ||
+            !attempt.captured || attempt.owner.origins.contains(attempt.bound.transaction)) {
+            attempt.deny();
+            return;
+        }
+        attempt.used = true;
+        try {
+            const auto invocation =
+                attempt.owner.admitOwner(attempt.client->pid, attempt.client->uid);
+            if (!invocation || *invocation != attempt.client->invocation) {
+                attempt.deny();
+                return;
+            }
+            Layout desired;
+            for (const auto &[key, target] : attempt.targets) {
+                (void)key;
+                desired.push_back(target);
+            }
+            if (!DisplayTransaction::validLayout(desired, attempt.captured->sample)) {
+                attempt.deny();
+                return;
+            }
+            if (attempt.owner.origins.size() >= CompositorDisplayService::MaxReservations) {
+                attempt.deny();
+                return;
+            }
+            attempt.owner.origins.emplace(attempt.bound.transaction,
+                                          Origin{attempt.client, *invocation});
+            const auto phase = attempt.owner.originalRestoration.dispatch(
+                std::move(grant), attempt.bound, desired, attempt.captured->sample,
+                attempt.captured->at, protection, client);
+            if (!phase || *phase < 1 || *phase > 8) {
+                attempt.deny();
+                return;
+            }
+            linura_display_attempt_v1_send_status(attempt.native, *phase);
+        } catch (...) {
+            // The endpoint/reservation remains consumed on an uncertain return.
+            wl_client_post_no_memory(client);
+        }
+    }
     static void confirm(wl_client *, wl_resource *resource)
     {
         auto &attempt = object<Attempt>(resource);
@@ -570,14 +624,14 @@ const struct linura_display_head_v1_interface WireEndpoint::Impl::headImplementa
 };
 const struct linura_display_attempt_v1_interface WireEndpoint::Impl::attemptImplementation
 {
-    release, configure, enable, disable, apply, confirm, restore, status
+    release, configure, enable, disable, apply, confirm, restore, status, restoreOriginal
 };
 
 WireEndpoint::WireEndpoint(wl_display &display, Backend &backend, CompositorDisplayService &service,
                            NativeBuildIdentity identity, OutputName names, AdmitOwner admission,
-                           NativeStartupPort startup)
+                           NativeStartupPort startup, NativeOriginalRestorationPort original)
     : impl_(std::make_unique<Impl>(display, backend, service, std::move(identity), std::move(names),
-                                   std::move(admission), std::move(startup)))
+                                   std::move(admission), std::move(startup), std::move(original)))
 {}
 WireEndpoint::~WireEndpoint() = default;
 bool WireEndpoint::available() const noexcept

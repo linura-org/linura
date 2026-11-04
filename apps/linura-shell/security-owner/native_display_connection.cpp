@@ -1,4 +1,5 @@
 #include "native_display_connection.h"
+#include "native_display_restoration.h"
 #include "native_wayland_readiness.h"
 #include "linura-display-management-v1-client-protocol.h"
 #include "linura-display-integration-build.h"
@@ -135,7 +136,7 @@ class NativeDisplayConnection::Impl final
         linura_display_attempt_v1 *native = nullptr;
         NativeDisplayCorrelation bound;
         std::optional<quint32> phase;
-        bool original = false, decisionUsed = false;
+        bool original = false, restoration = false, decisionUsed = false;
         quint64 startedUnixMs = 0, startedBootMs = 0;
         quint64 deadlineBootMs = 0;
         ~Attempt()
@@ -293,7 +294,7 @@ class NativeDisplayConnection::Impl final
         auto &head = *static_cast<Head *>(data);
         callback(*head.owner, [&] {
             const auto base =
-                witness(baseRule, "LNRL:1;", HyprlandDisplay::RecoveryLineage::MaxBytes);
+                witness(baseRule, "LNRL:2;", HyprlandDisplay::RecoveryLineage::MaxBytes);
             const auto native = witness(identity, "LNDF:2;", 16 * 1024);
             const auto kernel = native ? kernelBinding(*native) : std::nullopt;
             const auto overlay = owned == 1 ? witness(target, "LNOT:1;", 512)
@@ -532,8 +533,27 @@ std::optional<quint32> NativeDisplayConnection::apply(
     const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,
     const NativeDisplayLayout &desired, linura_protected_display_interaction_v1 *protection)
 {
+    return submit(bound, baseline, desired, protection, std::nullopt);
+}
+std::optional<quint32> NativeDisplayConnection::restoreOriginal(
+    const NativeDisplayCorrelation &bound, const NativeDisplayRestorationIntent &intent,
+    int originalGrant, linura_protected_display_interaction_v1 *protection)
+{
+    if (originalGrant < 0 || !NativeDisplayRestorationIntent::parse(intent.encode()))
+        return std::nullopt;
+    return submit(bound, intent.replacement.baseline, intent.replacement.desired, protection,
+                  originalGrant);
+}
+std::optional<quint32> NativeDisplayConnection::submit(
+    const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,
+    const NativeDisplayLayout &desired, linura_protected_display_interaction_v1 *protection,
+    std::optional<int> originalGrant)
+{
     if (!protection || !impl_->capture || impl_->capture->invalid || !impl_->capture->done ||
-        impl_->capture->sample.fenced || baseline.encode() == desired.encode() ||
+        (originalGrant
+             ? (!impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 2)
+             : (impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 1 ||
+                baseline.encode() == desired.encode())) ||
         baseline.topology != desired.topology ||
         baseline.topology.section(QLatin1Char(':'), 7, 7) != impl_->capture->sample.compositor ||
         !baseline.nativeOptions(impl_->capture->sample.topology) ||
@@ -567,6 +587,7 @@ std::optional<quint32> NativeDisplayConnection::apply(
     // Reserve before every potentially effectful wire request. A lost sync
     // cannot recreate an original attempt or grant another apply/decision.
     attempt->original = true;
+    attempt->restoration = originalGrant.has_value();
     attempt->startedUnixMs = *wall;
     attempt->startedBootMs = *boot;
     // The compositor uses this SAME original native snapshot clock pair.
@@ -599,7 +620,10 @@ std::optional<quint32> NativeDisplayConnection::apply(
         }
     }
     attempt->phase.reset();
-    linura_display_attempt_v1_apply(attempt->native, protection);
+    if (originalGrant)
+        linura_display_attempt_v1_restore_original(attempt->native, *originalGrant, protection);
+    else
+        linura_display_attempt_v1_apply(attempt->native, protection);
     return impl_->completed(*attempt);
 }
 std::optional<quint32> NativeDisplayConnection::status(const NativeDisplayCorrelation &bound)
@@ -619,8 +643,8 @@ NativeDisplayConnection::decisionBootDeadline(const NativeDisplayCorrelation &bo
     if (!impl_->healthy || found == impl_->attempts.end() || !wall || !boot)
         return std::nullopt;
     const auto &attempt = *found->second;
-    if (!attempt.original || attempt.bound != bound || !attempt.phase || *attempt.phase != 2 ||
-        attempt.decisionUsed ||
+    if (!attempt.original || attempt.restoration || attempt.bound != bound || !attempt.phase ||
+        *attempt.phase != 2 || attempt.decisionUsed ||
         !bound.decisionWindow(attempt.startedUnixMs, attempt.startedBootMs, *wall, *boot) ||
         attempt.deadlineBootMs == 0 || *boot >= attempt.deadlineBootMs)
         return std::nullopt;
@@ -629,6 +653,21 @@ NativeDisplayConnection::decisionBootDeadline(const NativeDisplayCorrelation &bo
 bool NativeDisplayCorrelation::valid() const
 {
     return correlation(*this);
+}
+std::optional<quint64>
+NativeDisplayConnection::restorationBootDeadline(const NativeDisplayCorrelation &bound) const
+{
+    const auto found = impl_->attempts.find(bound.transaction);
+    const auto wall = milliseconds(CLOCK_REALTIME), boot = milliseconds(CLOCK_BOOTTIME);
+    if (!impl_->healthy || found == impl_->attempts.end() || !wall || !boot)
+        return std::nullopt;
+    const auto &attempt = *found->second;
+    if (!attempt.original || !attempt.restoration || attempt.bound != bound || attempt.phase != 3 ||
+        attempt.decisionUsed ||
+        !bound.decisionWindow(attempt.startedUnixMs, attempt.startedBootMs, *wall, *boot) ||
+        attempt.deadlineBootMs == 0 || *boot >= attempt.deadlineBootMs)
+        return std::nullopt;
+    return attempt.deadlineBootMs;
 }
 bool NativeDisplayDecision::valid() const
 {
@@ -654,7 +693,8 @@ std::optional<quint32> NativeDisplayConnection::decide(const NativeDisplayCorrel
 {
     const auto retained = impl_->attempts.find(bound.transaction);
     if (retained == impl_->attempts.end() || retained->second->bound != bound ||
-        !retained->second->original || retained->second->decisionUsed || !impl_->healthy)
+        !retained->second->original || retained->second->restoration ||
+        retained->second->decisionUsed || !impl_->healthy)
         return std::nullopt;
     const auto wall = milliseconds(CLOCK_REALTIME), boot = milliseconds(CLOCK_BOOTTIME);
     const auto &original = *retained->second;

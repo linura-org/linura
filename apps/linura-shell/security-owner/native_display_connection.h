@@ -8,6 +8,7 @@ struct wl_registry;
 struct linura_protected_display_interaction_v1;
 
 namespace Linura::SecurityOwner {
+struct NativeDisplayRestorationIntent;
 
 struct NativePinnedDisplaySample final
 {
@@ -68,13 +69,23 @@ class NativeDisplayConnection final
                                                const NativeDisplayLayout &baseline,
                                                const NativeDisplayLayout &desired,
                                                linura_protected_display_interaction_v1 *protection);
+    [[nodiscard]] std::optional<quint32>
+    restoreOriginal(const NativeDisplayCorrelation &, const NativeDisplayRestorationIntent &,
+                    int originalGrant, linura_protected_display_interaction_v1 *protection);
     // Reconnection can observe a reservation, never acquire its continuation.
     [[nodiscard]] std::optional<quint32> status(const NativeDisplayCorrelation &);
     [[nodiscard]] std::optional<quint64>
     decisionBootDeadline(const NativeDisplayCorrelation &) const;
+    [[nodiscard]] std::optional<quint64>
+    restorationBootDeadline(const NativeDisplayCorrelation &) const;
     [[nodiscard]] std::optional<quint32> decide(const NativeDisplayCorrelation &, bool confirm);
 
   private:
+    [[nodiscard]] std::optional<quint32> submit(const NativeDisplayCorrelation &,
+                                                const NativeDisplayLayout &baseline,
+                                                const NativeDisplayLayout &desired,
+                                                linura_protected_display_interaction_v1 *protection,
+                                                std::optional<int> originalGrant);
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

@@ -132,6 +132,15 @@
       <arg name="native_baseline_guard" type="s" direction="in"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <!-- Distinct prepared Recovery purpose and one-use original Root endpoint.
+         Complete LNRI material and original sample time remain bound. -->
+    <method name="RestoreOriginalDisplay">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="sample_digest" type="s" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="original_grant" type="h" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <!-- Current attested executor only, following Control's consumed/durable
          protected decision. Original connection/reservation, layout, lock/input
          coverage and original deadline remain mandatory. No new apply, replay,

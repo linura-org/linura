@@ -10,6 +10,9 @@
 #include "native_output_identity.h"
 #include "linura-display-integration-build.h"
 #include "startup_fence.h"
+#include "original_restoration_grant.h"
+#include "native_baseline_guard.h"
+#include "protected_wire.h"
 
 #include "src/Compositor.hpp"
 #include "src/config/ConfigValue.hpp"
@@ -94,12 +97,35 @@ class PinnedBackend final : public Backend
         std::optional<std::size_t> selected;
         bool wlr;
         std::uint32_t mask, refreshMilliHz;
+        std::string restoredOrigin;
     };
     std::map<Monitor::CMonitor *, RuleSource> capturedSources;
     bool sourceCaptureValid = false;
     const std::string instance = instanceId();
     bool writing = false, commitFailed = false, supported = true, readingBaseRules = false;
     NativePowerInhibitor powerInhibitor;
+    struct RecoveredWlrSource final
+    {
+        OutputKey output;
+        RecoveryLineage lineage;
+    };
+    std::map<Monitor::CMonitor *, RecoveredWlrSource> recoveredWlr;
+    struct OriginalRecovery final
+    {
+        Correlation bound;
+        std::shared_ptr<OriginalRestorationGrant> grant;
+        std::shared_ptr<MutationProtection> protection;
+        Layout targets;
+        bool failed = false;
+    };
+    std::optional<OriginalRecovery> originalRecovery;
+    struct OriginalPlan final
+    {
+        std::map<std::size_t, RecoveryRule> rules;
+        std::map<Monitor::CMonitor *, RecoveredWlrSource> wlr;
+        std::map<Monitor::CMonitor *, Target> priorOverlay;
+        std::map<OutputKey, std::string> sources;
+    };
 
     [[nodiscard]] bool inhibitPowerTransitions() override
     {
@@ -317,6 +343,238 @@ class PinnedBackend final : public Backend
         return rules && identities &&
                checkpoint.restored(overlay, *rules, *identities, sameOverlaySources);
     }
+    [[nodiscard]] std::optional<OriginalPlan>
+    prepareOriginal(const OriginalRestorationSource &source, const Layout &targets,
+                    const Snapshot &captured)
+    {
+        if (writing || originalRecovery || checkpoint.retained() || !overlay.empty() ||
+            !recoveredWlr.empty() || source.integration != IntegrationSourceDigest ||
+            source.heads.size() != captured.heads.size() || source.desired != targets ||
+            !source.replacementTopology.ends_with(instance + ":" +
+                                                  std::to_string(captured.generation)) ||
+            !Config::monitorRuleMgr() || !DisplayTransaction::validLayout(targets, captured))
+            return std::nullopt;
+        Layout baseline;
+        for (const auto &head : captured.heads)
+            baseline.push_back(head.current);
+        const auto material = OriginalGrantCodec::materialFields(source.material);
+        const auto guard = nativeBaselineGuard(captured, source.baselineText);
+        if (!material || baseline != source.baseline || !guard || *guard != (*material)[3])
+            return std::nullopt;
+        const auto current = baseRules();
+        if (!current)
+            return std::nullopt;
+        OriginalPlan plan;
+        std::map<std::size_t, std::string> sharedRules;
+        for (const auto &saved : source.heads) {
+            const auto monitor = monitorFor(saved.replacement);
+            const auto fresh =
+                std::find_if(captured.heads.begin(), captured.heads.end(),
+                             [&](const Head &head) { return head.key == saved.replacement; });
+            if (!monitor || fresh == captured.heads.end() || fresh->linuraOwned ||
+                nativeKernelDrmBinding(*monitor->m_output) != std::optional{saved.kernel} ||
+                nativeSha256(fresh->outputIdentityWitness) != std::optional{saved.identityDigest})
+                return std::nullopt;
+            const auto live = current->find(monitor.get());
+            if (live == current->end() || !saved.lineage.replacementSourceCompatible(live->second))
+                return std::nullopt;
+            const auto selected = saved.lineage.selected();
+            if (selected) {
+                const auto &all = Config::monitorRuleMgr()->all();
+                if (*selected >= all.size())
+                    return std::nullopt;
+                const auto merged = saved.lineage.native().mergeOwnedFields(all[*selected]);
+                if (!merged)
+                    return std::nullopt;
+                const auto prior = sharedRules.find(*selected);
+                if (prior != sharedRules.end() && prior->second != saved.lineage.native().encode())
+                    return std::nullopt;
+                sharedRules.insert_or_assign(*selected, saved.lineage.native().encode());
+                plan.rules.insert_or_assign(*selected, saved.lineage.native());
+            } else if (saved.lineage.native().encode() != live->second.native().encode()) {
+                return std::nullopt; // Never invent/reorder a rule for a hardcoded fallback.
+            }
+            const auto post = saved.lineage.replacementProjection((*material)[2]);
+            if (!post)
+                return std::nullopt;
+            if (post->hasWlrProjection())
+                plan.wlr.emplace(monitor.get(), RecoveredWlrSource{saved.replacement, *post});
+            if (saved.priorOverlay) {
+                auto target = *saved.priorOverlay;
+                target.output = saved.replacement;
+                if (target.mirror) {
+                    const auto root = std::find_if(
+                        source.heads.begin(), source.heads.end(),
+                        [&](const auto &head) { return head.original == *target.mirror; });
+                    if (root == source.heads.end())
+                        return std::nullopt;
+                    target.mirror = root->replacement;
+                }
+                const auto desired =
+                    std::find_if(targets.begin(), targets.end(),
+                                 [&](const Target &row) { return row.output == target.output; });
+                if (desired == targets.end() || *desired != target)
+                    return std::nullopt;
+                plan.priorOverlay.emplace(monitor.get(), target);
+            }
+            if (!plan.sources.emplace(saved.replacement, post->encode()).second)
+                return std::nullopt;
+        }
+        return plan;
+    }
+    [[nodiscard]] std::optional<std::uint32_t>
+    restoreOriginal(std::shared_ptr<OriginalRestorationGrant> grant, const Correlation &bound,
+                    const Layout &targets, const Snapshot &captured, ClockSample at,
+                    wl_resource *resource, wl_client *client)
+    {
+        const auto now = clock();
+        const auto fresh = snapshot();
+        if (!now || !fresh || *fresh != captured || !startupFence.recoveryAvailable() ||
+            !grant->sampleFreshAt(now->bootMs) || at.bootMs == 0 || at.unixMs == 0 ||
+            now->bootMs < at.bootMs || now->unixMs < at.unixMs || now->bootMs - at.bootMs >= 2000 ||
+            now->unixMs - at.unixMs >= 2000 || bound.deadlineUnixMs <= now->unixMs ||
+            bound.deadlineUnixMs - at.unixMs > DisplayTransaction::WindowMs)
+            return std::nullopt;
+        auto staged = prepareOriginal(grant->source(), targets, captured);
+        if (!staged || !grant->verify())
+            return std::nullopt;
+        Layout baseline;
+        for (const auto &head : captured.heads)
+            baseline.push_back(head.current);
+        auto protection = ProtectedWireEndpoint::reserveOriginalRestoration(
+            resource, client, bound, baseline, targets, captured, at, staged->sources,
+            [grant] { return grant->live(); });
+        if (!protection)
+            return std::nullopt;
+        // Retain before the first possible effect. An error/exception never
+        // destroys opaque/input protection, replays, restores the replacement
+        // baseline or releases original/current power protection.
+        originalRecovery.emplace(
+            OriginalRecovery{bound, std::move(grant), std::move(protection), targets, false});
+        auto &active = *originalRecovery;
+        struct Outcome final
+        {
+            OriginalRecovery &active;
+            bool complete = false;
+            ~Outcome()
+            {
+                if (!complete)
+                    active.failed = true;
+            }
+        } outcome{active};
+        if (!active.grant->verify() || !inhibitPowerTransitions())
+            return 6U;
+        // Both calls above may block. Re-sample the original immutable sample's
+        // clocks afterwards; neither the grant nor power acquisition renews it.
+        const auto admitted = clock();
+        if (!admitted || admitted->bootMs < at.bootMs || admitted->unixMs < at.unixMs ||
+            admitted->bootMs - at.bootMs >= 2000 || admitted->unixMs - at.unixMs >= 2000 ||
+            admitted->unixMs >= bound.deadlineUnixMs ||
+            !active.grant->sampleFreshAt(admitted->bootMs) || !active.grant->live() ||
+            !active.protection->beginWrite(MutationProtection::Write::Restore, captured))
+            return 6U;
+        writing = true;
+        commitFailed = false;
+        struct Finish final
+        {
+            PinnedBackend &backend;
+            bool ended = false;
+            void end() noexcept
+            {
+                if (ended)
+                    return;
+                // End the exact granted source transition while the reserved
+                // compositor write is still active, then freeze post witnesses.
+                backend.originalRecovery->protection->endWrite(MutationProtection::Write::Restore);
+                backend.writing = false;
+                ended = true;
+            }
+            ~Finish()
+            {
+                end();
+            }
+        } finish{*this};
+        // beginWrite also snapshots native state and revokes old presentation.
+        // Check the original sample once more after that work, immediately
+        // before introducing any owned target or native rule change.
+        const auto firstWrite = clock();
+        if (!firstWrite || firstWrite->bootMs < admitted->bootMs ||
+            firstWrite->unixMs < admitted->unixMs ||
+            !active.grant->sampleFreshAt(firstWrite->bootMs) ||
+            firstWrite->unixMs >= bound.deadlineUnixMs || !active.grant->live())
+            return 6U;
+        for (const auto &target : targets)
+            if (!setTarget(target))
+                return 6U;
+        Config::monitorRuleMgr()->ensureMonitorStatus();
+        const auto roots = snapshot();
+        if (commitFailed || !roots || roots->generation != captured.generation ||
+            roots->securityEpoch != captured.securityEpoch ||
+            !hasDesiredPoweredRoot(targets, *roots) || !active.protection->healthy() ||
+            !active.grant->verify())
+            return 6U;
+        if (roots->heads.size() != captured.heads.size())
+            return 6U;
+        for (std::size_t i = 0; i < roots->heads.size(); ++i) {
+            const auto &live = roots->heads[i];
+            const auto &before = captured.heads[i];
+            if (live.key != before.key || live.modes != before.modes ||
+                live.baseRuleWitness != before.baseRuleWitness ||
+                live.outputIdentityWitness != before.outputIdentityWitness)
+                return 6U;
+        }
+        // Only the granted owned fields change. Selected indices/selector list
+        // were checked as one complete preflight; unrelated fields remain live.
+        auto &rules = Config::monitorRuleMgr()->allMut();
+        for (const auto &[index, rule] : staged->rules) {
+            if (index >= rules.size())
+                return 6U;
+            // Native callbacks during the temporary modeset may update live
+            // ICC/VRR and other unowned settings. Merge into the actual rule at
+            // this write point rather than restoring a stale full-rule copy.
+            const auto merged = rule.mergeOwnedFields(rules[index]);
+            if (!merged)
+                return 6U;
+            rules[index] = *merged;
+        }
+        recoveredWlr = std::move(staged->wlr);
+        Config::monitorRuleMgr()->ensureMonitorStatus();
+        const auto sourceState = snapshot();
+        if (commitFailed || !sourceState || sourceState->generation != captured.generation ||
+            sourceState->securityEpoch != captured.securityEpoch || !active.protection->healthy() ||
+            !active.grant->verify())
+            return 6U;
+        for (const auto &head : sourceState->heads) {
+            const auto expected = staged->sources.find(head.key);
+            if (expected == staged->sources.end() || expected->second != head.baseRuleWitness)
+                return 6U;
+        }
+        overlay = std::move(staged->priorOverlay);
+        Config::monitorRuleMgr()->ensureMonitorStatus();
+        const auto restored = snapshot();
+        if (commitFailed || !restored || restored->generation != captured.generation ||
+            restored->securityEpoch != captured.securityEpoch ||
+            !hasDesiredPoweredRoot(targets, *restored) ||
+            !std::equal(
+                targets.begin(), targets.end(), restored->heads.begin(), restored->heads.end(),
+                [](const Target &target, const Head &head) { return target == head.current; }) ||
+            !active.protection->healthy() || !active.grant->verify())
+            return 6U;
+        finish.end();
+        if (active.failed || !active.protection->healthy())
+            return 6U;
+        outcome.complete = true;
+        return 3U; // Still restoring/fenced. Native replies never supply terminal proof.
+    }
+    [[nodiscard]] std::optional<std::uint32_t> originalStatus(const Correlation &bound)
+    {
+        if (!originalRecovery || originalRecovery->bound != bound)
+            return std::nullopt;
+        auto &active = *originalRecovery;
+        if (!active.grant->live() || !active.protection->healthy())
+            active.failed = true;
+        return active.failed ? 6U : 3U;
+    }
     [[nodiscard]] PHLMONITOR monitorFor(OutputKey key) const
     {
         const auto found = std::find_if(bindings.begin(), bindings.end(),
@@ -335,6 +593,13 @@ class PinnedBackend final : public Backend
                            std::optional<std::size_t> selected, bool wlr, std::uint32_t committed,
                            std::uint32_t refreshMilliHz)
     {
+        if (wlr && recoveredWlr.contains(monitor)) {
+            if (originalRecovery) {
+                originalRecovery->failed = true;
+                sourceCaptureValid = false;
+            } else
+                recoveredWlr.erase(monitor);
+        }
         if (!readingBaseRules)
             return;
         const auto saved = RecoveryRule::capture(native);
@@ -354,8 +619,13 @@ class PinnedBackend final : public Backend
             selectors.push_back(rule.m_name);
         }
         if (!capturedSources
-                 .emplace(monitor, RuleSource{*saved, std::move(selectors), selected, wlr,
-                                              committed & 31U, refreshMilliHz})
+                 .emplace(monitor, RuleSource{*saved,
+                                              std::move(selectors),
+                                              selected,
+                                              wlr,
+                                              committed & 31U,
+                                              refreshMilliHz,
+                                              {}})
                  .second)
             sourceCaptureValid = false;
     }
@@ -413,7 +683,7 @@ class PinnedBackend final : public Backend
             auto lineage = RecoveryLineage::capture(
                 source->second.native, *effective, source->second.selectors,
                 source->second.selected, source->second.wlr, source->second.mask,
-                source->second.refreshMilliHz);
+                source->second.refreshMilliHz, source->second.restoredOrigin);
             if (!lineage || !rules.emplace(monitor.get(), std::move(*lineage)).second)
                 return std::nullopt;
         }
@@ -436,6 +706,8 @@ class PinnedBackend final : public Backend
     }
     static bool hasDesiredPoweredRoot(const Layout &targets, const Snapshot &sample)
     {
+        if (sample.coverage != Coverage::Unlocked && sample.coverage != Coverage::Secure)
+            return false;
         return std::any_of(targets.begin(), targets.end(), [&](const Target &target) {
             return target.enabled && !target.mirror &&
                    std::any_of(sample.heads.begin(), sample.heads.end(), [&](const Head &head) {
@@ -509,6 +781,21 @@ class PinnedBackend final : public Backend
 std::unique_ptr<PinnedBackend> backend;
 std::unique_ptr<CompositorDisplayService> service;
 std::unique_ptr<WireEndpoint> endpoint;
+std::optional<std::uint32_t> restoreOriginalNative(OwnedNativeFd descriptor,
+                                                   const Correlation &bound, const Layout &targets,
+                                                   const Snapshot &captured, ClockSample at,
+                                                   wl_resource *resource, wl_client *client)
+{
+    auto grant = OriginalRestorationGrant::receive(startupFence, std::move(descriptor), bound);
+    if (!grant || !backend || !service || service->fenced())
+        return std::nullopt;
+    return backend->restoreOriginal(std::shared_ptr<OriginalRestorationGrant>{std::move(grant)},
+                                    bound, targets, captured, at, resource, client);
+}
+std::optional<std::uint32_t> originalNativeStatus(const Correlation &bound)
+{
+    return backend ? backend->originalStatus(bound) : std::nullopt;
+}
 const std::string unavailable;
 } // namespace
 
@@ -553,7 +840,8 @@ void initialize(wl_display &display, wl_event_loop &loop)
                     startupFence.invalidate();
                 startupAdmissionChanged();
                 return true; // Ownership transferred, even if event setup failed.
-            }});
+            }},
+        NativeOriginalRestorationPort{restoreOriginalNative, originalNativeStatus});
     initializeProtectedDisplay(display);
 }
 void shutdown()
@@ -607,12 +895,51 @@ bool ownedCommitAllowed()
     // call or wait. A lost retained fence also blocks deferred commits after
     // writing returns: pending native state can still contain an owned modeset.
     // No retained transaction means ordinary rendering remains unchanged.
+    if (backend && backend->originalRecovery &&
+        (!backend->originalRecovery->grant->live() || backend->originalRecovery->failed))
+        return false;
     return !backend || (!backend->writing && !backend->powerInhibitor.retained()) ||
            backend->powerInhibitor.held();
 }
 Config::CMonitorRule overlayRule(Monitor::CMonitor *monitor, Config::CMonitorRule current)
 {
-    if (!backend || backend->readingBaseRules || !backend->refreshBindings())
+    if (!backend)
+        return current;
+    const auto recovered = backend->recoveredWlr.find(monitor);
+    if (recovered != backend->recoveredWlr.end()) {
+        const auto bound = backend->monitorFor(recovered->second.output);
+        if (!bound || bound.get() != monitor) {
+            // Raw monitor addresses can be reused after hotplug. Neither a new
+            // monitor nor a replacement native output inherits this projection.
+            if (backend->originalRecovery) {
+                backend->originalRecovery->failed = true;
+                backend->sourceCaptureValid = false;
+                return current;
+            }
+            backend->recoveredWlr.erase(recovered);
+        } else {
+            const auto &lineage = recovered->second.lineage;
+            const auto projected = lineage.restoredWlrProjection(current);
+            if (!projected) {
+                if (backend->originalRecovery)
+                    backend->originalRecovery->failed = true;
+                backend->sourceCaptureValid = false;
+                return current;
+            }
+            current = *projected;
+            if (backend->readingBaseRules) {
+                const auto source = backend->capturedSources.find(monitor);
+                if (source == backend->capturedSources.end() || source->second.wlr) {
+                    backend->sourceCaptureValid = false;
+                    return current;
+                }
+                source->second.restoredOrigin = lineage.restoredOrigin();
+                source->second.mask = lineage.wlrMask();
+                source->second.refreshMilliHz = lineage.wlrRefreshMilliHz();
+            }
+        }
+    }
+    if (backend->readingBaseRules || !backend->refreshBindings())
         return current;
     const auto found = backend->overlay.find(monitor);
     if (found == backend->overlay.end())
@@ -640,11 +967,20 @@ bool ownsMonitor(Monitor::CMonitor *monitor)
 {
     if (!backend || !monitor)
         return false;
-    for (const auto &binding : backend->bindings)
-        if (binding.monitor.lock().get() == monitor &&
-            backend->monitorFor(binding.key).get() == monitor &&
-            backend->checkpoint.owns(monitor, binding.key))
+    for (const auto &binding : backend->bindings) {
+        if (binding.monitor.lock().get() != monitor ||
+            backend->monitorFor(binding.key).get() != monitor)
+            continue;
+        if (backend->checkpoint.owns(monitor, binding.key) ||
+            (backend->originalRecovery &&
+             std::any_of(backend->originalRecovery->targets.begin(),
+                         backend->originalRecovery->targets.end(),
+                         [&](const Target &target) { return target.output == binding.key; })))
             return true;
+        const auto recovered = backend->recoveredWlr.find(monitor);
+        if (recovered != backend->recoveredWlr.end() && recovered->second.output == binding.key)
+            return true;
+    }
     const auto found = backend->overlay.find(monitor);
     return found != backend->overlay.end() &&
            backend->monitorFor(found->second.output).get() == monitor;

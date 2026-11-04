@@ -1,4 +1,5 @@
 #include "native_wayland_lock.h"
+#include "native_display_restoration.h"
 #include "native_deadline.h"
 #include "native_lock_protocol.h"
 #include "native_keyboard.h"
@@ -1044,6 +1045,14 @@ NativeWaylandLock::displayDecisionBootDeadline(const NativeDisplayCorrelation &b
         return std::nullopt;
     return impl_->displayConnection->decisionBootDeadline(bound);
 }
+std::optional<quint64>
+NativeWaylandLock::displayRestorationBootDeadline(const NativeDisplayCorrelation &bound)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || impl_->displayConnection->status(bound) != 3)
+        return std::nullopt;
+    return impl_->displayConnection->restorationBootDeadline(bound);
+}
 bool NativeWaylandLock::beginProtectedDisplayDecision(const NativeDisplayPromptScope &scope,
                                                       const NativeDisplayIntent &intent,
                                                       const NativeDisplayCorrelation &bound)
@@ -1291,6 +1300,31 @@ std::optional<quint32> NativeWaylandLock::dispatchPreparedDisplay(
     // reserves the one-use wire attempt before any potentially effectful call.
     return impl_->displayConnection->apply(correlation, intent.baseline, intent.desired,
                                            impl_->protectedInteraction);
+}
+std::optional<quint32>
+NativeWaylandLock::restoreOriginalDisplay(const NativeDisplayRestorationIntent &intent,
+                                          const NativeDisplayCorrelation &correlation,
+                                          quint64 validatedSampledBootMs, int originalGrant)
+{
+    if (originalGrant < 0 || thread() != QThread::currentThread() || !impl_->initialized ||
+        impl_->painting || impl_->pumping || !correlation.valid() ||
+        requestedSecure() != secureCoverage())
+        return std::nullopt;
+    const bool secure = secureCoverage();
+    const auto current = impl_->displayConnection->sample();
+    const auto clock = NativeDisplayClock::sample();
+    if (!current || !clock || !current->fenced || current->startupPhase != 2 ||
+        !correlation.dispatchWindow(validatedSampledBootMs, clock->bootMs, clock->unixMs) ||
+        current->coverage != (secure ? 1U : 0U) || requestedSecure() != secure ||
+        secureCoverage() != secure || (secure && !impl_->inputCovered()) ||
+        current->compositor != impl_->displayInvocation ||
+        intent.replacement.baseline.topology.section(QLatin1Char(':'), 8, 8) !=
+            QString::number(current->topology.generation) ||
+        !intent.nativeOptions(current->topology, intent.replacement.baseline.topology,
+                              intent.replacement.lock))
+        return std::nullopt;
+    return impl_->displayConnection->restoreOriginal(correlation, intent, originalGrant,
+                                                     impl_->protectedInteraction);
 }
 std::optional<quint32>
 NativeWaylandLock::continuePreparedDisplay(const NativeDisplayIntent &intent,

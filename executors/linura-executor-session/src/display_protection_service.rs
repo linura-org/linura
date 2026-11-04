@@ -1,9 +1,9 @@
 //! Independently supervised, bounded protection mechanisms. No output writes,
 //! planning, policy, human approval, desired state or recovery orchestration.
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,44 @@ const PATH: &str = "/org/linura/DisplayProtection1";
 const MAX_PENDING: usize = 32;
 const ORIGINAL_PROBE: Duration = Duration::from_secs(2);
 const MAX_STARTUPS: usize = 64;
+
+fn valid_dispatch_deadline(deadline: u64, now: u64) -> zbus::fdo::Result<()> {
+    if now == 0 || deadline <= now || deadline - now > 15_000 {
+        return Err(unavailable());
+    }
+    Ok(())
+}
+fn valid_dispatch_window(
+    deadline: u64,
+    sampled_boot: u64,
+    now_unix: u64,
+    now_boot: u64,
+) -> zbus::fdo::Result<()> {
+    valid_dispatch_deadline(deadline, now_unix)?;
+    if sampled_boot == 0 || now_boot < sampled_boot || now_boot - sampled_boot >= 2000 {
+        return Err(unavailable());
+    }
+    Ok(())
+}
+fn boot_ms() -> zbus::fdo::Result<u64> {
+    let clock = rustix::time::clock_gettime_dynamic(rustix::time::DynamicClockId::Boottime)
+        .map_err(|_| unavailable())?;
+    if clock.tv_nsec < 0 || clock.tv_nsec >= 1_000_000_000 {
+        return Err(unavailable());
+    }
+    u64::try_from(clock.tv_sec)
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(1000))
+        .and_then(|base| base.checked_add(clock.tv_nsec as u64 / 1_000_000))
+        .ok_or_else(unavailable)
+}
+fn unix_ms() -> zbus::fdo::Result<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|value| u64::try_from(value.as_millis()).ok())
+        .ok_or_else(unavailable)
+}
 
 struct StartupLease {
     peer: NativeDisplayStartupPeer,
@@ -70,6 +108,7 @@ struct NativeProtection {
     admission: Arc<Mutex<Admission>>,
     witnesses: Arc<super::display_kernel::Witnesses>,
     transfer_pending: Arc<AtomicBool>,
+    live_grants: Arc<AtomicUsize>,
 }
 
 fn unavailable() -> zbus::fdo::Error {
@@ -117,6 +156,8 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         &self,
         sender: &str,
         record: NativeDisplayRestorationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
     ) -> zbus::fdo::Result<OwnedFd>;
     fn read_original(
         &self,
@@ -169,6 +210,87 @@ impl Drop for StartupSlot {
     }
 }
 
+struct GrantSlot(Arc<AtomicUsize>);
+impl GrantSlot {
+    fn enter(count: &Arc<AtomicUsize>) -> zbus::fdo::Result<Self> {
+        count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                (current < MAX_STARTUPS).then_some(current + 1)
+            })
+            .map_err(|_| unavailable())?;
+        Ok(Self(count.clone()))
+    }
+}
+impl Drop for GrantSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+// The completed transfer stays a live original-Root witness channel. Each
+// fixed-size, strictly increasing probe receives an acknowledgement only after
+// fresh original protection checks. No output write, authority selection,
+// retry/regrant, timer renewal or terminal release is offered on this channel.
+fn serve_grant_witness(
+    writer: &mut UnixStream,
+    mut verify: impl FnMut() -> zbus::fdo::Result<()>,
+) -> zbus::fdo::Result<()> {
+    writer.set_nonblocking(false).map_err(|_| unavailable())?;
+    writer
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|_| unavailable())?;
+    writer
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .map_err(|_| unavailable())?;
+    let mut sequence = 1_u64;
+    loop {
+        let mut request = [0_u8; 16];
+        let mut read = 0;
+        let mut pending_deadline: Option<Instant> = None;
+        while read < request.len() {
+            let remaining = match pending_deadline {
+                Some(deadline) => deadline
+                    .checked_duration_since(Instant::now())
+                    .filter(|value| !value.is_zero())
+                    .ok_or_else(unavailable)?,
+                None => Duration::from_secs(1),
+            };
+            writer
+                .set_read_timeout(Some(remaining))
+                .map_err(|_| unavailable())?;
+            match writer.read(&mut request[read..]) {
+                Ok(0) => return Err(unavailable()),
+                Ok(size) => {
+                    if pending_deadline.is_none() {
+                        pending_deadline = Some(
+                            Instant::now()
+                                .checked_add(Duration::from_secs(1))
+                                .ok_or_else(unavailable)?,
+                        );
+                    }
+                    read += size;
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) && read == 0 =>
+                {
+                    // Idle endpoints cannot silently survive an original loss.
+                    verify()?;
+                }
+                Err(_) => return Err(unavailable()),
+            }
+        }
+        if &request[..8] != b"LNRV:1\n\0" || request[8..] != sequence.to_be_bytes() {
+            return Err(unavailable());
+        }
+        verify()?;
+        writer.write_all(&request).map_err(|_| unavailable())?;
+        sequence = sequence.checked_add(1).ok_or_else(unavailable)?;
+    }
+}
+
 fn write_grant(
     writer: &mut UnixStream,
     bytes: &[u8],
@@ -181,7 +303,7 @@ fn write_grant(
     let deadline = Instant::now().checked_add(budget).ok_or_else(unavailable)?;
     // A complete frame also requires this final marker, disclosed only after
     // fresh retained-witness checks. EOF or partial bytes cannot mean success.
-    for mut rest in [bytes, b"LNRG-END:1\n".as_slice()] {
+    for mut rest in [bytes, b"LNRG-END:2\n".as_slice()] {
         while !rest.is_empty() {
             verify()?;
             let remaining = deadline
@@ -272,40 +394,75 @@ impl ProtectionPort for NativeProtection {
         &self,
         sender: &str,
         record: NativeDisplayRestorationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
     ) -> zbus::fdo::Result<OwnedFd> {
         let slot = StartupSlot::enter(&self.transfer_pending)?;
+        let grant_slot = GrantSlot::enter(&self.live_grants)?;
         self.admit(sender)?;
+        valid_dispatch_window(
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
+            unix_ms()?,
+            boot_ms()?,
+        )?;
         let material = record.decoded_material().map_err(|_| unavailable())?;
         let scope = material.recovery_scope().map_err(|_| unavailable())?;
-        let admission = self.admission.try_lock().map_err(|_| unavailable())?;
+        let admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
         let payload = self.original_for_scope(&admission, &scope)?;
-        NativeDisplayRecoveryCheckpoint::validate_restoration_source(&payload, &record)
-            .map_err(|_| unavailable())?;
+        let projection =
+            NativeDisplayRecoveryCheckpoint::restoration_native_projection(&payload, &record)
+                .map_err(|_| unavailable())?;
         // Publication is exclusive and synced before creating/disclosing any
         // endpoint. All subsequent errors leave this attempt reserved.
+        valid_dispatch_window(
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
+            unix_ms()?,
+            boot_ms()?,
+        )?;
         super::display_checkpoint::reserve_restoration(&record).map_err(|_| unavailable())?;
         self.admit(sender)?;
         self.original_for_scope(&admission, &scope)?;
         let (mut writer, native) = UnixStream::pair().map_err(|_| unavailable())?;
         writer.set_nonblocking(true).map_err(|_| unavailable())?;
         let encoded = record.canonical_bytes();
-        let mut grant = b"LNRG:1\n".to_vec();
+        let mut grant = b"LNRG:2\n".to_vec();
         grant.extend_from_slice(&(encoded.len() as u64).to_be_bytes());
         grant.extend_from_slice(&encoded);
-        grant.extend_from_slice(&(payload.len() as u64).to_be_bytes());
-        grant.extend_from_slice(&payload);
+        grant.extend_from_slice(&(projection.len() as u64).to_be_bytes());
+        grant.extend_from_slice(&projection);
+        grant.extend_from_slice(&dispatch_deadline_unix_ms.to_be_bytes());
+        grant.extend_from_slice(&sampled_boot_ms.to_be_bytes());
         let service = self.clone();
         drop(admission);
         std::thread::Builder::new()
             .name("display-original-grant".into())
             .spawn(move || {
-                let _slot = slot;
-                // An incomplete/slow reader, lost original witness or service bus
-                // cannot extend this bounded transfer or obtain another endpoint.
-                let _result = write_grant(&mut writer, &grant, Duration::from_secs(2), || {
-                    let admission = service.admission.try_lock().map_err(|_| unavailable())?;
+                let _grant_slot = grant_slot;
+                let mut verify = || {
+                    let admission = super::protection_lock::acquire(
+                        &service.admission,
+                        super::protection_lock::BUDGET,
+                    )
+                    .map_err(|_| unavailable())?;
                     service.original_for_scope(&admission, &scope).map(|_| ())
+                };
+                let result = write_grant(&mut writer, &grant, Duration::from_secs(2), || {
+                    verify()?;
+                    valid_dispatch_window(
+                        dispatch_deadline_unix_ms,
+                        sampled_boot_ms,
+                        unix_ms()?,
+                        boot_ms()?,
+                    )
                 });
+                drop(slot); // Only the bounded transfer occupies the transfer slot.
+                if result.is_ok() {
+                    let _result = serve_grant_witness(&mut writer, &mut verify);
+                }
             })
             .map_err(|_| unavailable())?;
         Ok(OwnedFd::from(std::os::fd::OwnedFd::from(native)))
@@ -325,7 +482,9 @@ impl ProtectionPort for NativeProtection {
                 })
         };
         admit()?;
-        let admission = self.admission.try_lock().map_err(|_| unavailable())?;
+        let admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
         let payload = self.original_for_scope(&admission, &scope)?;
         admit()?;
         self.original_for_scope(&admission, &scope)?;
@@ -447,6 +606,8 @@ impl<P: ProtectionPort> ProtectionService<P> {
     async fn reserve_restoration(
         &self,
         reservation: &[u8],
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
         #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<OwnedFd> {
         let sender = sender(&header)?;
@@ -459,7 +620,12 @@ impl<P: ProtectionPort> ProtectionService<P> {
         let service = self.clone();
         blocking::unblock(move || {
             let _slot = slot;
-            service.port.reserve_restoration(&sender, record)
+            service.port.reserve_restoration(
+                &sender,
+                record,
+                dispatch_deadline_unix_ms,
+                sampled_boot_ms,
+            )
         })
         .await
     }
@@ -568,6 +734,7 @@ pub(super) fn serve() -> Result<(), String> {
         admission: Arc::new(Mutex::new(Admission::default())),
         witnesses: Arc::new(super::display_kernel::Witnesses::default()),
         transfer_pending: Arc::new(AtomicBool::new(false)),
+        live_grants: Arc::new(AtomicUsize::new(0)),
     }));
     connection
         .object_server()
@@ -592,6 +759,8 @@ mod tests {
             &self,
             _: &str,
             _: NativeDisplayRestorationReservation,
+            _: u64,
+            _: u64,
         ) -> zbus::fdo::Result<OwnedFd> {
             Err(unavailable())
         }
@@ -639,6 +808,7 @@ mod tests {
                 "name=\"recovery_scope\" type=\"s\" direction=\"in\"",
                 "name=\"checkpoint\" type=\"ay\" direction=\"out\"",
                 "name=\"reservation\" type=\"ay\" direction=\"in\"",
+                "name=\"dispatch_deadline_unix_ms\" type=\"t\" direction=\"in\"",
                 "name=\"grant\" type=\"h\" direction=\"out\"",
                 "name=\"accepted\" type=\"b\" direction=\"out\"",
                 "name=\"org.linura.ContractId\" value=\"dbus.org.linura.DisplayProtection1\"",
@@ -792,6 +962,20 @@ mod tests {
     }
 
     #[test]
+    fn restoration_dispatch_deadline_is_absolute_and_never_renewed() {
+        assert!(valid_dispatch_deadline(25_000, 10_000).is_ok());
+        for (deadline, now) in [(0, 10_000), (10_000, 10_000), (25_001, 10_000), (25_000, 0)] {
+            assert!(valid_dispatch_deadline(deadline, now).is_err());
+        }
+        assert!(valid_dispatch_deadline(25_000, 25_000).is_err());
+        assert!(valid_dispatch_window(25_000, 1000, 10_000, 2999).is_ok());
+        for now_boot in [999, 3000, u64::MAX] {
+            assert!(valid_dispatch_window(25_000, 1000, 10_000, now_boot).is_err());
+        }
+        assert!(valid_dispatch_window(25_000, 0, 10_000, 1).is_err());
+    }
+
+    #[test]
     fn restoration_rpc_cannot_turn_well_formed_comparison_material_into_authority() {
         let service = ProtectionService::new(DenyProtection);
         let record = super::super::display_checkpoint::tests::restoration(1, 2);
@@ -801,7 +985,7 @@ mod tests {
             .build(&())
             .unwrap_or_else(|e| unreachable!("{e}"));
         assert!(matches!(
-            async_io::block_on(service.reserve_restoration(&bytes, anonymous.header())),
+            async_io::block_on(service.reserve_restoration(&bytes, 15_000, 1, anonymous.header())),
             Err(zbus::fdo::Error::AccessDenied(_))
         ));
         let message = zbus::Message::method_call(PATH, "ReserveRestoration")
@@ -810,16 +994,27 @@ mod tests {
             .unwrap_or_else(|e| unreachable!("{e}"))
             .build(&())
             .unwrap_or_else(|e| unreachable!("{e}"));
-        assert!(async_io::block_on(service.reserve_restoration(&bytes, message.header())).is_err());
+        assert!(
+            async_io::block_on(service.reserve_restoration(&bytes, 15_000, 1, message.header()))
+                .is_err()
+        );
         assert!(
             async_io::block_on(service.reserve_restoration(
                 &vec![0; MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION + 1],
+                15_000,
+                1,
                 message.header()
             ))
             .is_err()
         );
         assert!(
-            async_io::block_on(service.reserve_restoration(b"LNRR:1\n", message.header())).is_err()
+            async_io::block_on(service.reserve_restoration(
+                b"LNRR:1\n",
+                15_000,
+                1,
+                message.header()
+            ))
+            .is_err()
         );
     }
 }
@@ -853,7 +1048,7 @@ mod grant_tests {
         reader
             .read_to_end(&mut bytes)
             .unwrap_or_else(|e| unreachable!("{e}"));
-        assert_eq!(bytes, b"synthetic bounded grantLNRG-END:1\n");
+        assert_eq!(bytes, b"synthetic bounded grantLNRG-END:2\n");
 
         let (mut writer, mut reader) = UnixStream::pair().unwrap_or_else(|e| unreachable!("{e}"));
         writer
@@ -882,7 +1077,7 @@ mod grant_tests {
             .read_to_end(&mut bytes)
             .unwrap_or_else(|e| unreachable!("{e}"));
         assert_eq!(bytes, b"unqualified payload");
-        assert!(!bytes.ends_with(b"LNRG-END:1\n"));
+        assert!(!bytes.ends_with(b"LNRG-END:2\n"));
     }
     #[test]
     fn stalled_closed_or_over_budget_transfer_never_completes() {
@@ -925,5 +1120,67 @@ mod grant_tests {
             )
             .is_err()
         );
+    }
+    fn probe(sequence: u64) -> [u8; 16] {
+        let mut bytes = [0; 16];
+        bytes[..8].copy_from_slice(b"LNRV:1\n\0");
+        bytes[8..].copy_from_slice(&sequence.to_be_bytes());
+        bytes
+    }
+    #[test]
+    fn completed_grant_requires_fresh_witness_checks_and_rejects_replay() {
+        for lost in [false, true] {
+            let (mut root, mut native) = UnixStream::pair().unwrap_or_else(|_| unreachable!());
+            let worker = std::thread::spawn(move || {
+                let mut checks = 0;
+                let result = serve_grant_witness(&mut root, || {
+                    checks += 1;
+                    if lost && checks == 2 {
+                        Err(unavailable())
+                    } else {
+                        Ok(())
+                    }
+                });
+                assert!(result.is_err());
+                checks
+            });
+            native
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap_or_else(|_| unreachable!());
+            native
+                .write_all(&probe(1))
+                .unwrap_or_else(|_| unreachable!());
+            let mut response = [0; 16];
+            native
+                .read_exact(&mut response)
+                .unwrap_or_else(|_| unreachable!());
+            assert_eq!(response, probe(1));
+            if lost {
+                native
+                    .write_all(&probe(2))
+                    .unwrap_or_else(|_| unreachable!());
+            } else {
+                // A duplicate endpoint cannot reset/reuse a consumed sequence.
+                native
+                    .write_all(&probe(1))
+                    .unwrap_or_else(|_| unreachable!());
+            }
+            assert!(native.read_exact(&mut response).is_err());
+            assert_eq!(
+                worker.join().unwrap_or_else(|_| unreachable!()),
+                if lost { 2 } else { 1 }
+            );
+        }
+    }
+    #[test]
+    fn native_grant_worker_quota_is_bounded_and_released_without_regranting() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let slots: Vec<_> = (0..MAX_STARTUPS)
+            .map(|_| GrantSlot::enter(&count).unwrap_or_else(|_| unreachable!()))
+            .collect();
+        assert!(GrantSlot::enter(&count).is_err());
+        assert_eq!(count.load(Ordering::Acquire), MAX_STARTUPS);
+        drop(slots);
+        assert_eq!(count.load(Ordering::Acquire), 0);
     }
 }

@@ -154,6 +154,10 @@ matrix() {
             "native-session-display-root-denied",
             "native-session-display-polkit-ordinary-denied",
             "ApplyDisplayLayout ststtsssss",
+            "RestoreOriginalDisplayLayout ststtssss",
+            "native-session-original-restoration-ordinary-denied",
+            "native-session-original-restoration-root-denied",
+            "native-session-original-restoration-polkit-ordinary-denied",
             "ContinueDisplayLayout ssstssb",
             "native-session-display-decision-ordinary-denied",
             "native-session-display-decision-root-denied",
@@ -172,16 +176,20 @@ matrix() {
         actions = ET.parse(
             ROOT / "packaging/polkit-1/actions/org.linura.executor.session.policy"
         ).getroot()
-        action_id = "org.linura.executor.session.apply-display-layout"
-        action = actions.find(f"action[@id='{action_id}']")
-        self.assertIsNotNone(action)
-        assert action is not None
-        for name in ("allow_any", "allow_inactive", "allow_active"):
-            self.assertEqual(action.findtext(f"defaults/{name}"), "no")
+        for operation in ("apply-display-layout", "restore-original-display-layout"):
+            action_id = f"org.linura.executor.session.{operation}"
+            action = actions.find(f"action[@id='{action_id}']")
+            self.assertIsNotNone(action)
+            assert action is not None
+            for name in ("allow_any", "allow_inactive", "allow_active"):
+                self.assertEqual(action.findtext(f"defaults/{name}"), "no")
         rule = (
             ROOT / "packaging/polkit-1/rules.d/50-linura-executor-session.rules"
         ).read_text()
-        self.assertIn(f'action.id === "{action_id}"', rule)
+        for operation in ("apply-display-layout", "restore-original-display-layout"):
+            self.assertIn(
+                f'action.id === "org.linura.executor.session.{operation}"', rule
+            )
         self.assertIn('subject.user === "linura-authority"', rule)
         self.assertNotIn('subject.user === "root"', rule)
         policy = ET.parse(

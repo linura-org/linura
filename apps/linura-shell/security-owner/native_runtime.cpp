@@ -1,4 +1,5 @@
 #include "native_runtime.h"
+#include "native_display_restoration.h"
 #include "native_display_startup.h"
 #include "authentication_agent.h"
 #include "native_deadline.h"
@@ -1093,6 +1094,36 @@ std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
     // response is ambiguity, never permission to invoke this call again.
     return impl_->backend->dispatchPreparedDisplay(intent, correlation, sampledBootMs,
                                                    nativeBaselineGuard);
+}
+
+std::optional<quint32> NativeRuntime::restoreOriginalDisplay(
+    const QDBusMessage &received, const NativeDisplayRestorationIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    int originalGrant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || originalGrant < 0 || intent.replacement.lock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayRestorationIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs) ||
+        !impl_->display || !impl_->display->redeemOriginal(intent, correlation))
+        return std::nullopt;
+    // No event processing separates the exact consumed Recovery receipt from
+    // the one-use native request. The compositor authenticates Root itself.
+    return impl_->backend->restoreOriginalDisplay(intent, correlation, sampledBootMs,
+                                                  originalGrant);
 }
 
 // This narrow effect is reachable only from the current supervised executor.

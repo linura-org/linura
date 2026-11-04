@@ -34,6 +34,14 @@ class ProtectedScene
     [[nodiscard]] virtual std::shared_ptr<MutationProtection>
     reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
                     const Snapshot &, ClockSample captured) = 0;
+    // Distinct consumed Recovery scene, admitted only alongside the original
+    // Root endpoint. Post-write source witnesses are exact comparison data;
+    // the native backend alone derives them from the authenticated grant.
+    [[nodiscard]] virtual std::shared_ptr<MutationProtection>
+    reserveOriginalRestoration(const Correlation &, const Layout &baseline, const Layout &desired,
+                               const Snapshot &, ClockSample,
+                               const std::map<OutputKey, std::string> &restoredSources,
+                               std::function<bool()> originalAlive) = 0;
     virtual void close() noexcept = 0;
 };
 
@@ -53,6 +61,11 @@ class ProtectedWireEndpoint final
     [[nodiscard]] static std::shared_ptr<MutationProtection>
     reserveMutation(wl_resource *, wl_client *, const Correlation &, const Layout &baseline,
                     const Layout &desired, const Snapshot &, ClockSample captured);
+    [[nodiscard]] static std::shared_ptr<MutationProtection>
+    reserveOriginalRestoration(wl_resource *, wl_client *, const Correlation &,
+                               const Layout &baseline, const Layout &desired, const Snapshot &,
+                               ClockSample, const std::map<OutputKey, std::string> &restoredSources,
+                               std::function<bool()> originalAlive);
 
   private:
     class Impl;

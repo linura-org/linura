@@ -194,6 +194,8 @@ impl NativeSessionChannel {
     pub fn reserve_display_restoration(
         &self,
         record: &crate::NativeDisplayRestorationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
     ) -> Result<std::os::fd::OwnedFd, String> {
         self.require_role(NativeSessionRole::Executor)?;
         let started = Instant::now();
@@ -204,7 +206,7 @@ impl NativeSessionChannel {
             "/org/linura/DisplayProtection1",
             "org.linura.DisplayProtection1",
             "ReserveRestoration",
-            &(bytes,),
+            &(bytes, dispatch_deadline_unix_ms, sampled_boot_ms),
             started,
         )?;
         if reply
@@ -560,6 +562,50 @@ impl NativeSessionChannel {
         {
             return Err(
                 "prepared display executor result has a different authenticated sender".into(),
+            );
+        }
+        self.decode_executor_outcome(&identity, reply, binding, Instant::now())
+    }
+
+    /// Fresh sealed Control handoff; historical Apply approvals cannot reach it.
+    pub fn handoff_original_display_restoration(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_restoration_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let identity = self.trusted_service(NativeSessionRole::Executor, Instant::now())?;
+        // Separate fixed mechanism budget, including root's service policy and
+        // one native probe/dispatch. It cannot extend the human deadline or the
+        // native sample's freshness. Fault/timeout never requests redelivery.
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "RestoreOriginalDisplayLayout",
+            &(
+                material,
+                deadline_unix_ms,
+                binding.transaction_id.as_str(),
+                binding.generation,
+                binding.state_version,
+                binding.authority_binding_digest.to_hex(),
+                binding.authority_use_digest.to_hex(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+            ),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+        {
+            return Err(
+                "original restoration executor result has a different authenticated sender".into(),
             );
         }
         self.decode_executor_outcome(&identity, reply, binding, Instant::now())

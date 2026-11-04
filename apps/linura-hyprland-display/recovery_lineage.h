@@ -12,21 +12,29 @@ namespace Linura::HyprlandDisplay {
 class RecoveryLineage final
 {
   public:
+    enum class WlrSource { None = 0, LiveClient = 1, RestoredProjection = 2 };
     static constexpr std::size_t MaxBytes = RecoveryRule::MaxBytes, MaxSelectors = 256;
     [[nodiscard]] static std::optional<RecoveryLineage>
     capture(RecoveryRule native, RecoveryRule effective, std::vector<std::string> selectors,
             std::optional<std::size_t> selected, bool wlr, std::uint32_t mask,
-            std::uint32_t refreshMilliHz = 0)
+            std::uint32_t refreshMilliHz = 0, std::string restoredOrigin = {})
     {
+        if (wlr && !restoredOrigin.empty())
+            return std::nullopt;
         RecoveryLineage saved{
             std::move(native), std::move(effective), std::move(selectors), selected, wlr, mask,
             refreshMilliHz};
+        if (!restoredOrigin.empty()) {
+            saved.source_ = WlrSource::RestoredProjection;
+            saved.restoredOrigin_ = std::move(restoredOrigin);
+        }
         return saved.valid() && saved.encode().size() <= MaxBytes ? std::optional{std::move(saved)}
                                                                   : std::nullopt;
     }
     [[nodiscard]] static std::optional<RecoveryLineage> decode(std::string_view bytes)
     {
-        if (bytes.size() > MaxBytes || !bytes.starts_with("LNRL:1;"))
+        const bool historical = bytes.starts_with("LNRL:1;");
+        if (bytes.size() > MaxBytes || (!historical && !bytes.starts_with("LNRL:2;")))
             return std::nullopt;
         Reader reader{bytes.substr(7)};
         const auto selected = reader.integer();
@@ -42,18 +50,34 @@ class RecoveryLineage final
         }
         const auto native = reader.rule(), effective = reader.rule();
         const auto wlr = reader.integer(), mask = reader.integer(), refresh = reader.integer();
-        if (!native || !effective || !wlr || *wlr > 1 || !mask || *mask > 31 || !refresh ||
+        const auto origin =
+            historical ? std::optional<std::string_view>{std::string_view{}} : reader.field();
+        if (!native || !effective || !wlr || *wlr > (historical ? 1U : 2U) || !origin ||
+            ((*wlr == 2) != !origin->empty()) || !mask || *mask > 31 || !refresh ||
             *refresh > std::numeric_limits<std::uint32_t>::max() || !reader.rest.empty())
             return std::nullopt;
-        auto saved = capture(
-            *native, *effective, std::move(selectors),
-            *selected ? std::optional{static_cast<std::size_t>(*selected - 1)} : std::nullopt,
-            *wlr != 0, static_cast<std::uint32_t>(*mask), static_cast<std::uint32_t>(*refresh));
-        return saved && saved->encode() == bytes ? saved : std::nullopt;
+        RecoveryLineage saved{*native,
+                              *effective,
+                              std::move(selectors),
+                              *selected ? std::optional{static_cast<std::size_t>(*selected - 1)}
+                                        : std::nullopt,
+                              *wlr == 1,
+                              static_cast<std::uint32_t>(*mask),
+                              static_cast<std::uint32_t>(*refresh)};
+        if (*wlr == 2) {
+            saved.source_ = WlrSource::RestoredProjection;
+            saved.restoredOrigin_ = *origin;
+        }
+        // Historical bounds/bytes retain their own version; validating them
+        // must not first expand them into the new current representation.
+        saved.version_ = historical ? 1U : 2U;
+        return saved.valid() && saved.encode() == bytes ? std::optional{std::move(saved)}
+                                                        : std::nullopt;
     }
     [[nodiscard]] std::string encode() const
     {
-        std::string out = "LNRL:1;" + std::to_string(selected_ ? *selected_ + 1 : 0) + ';' +
+        std::string out = "LNRL:" + std::to_string(version_) + ';' +
+                          std::to_string(selected_ ? *selected_ + 1 : 0) + ';' +
                           std::to_string(selectors_.size()) + ';';
         for (const auto &selector : selectors_) {
             for (const auto byte : selector) {
@@ -65,8 +89,9 @@ class RecoveryLineage final
         }
         out += native_.encode().substr(7);
         out += effective_.encode().substr(7);
-        return out + (wlr_ ? "1;" : "0;") + std::to_string(mask_) + ';' +
+        out += std::to_string(static_cast<unsigned>(source_)) + ';' + std::to_string(mask_) + ';' +
                std::to_string(refreshMilliHz_) + ';';
+        return version_ == 1 ? out : out + restoredOrigin_ + ';';
     }
     [[nodiscard]] const RecoveryRule &native() const noexcept
     {
@@ -86,7 +111,27 @@ class RecoveryLineage final
     }
     [[nodiscard]] bool wlr() const noexcept
     {
-        return wlr_;
+        return source_ == WlrSource::LiveClient;
+    }
+    [[nodiscard]] bool hasWlrProjection() const noexcept
+    {
+        return source_ != WlrSource::None;
+    }
+    [[nodiscard]] WlrSource wlrSource() const noexcept
+    {
+        return source_;
+    }
+    [[nodiscard]] const std::string &restoredOrigin() const noexcept
+    {
+        return restoredOrigin_;
+    }
+    // The original checkpoint hash explains this new native projection; it is
+    // comparison lineage, never authority or a recreated historical client.
+    [[nodiscard]] std::optional<RecoveryLineage>
+    replacementProjection(std::string_view origin) const
+    {
+        return capture(native_, effective_, selectors_, selected_, false, mask_, refreshMilliHz_,
+                       hasWlrProjection() ? std::string(origin) : std::string{});
     }
     [[nodiscard]] std::uint32_t wlrMask() const noexcept
     {
@@ -96,6 +141,40 @@ class RecoveryLineage final
     {
         return refreshMilliHz_;
     }
+    // Replacement recovery may restore owned fields, never select/reorder a
+    // different live rule or overwrite a new native wlr client's ownership.
+    // This comparison is not authorization; callers need the original Root
+    // endpoint, exact consumed Recovery scene and prepared one-use handoff.
+    [[nodiscard]] bool replacementSourceCompatible(const RecoveryLineage &current) const
+    {
+        return selectors_ == current.selectors_ && selected_ == current.selected_ &&
+               native_.selector() == current.native_.selector() &&
+               current.source_ == WlrSource::None;
+    }
+    // Recreate only the committed owned-field wlr projection. No historical
+    // client/socket is recreated and no uncommitted native field is frozen.
+    // Adaptive sync, color, ICC and every unrelated live field stay current.
+    template <typename Rule>
+    [[nodiscard]] std::optional<Rule> restoredWlrProjection(Rule current) const
+    {
+        if (!hasWlrProjection())
+            return std::nullopt;
+        const auto saved = effective_.mergeOwnedFields(current);
+        if (!saved)
+            return std::nullopt;
+        current.m_disabled = saved->m_disabled;
+        if (mask_ & 3U) {
+            current.m_resolution = saved->m_resolution;
+            current.m_refreshRate = static_cast<float>(refreshMilliHz_) / 1000.F;
+        }
+        if (mask_ & 4U)
+            current.m_offset = saved->m_offset;
+        if (mask_ & 8U)
+            current.m_transform = saved->m_transform;
+        if (mask_ & 16U)
+            current.m_scale = saved->m_scale;
+        return current;
+    }
     // Only for removing/restoring an in-process Linura overlay, which never
     // writes a native config rule or wlr manager. The actual selected owned
     // semantics must remain identical; an unrelated selector-list edit need
@@ -103,8 +182,9 @@ class RecoveryLineage final
     [[nodiscard]] bool sameOverlayCompensationSources(const RecoveryLineage &other) const
     {
         return native_.encode() == other.native_.encode() &&
-               effective_.encode() == other.effective_.encode() && wlr_ == other.wlr_ &&
-               mask_ == other.mask_ && refreshMilliHz_ == other.refreshMilliHz_;
+               effective_.encode() == other.effective_.encode() && source_ == other.source_ &&
+               restoredOrigin_ == other.restoredOrigin_ && mask_ == other.mask_ &&
+               refreshMilliHz_ == other.refreshMilliHz_;
     }
 
   private:
@@ -112,13 +192,16 @@ class RecoveryLineage final
                     std::optional<std::size_t> selected, bool wlr, std::uint32_t mask,
                     std::uint32_t refreshMilliHz)
         : native_(std::move(native)), effective_(std::move(effective)),
-          selectors_(std::move(selectors)), selected_(selected), wlr_(wlr), mask_(mask),
+          selectors_(std::move(selectors)), selected_(selected),
+          source_(wlr ? WlrSource::LiveClient : WlrSource::None), mask_(mask),
           refreshMilliHz_(refreshMilliHz)
     {}
     RecoveryRule native_, effective_;
     std::vector<std::string> selectors_;
     std::optional<std::size_t> selected_;
-    bool wlr_ = false;
+    unsigned version_ = 2;
+    WlrSource source_ = WlrSource::None;
+    std::string restoredOrigin_;
     std::uint32_t mask_ = 0;
     // The float Hz projection can collapse distinct integer source values.
     // Keep the actual original millihertz; never reconstruct it by rounding.
@@ -126,10 +209,12 @@ class RecoveryLineage final
     inline static constexpr char Digits[] = "0123456789abcdef";
     [[nodiscard]] bool valid() const
     {
-        if (selectors_.size() > MaxSelectors || mask_ > 31 || (!wlr_ && mask_ != 0))
+        if ((source_ == WlrSource::RestoredProjection && !originDigest(restoredOrigin_)) ||
+            (source_ != WlrSource::RestoredProjection && !restoredOrigin_.empty()) ||
+            selectors_.size() > MaxSelectors || mask_ > 31 || (!hasWlrProjection() && mask_ != 0))
             return false;
-        if ((wlr_ && (mask_ & 3U)) ? !effective_.hasWlrRefresh(refreshMilliHz_)
-                                   : refreshMilliHz_ != 0)
+        if ((hasWlrProjection() && (mask_ & 3U)) ? !effective_.hasWlrRefresh(refreshMilliHz_)
+                                                 : refreshMilliHz_ != 0)
             return false;
         std::size_t bytes = 0;
         for (const auto &selector : selectors_) {
@@ -143,8 +228,14 @@ class RecoveryLineage final
         } else if (!native_.selector().empty() ||
                    std::find(selectors_.begin(), selectors_.end(), "") != selectors_.end())
             return false;
-        return wlr_ ? effective_.isWlrProjectionOf(native_, mask_)
-                    : effective_.encode() == native_.encode();
+        return hasWlrProjection() ? effective_.isWlrProjectionOf(native_, mask_)
+                                  : effective_.encode() == native_.encode();
+    }
+    static bool originDigest(std::string_view value)
+    {
+        return value.size() == 64 && value != std::string(64, '0') &&
+               std::all_of(value.begin(), value.end(),
+                           [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
     }
     struct Reader final
     {

@@ -353,6 +353,24 @@ class ProtectedWireEndpoint::Impl final
             return {};
         return state->scene->reserveMutation(bound, baseline, desired, captured, clock);
     }
+    static std::shared_ptr<MutationProtection>
+    reserveOriginalRestoration(wl_resource *resource, wl_client *client, const Correlation &bound,
+                               const Layout &baseline, const Layout &desired,
+                               const Snapshot &captured, ClockSample clock,
+                               const std::map<OutputKey, std::string> &restoredSources,
+                               std::function<bool()> originalAlive)
+    {
+        if (!resource || !client || wl_resource_get_client(resource) != client ||
+            !wl_resource_instance_of(resource, &linura_protected_display_interaction_v1_interface,
+                                     &interactionImpl))
+            return {};
+        auto &interaction = object<Interaction>(resource);
+        const auto &state = interaction.state;
+        if (!state || state->closed || !state->scene || !interaction.owner.current(interaction))
+            return {};
+        return state->scene->reserveOriginalRestoration(bound, baseline, desired, captured, clock,
+                                                        restoredSources, std::move(originalAlive));
+    }
     static void beginDecision(wl_client *, wl_resource *resource, const char *scope,
                               std::uint32_t purpose, std::uint32_t high, std::uint32_t low,
                               std::uint32_t bootHigh, std::uint32_t bootLow)
@@ -406,5 +424,13 @@ std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveMutation(
     const Layout &desired, const Snapshot &captured, ClockSample clock)
 {
     return Impl::reserve(resource, client, bound, baseline, desired, captured, clock);
+}
+std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveOriginalRestoration(
+    wl_resource *resource, wl_client *client, const Correlation &bound, const Layout &baseline,
+    const Layout &desired, const Snapshot &captured, ClockSample clock,
+    const std::map<OutputKey, std::string> &restoredSources, std::function<bool()> originalAlive)
+{
+    return Impl::reserveOriginalRestoration(resource, client, bound, baseline, desired, captured,
+                                            clock, restoredSources, std::move(originalAlive));
 }
 } // namespace Linura::HyprlandDisplay

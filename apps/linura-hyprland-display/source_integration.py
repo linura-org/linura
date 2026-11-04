@@ -432,6 +432,7 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
 if(NOT IS_DIRECTORY "${LINURA_DISPLAY_INTEGRATION_DIR}")
   message(FATAL_ERROR "LINURA_DISPLAY_INTEGRATION_DIR must name the reviewed Linura native source")
 endif()
+find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
 add_subdirectory("${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_BINARY_DIR}/linura-display")
 pkg_check_modules(LINURA_DISPLAY_SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 pkg_check_modules(LINURA_DISPLAY_UDEV REQUIRED IMPORTED_TARGET libudev)
@@ -441,7 +442,7 @@ target_sources(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_ba
   "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_protected.cpp")
 target_include_directories(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_SOURCE_DIR}")
 target_include_directories(Hyprland PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}")
-target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner linura-hyprland-protected-wire PkgConfig::LINURA_DISPLAY_SYSTEMD PkgConfig::LINURA_DISPLAY_UDEV)
+target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner linura-hyprland-protected-wire PkgConfig::LINURA_DISPLAY_SYSTEMD PkgConfig::LINURA_DISPLAY_UDEV OpenSSL::Crypto)
 if(TARGET hyprland_gtests)
   target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp"
     "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_owner_admission.cpp"

@@ -40,6 +40,8 @@ class NativeDisplayFlow final : public QObject
     // The trusted runtime calls only after independently admitting the prepared
     // root executor. This reserves the exact live human receipt before effect.
     [[nodiscard]] bool redeem(const NativeDisplayIntent &, const NativeDisplayCorrelation &);
+    [[nodiscard]] bool redeemOriginal(const NativeDisplayRestorationIntent &,
+                                      const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginDecision(const NativeDisplayChoiceChallenge &);
     [[nodiscard]] bool matchesDecision(const NativeDisplayChoiceChallenge &) const;
     [[nodiscard]] bool decisionReady(const NativeDisplayChoiceChallenge &);
@@ -56,6 +58,7 @@ class NativeDisplayFlow final : public QObject
     NativeDisplayFlow(NativeApprovalScope, NativeDisplayIntent, NativeDisplaySnapshot,
                       NativeWaylandLock &, NativePresentation &, AuthenticationAgent &,
                       NativePeerIdentity, Revalidate);
+    [[nodiscard]] bool redeemReceipt(const QString &material, const NativeDisplayCorrelation &);
     [[nodiscard]] bool window();
     [[nodiscard]] bool refreshPresentation();
     void pulse();

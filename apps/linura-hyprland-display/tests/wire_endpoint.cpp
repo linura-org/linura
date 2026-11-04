@@ -82,6 +82,7 @@ class Harness final
     std::vector<int> connections;
     std::atomic<bool> stop{false};
     std::atomic<unsigned char> admittedInvocation{1};
+    std::atomic<unsigned> originalDispatches{0};
     StartupFence startup;
     std::thread server;
     explicit Harness(int connectionCount = 3, bool startupFixture = false)
@@ -113,7 +114,14 @@ class Harness final
                     // startup evidence. Production separately requires root.
                     return startupFixture && guardPid == static_cast<std::uint32_t>(getpid()) &&
                            startup.retain(fd, ordinary);
-                }});
+                }},
+            NativeOriginalRestorationPort{
+                [this](OwnedNativeFd, const Correlation &, const Layout &, const Snapshot &,
+                       ClockSample, wl_resource *, wl_client *) -> std::optional<std::uint32_t> {
+                    ++originalDispatches;
+                    return std::nullopt; // No original Root grant in this portable fixture.
+                },
+                [](const Correlation &) -> std::optional<std::uint32_t> { return std::nullopt; }});
         assert(endpoint->available());
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
             *display,
@@ -607,8 +615,64 @@ void startupTransferIsOriginalOneUseAndNeverAWrite()
         assert(close(replacement[0]) == 0 && close(replacement[1]) == 0);
     }
 }
+void originalRestorationNeverBorrowsOrdinaryAdmissionOrReplays()
+{
+    for (unsigned fault = 0; fault < 5; ++fault) {
+        Harness server(3, true);
+        Client owner(server.connections[0]);
+        (void)owner.snapshot();
+        owner.discardSnapshots();
+        int lease[2]{}, grant[2]{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, lease) == 0);
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, grant) == 0);
+        // The fixture models only phase/transport routing, never Root admission.
+        linura_display_manager_v1_admit_startup(owner.manager, lease[0], fault == 1 ? 1U : 0U,
+                                                static_cast<std::uint32_t>(getpid()),
+                                                "74e3ca24-b38b-4b62-9671-ae32dc38fd57");
+        owner.sync();
+        close(lease[0]);
+        auto &sample = owner.snapshot();
+        const auto bound = correlation("transaction:wire-original");
+        auto &attempt = owner.attempt(bound);
+        if (fault != 2) {
+            if (fault == 3)
+                linura_display_attempt_v1_configure(attempt.wire, sample.wire);
+            else
+                owner.configure(attempt, sample);
+        }
+        if (fault == 4)
+            server.admittedInvocation.store(2);
+        linura_display_attempt_v1_restore_original(attempt.wire, grant[0], owner.protection());
+        close(grant[0]);
+        owner.sync();
+        assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
+        assert(server.originalDispatches == (fault == 0 ? 1U : 0U));
+        assert(server.native.writes == 0);
+        char byte = 0;
+        assert(recv(grant[1], &byte, 1, MSG_DONTWAIT) == 0); // FD closed on every refusal.
+        close(grant[1]);
+        server.admittedInvocation.store(1);
+        auto &again = owner.attempt(bound);
+        owner.configure(again, sample);
+        int replay[2]{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, replay) == 0);
+        if (fault == 0) {
+            linura_display_attempt_v1_restore_original(again.wire, replay[0], owner.protection());
+            owner.sync();
+            assert(again.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
+            assert(server.originalDispatches == 1); // New object cannot redeliver.
+        }
+        linura_display_attempt_v1_apply(attempt.wire, owner.protection());
+        owner.sync();
+        assert(server.native.writes == 0);
+        close(replay[0]);
+        close(replay[1]);
+        close(lease[1]);
+    }
+}
 int main()
 {
+    originalRestorationNeverBorrowsOrdinaryAdmissionOrReplays();
     startupTransferIsOriginalOneUseAndNeverAWrite();
     ownershipAndOneUse();
     staleAndCrossSnapshotAreRejected();

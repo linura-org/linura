@@ -13,6 +13,7 @@
 #include <optional>
 
 namespace Linura::SecurityOwner {
+struct NativeDisplayRestorationIntent;
 
 enum class NativePeerPurpose;
 struct NativeDisplayChoiceChallenge;
@@ -76,6 +77,10 @@ class NativeRuntime final : public QObject
     dispatchPreparedDisplay(const QDBusMessage &, const NativeDisplayIntent &,
                             const NativeDisplayCorrelation &, const QString &sampleDigest,
                             quint64 sampledBootMs, const QString &nativeBaselineGuard);
+    [[nodiscard]] std::optional<quint32>
+    restoreOriginalDisplay(const QDBusMessage &, const NativeDisplayRestorationIntent &,
+                           const NativeDisplayCorrelation &, const QString &sampleDigest,
+                           quint64 sampledBootMs, int originalGrant);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const QDBusMessage &,
                                                                  const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &);

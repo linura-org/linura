@@ -1,6 +1,8 @@
 //! Deterministic managed-controller and SQLite restart/fault fixtures.
 //! NativeApi labels are simulated here; these are not compositor qualification.
 use super::*;
+#[path = "original_restoration.rs"]
+mod original_restoration;
 use linura_control::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, DisplayContinuationAction,
     DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayLayoutPlanRequest,
@@ -33,6 +35,10 @@ struct Machine {
     read_only_outputs: bool,
     native_base_drift: bool,
     original_native_guard: Option<linura_provider_sdk::ComponentDigest>,
+    original_protection_lost: bool,
+    restoration_calls: usize,
+    restoration_outcome: u8,
+    lose_restoration_dispatch: bool,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -180,6 +186,7 @@ fn replacement_review_reloads_authenticated_history_without_replaying_an_apply()
 struct LiveFixtureObserver {
     machine: Arc<Mutex<Machine>>,
     template: ObservationEnvelope,
+    replacement: bool,
 }
 impl Observer for LiveFixtureObserver {
     fn observer_id(&self) -> ProviderId {
@@ -215,6 +222,13 @@ impl Observer for LiveFixtureObserver {
             .machine
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        if machine.original_protection_lost
+            && self.template.provider.as_str() == "hyprland-recovery"
+        {
+            return Err(ProviderError::Unsupported(
+                "original kernel witness lost".into(),
+            ));
+        }
         machine.sequence += 1;
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
@@ -231,7 +245,7 @@ impl Observer for LiveFixtureObserver {
                 sample.attributes.remove(key);
             }
         }
-        if machine.desired && sample.provider.as_str() == "hyprland" {
+        if machine.desired && !self.replacement && sample.provider.as_str() == "hyprland" {
             sample
                 .attributes
                 .insert("output.0.linura_owned".into(), ObservedValue::Bool(true));
@@ -286,6 +300,7 @@ fn previews(machine: &Arc<Mutex<Machine>>) -> PlanPreviewControl {
         value(coordinator.register_observer(Box::new(LiveFixtureObserver {
             machine: machine.clone(),
             template,
+            replacement: false,
         })));
     }
     PlanPreviewControl::new(coordinator)
@@ -310,6 +325,19 @@ impl ApprovedRequestJournal for FailingJournal {
                 .lose_checkpoint
         {
             return Ok(()); // A write acknowledgement cannot replace readback.
+        }
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-recovery:")
+            && record.request_id().as_str().ends_with(":dispatched")
+            && self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .lose_restoration_dispatch
+        {
+            return Ok(()); // Acknowledged but absent correlation must never reach the native call.
         }
         self.writes += 1;
         if self.writes == self.fail_at {
@@ -337,6 +365,14 @@ fn open(
     machine: &Arc<Mutex<Machine>>,
     fail_at: usize,
 ) -> ManagedLifecycleControl<SqliteTransactionStore> {
+    open_with_previews(database, machine, fail_at, previews(machine))
+}
+fn open_with_previews(
+    database: &Path,
+    machine: &Arc<Mutex<Machine>>,
+    fail_at: usize,
+    previews: PlanPreviewControl,
+) -> ManagedLifecycleControl<SqliteTransactionStore> {
     let (signer, verifier) = authority_material();
     let store = value(SqliteTransactionStore::open(
         database,
@@ -350,17 +386,14 @@ fn open(
         ),
     );
     value(
-        value(ManagedLifecycleControl::new(
-            previews(machine),
-            store,
-            signer,
-        ))
-        .with_request_journal(Box::new(FailingJournal {
-            inner: journal,
-            machine: machine.clone(),
-            fail_at,
-            writes: 0,
-        })),
+        value(ManagedLifecycleControl::new(previews, store, signer)).with_request_journal(
+            Box::new(FailingJournal {
+                inner: journal,
+                machine: machine.clone(),
+                fail_at,
+                writes: 0,
+            }),
+        ),
     )
 }
 #[derive(Debug)]

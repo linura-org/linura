@@ -67,6 +67,7 @@ test "$(sudo -n systemctl show "$service" --value -p CapabilityBoundingSet)" = "
 pkaction --action-id org.linura.executor.session.set-secure >/dev/null
 pkaction --action-id org.linura.executor.session.execute-transition >/dev/null
 pkaction --action-id org.linura.executor.session.apply-display-layout >/dev/null
+pkaction --action-id org.linura.executor.session.restore-original-display-layout >/dev/null
 echo "native-session-live-executor=qualified"
 
 stage independent-display-protection-admission
@@ -167,6 +168,24 @@ expect_failure native-session-display-root-denied call_display_root
 grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 expect_failure native-session-display-polkit-ordinary-denied \
     pkcheck --action-id org.linura.executor.session.apply-display-layout --process "$$"
+call_original_restoration() {
+    busctl --system call "$destination" "$path" "$interface" RestoreOriginalDisplayLayout ststtssss \
+        "$material" 15000 "transaction:v06:original-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest"
+}
+call_original_restoration_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" RestoreOriginalDisplayLayout ststtssss \
+        "$material" 15000 "transaction:v06:original-root-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest"
+}
+# Bus admission precedes even decoding this deliberately wrong-purpose body.
+# A valid full LNRI binding is separately exercised by the Rust denial fixture.
+expect_failure native-session-original-restoration-ordinary-denied call_original_restoration
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-original-restoration-root-denied call_original_restoration_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-original-restoration-polkit-ordinary-denied \
+    pkcheck --action-id org.linura.executor.session.restore-original-display-layout --process "$$"
 call_display_decision() {
     busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
         "$material" "transaction:v06:display-decision" "$digest" 15000 "$digest" "$digest" true

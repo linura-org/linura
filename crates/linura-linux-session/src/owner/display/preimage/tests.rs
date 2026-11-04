@@ -13,7 +13,7 @@ fn lineage_fixture(rule: &str, selector: Option<&str>) -> String {
         .unwrap_or_else(|| unreachable!("fixture rule"));
     let selection =
         selector.map_or_else(|| "0;0;".to_owned(), |selector| format!("1;1;{selector};"));
-    format!("LNRL:1;{selection}{body}{body}0;0;0;")
+    format!("LNRL:2;{selection}{body}{body}0;0;0;;")
 }
 fn inputs() -> (Value, Value) {
     let full_rule = lineage_fixture(RULE, None);
@@ -137,8 +137,8 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
     for bad in [
         full.clone() + ";",
         full.clone() + "0;",
-        full.replacen("LNRL:1;", "LNRL:01;", 1),
-        full.replacen("LNRL:1;0;0;", "LNRL:1;1;0;", 1),
+        full.replacen("LNRL:2;", "LNRL:02;", 1),
+        full.replacen("LNRL:2;0;0;", "LNRL:2;1;0;", 1),
         "x".repeat(20 * 1024 + 1),
     ] {
         assert!(lineage(&bad).is_err());
@@ -152,7 +152,7 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
         .collect();
     let encode = |effective: &[String], mask| {
         format!(
-            "LNRL:1;0;0;{};{};1;{mask};{};",
+            "LNRL:2;0;0;{};{};1;{mask};{};;",
             native.join(";"),
             effective.join(";"),
             if mask & 3 != 0 { 60_000 } else { 0 }
@@ -178,6 +178,15 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
             effective[6] = real(1.25);
         }
         assert!(lineage(&encode(&effective, mask)).is_ok(), "mask {mask}");
+        let restored = format!(
+            "LNRL:2;0;0;{};{};2;{mask};{};{};",
+            native.join(";"),
+            effective.join(";"),
+            if mask & 3 != 0 { 60_000 } else { 0 },
+            "a".repeat(64)
+        );
+        assert!(lineage(&restored).is_ok(), "restored mask {mask}");
+
         for bit in [1, 2, 4, 8, 16] {
             if mask & bit != 0 && (bit > 2 || mask & 3 == bit) {
                 assert!(
@@ -199,7 +208,7 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
     effective[3] = format!("{:016x}", f64::from(u32::MAX as f32 / 1000_f32).to_bits());
     let exact = |refresh: u64| {
         format!(
-            "LNRL:1;0;0;{};{};1;1;{refresh};",
+            "LNRL:2;0;0;{};{};1;1;{refresh};;",
             native.join(";"),
             effective.join(";")
         )
@@ -209,6 +218,33 @@ fn complete_rule_lineage_separates_selection_native_rule_and_committed_wlr_field
     assert_ne!(exact(u64::from(u32::MAX)), exact(u64::from(u32::MAX) - 1));
     assert!(lineage(&exact(60000)).is_err());
     assert!(lineage(&exact(u64::from(u32::MAX) + 1)).is_err());
+}
+
+#[test]
+fn restored_projection_is_not_a_live_wlr_owner_or_unexplained_source() {
+    let fresh = lineage_fixture(RULE, None);
+    let legacy = fresh.replacen("LNRL:2;", "LNRL:1;", 1);
+    let legacy = legacy.strip_suffix(';').unwrap_or_else(|| unreachable!());
+    assert!(historical_lineage(legacy).is_ok());
+    assert!(lineage(legacy).is_err()); // Never a fresh native source or reservation.
+    let body = RULE
+        .strip_prefix("LNDR:2;")
+        .unwrap_or_else(|| unreachable!());
+    let restored = |kind, origin: &str| format!("LNRL:2;0;0;{body}{body}{kind};0;0;{origin};");
+    assert!(lineage(&restored(1, "")).is_ok());
+    assert!(lineage(&restored(2, &"a".repeat(64))).is_ok());
+    for (kind, origin) in [
+        (0, "a".repeat(64)),
+        (1, "a".repeat(64)),
+        (2, String::new()),
+        (2, "0".repeat(64)),
+        (2, "A".repeat(64)),
+        (3, "a".repeat(64)),
+    ] {
+        assert!(lineage(&restored(kind, &origin)).is_err());
+    }
+    let old_counterfeit = restored(2, &"a".repeat(64)).replacen("LNRL:2;", "LNRL:1;", 1);
+    assert!(historical_lineage(&old_counterfeit).is_err());
 }
 
 #[test]
@@ -377,6 +413,46 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         )
         .is_ok()
     );
+    let checked_reservation = reservation(&material, facts.checkpoint_digest(), "1:2:1:2;");
+    let native_projection = NativeDisplayRecoveryCheckpoint::restoration_native_projection(
+        record.canonical_bytes(),
+        &checked_reservation,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let mut projected = native_projection.as_slice();
+    let mut fields = Vec::new();
+    while !projected.is_empty() {
+        let (size, body) = projected
+            .split_at_checked(8)
+            .unwrap_or_else(|| unreachable!());
+        let size = usize::try_from(u64::from_be_bytes(
+            size.try_into().unwrap_or_else(|_| unreachable!()),
+        ))
+        .unwrap_or_else(|_| unreachable!());
+        let (field, tail) = body
+            .split_at_checked(size)
+            .unwrap_or_else(|| unreachable!());
+        fields.push(std::str::from_utf8(field).unwrap_or_else(|_| unreachable!()));
+        projected = tail;
+    }
+    assert_eq!(
+        &fields[..5],
+        &[
+            "linura.native-display.restoration-projection.v1",
+            "efb50993780079460b0cbed1363e2166a2de1d9f",
+            &"a".repeat(64),
+            "3",
+            "1"
+        ]
+    );
+    assert_eq!(&fields[5..10], &["1", "2", "1", "2", "226:0:1"]);
+    assert_eq!(
+        fields[10],
+        saved["heads"][0]["base_rule"]
+            .as_str()
+            .unwrap_or_else(|| unreachable!())
+    );
+    assert_eq!(fields.len(), 14);
     for changed in [
         reservation(&material, &"d".repeat(64), "1:2:1:2;"),
         reservation(
@@ -390,6 +466,18 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
             NativeDisplayRecoveryCheckpoint::validate_restoration_source(
                 record.canonical_bytes(),
                 &changed
+            )
+            .is_err()
+        );
+    }
+    for bad in [
+        record.canonical_bytes()[..record.canonical_bytes().len() - 1].to_vec(),
+        vec![0; MAX_CHECKPOINT + 1],
+    ] {
+        assert!(
+            NativeDisplayRecoveryCheckpoint::restoration_native_projection(
+                &bad,
+                &checked_reservation
             )
             .is_err()
         );
@@ -485,6 +573,41 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         ]
     );
     assert_eq!(fields[18], sample.recovery_preimage);
+    // Previous complete LNRL:1 source bytes retain their live-client meaning
+    // in stored history, but cannot be captured/reserved as a fresh source.
+    let mut old_source_preimage = saved.clone();
+    let old_source = old_source_preimage["heads"][0]["base_rule"]
+        .as_str()
+        .unwrap_or_else(|| unreachable!())
+        .replacen("LNRL:2;", "LNRL:1;", 1);
+    let old_source = old_source
+        .strip_suffix(';')
+        .unwrap_or_else(|| unreachable!());
+    old_source_preimage["heads"][0]["base_rule"] = json!(old_source);
+    let old_source_preimage = old_source_preimage.to_string();
+    let mut old_fields = fields.clone();
+    old_fields[18] = &old_source_preimage;
+    let mut old_bytes = Vec::new();
+    for field in old_fields {
+        old_bytes.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        old_bytes.extend_from_slice(field.as_bytes());
+    }
+    assert!(
+        NativeDisplayRecoveryCheckpoint::validate_stored(&old_bytes, &binding.dispatch_digest)
+            .is_ok()
+    );
+    assert!(
+        NativeDisplayRecoveryCheckpoint::reservation_at(
+            &old_bytes,
+            &binding.dispatch_digest,
+            100,
+            101,
+            10_000,
+            sample.boot.as_str()
+        )
+        .is_err()
+    );
+    assert_eq!(fields[18], sample.recovery_preimage); // Historical bytes never migrated.
     // Previously persisted owned-field records remain readable as history;
     // lacking selector lineage never becomes a new reservation or permission.
     let legacy_rule = RULE[..RULE.len() - 1].replacen("LNDR:2;", "LNDR:1;", 1);

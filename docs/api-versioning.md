@@ -220,7 +220,6 @@ For Experimental D-Bus changes, these must remain coherent in the same candidate
 
 A live method not represented in canonical XML, or XML that does not match live signatures, is contract drift and fails qualification rather than being explained away as Experimental flexibility.
 
-
 The private Experimental `SecurityOwner1.ObserveDisplay` method is a read-only
 native display probe, separate from `ObserveLock`. Its `(ssstssb)` structure binds
 the exact native lock resource, compositor connection generation, seat,
@@ -280,11 +279,16 @@ their existing limits. This read-only addition does not activate a display write
 
 The preimage has its own schema, exact upstream/integration identity, complete
 native output/kernel bindings, original owned-rule bytes and prior overlays.
-Private preimage schema 2 uses `LNRL:1`: exact native selection index/order,
-underlying and effective `LNDR:2` owned rules, wlr presence/committed fields and
-the original integer refresh. Live receivers do not accept the old rule-only
-witness. Schema-1 durable preimages remain historical bytes of their original
-meaning; they cannot qualify new reservation or complete restoration observation.
+Private preimage schema 2 now uses `LNRL:2`: exact native selection index/order,
+underlying and effective `LNDR:2` owned rules, explicit source kind (no wlr,
+actual live wlr client or retained restored projection), committed fields and
+the original integer refresh. A restored projection binds its original checkpoint
+digest and never claims a live historical client. Fresh receivers/reservations
+require version 2. Stored `LNRL:1` bytes retain their exact original interpretation
+and bytes: its wlr flag means actual live-client presence, never a restored
+projection. Historical reading cannot promote it to a new current observation or
+reservation. Schema-1 rule-only durable preimages also retain their original
+meaning and cannot qualify a complete new restoration observation.
 The outer `LNRJ:1` framing and all existing byte limits remain unchanged.
 Rust independently validates its canonical rule encoding and matches every row
 against the sampled topology's hashes/ownership before retention. It stays out
@@ -328,14 +332,37 @@ scanout, lock release and Apply redemption stay fenced. Protected approval is
 not a prepared restoration dispatch, terminal proof or release permission.
 
 The private Experimental `DisplayProtection1.ReserveRestoration` takes one
-bounded 16 KiB `ay` reservation and returns one original-root-created Unix
+bounded 16 KiB `ay` reservation, the exact absolute dispatch deadline (`t`) and
+original native sample BOOTTIME (`t`), and returns one original-root-created Unix
 endpoint (`h`). Runtime admission requires the exact supervised executor; Control
 retains only its member-specific `ReadOriginal` access. The reservation binds a
 fresh execution binding and complete `LNRI:1` material, not an old Apply/Keep
 approval. Typed `LNRR:1` files share the existing private quota and strict history
-checks; original `LNRJ:1` files are unchanged. `LNRG:1` transfer requires complete
-framing and a final fresh-check marker. This producer grants no output write,
-ordinary admission, native consumer qualification or production mutation support.
+checks; original `LNRJ:1` and `LNRR:1` files are unchanged. The unconsumed
+Experimental `LNRG:1` transfer is replaced by `LNRG:2`, containing the exact
+reservation and a native-only projection of the same strictly validated original
+source, the exact dispatch deadline and original sample BOOTTIME. A later native
+sample cannot refresh that original admission window. Complete framing and a
+final fresh-check marker precede fixed-size,
+strictly increasing `LNRV:1` witness probes on that original Root endpoint. Both
+the Root worker count and transfer/probe budgets are bounded. Serialized bytes,
+old transfers or a replacement service cannot reconstruct the original endpoint.
+The native recipient requires its kernel Root peer to match the continuously
+held startup lease; input/render lifetime checks never block on a witness query.
+
+Control's nonterminal restoration handoff uses canonical purpose-bound approval,
+fresh prepare and one-use durable CAS, and reads back request/dispatch history
+before calling its sealed complete-material restoration port. Repeated requests
+never transparently dispatch again. No reply verifies/commits restoration or
+releases a fence. Distinct private `Executor.Session1.RestoreOriginalDisplayLayout`
+and `SecurityOwner1.RestoreOriginalDisplay` methods carry the fresh full material,
+execution/sample bindings and one-use Root endpoint through consumed Recovery
+redemption to the compositor's `restore_original` request. All in-repository
+introspection, generated protocol clients and denial fixtures change together.
+The native writer restores only owned source fields and exact prior overlays;
+partial faults remain latched and every recovery fence remains held. Independent
+terminal composition and native qualification remain unfinished; these private
+changes create no public mutation support or qualification claim.
 
 ### Session1 bounded transient-effect contract
 

@@ -183,8 +183,11 @@ remain observable without mutation checkpoint qualification. These point-in-time
 facts do not prove continuity after replacement or grant a restoration effect.
 Independent retained kernel observation and durable restoration remain required.
 
-The owner accepts a native rule digest only after bounded canonical `LNRL:1`
-decoding. The actual selection point captures the selected index and ordered
+The owner accepts a fresh native rule digest only after bounded canonical `LNRL:2`
+decoding. Its source kind distinguishes an actual live wlr client from a retained
+restored projection; the latter binds its original checkpoint hash and cannot
+claim to recreate the client. Stored `LNRL:1` bytes retain their original live-client
+meaning and exact encoding and cannot be advertised/reserved as fresh state. The actual selection point captures the selected index and ordered
 selectors before wlr applies. Distinct underlying/effective `LNDR:2` records
 and explicit wlr presence, owned-field mask and original integer refresh prevent
 equal resolved geometry or lossy float projection from hiding source drift.
@@ -358,11 +361,25 @@ old compositor's actual pidfd exit plus the replacement's healthy fenced lease.
 Exclusive typed reservation publication and both syncs precede endpoint creation.
 A lost reply, malformed history, incomplete transfer or another binding for the
 same unresolved original cannot renew admission. The bounded stream ends with a
-marker only after fresh witness checks. The native recipient must authenticate
-its kernel peer against its continuously held original Root lease and validate a
-fresh protected Recovery scope before any mutation; that consumer and the
-terminal workflow remain unfinished. Neither serialized binding nor file digest
-is authority, and this mechanism does not release outputs or power blockers.
+marker only after fresh witness checks. `LNRG:2` projects only the same strictly
+validated original preimage and exact canonical output bijection; durable
+checkpoint/reservation bytes retain their original meaning. The native recipient
+authenticates its kernel peer against its continuously held original Root lease,
+bounds decoding and the original BOOTTIME transfer budget, and obtains fresh
+strictly increasing witness acknowledgements on that endpoint. Its completed
+transfer is not a reusable file credential. Root retains bounded worker slots;
+idle loss, malformed/replayed/slow probes and witness loss close the endpoint.
+The compositor's input/render lifetime checks remain nonblocking.
+
+Control's separate original-restoration handoff reloads authenticated original
+history, re-observes contributing facts after protected approval and uses the
+existing canonical managed prepare/handoff CAS. Request and reservation/dispatch
+records must be readable before the complete-material one-use port is called.
+Native rejection, acknowledgement loss and restart cannot authorize replay or
+commit restoration. Full native effect composition and independent terminal
+verification/cleanup remain unfinished. Neither serialized binding nor file
+digest is authority, and these mechanisms do not release outputs or power
+blockers.
 
 The separate protected original-restoration review uses private purpose 11
 (native Recovery purpose 3), complete baseline-only `LNRI:1` comparison material
@@ -687,3 +704,17 @@ v0.6 makes no remote/fleet, supported-distribution or supported-hardware securit
 The v0.6 claim requires both deterministic fault/recovery tests and a disposable real-system qualification using systemd, system D-Bus, Polkit and SQLite/WAL. Required negative evidence includes ordinary/direct-executor denial, wrong namespace/state rejection, request substitution rejection, stale/failed verification, executor loss/ambiguity, crash/restart without blind replay and conflict blocking.
 
 Trusted Release Proof must rerun the exact-source v0.6 qualification before sealed release build/promotion. A green unit suite alone is insufficient security evidence for the managed effect.
+
+The separate private original-restoration executor action remains default deny
+and checks the exact supervised Control sender before and after service policy.
+Its one-use Root handoff binds the complete material, new execution binding,
+absolute dispatch deadline and original native sample BOOTTIME. The owner and
+compositor cannot renew that freshness by sampling again. Only the exact consumed
+Recovery receipt, input/presentation generations and original Root endpoint admit
+the write; Apply and Keep/Revert cannot redeem it. The compositor merges only
+owned fields into current selected rules, preserves unrelated live settings,
+restores selective original wlr fields and exact remapped prior overlays, and
+latches every partial fault. It retains all startup/input/power/Root fences and
+returns only nonterminal status. Independent terminal proof, durable linked
+result, qualified release and retention cleanup remain separate unfinished work;
+this implementation does not activate public production display mutations.

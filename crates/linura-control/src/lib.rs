@@ -79,13 +79,15 @@ pub use durable_authority::{
 };
 pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
-    AuthorizedEffectExecutor, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
-    DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
-    DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
-    IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN,
-    MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
-    MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer, ManagedApprovalChallenge,
-    ManagedApprovalClass, ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    AuthorizedEffectExecutor, AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS,
+    DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
+    DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
+    IndependentDisplayVerifier, IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY,
+    MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER,
+    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
+    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
+    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, TrustedDisplayDecision, TrustedHumanApproval,
     managed_request_id,
 };

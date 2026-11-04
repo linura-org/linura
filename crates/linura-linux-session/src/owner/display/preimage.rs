@@ -108,11 +108,18 @@ fn validate_rule(raw: &str, historical: bool) -> Result<(), String> {
 // Independent Rust validation of the source-versioned native selection and
 // wlr-owned projection. Keep the same 20 KiB per-head cap as LNDR:2.
 fn lineage(raw: &str) -> Result<(), String> {
+    validate_lineage(raw, false)
+}
+fn historical_lineage(raw: &str) -> Result<(), String> {
+    validate_lineage(raw, true)
+}
+fn validate_lineage(raw: &str, historical: bool) -> Result<(), String> {
+    let legacy = historical && raw.starts_with("LNRL:1;");
     if raw.len() > 20 * 1024 {
         return Err(invalid());
     }
     let body = raw
-        .strip_prefix("LNRL:1;")
+        .strip_prefix(if legacy { "LNRL:1;" } else { "LNRL:2;" })
         .and_then(|value| value.strip_suffix(';'))
         .ok_or_else(invalid)?;
     let fields: Vec<_> = body.split(';').collect();
@@ -121,7 +128,7 @@ fn lineage(raw: &str) -> Result<(), String> {
     }
     let selected = usize::try_from(number(fields[0])?).map_err(|_| invalid())?;
     let count = usize::try_from(number(fields[1])?).map_err(|_| invalid())?;
-    if count > 256 || selected > count || fields.len() != 57 + count {
+    if count > 256 || selected > count || fields.len() != (if legacy { 57 } else { 58 }) + count {
         return Err(invalid());
     }
     let selectors = &fields[2..2 + count];
@@ -149,10 +156,19 @@ fn lineage(raw: &str) -> Result<(), String> {
     let wlr = fields[54 + count];
     let mask = number(fields[55 + count])?;
     let refresh = u32::try_from(number(fields[56 + count])?).map_err(|_| invalid())?;
-    if !matches!(wlr, "0" | "1") || mask > 31 {
+    let origin = if legacy { "" } else { fields[57 + count] };
+    if !matches!(wlr, "0" | "1" | "2")
+        || legacy && wlr == "2"
+        || mask > 31
+        || (if wlr == "2" {
+            !digest(origin)
+        } else {
+            !origin.is_empty()
+        })
+    {
         return Err(invalid());
     }
-    if wlr == "1" && mask & 3 != 0 {
+    if wlr != "0" && mask & 3 != 0 {
         let projected = f64::from(refresh as f32 / 1000_f32);
         if effective[3] != format!("{:016x}", projected.to_bits()) {
             return Err(invalid());
@@ -264,6 +280,81 @@ impl NativeDisplayRecoveryCheckpoint {
         }
         Ok(())
     }
+    /// Private native-only projection of the SAME strictly validated immutable
+    /// source. The Root-created endpoint authenticates this transfer; these
+    /// bytes alone never grant a write or replace canonical observation/history.
+    /// Durable LNRJ bytes and their original interpretation remain unchanged.
+    pub fn restoration_native_projection(
+        payload: &[u8],
+        reservation: &crate::NativeDisplayRestorationReservation,
+    ) -> Result<Vec<u8>, String> {
+        Self::validate_restoration_source(payload, reservation)?;
+        let material = reservation.decoded_material()?;
+        let mut rest = payload;
+        let mut raw = None;
+        for index in 0..19 {
+            let (size, body) = rest.split_at_checked(8).ok_or_else(invalid)?;
+            let size = usize::try_from(u64::from_be_bytes(size.try_into().map_err(|_| invalid())?))
+                .map_err(|_| invalid())?;
+            let (field, tail) = body.split_at_checked(size).ok_or_else(invalid)?;
+            if index == 18 {
+                raw = Some(field);
+            }
+            rest = tail;
+        }
+        if !rest.is_empty() {
+            return Err(invalid());
+        }
+        let saved: Preimage =
+            serde_json::from_slice(raw.ok_or_else(invalid)?).map_err(|_| invalid())?;
+        let mut out = Vec::new();
+        let mut field = |text: &str| {
+            out.extend_from_slice(&(text.len() as u64).to_be_bytes());
+            out.extend_from_slice(text.as_bytes());
+        };
+        for text in [
+            "linura.native-display.restoration-projection.v1",
+            &saved.upstream,
+            &saved.integration,
+            &saved.generation,
+            &saved.heads.len().to_string(),
+        ] {
+            field(text);
+        }
+        // Emit canonical old-key ordering from the typed bijection, regardless
+        // of historical JSON object/array ordering. Every original head is used.
+        for (old, new) in material.mapping().outputs() {
+            let row = saved
+                .heads
+                .iter()
+                .find(|head| {
+                    number(&head.handle).ok() == Some(old.handle())
+                        && number(&head.generation).ok() == Some(old.generation())
+                })
+                .ok_or_else(invalid)?;
+            for text in [
+                old.handle().to_string(),
+                old.generation().to_string(),
+                new.handle().to_string(),
+                new.generation().to_string(),
+                format!(
+                    "{}:{}:{}",
+                    row.kernel_drm[0], row.kernel_drm[1], row.kernel_drm[2]
+                ),
+                row.base_rule.clone(),
+                if row.linura_owned { "1" } else { "0" }.into(),
+                row.owned_target.clone(),
+                row.output_identity_digest.clone(),
+            ] {
+                field(&text);
+            }
+        }
+        if out.is_empty() || out.len() > MAX_CHECKPOINT {
+            return Err(invalid());
+        }
+        Ok(out)
+    }
+
     /// Project only typed historical comparison data after the adapter has
     /// freshly authenticated live independent protection. Raw rule bytes never
     /// enter the canonical observation, public reports or model context.
@@ -481,7 +572,7 @@ impl NativeDisplayRecoveryCheckpoint {
             if saved.schema == 1 {
                 validate_rule(&head.base_rule, true)?;
             } else {
-                lineage(&head.base_rule)?;
+                historical_lineage(&head.base_rule)?;
             }
         }
         Ok(())

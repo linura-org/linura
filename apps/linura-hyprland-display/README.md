@@ -187,14 +187,18 @@ output object. The owner validates this source-versioned binding before hashing
 and projecting metadata. Duplicate or malformed bindings fail closed; explicit
 non-DRM outputs remain read-only without mutation checkpoint qualification.
 These facts are required comparison material for recovery, not proof of kernel
-lifetime across compositor replacement. No new restoration write is enabled.
+lifetime across compositor replacement. These facts alone enable no restoration.
 
-Native rule witnesses use bounded `LNRL:1` lineage. The actual native selection
+Native rule witnesses use bounded `LNRL:2` lineage. The actual native selection
 point captures the selected index and ordered selectors before wlr overrides.
 Separate `LNDR:2` records retain the underlying and effective owned fields,
 including automatic placement/scaling and complete custom modelines. The wlr
-presence, committed owned-field mask and original integer refresh are explicit;
-the lossy float-Hz projection cannot reconstruct its source millihertz.
+source kind, committed owned-field mask and original integer refresh are explicit;
+a lossy float-Hz value cannot reconstruct the original millihertz.
+No source, an actual live wlr client and a retained restored projection are distinct.
+Only the restored kind carries its original checkpoint hash; it never claims to
+recreate the historical client. The projection is bound to the actual output key
+and retained monitor/output identity, so pointer reuse cannot transfer it.
 The protected receiver validates the complete canonical
 preimage before hashing it; truncated, nonfinite, rounded, out-of-range or
 noncanonical data cannot become a baseline checkpoint. Reconstruction refuses a
@@ -210,12 +214,13 @@ exercise malformed bytes and the actual pinned upstream rule projection.
 Older schema-1 preimages with `LNDR:1` or `LNDR:2` remain historical, bounded,
 validated bytes; they are not migrated, deleted, admitted to a new reservation
 or projected as complete restoration sources. Native clients accept only
-`LNRL:1`; the private JSON preimage is schema 2. Per-head and whole-payload
+`LNRL:2`; the private JSON preimage remains schema 2. Historical `LNRL:1`
+records retain their exact bytes and original live-client meaning, and cannot be
+advertised/reserved as fresh state. Per-head and whole-payload
 bounds remain unchanged. The enclosing immutable `LNRJ:1` checkpoint format and
 its dispatch binding are unchanged.
 This codec does not persist a checkpoint, establish kernel continuity or admit
 restoration; the compositor-loss recovery and native acceptance gaps remain.
-
 
 The source integration now defaults to a startup presentation fence. The
 supervised protected owner transfers one original independent-protection socket,
@@ -227,3 +232,13 @@ drains before ordinary focus. Lost descriptors and service replacement cannot
 rearm admission. This grants no restoration effect and changes no S17 lock state.
 Portable tests cover the descriptor lifetime, one-use private wire transfer and
 input routing; real native first-frame/crash acceptance is still required.
+
+The separate private `restore_original` request consumes a one-use original Root
+endpoint, full canonical material, exact deadline/sample clocks and the actual
+consumed Recovery scene. Its writer merges only owned selected-rule fields into
+live rules, retains selective recovered wlr projections and remaps only exact
+prior overlays. Native source kinds/origins remain explicit. Lost scope, partial
+writes and unknown state remain fenced. Native mode retries cannot replace an
+owned recovery source. Acknowledgements are nonterminal; independent proof,
+durable linked results, qualified release, retention cleanup and real native
+acceptance remain required before public mutation activation.

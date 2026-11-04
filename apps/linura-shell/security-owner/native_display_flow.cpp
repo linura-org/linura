@@ -118,7 +118,9 @@ bool NativeDisplayFlow::window()
 {
     const auto now = NativeDisplayClock::sample();
     if (!failed_ && spent_ && dispatched_ && !decisionMode_) {
-        const auto boot = backend_.displayDecisionBootDeadline(*dispatched_);
+        const auto boot = scope_.purpose == ApprovalPurpose::RestoreOriginalDisplay
+                              ? backend_.displayRestorationBootDeadline(*dispatched_)
+                              : backend_.displayDecisionBootDeadline(*dispatched_);
         if (!now || !boot || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
             now->unixMs >= dispatched_->deadlineUnixMs || now->bootMs >= *boot)
             return false;
@@ -295,9 +297,21 @@ bool NativeDisplayFlow::consume(const NativeApprovalScope &scope)
 bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
                                const NativeDisplayCorrelation &correlation)
 {
-    if (scope_.purpose != ApprovalPurpose::ApplyDisplay || !consumed_ || spent_ || !window() ||
-        !revalidate_() || !correlation.valid() || intent.encode() != scope_.display->material ||
-        correlation.transaction != transaction(scope_))
+    return scope_.purpose == ApprovalPurpose::ApplyDisplay &&
+           redeemReceipt(intent.encode(), correlation);
+}
+bool NativeDisplayFlow::redeemOriginal(const NativeDisplayRestorationIntent &intent,
+                                       const NativeDisplayCorrelation &correlation)
+{
+    return scope_.purpose == ApprovalPurpose::RestoreOriginalDisplay &&
+           NativeDisplayRestorationIntent::parse(intent.encode()) &&
+           redeemReceipt(intent.encode(), correlation);
+}
+bool NativeDisplayFlow::redeemReceipt(const QString &material,
+                                      const NativeDisplayCorrelation &correlation)
+{
+    if (!consumed_ || spent_ || !window() || !revalidate_() || !correlation.valid() ||
+        material != scope_.display->material || correlation.transaction != transaction(scope_))
         return false;
     const auto status = backend_.protectedDisplayStatus();
     if (!status || status->phase != NativeDisplayPromptStatus::Phase::Consumed || !window() ||
@@ -311,10 +325,11 @@ bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
 }
 bool NativeDisplayFlow::beginDecision(const NativeDisplayChoiceChallenge &challenge)
 {
-    if (failed_ || decisionMode_ || !consumed_ || !spent_ || !dispatched_ ||
-        challenge.correlation != *dispatched_ || challenge.principal != scope_.principal ||
-        challenge.request != scope_.request || challenge.material != intent_.encode() ||
-        challenge.digest.size() != 64 || !window() || !revalidate_())
+    if (scope_.purpose != ApprovalPurpose::ApplyDisplay || failed_ || decisionMode_ || !consumed_ ||
+        !spent_ || !dispatched_ || challenge.correlation != *dispatched_ ||
+        challenge.principal != scope_.principal || challenge.request != scope_.request ||
+        challenge.material != intent_.encode() || challenge.digest.size() != 64 || !window() ||
+        !revalidate_())
         return false;
     const auto boot = backend_.displayDecisionBootDeadline(*dispatched_);
     const auto snapshot = backend_.observeDisplayTopology();

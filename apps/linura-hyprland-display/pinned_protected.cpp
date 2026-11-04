@@ -202,6 +202,9 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     ProtectedKeyDelivery keys;
     std::vector<WP<IPointer>> pointers;
     bool closed = false;
+    bool originalRestoration = false;
+    std::map<OutputKey, std::string> restoredSources;
+    std::function<bool()> originalAlive;
     bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
     bool decisionActive = false, decisionStarted = false, decisionUsed = false;
     MutationProtection::Write lastWrite = MutationProtection::Write::Apply;
@@ -251,6 +254,11 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                           pointers[i].lock() == g_pInputManager->m_pointers[i];
         }
         if (mutation) {
+            if (originalRestoration && (!originalAlive || !originalAlive())) {
+                mutationFault = true;
+                interaction.cancel();
+                return false;
+            }
             if (!devices) {
                 mutationFault = true; // Retire authority, retain opaque rendering.
                 interaction.cancel();
@@ -298,7 +306,10 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             const auto &head = facts.heads[i];
             const auto &original = mutationInventory.heads[i];
             if (head.key != original.key || head.modes != original.modes ||
-                head.baseRuleWitness != original.baseRuleWitness ||
+                (head.baseRuleWitness != original.baseRuleWitness &&
+                 !(originalRestoration && writing && ownedModesetInProgress() &&
+                   restoredSources.contains(head.key) &&
+                   restoredSources.at(head.key) == head.baseRuleWitness)) ||
                 head.outputIdentityWitness != original.outputIdentityWitness ||
                 (head.current.enabled && facts.coverage == Coverage::Secure && !head.covered))
                 return false;
@@ -456,8 +467,20 @@ class PinnedMutation final : public MutationProtection
         auto *backend = nativeBackend();
         const auto current = backend ? backend->snapshot() : std::nullopt;
         if (!data_->mutation || data_->writing || !current || *current != captured ||
-            !data_->mutationScope(*current) || (kind == Write::Apply && (wrote_ || !healthy())))
+            !data_->mutationScope(*current) || (kind == Write::Apply && (wrote_ || !healthy())) ||
+            (data_->originalRestoration && (kind != Write::Restore || wrote_ || !healthy())))
             return false;
+        if (data_->originalRestoration) {
+            const auto now = backend->clock();
+            const auto &review = data_->interaction.scope();
+            if (!now || now->unixMs >= review.deadlineUnixMs ||
+                now->bootMs >= review.deadlineBootMs ||
+                now->unixMs >= data_->bound.deadlineUnixMs ||
+                now->bootMs >= data_->mutationDeadlineBootMs ||
+                now->unixMs < data_->mutationClock.unixMs ||
+                now->bootMs < data_->mutationClock.bootMs)
+                return false;
+        }
         // Compensation remains confined to this original baseline even if the
         // owner or human proof has gone away. No new client gains an effect.
         wrote_ = true;
@@ -475,19 +498,37 @@ class PinnedMutation final : public MutationProtection
     }
     void endWrite(Write kind) noexcept override
     {
-        data_->writing = false;
         try {
             const auto sample = nativeBackend()->snapshot();
-            if (!sample || !data_->mutationScope(*sample) || data_->lastWrite != kind)
+            bool originalSources = true;
+            if (data_->originalRestoration) {
+                originalSources = sample && data_->restoredSources.size() == sample->heads.size();
+                if (sample)
+                    for (const auto &head : sample->heads) {
+                        const auto expected = data_->restoredSources.find(head.key);
+                        originalSources = originalSources &&
+                                          expected != data_->restoredSources.end() &&
+                                          expected->second == head.baseRuleWitness;
+                    }
+            }
+            // During the reserved write only the exact retained post-source may
+            // replace its preimage. Outside that stack the new witnesses are
+            // fixed; a partial source write cannot become a healthy result.
+            if (!sample || !originalSources || !data_->mutationScope(*sample) ||
+                data_->lastWrite != kind)
                 data_->mutationFault = true;
-            else
+            else {
                 data_->stableInventory = *sample;
-            // A pre-modeset hardware event cannot qualify the restored mode.
+                if (data_->originalRestoration)
+                    data_->mutationInventory = *sample;
+            }
             data_->invalidateFrames();
         } catch (...) {
             data_->mutationFault = true;
         }
+        data_->writing = false;
     }
+
     bool presented(Write kind) override
     {
         if (!data_->mutation || data_->writing || data_->lastWrite != kind || !data_->refresh())
@@ -517,8 +558,8 @@ class PinnedMutation final : public MutationProtection
     }
     void release() noexcept override
     {
-        if (!data_->mutation)
-            return;
+        if (!data_->mutation || (data_->originalRestoration && wrote_))
+            return; // Only Stage 3's separate qualified terminal path can release.
         data_->mutation = false;
         if (mutationFence == data_)
             mutationFence.reset();
@@ -555,10 +596,29 @@ class PinnedScene final : public ProtectedScene
     reserveMutation(const Correlation &bound, const Layout &baseline, const Layout &desired,
                     const Snapshot &captured, ClockSample capturedClock) override
     {
+        return reserve(bound, baseline, desired, captured, capturedClock, false, {}, {});
+    }
+    std::shared_ptr<MutationProtection>
+    reserveOriginalRestoration(const Correlation &bound, const Layout &baseline,
+                               const Layout &desired, const Snapshot &captured, ClockSample clock,
+                               const std::map<OutputKey, std::string> &sources,
+                               std::function<bool()> alive) override
+    {
+        return reserve(bound, baseline, desired, captured, clock, true, sources, std::move(alive));
+    }
+    std::shared_ptr<MutationProtection> reserve(const Correlation &bound, const Layout &baseline,
+                                                const Layout &desired, const Snapshot &captured,
+                                                ClockSample capturedClock, bool original,
+                                                const std::map<OutputKey, std::string> &sources,
+                                                std::function<bool()> alive)
+    {
         if (data->mutation || mutationFence || !data->refresh() ||
             data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
-            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
-            data->surfaces.size() != captured.heads.size() || baseline == desired ||
+            data->interaction.scope().purpose != (original
+                                                      ? ProtectedInteraction::Purpose::Recovery
+                                                      : ProtectedInteraction::Purpose::Apply) ||
+            (original && (!alive || !alive() || sources.size() != captured.heads.size())) ||
+            data->surfaces.size() != captured.heads.size() || (!original && baseline == desired) ||
             !DisplayTransaction::validLayout(baseline, captured) ||
             !DisplayTransaction::validLayout(desired, captured) || capturedClock.unixMs == 0 ||
             capturedClock.bootMs == 0 || bound.deadlineUnixMs <= capturedClock.unixMs ||
@@ -571,11 +631,15 @@ class PinnedScene final : public ProtectedScene
             return {};
         for (std::size_t i = 0; i < captured.heads.size(); ++i)
             if (!data->surfaces.contains(captured.heads[i].key) ||
-                baseline[i] != captured.heads[i].current)
+                baseline[i] != captured.heads[i].current ||
+                (original && !sources.contains(captured.heads[i].key)))
                 return {};
         auto lease = std::make_shared<PinnedMutation>(data);
         data->mutationInventory = data->stableInventory = captured;
-        data->baseline = baseline;
+        data->originalRestoration = original;
+        data->restoredSources = sources;
+        data->originalAlive = std::move(alive);
+        data->baseline = original ? desired : baseline;
         data->desired = desired;
         data->bound = bound;
         data->mutationEpoch = data->interaction.epoch();

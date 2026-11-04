@@ -72,6 +72,11 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.executor.session.restore-original-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "linura-executor-session.service"
 kind = "systemd-unit"
 status = "active"
@@ -280,6 +285,13 @@ source = "executors/linura-executor-session/src/lib.rs"
 usage = "action-arg"
 token = "DISPLAY_ACTION"
 action = "org.linura.executor.session.apply-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
+
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "ORIGINAL_DISPLAY_ACTION"
+action = "org.linura.executor.session.restore-original-display-layout"
 policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
 
 [[dbus_name_binding]]

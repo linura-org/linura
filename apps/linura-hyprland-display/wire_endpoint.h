@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compositor_display_service.h"
+#include "owned_native_fd.h"
 
 #include <functional>
 #include <array>
@@ -9,6 +10,8 @@
 #include <sys/types.h>
 
 struct wl_display;
+struct wl_client;
+struct wl_resource;
 
 namespace Linura::HyprlandDisplay {
 
@@ -25,6 +28,18 @@ struct NativeStartupPort final
     std::function<bool(int, bool, std::uint32_t)> admit;
 };
 
+struct NativeOriginalRestorationPort final
+{
+    // The move-only descriptor is consumed on every path, including exceptions.
+    // Only the pinned backend may authenticate its original Root peer and
+    // reserve the distinct consumed Recovery scene before a native write.
+    std::function<std::optional<std::uint32_t>(OwnedNativeFd, const Correlation &, const Layout &,
+                                               const Snapshot &, ClockSample, wl_resource *,
+                                               wl_client *)>
+        dispatch;
+    std::function<std::optional<std::uint32_t>(const Correlation &)> status;
+};
+
 // Adapter-private Wayland mechanism. Its native session scoping and ownership
 // checks do not authorize a Linura operation. Linura's sole production caller
 // remains the protected owner reached through prepared executor admission.
@@ -37,7 +52,7 @@ class WireEndpoint final
     // Each effect requires a fresh root-supervised invocation attestation.
     using AdmitOwner = std::function<std::optional<OwnerInvocation>(pid_t, uid_t)>;
     WireEndpoint(wl_display &, Backend &, CompositorDisplayService &, NativeBuildIdentity,
-                 OutputName, AdmitOwner, NativeStartupPort);
+                 OutputName, AdmitOwner, NativeStartupPort, NativeOriginalRestorationPort);
     ~WireEndpoint();
     WireEndpoint(const WireEndpoint &) = delete;
     WireEndpoint &operator=(const WireEndpoint &) = delete;

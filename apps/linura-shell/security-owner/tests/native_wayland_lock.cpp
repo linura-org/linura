@@ -967,8 +967,13 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         [](OutputKey key) -> std::optional<std::string> {
             return key == OutputKey{1, 1} ? std::optional<std::string>("DP-1") : std::nullopt;
         },
-        admit,
-        NativeStartupPort{[] { return 1U; }, [](int, bool, std::uint32_t) { return false; }});
+        admit, NativeStartupPort{[] { return 1U; }, [](int, bool, std::uint32_t) { return false; }},
+        NativeOriginalRestorationPort{
+            [](OwnedNativeFd, const Correlation &, const Layout &, const Snapshot &, ClockSample,
+               wl_resource *, wl_client *) -> std::optional<std::uint32_t> {
+                return std::nullopt; // No original Root lifetime in this fixture.
+            },
+            [](const Correlation &) -> std::optional<std::uint32_t> { return std::nullopt; }});
     assert(layout->available());
     class Scene final : public ProtectedScene
     {
@@ -996,6 +1001,12 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
                                                             ClockSample) override
         {
             return {};
+        }
+        std::shared_ptr<MutationProtection> reserveOriginalRestoration(
+            const Correlation &, const Layout &, const Layout &, const Snapshot &, ClockSample,
+            const std::map<OutputKey, std::string> &, std::function<bool()>) override
+        {
+            return {}; // A simulated scene cannot restore native original state.
         }
         bool beginDecision(const ProtectedInteraction::Scope &) override
         {

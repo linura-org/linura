@@ -134,7 +134,14 @@ class Harness final
                     return invocation;
                 },
                 NativeStartupPort{[] { return 1U; },
-                                  [](int, bool, std::uint32_t) { return false; }});
+                                  [](int, bool, std::uint32_t) { return false; }},
+                NativeOriginalRestorationPort{
+                    [](OwnedNativeFd, const Correlation &, const Layout &, const Snapshot &,
+                       ClockSample, wl_resource *,
+                       wl_client *) -> std::optional<std::uint32_t> { return std::nullopt; },
+                    [](const Correlation &) -> std::optional<std::uint32_t> {
+                        return std::nullopt;
+                    }});
         assert(!publishIntegration || (endpoint && endpoint->available()));
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
             *display,

@@ -17,10 +17,12 @@ mod display_checkpoint;
 mod display_kernel;
 mod display_protection_service;
 mod introspection;
+mod protection_lock;
 
 const ACTION: &str = "org.linura.executor.session.set-secure";
 const TRANSITION_ACTION: &str = "org.linura.executor.session.execute-transition";
 const DISPLAY_ACTION: &str = "org.linura.executor.session.apply-display-layout";
+const ORIGINAL_DISPLAY_ACTION: &str = "org.linura.executor.session.restore-original-display-layout";
 const OBJECT_PATH: &str = "/org/linura/Executor/Session1";
 pub const INTERFACE_NAME: &str = "org.linura.Executor.Session1";
 type OutcomeWire = (String, String, String);
@@ -63,6 +65,12 @@ trait SessionDispatch: Clone + Send + Sync + 'static {
         deadline_unix_ms: u64,
         native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String>;
+    fn restore_original(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<u32, String>;
     fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String>;
 }
 #[derive(Clone, Debug)]
@@ -70,6 +78,16 @@ struct NativeSessionDispatch {
     channel: NativeSessionChannel,
 }
 impl SessionDispatch for NativeSessionDispatch {
+    fn restore_original(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<u32, String> {
+        self.channel
+            .dispatch_original_display_restoration(material, binding, deadline_unix_ms)
+    }
+
     fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String> {
         self.channel
             .verify_display_protection(continuation.dispatch_digest())?;
@@ -455,6 +473,90 @@ impl<C: SessionDispatch> SessionExecutor<C> {
         })
         .await
     }
+    #[allow(clippy::too_many_arguments)]
+    #[zbus(out_args("outcome"))]
+    async fn restore_original_display_layout(
+        &self,
+        material: &str,
+        deadline_unix_ms: u64,
+        transaction_id: &str,
+        generation: u64,
+        state_version: u64,
+        authority_binding_digest: &str,
+        authority_use_digest: &str,
+        effect_digest: &str,
+        dispatch_digest: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(OutcomeWire,)> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| {
+                zbus::fdo::Error::AccessDenied(
+                    "display executor call has no authenticated sender".into(),
+                )
+            })?
+            .as_str()
+            .to_owned();
+        if material.len() > linura_core::MAX_DISPLAY_RESTORATION_BYTES
+            || transaction_id.len() > 256
+            || [
+                authority_binding_digest,
+                authority_use_digest,
+                effect_digest,
+                dispatch_digest,
+            ]
+            .iter()
+            .any(|value| value.len() != 64)
+        {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "display executor request exceeds its bound".into(),
+            ));
+        }
+        let effect = linura_provider_sdk::display_restoration_effect(material)
+            .map_err(zbus::fdo::Error::InvalidArgs)?;
+        let parse = |value| {
+            ComponentDigest::parse_hex(value)
+                .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))
+        };
+        let binding = ExecutionBinding {
+            transaction_id: transaction_id.into(),
+            generation,
+            state_version,
+            authority_binding_digest: parse(authority_binding_digest)?,
+            authority_use_digest: parse(authority_use_digest)?,
+            effect_digest: parse(effect_digest)?,
+            dispatch_digest: parse(dispatch_digest)?,
+        };
+        binding
+            .validate_for(&effect)
+            .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
+        let material = material.to_owned();
+        let channel = self.channel.clone();
+        blocking::unblock(move || {
+            channel
+                .require_control(&sender)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            authorize_service(&sender, ServiceAction::OriginalDisplay)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            channel
+                .require_control(&sender)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            // The bounded native adapter independently validates full metadata,
+            // preserves its original sample time/owner and makes ONE restoration.
+            // Any uncertain result remains durable ambiguity, with no retry.
+            let (disposition, detail) = display_disposition(channel.restore_original(
+                &material,
+                &binding,
+                deadline_unix_ms,
+            ));
+            Ok(((
+                disposition.into(),
+                binding.dispatch_digest.to_hex(),
+                detail.into(),
+            ),))
+        })
+        .await
+    }
 }
 
 fn display_disposition(phase: Result<u32, String>) -> (&'static str, &'static str) {
@@ -478,6 +580,7 @@ enum ServiceAction {
     Lock,
     Transition,
     Display,
+    OriginalDisplay,
 }
 
 fn authorize_service(sender: &str, action: ServiceAction) -> Result<(), String> {
@@ -491,6 +594,12 @@ fn authorize_service(sender: &str, action: ServiceAction) -> Result<(), String> 
                 sender,
             ],
             ServiceAction::Display => ["--action-id", DISPLAY_ACTION, "--system-bus-name", sender],
+            ServiceAction::OriginalDisplay => [
+                "--action-id",
+                ORIGINAL_DISPLAY_ACTION,
+                "--system-bus-name",
+                sender,
+            ],
         })
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
@@ -554,6 +663,10 @@ mod tests {
     #[derive(Clone, Debug)]
     struct DenyNative;
     impl SessionDispatch for DenyNative {
+        fn restore_original(&self, _: &str, _: &ExecutionBinding, _: u64) -> Result<u32, String> {
+            unreachable!("untrusted calls must never restore an original display layout")
+        }
+
         fn continue_display(&self, _: &NativeDisplayContinuation) -> Result<u32, String> {
             unreachable!("untrusted calls must never continue a display attempt")
         }
@@ -616,6 +729,69 @@ mod tests {
     }
 
     #[test]
+    fn original_restoration_binding_cannot_bypass_control_or_service_policy() {
+        let material = include_str!(
+            "../../../crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+        )
+        .trim_end();
+        let effect = linura_provider_sdk::display_restoration_effect(material)
+            .unwrap_or_else(|_| unreachable!());
+        let binding = ExecutionBinding::new(
+            "transaction:original-test",
+            0,
+            1,
+            ComponentDigest::from_bytes([1; 32]),
+            ComponentDigest::from_bytes([2; 32]),
+            &effect,
+        )
+        .unwrap_or_else(|_| unreachable!());
+        let service = SessionExecutor {
+            channel: DenyNative,
+        };
+        let call = |material: &str, effect: &str, message: &zbus::Message| {
+            async_io::block_on(service.restore_original_display_layout(
+                material,
+                25_000,
+                &binding.transaction_id,
+                binding.generation,
+                binding.state_version,
+                &binding.authority_binding_digest.to_hex(),
+                &binding.authority_use_digest.to_hex(),
+                effect,
+                &binding.dispatch_digest.to_hex(),
+                message.header(),
+            ))
+        };
+        let message = zbus::Message::method_call(OBJECT_PATH, "RestoreOriginalDisplayLayout")
+            .unwrap_or_else(|_| unreachable!())
+            .sender(":1.7")
+            .unwrap_or_else(|_| unreachable!())
+            .build(&())
+            .unwrap_or_else(|_| unreachable!());
+        assert!(matches!(
+            call(material, &binding.effect_digest.to_hex(), &message),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let anonymous = zbus::Message::method_call(OBJECT_PATH, "RestoreOriginalDisplayLayout")
+            .unwrap_or_else(|_| unreachable!())
+            .build(&())
+            .unwrap_or_else(|_| unreachable!());
+        assert!(matches!(
+            call(material, &binding.effect_digest.to_hex(), &anonymous),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        for (material, digest) in [
+            (material, "0".repeat(64)),
+            ("LNDI:1;", binding.effect_digest.to_hex()),
+        ] {
+            assert!(matches!(
+                call(material, &digest, &message),
+                Err(zbus::fdo::Error::InvalidArgs(_))
+            ));
+        }
+    }
+
+    #[test]
     fn actual_service_introspection_matches_canonical_contract() {
         let service = introspection::SessionContract(SessionExecutor {
             channel: DenyNative,
@@ -632,8 +808,8 @@ mod tests {
             assert_eq!(live.matches(&marker).count(), 1);
             assert_eq!(canonical.matches(&marker).count(), 1);
         }
-        assert_eq!(live.matches("<method ").count(), 4);
-        assert_eq!(canonical.matches("<method ").count(), 4);
+        assert_eq!(live.matches("<method ").count(), 5);
+        assert_eq!(canonical.matches("<method ").count(), 5);
         for (name, kind, direction) in [
             ("resource", "s", "in"),
             ("material", "s", "in"),
@@ -659,9 +835,10 @@ mod tests {
                 | "protected_decision_digest"
                 | "confirm"
                 | "phase" => 1,
-                "resource" | "material" | "deadline_unix_ms" => 2,
-                "transaction_id" | "dispatch_digest" => 4,
-                _ => 3,
+                "resource" => 2,
+                "material" | "deadline_unix_ms" => 3,
+                "transaction_id" | "dispatch_digest" => 5,
+                _ => 4,
             };
             assert_eq!(live.matches(&marker).count(), expected, "live {name}");
             assert_eq!(
@@ -673,6 +850,7 @@ mod tests {
         assert!(live.contains("<method name=\"SetSecure\">"));
         assert!(live.contains("<method name=\"ExecuteTransition\">"));
         assert!(live.contains("<method name=\"ApplyDisplayLayout\">"));
+        assert!(live.contains("<method name=\"RestoreOriginalDisplayLayout\">"));
         assert!(live.contains("<method name=\"ContinueDisplayLayout\">"));
         // The actual tuple codecs depend on argument ORDER as well as counts.
         for contract in [live.as_str(), canonical] {

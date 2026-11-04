@@ -33,6 +33,7 @@ target_compile_options(linura-hyprland-display-mechanism PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
 
 find_package(PkgConfig REQUIRED)
+find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
 pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server>=1.22)
 add_library(linura-hyprland-display-supervisor STATIC compositor_display_service.cpp)
 target_link_libraries(linura-hyprland-display-supervisor PUBLIC
@@ -81,6 +82,14 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-original-restoration-grant-tests tests/original_restoration_grant.cpp)
+    target_link_libraries(linura-hyprland-original-restoration-grant-tests PRIVATE OpenSSL::Crypto)
+    target_include_directories(linura-hyprland-original-restoration-grant-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(linura-hyprland-original-restoration-grant-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-original-restoration-grant COMMAND linura-hyprland-original-restoration-grant-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../crates/linura-core/src/display_recovery/fixtures/original-baseline.txt")
+    set_tests_properties(hyprland-original-restoration-grant PROPERTIES TIMEOUT 10)
     # A real DSO constructor and an executable C++ constructor must both
     # observe the filtered vector, before main or any native group reset.
     add_library(linura-native-environment-constructor SHARED tests/native_environment_constructor.cpp)

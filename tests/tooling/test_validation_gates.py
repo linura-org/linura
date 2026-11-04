@@ -425,6 +425,33 @@ class ValidationGateTests(unittest.TestCase):
                     relative + ": unreviewed shell execution", gates.check(self.root)
                 )
 
+    def test_native_session_review_binds_denial_commands_and_complete_body(self):
+        relative = "tests/acceptance/v06/qualify-native-session.sh"
+        target = self.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        original = (ROOT / relative).read_text(encoding="utf-8")
+        target.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        for changed in (
+            original.replace(
+                "RestoreOriginalDisplayLayout ststtssss",
+                "ApplyDisplayLayout ststtssss",
+                1,
+            ),
+            original.replace(
+                "native-session-original-restoration-root-denied",
+                "weakened-root-check",
+                1,
+            ),
+            original + "exit 0\n",
+        ):
+            with self.subTest(changed=changed != original):
+                self.assertNotEqual(changed, original)
+                target.write_text(changed, encoding="utf-8")
+                self.assertIn(
+                    relative + ": unreviewed shell execution", gates.check(self.root)
+                )
+
     def test_dynamic_shell_interpreters_require_review_for_every_input(self):
         commands = (
             'bash < "$contract"',

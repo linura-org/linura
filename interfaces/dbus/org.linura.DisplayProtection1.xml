@@ -17,6 +17,8 @@
            Synced one-use reservation precedes the original-root-created
            endpoint. No root output write, policy or orchestration. -->
       <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
       <arg name="grant" type="h" direction="out"/>
     </method>
     <method name="NativeStartup">

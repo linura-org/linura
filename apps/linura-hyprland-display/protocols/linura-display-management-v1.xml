@@ -170,6 +170,17 @@
     <request name="confirm"/>
     <request name="restore"/>
     <request name="get_status"/>
+    <request name="restore_original">
+      <description summary="one-use original Root restoration endpoint">
+        Only a replacement with unresolved startup recovery may consume this
+        distinct prepared operation. Its original Root endpoint, complete native
+        source and consumed Recovery scene must all verify before any write.
+        This never reuses Apply, confirms a layout or releases a fence. Lost
+        replies and destroyed resources cannot replay the consumed stream.
+      </description>
+      <arg name="grant" type="fd"/>
+      <arg name="protection" type="object" interface="linura_protected_display_interaction_v1"/>
+    </request>
     <event name="status">
       <arg name="phase" type="uint" enum="phase"/>
     </event>

@@ -94,10 +94,8 @@ impl Witnesses {
         dispatch: &ComponentDigest,
         verify: impl FnOnce(&mut Protection) -> Result<T, String>,
     ) -> Result<T, String> {
-        let mut witnesses = self
-            .0
-            .try_lock()
-            .map_err(|_| "kernel witness busy or unavailable")?;
+        let mut witnesses =
+            super::protection_lock::acquire(&self.0, super::protection_lock::BUDGET)?;
         verify(
             witnesses
                 .get_mut(&dispatch.to_hex())

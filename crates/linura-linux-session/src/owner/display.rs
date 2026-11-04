@@ -33,6 +33,7 @@ mod power;
 mod preimage;
 mod startup;
 pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
+mod original;
 mod prepared;
 pub use continuation::NativeDisplayContinuation;
 pub use power::NativeDisplayPowerFence;
@@ -481,6 +482,15 @@ impl NativeSessionChannel {
         self.require_role(NativeSessionRole::Executor)?;
         let material =
             linura_core::DisplayLayoutMaterial::decode(material).map_err(|e| e.to_string())?;
+        self.prepared_display_material(&material, sequence)
+    }
+
+    fn prepared_display_material(
+        &self,
+        material: &linura_core::DisplayLayoutMaterial<'_>,
+        sequence: u64,
+    ) -> Result<PreparedSample, String> {
+        self.require_role(NativeSessionRole::Executor)?;
         let started = Instant::now();
         let boot = current_boot()?;
         let identity = self.discover(material.lock().epoch().uid(), started)?;

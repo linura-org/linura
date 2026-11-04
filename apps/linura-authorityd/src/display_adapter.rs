@@ -14,6 +14,22 @@ use linura_provider_sdk::{Observer, VerificationDisposition, VerificationOutcome
 
 use crate::session_adapter::{FreshSessionVerifier, SessionExecutorClient};
 
+impl linura_control::OriginalDisplayRestorationPort for SessionExecutorClient {
+    fn dispatch_original(
+        &mut self,
+        restoration: linura_control::AuthorizedOriginalDisplayRestoration,
+    ) -> Result<linura_provider_sdk::ExecutionOutcome, String> {
+        let (authorization, material, deadline) = restoration.into_executor_request();
+        let (effect, binding) = authorization.into_executor_request();
+        if effect != linura_provider_sdk::display_restoration_effect(&material)? {
+            return Err("prepared restoration effect differs from its complete intent".into());
+        }
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        self.channel
+            .handoff_original_display_restoration(&material, &binding, deadline)
+    }
+}
+
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(
         &mut self,

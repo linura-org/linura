@@ -102,6 +102,7 @@ QString NativeDisplaySnapshot::recoveryPreimage() const
             head.handle == std::numeric_limits<quint64>::max() ||
             head.generation == std::numeric_limits<quint64>::max() || key[0] != 226 ||
             key[1] > 63 || key[2] == 0 || !devices.insert(key).second ||
+            !bytes.startsWith("LNRL:2;") ||
             !HyprlandDisplay::RecoveryLineage::decode(
                 std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size()))) ||
             QString::fromLatin1(

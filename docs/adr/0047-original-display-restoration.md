@@ -101,7 +101,7 @@ ask for approval, run a recovery loop or write display rules.
 
 ## Native source lineage
 
-The private schema-2 native preimage captures `LNRL:1` at the actual native
+The private schema-2 native preimage now captures `LNRL:2` at the actual native
 selection point. It binds the selected index and ordered selectors, distinct
 underlying/effective `LNDR:2` owned fields, wlr presence and committed owned-field
 mask, and the original integer refresh before float-Hz projection. Geometry and
@@ -135,7 +135,7 @@ transfer, cancellation, timeout or partial mutation. The protected compositor
 must retain opaque/input fencing independently of the human-review lifetime.
 The private Guard now accepts `ReserveRestoration` only from the exact supervised
 executor. `LNRR:1` stores the complete fresh execution binding and `LNRI:1`
-material before disclosure of an `LNRG:1` endpoint. It uses the same exclusive,
+material before disclosure of an `LNRG:2` endpoint. It uses the same exclusive,
 synced, strictly validated bounded history directory as original checkpoints;
 original `LNRJ:1` records retain their bytes and meaning. Another binding for the
 same unresolved original cannot supersede it. Failed replies/transfers retain
@@ -160,10 +160,91 @@ opaque/input fencing. Ordinary scene rendering and scanout stay blocked. Native
 input callbacks do not start nested owner snapshot queries: the compositor's
 actual private status/consume paths revalidate the lease independently.
 
-Authenticated native grant consumption/writes, fresh Control prepared handoff
-and qualified supersession/terminal workflow remain unfinished. Component checks
-of the review and endpoint producer do not establish that required composition
-or native qualification.
+Control now exposes a separate nonterminal original-restoration handoff. It
+reloads authenticated original history and fresh contributing evidence after the
+protected interaction, requires unchanged material/authority semantics, issues
+purpose-bound approval evidence and uses the existing durable prepare/handoff
+CAS. It retains and reads back the exact request, reservation and dispatch
+correlation before calling the narrow restoration port. That sealed handoff
+carries the complete private material and the original fixed dispatch deadline;
+a digest-only descriptor cannot select or reconstruct native intent. Duplicate
+requests, including after restart or a lost/rejected reply, cannot hand off again.
+A native reply cannot commit, verify or release this nonterminal transaction.
+
+The unconsumed Experimental `LNRG:1` producer format is replaced coherently by
+`LNRG:2`: the complete reservation plus a bounded native-only projection derived
+from the same strictly validated immutable schema-2 source. The projection binds
+the exact canonical old-to-new output bijection, original rule/wlr lineage, prior
+overlay and kernel/native identities. It is neither another observation nor an
+alternative durable history; original `LNRJ:1` and `LNRR:1` records retain their
+bytes and meaning. Serialized projections and old transfer bytes grant no effect.
+
+The bounded native recipient authenticates its actual Root peer against the
+continuously retained startup lease, consumes its descriptor on every path,
+checks framing/correlation and the exact canonical bijection, and shares one
+two-second BOOTTIME budget across transfer and its first fresh witness probe.
+After the final marker, the original Root endpoint remains a live witness
+channel. Fixed 16-byte `LNRV:1` probes have strictly increasing sequence numbers;
+Root acknowledges only after fresh retained protection checks. Idle endpoints
+also check original protection, and malformed, replayed, slow or lost probes
+close the endpoint. Worker retention is bounded by the existing startup quota;
+the transfer slot is released after transfer without redelivering authority.
+Input/render lifetime checks do not perform blocking witness queries.
+
+Original native wlr projection restores only the committed owned fields plus
+its enabled state, retaining the original integer refresh. It never recreates
+a historical Wayland client or freezes uncommitted native fields. New live wlr
+ownership, a changed selected rule or changed selector ordering refuses import.
+Unrelated live color, ICC, VRR and other settings remain current.
+
+`LNRL:2` explicitly distinguishes no wlr source, a real live wlr client and a
+retained restored projection. Only the last kind carries its original checkpoint
+digest. The actual native selected source remains separate; reconstructing old
+committed fields never claims a historical Wayland client is live. The expected
+post-write source is the new explicit restored-projection lineage, rather than
+counterfeiting the old live-client witness. Same numeric geometry cannot equate
+those source kinds. A new actual wlr owner refuses import or, after qualified
+terminal retirement, replaces the retained projection normally. Original
+`LNRL:1` history retains its exact bytes and live-client interpretation; historical
+decoding neither advertises it as current nor permits a new reservation.
+
+The private `Executor.Session1.RestoreOriginalDisplayLayout` method accepts only
+the complete fresh material and execution binding from the exact supervised
+Control owner, with a distinct default-deny service policy action checked between
+two fresh Control identity checks. The concrete Control adapter consumes its
+sealed one-use authorization. The native session adapter validates a fresh
+replacement sample/guard, reserves the original Root endpoint once and carries
+the exact sample digest and original BOOTTIME to the private owner. All adapters
+refuse late, changed-owner or wrong-purpose state without retry or rediscovery.
+
+`ReserveRestoration` also binds the exact absolute dispatch deadline and original
+native sample BOOTTIME into the Root-produced `LNRG:2` transfer. They remain
+single-handoff data: immutable `LNRR:1` history retains its existing bytes and
+meaning and is never redelivered after restart. Root rechecks the original
+sample/deadline before reservation and after witness checks before its final
+marker. The compositor checks the Root-bound deadline against its correlation
+and the original sample age again immediately before the first write. A newer
+owner/native snapshot cannot renew the original two-second freshness window.
+
+The owner separately redeems only its exact consumed Recovery material,
+transaction and input/presentation generations. Apply and Keep/Revert cannot
+consume that receipt. Its original boot deadline remains fixed. The native
+`restore_original` request consumes its descriptor on every path and retains a
+wire tombstone before entering the effect mechanism; a new wire object cannot
+redeliver even an ambiguous callback. The compositor authenticates the original
+Root peer, compares the complete native source and current baseline guard,
+acquires current power protection and retains its grant/protected fence before
+any possible write. It stages only owned rule fields, remerges those fields into
+the actual live selected rules at the write point and restores the selective wlr
+projection and exact remapped prior overlays. Shared rules, new wlr ownership,
+selector/inventory/identity drift or any partial failure remain unresolved.
+A failed write permanently latches the fault; no successful return clears it.
+
+The native mechanism returns only nonterminal Restoring or RecoveryFailed.
+Opaque rendering, input, original Root witnesses and power remain fenced;
+there is no terminal release or cleanup here. Qualified supersession, independent
+terminal proof and terminal workflow remain unfinished. Component checks and
+code composition do not establish pinned SDK/native qualification.
 
 ## Terminal sequencing
 

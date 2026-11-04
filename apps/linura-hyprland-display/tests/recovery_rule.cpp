@@ -160,12 +160,19 @@ void lineage()
     assert(saved && saved->native().encode() == base->encode() && !saved->wlr());
     const auto bytes = saved->encode();
     assert(RecoveryLineage::decode(bytes));
+    assert(bytes.starts_with("LNRL:2;") && saved->wlrSource() == RecoveryLineage::WlrSource::None);
+    auto historical = bytes;
+    historical.replace(0, 7, "LNRL:1;");
+    historical.pop_back();
+    const auto old = RecoveryLineage::decode(historical);
+    assert(old && old->encode() == historical && !old->wlr());
+
     for (std::size_t i = 0; i < bytes.size(); ++i)
         assert(!RecoveryLineage::decode(std::string_view(bytes).substr(0, i)));
     for (const auto &suffix : {";", "0;", "\n", "extra"})
         assert(!RecoveryLineage::decode(bytes + suffix));
     assert(!RecoveryLineage::decode("LNRL:01;" + bytes.substr(7)));
-    assert(!RecoveryLineage::decode("LNRL:1;02;" + bytes.substr(bytes.find(';', 7) + 1)));
+    assert(!RecoveryLineage::decode("LNRL:2;02;" + bytes.substr(bytes.find(';', 7) + 1)));
     assert(!RecoveryLineage::capture(*base, *base, selectors, 0, false, 0));
     assert(!RecoveryLineage::capture(*base, *base, selectors, 3, false, 0));
     assert(!RecoveryLineage::capture(*base, *base, selectors, std::nullopt, false, 0));
@@ -194,6 +201,29 @@ void lineage()
         const auto withWlr = RecoveryLineage::capture(*base, *projected, selectors, 1, true, mask,
                                                       (mask & 3U) ? 59940U : 0U);
         assert(withWlr && withWlr->wlr() && withWlr->wlrMask() == mask);
+        const auto recovered = withWlr->replacementProjection(std::string(64, 'a'));
+        assert(recovered && !recovered->wlr() && recovered->hasWlrProjection() &&
+               recovered->wlrSource() == RecoveryLineage::WlrSource::RestoredProjection &&
+               recovered->restoredOrigin() == std::string(64, 'a'));
+        assert(recovered->encode() != withWlr->encode() &&
+               !recovered->sameOverlayCompensationSources(*withWlr));
+        const auto recoveredRead = RecoveryLineage::decode(recovered->encode());
+        assert(recoveredRead && recoveredRead->encode() == recovered->encode() &&
+               !recoveredRead->wlr() && recoveredRead->wlrMask() == mask);
+        assert(!withWlr->replacementProjection("") &&
+               !withWlr->replacementProjection(std::string(64, '0')) &&
+               !withWlr->replacementProjection(std::string(64, 'A')));
+        assert(!withWlr->replacementSourceCompatible(*recovered));
+        auto oldLive = withWlr->encode();
+        oldLive.replace(0, 7, "LNRL:1;");
+        oldLive.pop_back();
+        const auto originalLive = RecoveryLineage::decode(oldLive);
+        assert(originalLive && originalLive->wlr() && originalLive->encode() == oldLive);
+        assert(originalLive->replacementProjection(std::string(64, 'a'))->encode() ==
+               recovered->encode());
+        auto counterfeit = recovered->encode();
+        counterfeit.replace(0, 7, "LNRL:1;");
+        assert(!RecoveryLineage::decode(counterfeit));
         const auto decoded = RecoveryLineage::decode(withWlr->encode());
         assert(decoded && decoded->encode() == withWlr->encode());
         assert(decoded->native().encode() == base->encode());
@@ -240,7 +270,92 @@ void lineage()
     oversized[0] = std::string(4097, 'x');
     assert(!RecoveryLineage::capture(*base, *base, oversized, 1, false, 0));
     assert(!RecoveryLineage::decode(std::string(RecoveryLineage::MaxBytes + 1, '0')));
+    // Reading old immutable bytes must not first expand them into version 2
+    // and reject a record that was valid at the old exact size limit.
+    const auto body = automatic->encode().substr(7);
+    const auto tail = body + body + "0;0;0;";
+    auto prefix = [](unsigned count) { return "LNRL:1;0;" + std::to_string(count) + ';'; };
+    unsigned count = 3;
+    if ((RecoveryLineage::MaxBytes - (prefix(count).size() + count + tail.size())) % 2)
+        count = 4;
+    const auto fixed =
+        prefix(count).size() + count + tail.size() + 2 * 8192 + (count == 4 ? 2U : 0U);
+    assert(fixed < RecoveryLineage::MaxBytes && (RecoveryLineage::MaxBytes - fixed) % 2 == 0);
+    auto limit = prefix(count) + std::string(8192, 'a') + ';' + std::string(8192, 'b') + ';' +
+                 std::string(RecoveryLineage::MaxBytes - fixed, 'c') + ';';
+    if (count == 4)
+        limit += "64;";
+    limit += tail;
+    const auto retainedLimit = RecoveryLineage::decode(limit);
+    assert(limit.size() == RecoveryLineage::MaxBytes && retainedLimit &&
+           retainedLimit->encode() == limit && !retainedLimit->wlr());
+    assert(!RecoveryLineage::decode(limit + ';'));
 }
+void replacementProjection()
+{
+    Rule native;
+    native.m_name = "DP-1";
+    native.m_resolution = {1920, 1080};
+    native.m_scale = 1;
+    native.m_offset = {0, 0};
+    const auto base = RecoveryRule::capture(native);
+    assert(base);
+    const std::vector<std::string> selectors{"", "DP-1"};
+    const auto replacement = RecoveryLineage::capture(*base, *base, selectors, 1, false, 0);
+    assert(replacement);
+    for (std::uint32_t mask = 0; mask <= 31; ++mask) {
+        auto effective = native;
+        effective.m_disabled = true;
+        if (mask & 3U) {
+            effective.m_resolution = {1280, 720};
+            effective.m_refreshRate = 59.94F;
+        }
+        if (mask & 4U)
+            effective.m_offset = {-1920, 100};
+        if (mask & 8U)
+            effective.m_transform = 3;
+        if (mask & 16U)
+            effective.m_scale = 1.25F;
+        const auto saved = RecoveryRule::capture(effective);
+        assert(saved);
+        const auto original = RecoveryLineage::capture(*base, *saved, selectors, 1, true, mask,
+                                                       (mask & 3U) ? 59940 : 0);
+        assert(original && original->replacementSourceCompatible(*replacement));
+        assert(!original->replacementSourceCompatible(*original)); // Never adopt a new wlr owner.
+        auto current = native;
+        current.m_iccFile = "new live profile";
+        current.m_vrr = 7;
+        // Uncommitted fields continue to follow current native rules after
+        // restoration. Old effective geometry cannot freeze those semantics.
+        current.m_scale = 2;
+        current.m_offset = {800, 900};
+        current.m_transform = 6;
+        current.m_resolution = {3840, 2160};
+        current.m_refreshRate = 120;
+        const auto projected = original->restoredWlrProjection(current);
+        const auto retained = original->replacementProjection(std::string(64, 'b'));
+        assert(projected && retained);
+        const auto retainedRule = retained->restoredWlrProjection(current);
+        assert(retainedRule && !retained->wlr() &&
+               RecoveryRule::capture(*retainedRule)->encode() ==
+                   RecoveryRule::capture(*projected)->encode() &&
+               retainedRule->m_iccFile == current.m_iccFile && retainedRule->m_vrr == 7);
+        assert(projected && projected->m_disabled && projected->m_iccFile == current.m_iccFile &&
+               projected->m_vrr == 7);
+        assert(projected->m_resolution.x == ((mask & 3U) ? 1280 : 3840));
+        assert(projected->m_refreshRate == ((mask & 3U) ? 59.94F : 120));
+        assert(projected->m_offset.x == ((mask & 4U) ? -1920 : 800));
+        assert(projected->m_transform == ((mask & 8U) ? 3 : 6));
+        assert(projected->m_scale == ((mask & 16U) ? 1.25F : 2));
+        auto foreign = current;
+        foreign.m_name = "DP-2";
+        assert(!original->restoredWlrProjection(foreign));
+        const auto reordered = RecoveryLineage::capture(*base, *base, {"DP-1", ""}, 0, false, 0);
+        assert(reordered && !original->replacementSourceCompatible(*reordered));
+    }
+    assert(!replacement->restoredWlrProjection(native));
+}
+
 } // namespace
 
 int main()
@@ -248,4 +363,5 @@ int main()
     malformed();
     roundTrip();
     lineage();
+    replacementProjection();
 }

@@ -221,24 +221,7 @@ impl OriginalDisplayPlanningContext {
             &mapping,
         )
         .map_err(fail)?;
-        // Compensation retains the source intent's why-chain. A replacement
-        // caller may explain this new request but cannot erase shared origins.
-        for origin in &self.original_request.reason.intent_ids {
-            if !reason.intent_ids.contains(origin) {
-                reason.intent_ids.push(origin.clone());
-            }
-        }
-        for origin in &self.original_request.reason.requirement_ids {
-            if !reason.requirement_ids.contains(origin) {
-                reason.requirement_ids.push(origin.clone());
-            }
-        }
-        for origin in &self.original_request.reason.capability_ids {
-            if !reason.capability_ids.contains(origin) {
-                reason.capability_ids.push(origin.clone());
-            }
-        }
-        reason.validate().map_err(fail)?;
+        inherit_original_reason(&mut reason, &self.original_request.reason).map_err(fail)?;
         Ok(PlanDesiredStateRequest {
             request_id,
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(fail)?,
@@ -249,6 +232,31 @@ impl OriginalDisplayPlanningContext {
             reason,
         })
     }
+}
+
+// Compensation preserves the original why-chain, including on restart-readable
+// request identity checks. Neither caller prose nor a receipt grants authority.
+pub(crate) fn inherit_original_reason(
+    reason: &mut SemanticReason,
+    original: &SemanticReason,
+) -> Result<(), String> {
+    for origin in &original.intent_ids {
+        if !reason.intent_ids.contains(origin) {
+            reason.intent_ids.push(origin.clone());
+        }
+    }
+    for origin in &original.requirement_ids {
+        if !reason.requirement_ids.contains(origin) {
+            reason.requirement_ids.push(origin.clone());
+        }
+    }
+    for origin in &original.capability_ids {
+        if !reason.capability_ids.contains(origin) {
+            reason.capability_ids.push(origin.clone());
+        }
+    }
+    reason.validate().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[derive(Debug)]
