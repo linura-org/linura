@@ -762,3 +762,176 @@ fn restoration_reconciliation_refuses_substituted_stale_or_lost_protection() {
         assert_eq!(m.decisions, 0);
     }
 }
+
+#[test]
+fn qualified_restoration_links_and_retires_original_authority_without_releasing_or_replaying() {
+    for originally_verified in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (original, input) = prepare_original(&database, &machine);
+        let original_transaction = TransactionId::for_namespace(
+            &value(PrincipalId::new(principal().as_str())),
+            &original.request_id,
+        );
+        if originally_verified {
+            // Simulate the authenticated SQLite verification/commit crash gap.
+            // This is bookkeeping evidence, not real Keep or native qualification.
+            let (signer, verifier) = authority_material();
+            let mut store = value(SqliteTransactionStore::open(
+                database.path(),
+                verifier,
+                value(SqliteIntegrityKey::new(fixture_key(5))),
+            ));
+            let before = value(store.snapshot(&original_transaction));
+            let digest = |text: &str| {
+                linura_transaction::digest_bytes("fixture:original-verified", text.as_bytes())
+            };
+            let recovery = value(signer.authorize_recovery(
+                &before,
+                linura_transaction::RecoveryResolution::IntendedStateVerified {
+                    observation_digest: digest("old observation"),
+                    desired_state_digest: digest("desired"),
+                    graph_digest: digest("graph"),
+                    provenance_digest: digest("provenance"),
+                },
+                1,
+                u64::MAX,
+            ));
+            assert!(matches!(
+                value(store.recover(&recovery)),
+                linura_transaction::RecoveryOutcome::Verified(_)
+            ));
+        }
+        let before = snapshot(&database, &original_transaction);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, 0, previews);
+        let receipt = value(control.begin_original_display_restoration(
+            principal(),
+            actor(true),
+            input.clone(),
+            &approval(),
+            &mut Executor(machine.clone()),
+        ));
+        assert!(
+            control
+                .retire_original_display_restoration(principal(), actor(true), &receipt.request_id)
+                .is_err()
+        );
+        assert_eq!(snapshot(&database, &original_transaction), before);
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_native_verified = true;
+        let terminal = value(control.retire_original_display_restoration(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        assert_eq!(
+            terminal.original.state,
+            linura_transaction::TransactionState::RecoveryBlocked
+        );
+        assert_eq!(terminal.original.state_version, before.state_version + 1);
+        assert_eq!(
+            terminal.restoration.state,
+            linura_transaction::TransactionState::Committed
+        );
+        drop(control);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        assert_eq!(
+            value(restarted.retire_original_display_restoration(
+                principal(),
+                actor(true),
+                &receipt.request_id
+            )),
+            terminal
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_proof_fault = 8;
+        assert!(
+            restarted
+                .retire_original_display_restoration(principal(), actor(true), &receipt.request_id)
+                .is_err()
+        );
+        let m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(m.restoration_calls, 1);
+        assert_eq!(m.applies, 1);
+        assert_eq!(m.decisions, 0);
+    }
+}
+
+#[test]
+fn lost_link_or_post_link_proof_and_terminal_readback_cannot_release_or_repeat_effects() {
+    for fault in 1..=3 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (original, input) = prepare_original(&database, &machine);
+        let original_transaction = TransactionId::for_namespace(
+            &value(PrincipalId::new(principal().as_str())),
+            &original.request_id,
+        );
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, 0, previews);
+        let receipt = value(control.begin_original_display_restoration(
+            principal(),
+            actor(true),
+            input.clone(),
+            &approval(),
+            &mut Executor(machine.clone()),
+        ));
+        {
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.restoration_native_verified = true;
+            m.restoration_link_fault = fault;
+        }
+        assert!(
+            control
+                .retire_original_display_restoration(principal(), actor(true), &receipt.request_id)
+                .is_err()
+        );
+        assert_eq!(
+            snapshot(&database, &receipt.transaction_id).state,
+            linura_transaction::TransactionState::Committed
+        );
+        assert_eq!(
+            snapshot(&database, &original_transaction).state,
+            if fault == 3 {
+                linura_transaction::TransactionState::RecoveryBlocked
+            } else {
+                linura_transaction::TransactionState::Indeterminate
+            }
+        );
+        drop(control);
+        {
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.restoration_link_fault = 0;
+            m.restoration_proof_fault = 0; // A new fresh probe; original Root continuity never ceased.
+        }
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        let terminal = value(restarted.retire_original_display_restoration(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        assert_eq!(
+            terminal.original.state,
+            linura_transaction::TransactionState::RecoveryBlocked
+        );
+        let m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(m.restoration_calls, 1);
+        assert_eq!(m.applies, 1);
+        assert_eq!(m.decisions, 0);
+    }
+}

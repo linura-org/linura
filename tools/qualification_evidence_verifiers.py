@@ -882,9 +882,43 @@ def _verify_v05(
     )
 
 
+def _v06_matrix_inventory(root: Path) -> tuple[str, ...]:
+    data = _stable_repository_bytes(root / "tests/acceptance/v06/fault-matrix.txt")
+    _require(len(data) <= 16 * 1024, "v0.6 test inventory exceeds its bound")
+    _require(
+        re.fullmatch(rb"(?:[a-z][a-z0-9_]*(?:::[a-z][a-z0-9_]*)*\n){67}", data)
+        is not None,
+        "v0.6 test inventory is malformed or has the wrong cardinality",
+    )
+    names = tuple(data.decode("ascii").splitlines())
+    _require(
+        names == tuple(sorted(set(names))),
+        "v0.6 test inventory is not sorted and unique",
+    )
+    _require(
+        sum(not name.startswith(("s17_managed_", "s21_managed_")) for name in names)
+        == 11,
+        "v0.6 original test inventory drifted",
+    )
+    return names
+
+
 def _require_v06_matrix_result(
-    text: str, cases: int, label: str, *, filtered_out: int
+    text: str,
+    cases: int,
+    label: str,
+    *,
+    filtered_out: int,
+    expected_tests: tuple[str, ...],
 ) -> None:
+    names = re.findall(r"(?m)^test ([a-z][a-z0-9_:]*) \.\.\. ok$", text)
+    _require(
+        len(expected_tests) == cases
+        and len(set(expected_tests)) == cases
+        and len(names) == cases
+        and set(names) == set(expected_tests),
+        f"{label} did not pass every reviewed test exactly once",
+    )
     _require(
         re.search(rf"(?m)^running {cases} tests?$", text) is not None,
         f"{label} did not run the exact declared test set",
@@ -972,7 +1006,7 @@ def _verify_v06(
             "real-idempotency=qualified",
             "real-verification-not-satisfied-explicit-recovery=qualified",
             "real-crash-restart-explicit-no-effect-recovery=qualified",
-            "deterministic-fault-matrix=60/60",
+            "deterministic-fault-matrix=67/67",
         ],
         "v0.6 qualification transcript",
     )
@@ -1016,9 +1050,24 @@ def _verify_v06(
         },
         "v0.6 native session boundary claim drifted",
     )
-    _require_v06_matrix_result(matrix, 60, "v0.6 complete fault matrix", filtered_out=0)
+    inventory = _v06_matrix_inventory(root)
     _require_v06_matrix_result(
-        legacy_matrix, 11, "v0.6 original fault matrix", filtered_out=49
+        matrix,
+        67,
+        "v0.6 complete fault matrix",
+        filtered_out=0,
+        expected_tests=inventory,
+    )
+    _require_v06_matrix_result(
+        legacy_matrix,
+        11,
+        "v0.6 original fault matrix",
+        filtered_out=56,
+        expected_tests=tuple(
+            name
+            for name in inventory
+            if not name.startswith(("s17_managed_", "s21_managed_"))
+        ),
     )
     fault_matrix = primary.get("fault_matrix")
     _require(
@@ -1028,7 +1077,7 @@ def _verify_v06(
     expanded_matrix = primary.get("expanded_fault_matrix")
     _require(
         isinstance(expanded_matrix, dict)
-        and expanded_matrix.get("cases") == 60
+        and expanded_matrix.get("cases") == 67
         and expanded_matrix.get("includes_original_cases") == 11,
         "v0.6 expanded fault-matrix cardinality mismatch",
     )
@@ -1044,6 +1093,7 @@ def _verify_v06(
         "executor": "retained:v06-executor-systemd.bin",
         "session_executor": "retained:v06-executor-session.bin",
         "fault_matrix": "retained:v06-qualification-matrix.bin",
+        "fault_matrix_inventory": "tests/acceptance/v06/fault-matrix.txt",
         "authority_dbus_contract": "interfaces/dbus/org.linura.Authority1.xml",
         "executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Systemd1.xml",
         "session_executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Session1.xml",
@@ -1087,13 +1137,13 @@ def _verify_v06(
             "crash-restart-no-blind-replay-proved",
             "sqlite-integrity-proved",
             "fault-matrix-11-of-11-passed",
-            "expanded-fault-matrix-60-of-60-passed",
+            "expanded-fault-matrix-67-of-67-passed",
             "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
         details={
             "fault_matrix_cases": 11,
-            "expanded_fault_matrix_cases": 60,
+            "expanded_fault_matrix_cases": 67,
             "repository_artifacts": len(artifacts),
         },
     )

@@ -725,3 +725,13 @@ restoration transaction without replay. A restart still needs fresh proof;
 historical Committed state never releases a fence. Durable linked original
 retirement, qualified release and retention cleanup remain unfinished. This
 implementation does not activate public production display mutations.
+
+Linked retirement separately persists and reads back an immutable authenticated
+record of both exact requests and authority snapshots before closing original
+authority as RecoveryBlocked. A fresh canonical restoration proof is required
+again after persistence and on restart repair. The exact single-version CAS
+invalidates old Verified commit capabilities without reporting the original
+desired layout as committed. Missing/substituted link data, changed authority,
+stale post-link evidence or a lost final readback cannot release a native/Root
+fence or repeat the effect. The returned historical receipt is not permission
+for the still-required qualified release and cleanup continuation.

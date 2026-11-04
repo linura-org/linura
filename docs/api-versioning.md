@@ -388,6 +388,15 @@ audit kind instead of misinterpreting it. No schema migration, historical event
 rewrite, desired-state commit, public method or executor credential is introduced.
 The linked Control/native terminal workflow remains required before activation.
 
+The internal `retire_original_display_restoration` bookkeeping API joins the
+restoration commit to its original authority through an immutable purpose-versioned
+`linura.display.original-restoration-link.v1` journal record. It binds exact
+principal, requests, snapshots, dispatches and checkpoint, preserves original
+non-success/provenance and requires fresh canonical proof again before its CAS or
+restart repair. Its returned receipt is historical correlation, with no public
+D-Bus/SDK mutation activation or native/Root release authority. This additional
+opaque journal payload does not reinterpret prior phase records or checkpoints.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

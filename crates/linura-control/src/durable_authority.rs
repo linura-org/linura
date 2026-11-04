@@ -976,6 +976,88 @@ where
         }
     }
 
+    /// Linked replacement compensation closes original authority, not its old
+    /// desired state. The private authenticated planning context must still
+    /// produce the exact fresh canonical restoration NoChange after the link
+    /// was durably retained. This creates no effect or fence-release capability.
+    pub(crate) fn retire_replaced_display_without_replay(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: &AuthenticatedPrincipal,
+        actor: Actor,
+        original_request: &PlanDesiredStateRequest,
+        restoration_request: &PlanDesiredStateRequest,
+        link: &crate::display_restoration_link::RestorationLink,
+    ) -> Result<TransactionSnapshot, DurableAuthorityError> {
+        self.assert_request_matches(principal, original_request)?;
+        self.assert_request_matches(principal, restoration_request)?;
+        if link.original().principal.as_str() != principal.as_str()
+            || link.original().request_id != original_request.request_id
+            || link.restoration().request_id != restoration_request.request_id
+            || self.snapshot(&link.restoration().transaction_id)? != *link.restoration()
+            || link.restoration().state != TransactionState::Committed
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let original = self.snapshot(&link.original().transaction_id)?;
+        let retired = link
+            .retired_original()
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        if original != *link.original() && original != retired {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let (plan, observation) = previews.build_fresh_original_display_restoration_plan(
+            principal,
+            actor,
+            restoration_request,
+        )?;
+        if plan.status != linura_planner::PlanStatus::NoChange
+            || !plan.changes.is_empty()
+            || plan.execution_authorized()
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let at = self.authority_now_unix_ms()?;
+        observation
+            .require_current(at)
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        if original == retired {
+            return Ok(original);
+        }
+        let observed = digest_observation(&observation)?;
+        let expires = observation_expires_at_unix_ms(&observation)?;
+        let recovery = match original.state {
+            TransactionState::Indeterminate => self.authority_signer.authorize_recovery(
+                &original,
+                RecoveryResolution::ConflictingState {
+                    observation_digest: digest_parts(
+                        "linura.display.linked-original-compensation.v1",
+                        [
+                            observed.as_str().as_bytes(),
+                            link.digest().as_str().as_bytes(),
+                        ],
+                    ),
+                },
+                at,
+                expires,
+            )?,
+            TransactionState::Verified => self.authority_signer.authorize_verified_compensation(
+                &original,
+                observed,
+                link.digest().clone(),
+                at,
+                expires,
+            )?,
+            _ => return Err(DurableAuthorityError::AuthorityChanged),
+        };
+        if !matches!(self.transactions.recover(&recovery)?, RecoveryOutcome::Blocked(ref result) if result == &retired)
+            || self.snapshot(&retired.transaction_id)? != retired
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        Ok(retired)
+    }
+
     fn recover_indeterminate_inner(
         &mut self,
         previews: &mut PlanPreviewControl,

@@ -87,6 +87,17 @@ class TrackedFormatsTests(unittest.TestCase):
         ):
             self.assertEqual(formats.classify(neighbor, b"LNRI:1;\n"), "unclassified")
 
+    def test_reviewed_v06_matrix_inventory_is_explicit_text(self) -> None:
+        path = Path("tests/acceptance/v06/fault-matrix.txt")
+        content = (ROOT / path).read_bytes()
+        self.assertEqual(formats.classify(path, content), "text")
+        self.assertEqual(formats.format_errors(path, content, "text"), [])
+        for neighbor in (
+            path.with_name("unchecked.txt"),
+            Path("tests/acceptance/unreviewed/fault-matrix.txt"),
+        ):
+            self.assertEqual(formats.classify(neighbor, b"unchecked\n"), "unclassified")
+
     def test_unknown_extension_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

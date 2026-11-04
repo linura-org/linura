@@ -43,6 +43,8 @@ struct Machine {
     restoration_material: Option<String>,
     restoration_native_verified: bool,
     restoration_proof_fault: u8,
+    restoration_link_fault: u8,
+    restoration_link_reads: usize,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -321,6 +323,21 @@ impl ApprovedRequestJournal for FailingJournal {
         if record
             .request_id()
             .as_str()
+            .starts_with("request:v010:display-restoration-link:")
+        {
+            let mut m = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            match m.restoration_link_fault {
+                1 => return Ok(()), // Lost link persistence despite acknowledgement.
+                2 => m.restoration_proof_fault = 8, // Next physical probe is stale, not loss/revival of Root.
+                _ => {}
+            }
+        }
+        if record
+            .request_id()
+            .as_str()
             .starts_with("request:v010:display-native-baseline:")
             && self
                 .machine
@@ -358,6 +375,21 @@ impl ApprovedRequestJournal for FailingJournal {
         principal: &PrincipalId,
         request: &RequestId,
     ) -> Result<RetainedRequest, TransactionStoreError> {
+        if request
+            .as_str()
+            .starts_with("request:v010:display-restoration-link:")
+        {
+            let mut m = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.restoration_link_reads += 1;
+            if m.restoration_link_fault == 3 && m.restoration_link_reads == 3 {
+                return Err(TransactionStoreError::Storage(
+                    "simulated terminal readback loss".into(),
+                ));
+            }
+        }
         self.inner.load(principal, request)
     }
     fn integrity_check(&self) -> Result<(), TransactionStoreError> {

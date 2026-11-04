@@ -10,7 +10,8 @@ pub use display::{
     DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
     DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, TrustedDisplayDecision,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    TrustedDisplayDecision,
 };
 
 use linura_core::{

@@ -20,6 +20,7 @@ mod authority_clock;
 mod display_checkpoint;
 mod display_plan;
 mod display_recovery_journal;
+mod display_restoration_link;
 mod display_restoration_plan;
 mod display_safety;
 mod durable_authority;
@@ -88,8 +89,8 @@ pub use managed_lifecycle::{
     ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
     ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, TrustedDisplayDecision, TrustedHumanApproval,
-    managed_request_id,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

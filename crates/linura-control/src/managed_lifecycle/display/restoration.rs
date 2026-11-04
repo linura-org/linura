@@ -32,6 +32,15 @@ pub struct OriginalDisplayRestorationReceipt {
     pub dispatch_digest: Option<String>,
 }
 
+/// Historical linked compensation only. This is not current native state or a
+/// credential for cleanup, release, another write or another approval purpose.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OriginalDisplayRestorationTerminalReceipt {
+    pub original: linura_transaction::TransactionSnapshot,
+    pub restoration: linura_transaction::TransactionSnapshot,
+    pub link_digest: String,
+}
+
 /// A one-use Control handoff plus its exact complete private material. The
 /// digest-only effect descriptor cannot reconstruct or select a native intent.
 #[derive(Debug)]
@@ -640,5 +649,153 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             ));
         }
         Ok(terminal)
+    }
+
+    /// Durably link independently proven restoration before closing the old
+    /// authority as compensated. Every retry observes the same complete fresh
+    /// canonical proof and exact retained link; no native port, approval or
+    /// write can be reconstructed. Native/Root finalization remains separate.
+    pub fn retire_original_display_restoration(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request_id: &RequestId,
+    ) -> Result<OriginalDisplayRestorationTerminalReceipt, ManagedLifecycleError> {
+        use crate::display_restoration_link::RestorationLink;
+        let committed = self.reconcile_original_display_restoration(
+            principal.clone(),
+            actor.clone(),
+            request_id,
+        )?;
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let retained = self
+            .display_journal()?
+            .load(&principal_id, request_id)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(ManagedLifecycleError::Authority(
+                "restoration link request identity differs".into(),
+            ));
+        }
+        let request = crate::retained_request::decode(&retained)?;
+        self.authority
+            .assert_request_matches(&principal, &request)?;
+        let material = DisplayRestorationMaterial::decode(
+            request
+                .desired_state
+                .get("restore_original")
+                .ok_or_else(|| {
+                    ManagedLifecycleError::Contract("restoration material missing".into())
+                })?,
+        )
+        .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let original = self.retained_display_request(&principal, material.original_request())?;
+        let original_transaction =
+            TransactionId::for_namespace(&principal_id, &original.request_id);
+        let original_snapshot = self.authority.snapshot(&original_transaction)?;
+        let dispatched = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Dispatched,
+        )?
+        .ok_or_else(|| ManagedLifecycleError::Authority("restoration dispatch missing".into()))?;
+        let dispatch = dispatched.dispatch_digest.as_deref().ok_or_else(|| {
+            ManagedLifecycleError::Authority("restoration dispatch digest missing".into())
+        })?;
+        let source = self.original_display_context(&principal, &original.request_id)?;
+        let _context = self
+            .previews
+            .enter_original_display_verification_context(source, &request, &committed, &dispatched)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        let link = if let Some(link) = RestorationLink::load(
+            self.display_journal()?,
+            &principal,
+            &original,
+            &request,
+            &committed,
+            dispatch,
+            now_ms()?,
+        )? {
+            link
+        } else {
+            let (plan, observed) = self
+                .previews
+                .build_fresh_original_display_restoration_plan(&principal, actor.clone(), &request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            if plan.status != linura_planner::PlanStatus::NoChange
+                || !plan.changes.is_empty()
+                || plan.execution_authorized()
+            {
+                return Err(ManagedLifecycleError::Authority(
+                    "restoration link lacks canonical proof".into(),
+                ));
+            }
+            let at = now_ms()?;
+            observed
+                .require_current(at)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            let link = RestorationLink::capture(
+                &principal,
+                &original,
+                &request,
+                original_snapshot,
+                committed.clone(),
+                dispatch.into(),
+                crate::durable_authority::digest_observation(&observed)?,
+                at,
+            )?;
+            link.append(self.request_journal.as_deref_mut().ok_or_else(|| {
+                ManagedLifecycleError::Authority("restoration journal unavailable".into())
+            })?)?;
+            if RestorationLink::load(
+                self.display_journal()?,
+                &principal,
+                &original,
+                &request,
+                &committed,
+                dispatch,
+                now_ms()?,
+            )?
+            .as_ref()
+                != Some(&link)
+            {
+                return Err(ManagedLifecycleError::Authority(
+                    "restoration link readback differs".into(),
+                ));
+            }
+            link
+        };
+        let retired = self.authority.retire_replaced_display_without_replay(
+            &mut self.previews,
+            &principal,
+            actor,
+            &original,
+            &request,
+            &link,
+        )?;
+        if RestorationLink::load(
+            self.display_journal()?,
+            &principal,
+            &original,
+            &request,
+            &committed,
+            dispatch,
+            now_ms()?,
+        )?
+        .as_ref()
+            != Some(&link)
+            || self.authority.snapshot(&original_transaction)? != retired
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "linked original retirement readback differs".into(),
+            ));
+        }
+        Ok(OriginalDisplayRestorationTerminalReceipt {
+            original: retired,
+            restoration: committed,
+            link_digest: link.digest().as_str().into(),
+        })
     }
 }

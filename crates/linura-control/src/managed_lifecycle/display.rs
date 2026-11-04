@@ -24,6 +24,7 @@ pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedD
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
+    OriginalDisplayRestorationTerminalReceipt,
 };
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DisplayContinuationAction {

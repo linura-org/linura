@@ -23,6 +23,56 @@ READ_ONLY_INTERFACES = {
 
 
 class V06PolkitBoundaryTests(unittest.TestCase):
+    def test_reviewed_matrix_inventory_matches_all_source_tests(self) -> None:
+        # This suite deliberately uses flat test functions and explicit path
+        # modules. Refuse another module form instead of silently missing tests.
+        names: list[str] = []
+        visited: set[Path] = set()
+
+        def collect(path: Path, prefix: str) -> None:
+            self.assertNotIn(path, visited, "duplicate or cyclic fixture module")
+            visited.add(path)
+            source = path.read_text(encoding="utf-8")
+            modules = re.findall(
+                r'^#\[path = "([^"\n]+)"\]\nmod ([a-z][a-z0-9_]*);$',
+                source,
+                re.MULTILINE,
+            )
+            self.assertEqual(
+                len(modules),
+                len(re.findall(r"^\s*mod [a-z]", source, re.MULTILINE)),
+                "new fixture module form needs explicit inventory review",
+            )
+            tests = re.findall(
+                r"^#\[test\]\nfn ([a-z][a-z0-9_]*)\(", source, re.MULTILINE
+            )
+            self.assertEqual(len(tests), source.count("#[test]"))
+            self.assertNotIn("#[ignore", source)
+            names.extend(prefix + name for name in tests)
+            for relative, module in modules:
+                child = (path.parent / relative).resolve()
+                self.assertTrue(
+                    child.is_relative_to(ROOT / "apps/linura-authorityd/tests")
+                )
+                collect(child, prefix + module + "::")
+
+        collect(ROOT / "apps/linura-authorityd/tests/v06_qualification.rs", "")
+        inventory = (
+            (ROOT / "tests/acceptance/v06/fault-matrix.txt")
+            .read_text(encoding="ascii")
+            .splitlines()
+        )
+        self.assertEqual(len(names), 67)
+        self.assertEqual(len(set(names)), 67)
+        self.assertEqual(inventory, sorted(names))
+        self.assertEqual(
+            sum(
+                not name.startswith(("s17_managed_", "s21_managed_"))
+                for name in inventory
+            ),
+            11,
+        )
+
     def test_expanded_guest_matrix_preserves_all_cases_and_legacy_projection(
         self,
     ) -> None:
@@ -41,7 +91,7 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             "| tee /tmp/v06-legacy-matrix.log",
             script,
         )
-        self.assertIn("60 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("67 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
@@ -56,20 +106,27 @@ matrix() {
 }
 """
         for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
-            (60, 11, 0, 0, 0, 0, True),
+            (67, 11, 0, 0, 0, 0, True),
             (49, 11, 0, 0, 0, 0, False),
             (55, 11, 0, 0, 0, 0, False),
             (56, 11, 0, 0, 0, 0, False),
             (57, 11, 0, 0, 0, 0, False),
             (58, 11, 0, 0, 0, 0, False),
             (59, 11, 0, 0, 0, 0, False),
+            (60, 11, 0, 0, 0, 0, False),
             (61, 11, 0, 0, 0, 0, False),
-            (60, 10, 0, 0, 0, 0, False),
-            (60, 12, 0, 0, 0, 0, False),
-            (60, 11, 1, 0, 0, 0, False),
-            (60, 11, 0, 1, 0, 0, False),
-            (60, 11, 0, 0, 1, 0, False),
-            (60, 11, 0, 0, 0, 1, False),
+            (62, 11, 0, 0, 0, 0, False),
+            (63, 11, 0, 0, 0, 0, False),
+            (64, 11, 0, 0, 0, 0, False),
+            (65, 11, 0, 0, 0, 0, False),
+            (66, 11, 0, 0, 0, 0, False),
+            (68, 11, 0, 0, 0, 0, False),
+            (67, 10, 0, 0, 0, 0, False),
+            (67, 12, 0, 0, 0, 0, False),
+            (67, 11, 1, 0, 0, 0, False),
+            (67, 11, 0, 1, 0, 0, False),
+            (67, 11, 0, 0, 1, 0, False),
+            (67, 11, 0, 0, 0, 1, False),
         ):
             with (
                 self.subTest(

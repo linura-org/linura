@@ -315,6 +315,31 @@ This mechanism is bookkeeping only: Control's linked terminal workflow and nativ
 finalization must still consume it through the qualified path below. It is not yet
 used to release any fence.
 
+Control's linked bookkeeping path first independently reconciles the restoration
+transaction to Committed, then records a bounded immutable
+`linura.display.original-restoration-link.v1` payload in its existing authenticated
+request journal. It binds both complete authority snapshots and request digests,
+the original dispatch/checkpoint, the restoration dispatch and the independently
+verified combined observation digest. Its meaning is qualified historical
+compensation correlation; original retirement may still be pending. Original
+source/intent records retain their bytes and meaning.
+
+The exact journal key, principal, canonical bytes and committed restoration anchor
+are read back before original retirement. Control then runs the same fresh
+canonical five-source proof again. The original must equal the retained pre-retire
+snapshot or its exact single-version RecoveryBlocked successor. Indeterminate
+authority closes through the existing conflicting-state recovery; Verified
+authority uses the distinct compensation resolution above. An already completed
+retirement returns only after the same fresh proof. Original Committed state,
+changed anchors or unavailable proof cannot be converted into compensation.
+
+This ordering permits observe-only repair after a crash between link persistence
+and retirement or a lost final readback. Missing link persistence cannot retire
+authority; fresh proof cannot rewrite an existing link with new timestamps or
+bindings. The returned terminal receipt describes durable historical bookkeeping,
+not current native state, a release credential or another effect. The separate
+qualified native/Root continuation and retention workflow remain unfinished.
+
 Restoration acknowledgement is not success. Native opaque/input protection,
 original witnesses and power blockers must remain retained until independent
 fresh evidence proves the original rule/overlay semantics, kernel continuity,

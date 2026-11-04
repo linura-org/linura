@@ -2,6 +2,9 @@
 //! continuity or compositor acceptance.
 #[path = "verification_tests.rs"]
 mod verification_tests;
+
+#[path = "link_tests.rs"]
+mod link_tests;
 use super::*;
 use linura_core::{
     ActorId, ActorKind, DisplayLayout, DisplayMode, DisplayOutputId, DisplayOutputSet,
