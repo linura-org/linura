@@ -402,8 +402,8 @@ The separate private Experimental `LNRF:1` material preserves the complete origi
 `LNRI:1` bytes and adds bounded terminal comparison bindings. Its purpose-separated
 `finalize-original-display-restoration` SDK descriptor and
 `linura.native-display.finalization-reservation.v1` adapter codec accept neither
-old Apply nor restoration bindings. They activate no registered operation,
-protected purpose or executor/native endpoint and change no durable record.
+old Apply nor restoration bindings. Complete material and its digest are
+comparison data, not execution authority; they change no durable record.
 
 The internal read-only `inspect_original_display_finalization` API returns an
 expiring material/evidence report only after exact authenticated linked retirement
@@ -430,6 +430,20 @@ producer. A historical spent record cannot supply released-current admission.
 Control's inspection matches these new Root facts to actual authenticated history
 and joins the independent five-source proof without extending either expiry.
 The report includes the canonical restoration postcondition digest, not a permit.
+
+The internal `plan_original_display_finalization` API takes an operation ID,
+authenticated restoration request reference and semantic reason. A separate
+registered SecuritySensitive ManagedExternalEffect binds the single
+`finalize_original` desired-state key to `display.original-finalization.observe`.
+The desired value is the canonical `LNRF-SHA256:1` payload, with the existing
+4 KiB generic attribute and 64 KiB normalized request bounds unchanged. Complete
+bounded material is private context and must recompute that exact payload; the
+SDK descriptor-from-payload helper validates only comparison syntax and scope.
+Neither a client-authored digest nor raw material can establish the authenticated
+history context. Planning repeats all independent probes and durable readback,
+preserves provenance, returns a non-executable canonical plan and retires context
+on every exit. It activates no protected purpose, prepare, executor/native release
+endpoint, public D-Bus/SDK facade or production mutation support.
 
 ### Session1 bounded transient-effect contract
 

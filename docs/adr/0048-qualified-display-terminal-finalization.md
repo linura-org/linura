@@ -36,6 +36,13 @@ The terminal path must load and authenticate both actual transactions and their
 link, prove exact original retirement, and independently verify the complete
 current native/source, Root, logind, coverage and physical frame facts.
 
+The canonical terminal desired-state value is the existing purpose-separated
+`LNRF-SHA256:1` digest payload. Complete bounded material remains in Control's
+private authenticated context and must be recomputed against the digest before
+planning and any later prepared handoff. This preserves the generic planner's
+4 KiB attribute limit and avoids platform-specific validation in the planner.
+A digest alone establishes neither historical context nor current proof.
+
 The terminal operation follows the restoration layout commit and linked original
 retirement. Its own effect handoff requires fresh protected approval, canonical
 review, durable prepare, reservation/readback, current revalidation and a sealed
@@ -81,8 +88,17 @@ This initial inspection requires the exact restoration lock identity; current
 owner/generation replacement fails closed. A fresh lock in the codec alone does
 not qualify that path.
 
-No operation, protected purpose, executor endpoint, Root retirement or native
-release is activated. The terminal managed workflow, native/Root quiescence and
+The separate operation registration has ManagedExternalEffect semantics and a
+trusted SecuritySensitive floor. Non-executable canonical planning requires a
+private principal/request-bound context built from actual linked history; generic
+previews refuse before provider probing. Planning re-observes Root reservation and
+the same independent five-source restoration proof, checks exact current source,
+post-write epoch and lock against complete material, then re-reads durable anchors.
+It preserves the original provenance and performs no durable transition. Failed
+planning retires the private context just as successful planning does.
+
+No protected purpose, prepared terminal handoff, executor endpoint, Root retirement
+or native release is activated. The terminal managed workflow, native/Root quiescence and
 finalization, normal Keep/Revert ordering, Committed adoption, safe supersession
 and reference-aware cleanup still require coherent implementation.
 

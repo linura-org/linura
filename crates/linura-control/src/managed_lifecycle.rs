@@ -9,9 +9,10 @@ pub use display::{
     AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
     DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
     DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
-    OriginalDisplayFinalizationInspection, OriginalDisplayRestorationPort,
-    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
-    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
+    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationRequest,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    TrustedDisplayDecision,
 };
 
 use linura_core::{
@@ -60,6 +61,7 @@ const SESSION_REQUEST_PREFIX: &str = "request:v010:session-lock:";
 const TRANSITION_REQUEST_PREFIX: &str = "request:v010:session-transition:";
 const DISPLAY_REQUEST_PREFIX: &str = "request:v010:display-layout:";
 const DISPLAY_RESTORATION_REQUEST_PREFIX: &str = "request:v010:display-restoration:";
+const DISPLAY_FINALIZATION_REQUEST_PREFIX: &str = "request:v010:display-finalization:";
 const MAX_OPERATION_ID_BYTES: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_ATTEMPTS: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_INTERVAL: Duration = Duration::from_millis(250);
@@ -477,6 +479,8 @@ pub fn managed_request_id(
         DISPLAY_REQUEST_PREFIX
     } else if is_display_restoration_request(request) {
         DISPLAY_RESTORATION_REQUEST_PREFIX
+    } else if is_display_finalization_request(request) {
+        DISPLAY_FINALIZATION_REQUEST_PREFIX
     } else {
         MANAGED_REQUEST_PREFIX
     };
@@ -1991,6 +1995,16 @@ fn registered_route(
     resource: &ResourceId,
 ) -> Result<(&'static str, &'static str), ManagedLifecycleError> {
     if provider == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && capability == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+    {
+        linura_core::DisplayRecoveryScope::from_resource(resource)
+            .map_err(|e| ManagedLifecycleError::UnsupportedEffect(e.to_string()))?;
+        return Ok((
+            crate::operation_registry::MANAGED_DISPLAY_FINALIZATION_OPERATION_ID,
+            crate::operation_registry::MANAGED_DISPLAY_FINALIZATION_RISK_FLOOR_RULE_ID,
+        ));
+    }
+    if provider == linura_observation::DISPLAY_RECOVERY_PROVIDER
         && capability == linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
     {
         linura_core::DisplayRecoveryScope::from_resource(resource)
@@ -2064,9 +2078,11 @@ fn required_approval_for_request(
         });
     }
     match (request.provider.as_str(), key.as_str(), value.as_str()) {
-        (linura_observation::DISPLAY_RECOVERY_PROVIDER, "restore_original", _) => {
-            Ok(ApprovalClass::Administrator)
-        }
+        (
+            linura_observation::DISPLAY_RECOVERY_PROVIDER,
+            "restore_original" | "finalize_original",
+            _,
+        ) => Ok(ApprovalClass::Administrator),
         (linura_observation::DISPLAY_PROVIDER, "layout", _) => Ok(ApprovalClass::Administrator),
         (MANAGED_SYSTEMD_PROVIDER, "active_state", "active" | "inactive") => {
             Ok(ApprovalClass::Administrator)
@@ -2091,6 +2107,7 @@ fn effect_from_request(
     )?;
     effect_from_parts(
         request.provider.clone(),
+        request.observation_capability.as_str(),
         request.resource.clone(),
         &request.desired_state,
     )
@@ -2111,18 +2128,23 @@ fn effect_from_candidate(
         ));
     }
     let change = &subject.changes()[0];
-    let expected_key =
-        if subject.provider().as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
-            "restore_original"
-        } else if subject.provider().as_str() == linura_observation::DISPLAY_PROVIDER {
-            "layout"
-        } else if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
-            "secure"
-        } else if subject.provider().as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
-            "completed"
-        } else {
-            "active_state"
-        };
+    let expected_key = if subject.provider().as_str()
+        == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && subject.capability().as_str()
+            == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+    {
+        "finalize_original"
+    } else if subject.provider().as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+        "restore_original"
+    } else if subject.provider().as_str() == linura_observation::DISPLAY_PROVIDER {
+        "layout"
+    } else if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+        "secure"
+    } else if subject.provider().as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
+        "completed"
+    } else {
+        "active_state"
+    };
     if change.key != expected_key {
         return Err(ManagedLifecycleError::UnsupportedEffect(
             "trusted plan contains a mutation other than active_state".into(),
@@ -2131,6 +2153,7 @@ fn effect_from_candidate(
     let desired = BTreeMap::from([(change.key.clone(), change.desired.clone())]);
     effect_from_parts(
         subject.provider().clone(),
+        subject.capability().as_str(),
         subject.resource().clone(),
         &desired,
     )
@@ -2138,6 +2161,7 @@ fn effect_from_candidate(
 
 fn effect_from_parts(
     provider: ProviderId,
+    capability: &str,
     resource: ResourceId,
     desired_state: &BTreeMap<String, String>,
 ) -> Result<EffectDescriptor, ManagedLifecycleError> {
@@ -2147,11 +2171,21 @@ fn effect_from_parts(
                 "original restoration requires one complete material".into(),
             ));
         }
-        let material = desired_state.get("restore_original").ok_or_else(|| {
+        let terminal = capability == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY;
+        let key = if terminal {
+            "finalize_original"
+        } else {
+            "restore_original"
+        };
+        let material = desired_state.get(key).ok_or_else(|| {
             ManagedLifecycleError::UnsupportedEffect("original restoration intent is absent".into())
         })?;
-        let effect = linura_provider_sdk::display_restoration_effect(material)
-            .map_err(ManagedLifecycleError::UnsupportedEffect)?;
+        let effect = if terminal {
+            linura_provider_sdk::display_finalization_effect_for_payload(&resource, material)
+        } else {
+            linura_provider_sdk::display_restoration_effect(material)
+        }
+        .map_err(ManagedLifecycleError::UnsupportedEffect)?;
         if effect.resource != resource {
             return Err(ManagedLifecycleError::UnsupportedEffect(
                 "original restoration refers to another recovery scope".into(),
@@ -2337,6 +2371,8 @@ fn validate_request_identity(
         DISPLAY_REQUEST_PREFIX
     } else if is_display_restoration_request(request) {
         DISPLAY_RESTORATION_REQUEST_PREFIX
+    } else if is_display_finalization_request(request) {
+        DISPLAY_FINALIZATION_REQUEST_PREFIX
     } else {
         MANAGED_REQUEST_PREFIX
     };
@@ -2364,6 +2400,11 @@ fn is_display_restoration_request(request: &PlanDesiredStateRequest) -> bool {
     request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
         && request.observation_capability.as_str()
             == linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+}
+fn is_display_finalization_request(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && request.observation_capability.as_str()
+            == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
 }
 
 fn now_unix_seconds() -> Result<u64, ManagedLifecycleError> {
@@ -2482,6 +2523,139 @@ mod tests {
     use linura_core::{CapabilityId, SemanticReason};
 
     use super::*;
+
+    #[test]
+    fn terminal_digest_request_cannot_alias_restoration_capability_key_or_request_identity() {
+        let value = |text| RequestId::new(text).unwrap_or_else(|e| unreachable!("{e}"));
+        let original =
+            include_str!("../../linura-core/src/display_recovery/fixtures/original-baseline.txt")
+                .trim_end();
+        let old = linura_core::DisplayRestorationMaterial::decode(original)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let material = linura_core::DisplayFinalizationMaterial::encode(
+            &value("request:restoration"),
+            &"1".repeat(64),
+            &"2".repeat(64),
+            &"3".repeat(64),
+            29,
+            old.replacement().lock(),
+            original,
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let effect = linura_provider_sdk::display_finalization_effect(&material)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let payload = String::from_utf8(effect.canonical_payload.clone())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let mut request = PlanDesiredStateRequest {
+            request_id: value("request:v010:display-finalization:exact"),
+            provider: effect.provider.clone(),
+            resource: effect.resource.clone(),
+            observation_capability: CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+            desired_state: BTreeMap::from([("finalize_original".into(), payload)]),
+            reason: SemanticReason {
+                summary: "Complete qualified original restoration".into(),
+                intent_ids: vec![],
+                requirement_ids: vec![],
+                capability_ids: vec![
+                    CapabilityId::new(linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY)
+                        .unwrap_or_else(|e| unreachable!("{e}")),
+                ],
+            },
+        };
+        assert_eq!(
+            effect_from_request(&request).unwrap_or_else(|e| unreachable!("{e}")),
+            effect
+        );
+        assert!(validate_request_identity(&request).is_ok());
+        assert_eq!(
+            required_approval_for_request(&request).unwrap_or_else(|e| unreachable!("{e}")),
+            ApprovalClass::Administrator
+        );
+        let valid = request.clone();
+        // Registration/risk tests only: this synthetic planning input grants no
+        // authoritative evidence, protected approval or executor capability.
+        let observed = linura_planner::PlanningObservation {
+            provider: request.provider.clone(),
+            resource: request.resource.clone(),
+            observation_capability: request.observation_capability.clone(),
+            authority: "fixture".into(),
+            evidence_id: "fixture:terminal-registration".into(),
+            freshness: linura_planner::PlanningFreshness::Current,
+            attributes: BTreeMap::from([(
+                "finalize_original".into(),
+                "protection retained".into(),
+            )]),
+        };
+        let plan = linura_planner::DeterministicPlanner
+            .plan_resource(
+                request.request_id.clone(),
+                Actor {
+                    id: linura_core::ActorId::new("actor:terminal-registration")
+                        .unwrap_or_else(|e| unreachable!("{e}")),
+                    kind: ActorKind::Human,
+                    interactive: true,
+                },
+                linura_planner::DesiredResource {
+                    provider: request.provider.clone(),
+                    resource: request.resource.clone(),
+                    observation_capability: request.observation_capability.clone(),
+                    state: request.desired_state.clone(),
+                    reason: request.reason.clone(),
+                },
+                &observed,
+            )
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let registry = OperationSemanticsControl::from_trusted_registry(
+            trusted_builtin_operation_registry().unwrap_or_else(|e| unreachable!("{e}")),
+        );
+        let operation =
+            OperationId::new(crate::operation_registry::MANAGED_DISPLAY_FINALIZATION_OPERATION_ID)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+        let semantics = registry
+            .resolve_external(&operation, &plan)
+            .unwrap_or_else(|e| unreachable!("{e:?}"));
+        assert_eq!(semantics.class(), OperationClass::ManagedExternalEffect);
+        assert_eq!(semantics.risk(), RiskClass::SecuritySensitive);
+        assert!(semantics.requires_durable_managed_lifecycle());
+        for case in 0..3 {
+            let mut substituted = plan.clone();
+            match case {
+                0 => {
+                    substituted.observation_capability = CapabilityId::new(
+                        linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
+                    )
+                    .unwrap_or_else(|e| unreachable!("{e}"))
+                }
+                1 => substituted.changes[0].key = "restore_original".into(),
+                _ => {
+                    substituted.provider = ProviderId::new(linura_observation::DISPLAY_PROVIDER)
+                        .unwrap_or_else(|e| unreachable!("{e}"))
+                }
+            }
+            assert!(registry.resolve_external(&operation, &substituted).is_err());
+        }
+        request.observation_capability =
+            CapabilityId::new(linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(effect_from_request(&request).is_err());
+        request.desired_state = BTreeMap::from([("restore_original".into(), original.into())]);
+        assert!(effect_from_request(&request).is_ok());
+        assert!(validate_request_identity(&request).is_err());
+        request = valid.clone();
+        request.desired_state = BTreeMap::from([("restore_original".into(), original.into())]);
+        assert!(effect_from_request(&request).is_err());
+        request = valid.clone();
+        request
+            .desired_state
+            .insert("restore_original".into(), original.into());
+        assert!(effect_from_request(&request).is_err());
+        request = valid;
+        request.request_id = value("request:v010:display-restoration:exact");
+        assert!(validate_request_identity(&request).is_err());
+    }
 
     fn request(resource: &str, desired: &str) -> PlanDesiredStateRequest {
         let mut request = PlanDesiredStateRequest {

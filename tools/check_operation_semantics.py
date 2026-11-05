@@ -130,6 +130,16 @@ EXPECTED_LOCAL_OPERATIONS = {
     }
 }
 EXPECTED_REGISTERED_OPERATIONS = {
+    "managed-display-finalization": {
+        "operation_id": "operation:display.layout.finalize-original",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-finalization.risk-floor",
+        "provider": "hyprland-recovery",
+        "observation_capability": "display.original-finalization.observe",
+        "resource_prefix": "display:recovery:",
+        "change_keys": ["finalize_original"],
+    },
     "managed-display-restoration": {
         "operation_id": "operation:display.layout.restore-original",
         "class": "managed-external-effect",

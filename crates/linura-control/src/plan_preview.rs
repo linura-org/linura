@@ -333,6 +333,7 @@ pub struct PlanPreviewControl {
     coordinator: ObservationCoordinator,
     previews: PreviewStore,
     pub(super) restoration_context: crate::display_restoration_plan::OriginalContextSlot,
+    pub(super) finalization_context: crate::display_finalization_plan::FinalizationContextSlot,
 }
 
 impl PlanPreviewControl {
@@ -357,6 +358,8 @@ impl PlanPreviewControl {
             coordinator,
             previews: PreviewStore::default(),
             restoration_context: crate::display_restoration_plan::OriginalContextSlot::default(),
+            finalization_context:
+                crate::display_finalization_plan::FinalizationContextSlot::default(),
         }
     }
 
@@ -427,6 +430,15 @@ impl PlanPreviewControl {
         observe_only_protective: bool,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
         if input.request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            if input.request.observation_capability.as_str()
+                == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+            {
+                return self.build_fresh_original_display_finalization_plan(
+                    &input.principal,
+                    actor,
+                    &input.request,
+                );
+            }
             return self.build_fresh_original_display_restoration_plan(
                 &input.principal,
                 actor,

@@ -257,11 +257,33 @@ pub fn display_finalization_effect(material: &str) -> Result<EffectDescriptor, S
         b"linura.display.original-finalization-intent.v1",
         &[material.as_bytes()],
     );
+    display_finalization_effect_for_payload(
+        &resource,
+        &format!("LNRF-SHA256:1:{}", digest.to_hex()),
+    )
+}
+
+/// Reconstruct the same non-executable comparison descriptor from a canonical
+/// plan's bounded digest value. This does not prove possession, provenance or
+/// validity of complete terminal material. Control's private planning context
+/// and the prepared receiver must independently recompute it from that material.
+pub fn display_finalization_effect_for_payload(
+    resource: &ResourceId,
+    payload: &str,
+) -> Result<EffectDescriptor, String> {
+    linura_core::DisplayRecoveryScope::from_resource(resource).map_err(|e| e.to_string())?;
+    let text = payload
+        .strip_prefix("LNRF-SHA256:1:")
+        .ok_or("terminal intent digest domain differs")?;
+    let digest = ComponentDigest::parse_hex(text).map_err(|e| e.to_string())?;
+    if digest.to_hex() != text || text == "0".repeat(64) {
+        return Err("terminal intent digest is not canonical and nonzero".into());
+    }
     EffectDescriptor::new(
         ProviderId::new("hyprland-recovery").map_err(|error| error.to_string())?,
-        resource,
+        resource.clone(),
         "finalize-original-display-restoration",
-        format!("LNRF-SHA256:1:{}", digest.to_hex()).into_bytes(),
+        payload.as_bytes().to_vec(),
     )
     .map_err(|error| error.to_string())
 }
@@ -616,6 +638,32 @@ mod tests {
         assert_eq!(terminal.resource, restored.resource);
         assert_eq!(terminal.operation, "finalize-original-display-restoration");
         assert!(terminal.canonical_payload.starts_with(b"LNRF-SHA256:1:"));
+        let payload = std::str::from_utf8(&terminal.canonical_payload)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            id(display_finalization_effect_for_payload(
+                &terminal.resource,
+                payload
+            )),
+            terminal
+        );
+        for bad in [
+            payload.replace("LNRF", "LNRI"),
+            payload.replace(":1:", ":2:"),
+            payload.to_uppercase(),
+            format!("{payload};"),
+            "LNRF-SHA256:1:".into(),
+            format!("LNRF-SHA256:1:{}", "0".repeat(64)),
+        ] {
+            assert!(display_finalization_effect_for_payload(&terminal.resource, &bad).is_err());
+        }
+        assert!(
+            display_finalization_effect_for_payload(
+                &id(ResourceId::new("display:topology:foreign")),
+                payload
+            )
+            .is_err()
+        );
         assert_ne!(terminal.digest(), restored.digest());
         assert_ne!(terminal.digest(), apply.digest());
         assert!(binding.validate_for(&terminal).is_err());

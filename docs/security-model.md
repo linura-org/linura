@@ -761,7 +761,9 @@ unchanged nonterminal `LNRI:1` history and binds the restoration request/dispatc
 immutable link, restored source guard, post-write epoch and current login/lock.
 Its purpose-separated SDK effect and adapter reservation cannot validate an old
 Apply or restoration binding. A codec or reservation is never execution authority.
-The terminal operation and privileged/native endpoints remain unavailable.
+The separate registered terminal operation currently supports non-executable
+canonical planning only; protected authorization, prepared terminal handoff and
+privileged/native release endpoints remain unavailable.
 
 Control's read-only `inspect_original_display_finalization` authenticates both
 actual requests, exact committed restoration, reserved/dispatched history, link,
@@ -781,3 +783,17 @@ owner/generation is unsupported until separately qualified current-lock admissio
 Reports are expiring comparison data, never reusable terminal authority. Fresh
 protected review, durable prepare/revalidation, native/Root quiescence and release,
 independent completion proof and ownership-aware cleanup remain required.
+
+Canonical terminal planning accepts a restoration request reference and semantic
+reason, never caller-selected original sources or terminal material. It reloads
+authenticated linked history, inherits its provenance, and binds a private scoped
+context to the exact principal and normalized request digest. The plan's single
+`finalize_original` value is the purpose-separated material digest; complete
+bounded `LNRF:1` stays private and is independently recomputed. The generic 4 KiB
+planner attribute and 64 KiB normalized request limits remain unchanged. Generic
+preview cannot create this context and refuses before probing. The canonical
+recipe repeats Root and five-source native restoration probes, rejects source,
+post-write epoch or lock drift, intersects original expiries, and re-reads linked
+history afterward. Registration and trusted risk classification require a
+SecuritySensitive ManagedExternalEffect; Apply, restoration, transient or local
+operation classes cannot substitute. No planning result is approval or prepare.

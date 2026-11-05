@@ -2,12 +2,25 @@
 //! native compositor, original kernel witnesses, PAM or independent restoration.
 use super::*;
 use linura_control::{
-    AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,
-    OriginalDisplayRestorationRequest,
+    AuthorizedOriginalDisplayRestoration, OriginalDisplayFinalizationRequest,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationRequest,
 };
 use linura_core::DisplayRecoveryScope;
 use linura_observation::{DisplayObservationFacts, DisplayOriginalProtectionFacts};
 use linura_transaction::{TransactionId, TransactionStore};
+
+fn finalization_input(restoration_request: &RequestId) -> OriginalDisplayFinalizationRequest {
+    OriginalDisplayFinalizationRequest {
+        operation_id: "finalize-original-once".into(),
+        restoration_request: restoration_request.clone(),
+        reason: SemanticReason {
+            summary: "Finish the independently verified original display recovery".into(),
+            intent_ids: vec![],
+            requirement_ids: vec![],
+            capability_ids: vec![],
+        },
+    }
+}
 
 fn input(original: &PlanDesiredStateRequest) -> OriginalDisplayRestorationRequest {
     OriginalDisplayRestorationRequest {
@@ -918,6 +931,144 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
             terminal.restoration
         );
         let expected_material = inspection.material().to_owned();
+        let plan = value(control.plan_original_display_finalization(
+            principal(),
+            actor(true),
+            finalization_input(&receipt.request_id),
+        ));
+        assert_eq!(plan.status.as_str(), "change-proposed");
+        assert!(!plan.execution_authorized());
+        assert_eq!(plan.changes.len(), 1);
+        assert_eq!(plan.changes[0].key, "finalize_original");
+        assert_eq!(
+            plan.changes[0].desired.as_bytes(),
+            value(linura_provider_sdk::display_finalization_effect(
+                &expected_material
+            ))
+            .canonical_payload
+        );
+        assert_eq!(
+            plan.provider.as_str(),
+            linura_observation::DISPLAY_RECOVERY_PROVIDER
+        );
+        assert_eq!(
+            plan.observation_capability.as_str(),
+            linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+        );
+        for origin in &original.reason.intent_ids {
+            assert!(plan.reason.intent_ids.contains(origin));
+        }
+        for origin in &original.reason.requirement_ids {
+            assert!(plan.reason.requirement_ids.contains(origin));
+        }
+        for origin in &original.reason.capability_ids {
+            assert!(plan.reason.capability_ids.contains(origin));
+        }
+        let sampled = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .sequence;
+        let mut agent = actor(true);
+        agent.kind = ActorKind::Agent;
+        for actor in [actor(false), agent] {
+            assert!(
+                control
+                    .plan_original_display_finalization(
+                        principal(),
+                        actor,
+                        finalization_input(&receipt.request_id)
+                    )
+                    .is_err()
+            );
+        }
+        assert!(
+            control
+                .plan_original_display_finalization(
+                    value(AuthenticatedPrincipal::new("unix:uid:1001")),
+                    actor(true),
+                    finalization_input(&receipt.request_id),
+                )
+                .is_err()
+        );
+        assert_eq!(
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .sequence,
+            sampled
+        );
+        assert_eq!(
+            snapshot(&database, &original_transaction),
+            terminal.original
+        );
+        assert_eq!(
+            snapshot(&database, &receipt.transaction_id),
+            terminal.restoration
+        );
+        // A successful initial inspection cannot supply stale evidence to the
+        // actual canonical recipe. Failure must also retire its private context.
+        {
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.finalization_probe_fault_after = Some(m.restoration_root_reads + 2);
+        }
+        assert!(
+            control
+                .plan_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    finalization_input(&receipt.request_id)
+                )
+                .is_err()
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .finalization_probe_fault_after = None;
+        value(control.plan_original_display_finalization(
+            principal(),
+            actor(true),
+            finalization_input(&receipt.request_id),
+        ));
+        // History readback is required before and after the canonical join.
+        // No missing immutable anchor is repaired by this read-only API.
+        for read in 1..=4 {
+            {
+                let mut m = machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                m.restoration_link_reads = 0;
+                m.restoration_link_fail_read = Some(read);
+            }
+            assert!(
+                control
+                    .plan_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        finalization_input(&receipt.request_id)
+                    )
+                    .is_err(),
+                "terminal planning readback {read}"
+            );
+            assert_eq!(
+                snapshot(&database, &original_transaction),
+                terminal.original
+            );
+            assert_eq!(
+                snapshot(&database, &receipt.transaction_id),
+                terminal.restoration
+            );
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .restoration_link_fail_read = None;
+            value(control.plan_original_display_finalization(
+                principal(),
+                actor(true),
+                finalization_input(&receipt.request_id),
+            ));
+        }
         drop(control);
         let previews = replacement_previews(&machine, &original, &input);
         let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
@@ -1007,6 +1158,16 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
                     .is_err(),
                 "Root mechanism fault {fault}"
             );
+            assert!(
+                restarted
+                    .plan_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        finalization_input(&receipt.request_id)
+                    )
+                    .is_err(),
+                "terminal plan Root fault {fault}"
+            );
             assert_eq!(
                 snapshot(&database, &original_transaction),
                 terminal.original
@@ -1043,6 +1204,16 @@ fn qualified_restoration_links_and_retires_original_authority_without_releasing_
                     )
                     .is_err(),
                 "terminal inspection fault {fault}"
+            );
+            assert!(
+                restarted
+                    .plan_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        finalization_input(&receipt.request_id)
+                    )
+                    .is_err(),
+                "terminal plan independent proof fault {fault}"
             );
             assert_eq!(
                 snapshot(&database, &original_transaction),

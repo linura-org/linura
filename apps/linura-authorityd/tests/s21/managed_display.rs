@@ -47,6 +47,8 @@ struct Machine {
     restoration_link_reads: usize,
     restoration_link_fail_read: Option<usize>,
     restoration_root_state_fault: u8,
+    restoration_root_reads: usize,
+    finalization_probe_fault_after: Option<usize>,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -258,6 +260,7 @@ impl Observer for LiveFixtureObserver {
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
         if finalization {
+            machine.restoration_root_reads += 1;
             let binding = machine.restoration_binding.as_ref().ok_or_else(|| {
                 ProviderError::Unavailable("no simulated Root restoration reservation".into())
             })?;
@@ -278,7 +281,13 @@ impl Observer for LiveFixtureObserver {
             ));
             sample.capability = capability.clone();
             sample.attributes = facts.attributes();
-            match machine.restoration_root_state_fault {
+            let fault =
+                if machine.finalization_probe_fault_after == Some(machine.restoration_root_reads) {
+                    1 // Fresh first inspection cannot excuse a stale planning probe.
+                } else {
+                    machine.restoration_root_state_fault
+                };
+            match fault {
                 1 => sample.observed_at_unix_ms = now_unix_ms() - 2001,
                 2 => sample.authority = ObservationAuthority::SyntheticTest,
                 3 => {

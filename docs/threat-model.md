@@ -1330,8 +1330,9 @@ An attacker may present old restoration approval, a committed snapshot, a copied
 terminal receipt, forged digests or a truncated/oversized terminal intent as
 permission to release protection. Separate bounded `LNRF:1` material preserves
 the old `LNRI:1` bytes and uses a distinct effect/reservation domain; none of these
-data formats is an approval or executor credential. The terminal operation and
-Root/native release endpoints remain unavailable.
+data formats is an approval or executor credential. Registered terminal planning
+is non-executable; protected terminal authorization, prepared handoff and Root/native
+release endpoints remain unavailable.
 
 The read-only Control inspection loads actual authenticated requests, exact
 committed restoration and linked original retirement, complete phase history and
@@ -1358,6 +1359,18 @@ fresh canonical restoration proof. Neither a substituted reservation nor a forge
 released phase without terminal lineage can pass inspection. No current producer
 reports quiescence, retirement or release; future released-current evidence must
 also prove this Root invocation's live ordinary admission.
+
+A client may submit an otherwise valid terminal digest without the complete
+material or authenticated linked history. The canonical terminal recipe requires
+a private exact principal/request-bound context before any provider probe. Control
+alone constructs it from actual linked retirement and freshly derived material;
+the bounded plan digest must recompute from the complete private bytes. Generic
+planner size limits remain unchanged. The recipe repeats current Root and
+five-source restoration verification and compares source guard, post-write epoch
+and exact lock with the approved candidate material; the enclosing Control query
+also re-reads all durable anchors. Failure after context admission still retires
+the context. Wrong capability/key/operation cannot turn restoration into terminal
+authority or downgrade its registered managed semantics and trusted risk floor.
 
 Fresh protected terminal review, canonical prepare/revalidation, authenticated
 native/Root quiescence and one-use release, lost-ack repair, current lock/input

@@ -2,14 +2,24 @@
 //! No caller-supplied receipt, retained proof or codec becomes execution
 //! authority. This module neither retires history nor releases protection.
 use super::*;
+use crate::display_finalization_plan::FinalizationPlanningContext;
 use crate::display_restoration_link::RestorationLink;
 use crate::display_restoration_plan::OriginalDisplayPlanningContext;
-use linura_core::{DisplayFinalizationMaterial, DisplayRestorationMaterial};
+use linura_core::{DisplayFinalizationMaterial, DisplayRestorationMaterial, SemanticReason};
 use linura_observation::{
     DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, DisplayFinalizationPhase,
     DisplayOriginalFinalizationFacts,
 };
 use linura_transaction::TransactionSnapshot;
+
+/// The caller identifies existing restoration history and supplies provenance.
+/// Original sources, current proof and terminal material come only from Control.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OriginalDisplayFinalizationRequest {
+    pub operation_id: String,
+    pub restoration_request: RequestId,
+    pub reason: SemanticReason,
+}
 
 /// Fresh restoration evidence joined to exact authenticated linked history.
 /// This report may expire immediately. It is not an approval, prepared request,
@@ -59,6 +69,109 @@ fn invalid() -> ManagedLifecycleError {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
+    /// Canonical non-executable review of a separate security-sensitive managed
+    /// terminal effect. This performs no approval, prepare, dispatch or release.
+    pub fn plan_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        input: OriginalDisplayFinalizationRequest,
+    ) -> Result<linura_planner::ReconciliationPlan, ManagedLifecycleError> {
+        validate_operation_id(&input.operation_id)?;
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal finalization requires an authenticated interactive human".into(),
+            ));
+        }
+        let inspection = self.inspect_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            &input.restoration_request,
+        )?;
+        let history = self.finalization_history(&principal, &input.restoration_request)?;
+        if inspection.original != history.original_snapshot
+            || inspection.restoration != history.restoration_snapshot
+        {
+            return Err(invalid());
+        }
+        let material =
+            DisplayFinalizationMaterial::decode(&inspection.material).map_err(|_| invalid())?;
+        if material.terminal_link() != history.link.digest().hex()
+            || material.restoration_request() != &history.restoration.request_id
+            || Some(material.restoration_dispatch())
+                != history.dispatched.dispatch_digest.as_deref()
+            || history
+                .restoration
+                .desired_state
+                .get("restore_original")
+                .map(String::as_str)
+                != Some(material.restoration_text())
+        {
+            return Err(invalid());
+        }
+        let mut reason = input.reason;
+        crate::display_restoration_plan::inherit_original_reason(
+            &mut reason,
+            &history.restoration.reason,
+        )
+        .map_err(ManagedLifecycleError::Contract)?;
+        let request = PlanDesiredStateRequest {
+            request_id: RequestId::new(format!(
+                "{DISPLAY_FINALIZATION_REQUEST_PREFIX}{}",
+                input.operation_id
+            ))
+            .map_err(|_| invalid())?,
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+            resource: material
+                .recovery_scope()
+                .map_err(|_| invalid())?
+                .resource_id()
+                .map_err(|_| invalid())?,
+            observation_capability: linura_core::CapabilityId::new(
+                DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            desired_state: BTreeMap::from([(
+                "finalize_original".into(),
+                String::from_utf8(
+                    linura_provider_sdk::display_finalization_effect(&inspection.material)
+                        .map_err(|_| invalid())?
+                        .canonical_payload,
+                )
+                .map_err(|_| invalid())?,
+            )]),
+            reason,
+        };
+        validate_public_request(&request)?;
+        validate_request_identity(&request)?;
+        let source = FinalizationPlanningContext {
+            principal: principal.clone(),
+            original: history.source.clone(),
+            restoration: history.restoration.clone(),
+            snapshot: history.restoration_snapshot.clone(),
+            dispatched: history.dispatched.clone(),
+            link: history.link.digest().clone(),
+            material: inspection.material,
+        };
+        let (plan, observation) = {
+            let _context = self
+                .previews
+                .enter_original_display_finalization_context(source, &request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            self.previews
+                .authority_candidate(principal.clone(), actor, request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?
+        };
+        self.validate_registered_managed_plan(&plan, RiskClass::SecuritySensitive)?;
+        if self.finalization_history(&principal, &input.restoration_request)? != history {
+            return Err(invalid());
+        }
+        observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        Ok(plan)
+    }
+
     fn finalization_history(
         &self,
         principal: &AuthenticatedPrincipal,
