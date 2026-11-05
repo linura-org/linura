@@ -26,6 +26,7 @@ add_library(linura-security-owner-foundation STATIC
     native_display_layout.cpp native_display_layout.h
     native_display_guard.cpp
     native_display_restoration.cpp native_display_restoration.h
+    native_display_finalization.cpp native_display_finalization.h
     native_display_prompt.cpp native_display_prompt.h
     native_display_review.cpp native_display_review.h
     native_display_attempt.cpp native_display_attempt.h
@@ -273,10 +274,13 @@ if(BUILD_TESTING)
     add_test(NAME security-owner-display-watchdog-boundary COMMAND linura-security-owner-display-watchdog-tests)
     set_tests_properties(security-owner-display-watchdog-boundary PROPERTIES TIMEOUT 10)
 
-    add_executable(linura-security-owner-display-restoration-tests tests/native_display_restoration.cpp)
+    add_executable(linura-security-owner-display-restoration-tests
+        tests/native_display_restoration.cpp tests/native_display_finalization.cpp)
     target_link_libraries(linura-security-owner-display-restoration-tests PRIVATE linura-security-owner-wayland)
     target_compile_definitions(linura-security-owner-display-restoration-tests PRIVATE
         "LINURA_DISPLAY_RESTORATION_FIXTURE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/../../../crates/linura-core/src/display_recovery/fixtures/original-baseline.txt\"")
+    target_compile_definitions(linura-security-owner-display-restoration-tests PRIVATE
+        "LINURA_DISPLAY_FINALIZATION_FIXTURE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/../../../crates/linura-core/src/display_recovery/fixtures/original-finalization.txt\"")
     target_compile_options(linura-security-owner-display-restoration-tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
     add_test(NAME security-owner-display-restoration-boundary COMMAND linura-security-owner-display-restoration-tests)
     set_tests_properties(security-owner-display-restoration-boundary PROPERTIES TIMEOUT 10)

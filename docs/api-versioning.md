@@ -405,6 +405,14 @@ The separate private Experimental `LNRF:1` material preserves the complete origi
 old Apply nor restoration bindings. Complete material and its digest are
 comparison data, not execution authority; they change no durable record.
 
+The owner has a bounded private `LNRF:1` reader with a shared canonical core
+fixture. It preserves complete nested restoration bytes, rejects original-purpose
+correlations and foreign login epochs, and compares the restored layout/source
+guard, exact current lock and post-write epoch against supplied current native
+facts. Public aggregate encoding is bounded before allocation. This comparison
+does not attest Root continuity or physical frames, arm a protected purpose or
+release any protection. Existing Apply/Recovery scope parsers refuse these bytes.
+
 The internal read-only `inspect_original_display_finalization` API returns an
 expiring material/evidence report only after exact authenticated linked retirement
 and a new independent canonical restoration proof. It reads history again after

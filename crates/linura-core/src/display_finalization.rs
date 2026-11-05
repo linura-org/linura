@@ -253,6 +253,10 @@ mod tests {
     fn terminal_framing_is_bounded_canonical_complete_and_purpose_distinct() {
         let old = value(DisplayRestorationMaterial::decode(original()));
         let text = value(material(old.replacement().lock(), 29));
+        assert_eq!(
+            text,
+            include_str!("display_recovery/fixtures/original-finalization.txt").trim_end()
+        );
         for length in 0..text.len() {
             assert!(DisplayFinalizationMaterial::decode(&text[..length]).is_err());
         }

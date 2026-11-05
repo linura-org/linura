@@ -7,6 +7,7 @@
 #include <algorithm>
 
 using namespace Linura::SecurityOwner;
+void terminalMaterialBoundaries();
 namespace {
 QString frame(const std::vector<QString> &fields)
 {
@@ -231,4 +232,5 @@ int main()
     assert(expired.beginDisplay(scope, ready, 999));
     now = 1000;
     assert(!expired.nativePrompt(scope) && !expired.consume(scope));
+    terminalMaterialBoundaries();
 }

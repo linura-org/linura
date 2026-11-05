@@ -88,6 +88,14 @@ This initial inspection requires the exact restoration lock identity; current
 owner/generation replacement fails closed. A fresh lock in the codec alone does
 not qualify that path.
 
+The owner's bounded terminal comparison reader now shares an exact `LNRF:1`
+fixture with canonical core tests. It checks unchanged nested restoration,
+purpose-distinct correlations and same-login current lock, and can compare a
+restored native snapshot/source guard and post-write epoch. Changed public
+aggregate fields are bounded before encoding. This arms no protected native
+purpose and supplies no Root/physical-frame attestation or release authority;
+existing Apply/Recovery parsers continue to reject terminal material.
+
 The separate operation registration has ManagedExternalEffect semantics and a
 trusted SecuritySensitive floor. Non-executable canonical planning requires a
 private principal/request-bound context built from actual linked history; generic
