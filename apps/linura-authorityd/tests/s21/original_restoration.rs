@@ -2,7 +2,9 @@
 //! native compositor, original kernel witnesses, PAM or independent restoration.
 use super::*;
 use linura_control::{
-    AuthorizedOriginalDisplayRestoration, OriginalDisplayFinalizationRequest,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRestoration,
+    OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
+    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationRequest,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationRequest,
 };
 use linura_core::DisplayRecoveryScope;
@@ -307,8 +309,8 @@ impl Observer for RestorationObserver {
                     output,
                     linura_observation::DisplayPostWriteFrame::Presented {
                         crtc: 7,
-                        framebuffer: 42,
-                        commit: 99,
+                        framebuffer: 42 + m.restoration_frame_version,
+                        commit: 99 + u64::from(m.restoration_frame_version),
                     },
                 )
             })
@@ -525,6 +527,290 @@ fn original_restoration_is_one_use_across_restart_and_never_commits_from_a_reply
         assert_eq!(m.applies, 1);
         assert_eq!(m.decisions, 0);
     }
+    terminal_finalization_is_separately_authorized_prepared_and_never_replayed();
+}
+
+#[derive(Debug)]
+struct TerminalApproval(Arc<Mutex<Machine>>, u8);
+impl OriginalDisplayFinalizationAuthorizer for TerminalApproval {
+    fn authorize_finalization(
+        &self,
+        challenge: &OriginalDisplayFinalizationChallenge,
+    ) -> Result<TrustedHumanApproval, String> {
+        let managed = challenge.managed();
+        assert_eq!(managed.change_key(), "finalize_original");
+        assert_eq!(
+            managed.approval_class(),
+            linura_control::ManagedApprovalClass::Administrator
+        );
+        assert!(
+            managed
+                .request_id()
+                .as_str()
+                .starts_with("request:v010:display-finalization:")
+        );
+        assert_eq!(
+            managed.desired_value().as_bytes(),
+            value(linura_provider_sdk::display_finalization_effect(
+                challenge.material()
+            ))
+            .canonical_payload
+        );
+        let mut m = self
+            .0
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        m.finalization_approvals += 1;
+        match self.1 {
+            1 => return Err("simulated protected terminal cancellation".into()),
+            2 => m.restoration_proof_fault = 8,
+            3 => m.native_base_drift = true,
+            4 => {
+                return Ok(TrustedHumanApproval::from_privileged_local_boundary(
+                    managed.principal().clone(),
+                ));
+            }
+            5 => {
+                return Ok(TrustedHumanApproval::from_authorized_challenge(
+                    value(PrincipalId::new("unix:uid:99999")),
+                    managed,
+                ));
+            }
+            // A later genuinely valid frame changes current proof, not the
+            // reviewed source/epoch/lock or the complete release intent.
+            _ => m.restoration_frame_version += 1,
+        }
+        Ok(TrustedHumanApproval::from_authorized_challenge(
+            managed.principal().clone(),
+            managed,
+        ))
+    }
+}
+#[derive(Debug)]
+struct TerminalPort(Arc<Mutex<Machine>>);
+impl OriginalDisplayFinalizationPort for TerminalPort {
+    fn dispatch_finalization(
+        &mut self,
+        finalization: AuthorizedOriginalDisplayFinalization,
+    ) -> Result<ExecutionOutcome, String> {
+        let (authorization, material, deadline) = finalization.into_executor_request();
+        assert!(deadline > now_unix_ms() && deadline - now_unix_ms() <= 15_000);
+        let (effect, binding) = authorization.into_executor_request();
+        assert_eq!(
+            effect,
+            value(linura_provider_sdk::display_finalization_effect(&material))
+        );
+        value(binding.validate_for(&effect));
+        value(linura_linux_session::NativeDisplayFinalizationReservation::new(&material, &binding));
+        let mut m = self
+            .0
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_ne!(
+            binding.dispatch_digest,
+            m.restoration_binding
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("restoration binding"))
+                .dispatch_digest
+        );
+        m.finalization_calls += 1;
+        if m.finalization_outcome == 1 {
+            return Err("simulated terminal lost reply".into());
+        }
+        ExecutionOutcome::new(
+            if m.finalization_outcome == 2 {
+                ExecutionDisposition::RejectedBeforeDispatch
+            } else {
+                ExecutionDisposition::Dispatched
+            },
+            if m.finalization_outcome == 3 {
+                linura_provider_sdk::ComponentDigest::from_bytes([9; 32])
+            } else {
+                binding.dispatch_digest
+            },
+            "simulated terminal handoff; no native quiescence or release",
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+// Called by the existing one-use/restart qualification case. Fresh independent
+// databases avoid reviving the earlier matrix's permanently lost Root witness.
+fn terminal_finalization_is_separately_authorized_prepared_and_never_replayed() {
+    for (outcome, approval_fault, fail_at, history_fault) in [
+        (0, 0, 0, 0),
+        (1, 0, 0, 0),
+        (2, 0, 0, 0),
+        (3, 0, 0, 0),
+        (0, 1, 0, 0),
+        (0, 2, 0, 0),
+        (0, 3, 0, 0),
+        (0, 4, 0, 0),
+        (0, 5, 0, 0),
+        (0, 0, 1, 0),
+        (0, 0, 2, 0),
+        (0, 0, 3, 0),
+        (0, 0, 4, 0),
+        (0, 0, 5, 0),
+        (0, 0, 0, 1),
+        (0, 0, 0, 2),
+        (0, 0, 0, 3),
+        (0, 0, 0, 4),
+        (0, 0, 0, 5),
+        (0, 0, 0, 6),
+    ] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine {
+            finalization_outcome: outcome,
+            ..Machine::default()
+        }));
+        let (original, input) = prepare_original(&database, &machine);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, 0, previews);
+        let receipt = value(control.begin_original_display_restoration(
+            principal(),
+            actor(true),
+            input.clone(),
+            &approval(),
+            &mut Executor(machine.clone()),
+        ));
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_native_verified = true;
+        value(control.reconcile_original_display_restoration(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        let linked = value(control.retire_original_display_restoration(
+            principal(),
+            actor(true),
+            &receipt.request_id,
+        ));
+        drop(control);
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .finalization_history_fault = history_fault;
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, fail_at, previews);
+        let terminal_input = finalization_input(&receipt.request_id);
+        let result = control.begin_original_display_finalization(
+            principal(),
+            actor(true),
+            terminal_input.clone(),
+            &TerminalApproval(machine.clone(), approval_fault),
+            &mut TerminalPort(machine.clone()),
+        );
+        let handoff = approval_fault == 0 && fail_at == 0 && history_fault == 0;
+        assert_eq!(
+            result.is_ok(),
+            handoff && outcome != 3,
+            "outcome {outcome}, approval {approval_fault}, write {fail_at}, history {history_fault}"
+        );
+        assert_eq!(
+            snapshot(&database, &original_transaction_id(&original)),
+            linked.original
+        );
+        assert_eq!(
+            snapshot(&database, &receipt.transaction_id),
+            linked.restoration
+        );
+        {
+            let m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            assert_eq!(m.finalization_calls, usize::from(handoff));
+            assert_eq!(m.restoration_calls, 1);
+            assert_eq!(m.applies, 1);
+            assert_eq!(m.decisions, 0);
+        }
+        // All acknowledgement dispositions remain durable uncertainty. A new
+        // process has no live providers and no authorizer able to approve.
+        if handoff || fail_at >= 4 || matches!(history_fault, 3 | 5 | 6) {
+            let retained = value(control.begin_original_display_finalization(
+                principal(),
+                actor(true),
+                terminal_input.clone(),
+                &TerminalApproval(machine.clone(), 1),
+                &mut TerminalPort(machine.clone()),
+            ));
+            assert_eq!(
+                snapshot(&database, &retained.transaction_id).state,
+                if handoff || fail_at == 5 || matches!(history_fault, 3 | 6) {
+                    linura_transaction::TransactionState::Indeterminate
+                } else {
+                    linura_transaction::TransactionState::Prepared
+                }
+            );
+            assert_eq!(
+                retained.dispatch_digest.is_some(),
+                handoff || history_fault == 6
+            );
+            drop(control);
+            let mut restarted = open(database.path(), &machine, 0);
+            let duplicate = restarted.begin_original_display_finalization(
+                principal(),
+                actor(true),
+                terminal_input.clone(),
+                &TerminalApproval(machine.clone(), 1),
+                &mut TerminalPort(machine.clone()),
+            );
+            if !handoff && (fail_at == 4 || history_fault == 5) {
+                // Preserve qualified v0.6 startup behavior: never-dispatched
+                // Prepared authority is aborted, not resurrected for retry.
+                assert!(duplicate.is_err());
+                assert_eq!(
+                    snapshot(&database, &retained.transaction_id).state,
+                    linura_transaction::TransactionState::Aborted
+                );
+            } else {
+                assert_eq!(value(duplicate), retained);
+            }
+            let mut changed = terminal_input.clone();
+            changed.reason.summary.push_str(" changed");
+            assert!(
+                restarted
+                    .begin_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        changed,
+                        &TerminalApproval(machine.clone(), 0),
+                        &mut TerminalPort(machine.clone())
+                    )
+                    .is_err()
+            );
+            let sampled = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .sequence;
+            let mut superseding = terminal_input;
+            superseding.operation_id.push_str("-another");
+            assert!(
+                restarted
+                    .begin_original_display_finalization(
+                        principal(),
+                        actor(true),
+                        superseding,
+                        &TerminalApproval(machine.clone(), 0),
+                        &mut TerminalPort(machine.clone())
+                    )
+                    .is_err()
+            );
+            let m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            assert_eq!(m.sequence, sampled);
+            assert_eq!(m.finalization_calls, usize::from(handoff));
+            assert_eq!(m.finalization_approvals, 1);
+        }
+    }
+}
+fn original_transaction_id(original: &PlanDesiredStateRequest) -> TransactionId {
+    TransactionId::for_namespace(
+        &value(PrincipalId::new(principal().as_str())),
+        &original.request_id,
+    )
 }
 #[derive(Debug)]
 struct DriftApproval(Arc<Mutex<Machine>>, bool);

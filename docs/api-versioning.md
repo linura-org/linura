@@ -442,8 +442,33 @@ SDK descriptor-from-payload helper validates only comparison syntax and scope.
 Neither a client-authored digest nor raw material can establish the authenticated
 history context. Planning repeats all independent probes and durable readback,
 preserves provenance, returns a non-executable canonical plan and retires context
-on every exit. It activates no protected purpose, prepare, executor/native release
-endpoint, public D-Bus/SDK facade or production mutation support.
+on every exit. Generic preview cannot establish its private context.
+
+The internal `begin_original_display_finalization` API adds a separate typed
+terminal authorizer/challenge and one-use prepared port. The challenge carries the
+complete bounded material alongside its exact managed canonical digest binding;
+old restoration/Apply/Keep/Revert/unlock/power approval cannot substitute. Fresh
+history and all independent observations are reloaded after interaction, with
+unchanged intent semantics and original contributor expiries required. Nested
+observation IDs and later valid frame counters remain exact evidence in the
+observation binding; they do not become different human intent.
+
+The existing authenticated opaque journal retains complete material under
+`linura.display.original-finalization-material.v1` (16 KiB maximum). A separate
+`linura.display.original-finalization-owner.v1` record (1 KiB maximum) binds one
+restoration to its terminal request/digest/material. Existing formats, quotas and
+immutability remain unchanged. Exact readback of request/material/owner and
+reserved/dispatched phases is required before the sealed port; history, owner and
+the candidate's original freshness are checked again at handoff. Another operation
+ID requires qualified supersession, which this API does not implement.
+
+An existing prepared/dispatched request is observation-only, including after
+persistence failure, rejected or lost native replies. Its receipt is retained
+uncertainty, never independent completion or release authority. No native terminal
+purpose, production executor/native release endpoint, public D-Bus/SDK facade or
+production mutation support is activated by this Control component.
+Never-dispatched Prepared authority still becomes Aborted at startup under the
+qualified v0.6 recovery rule; this API refuses revival or redispatch.
 
 ### Session1 bounded transient-effect contract
 

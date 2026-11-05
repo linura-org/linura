@@ -97,8 +97,27 @@ post-write epoch and lock against complete material, then re-reads durable ancho
 It preserves the original provenance and performs no durable transition. Failed
 planning retires the private context just as successful planning does.
 
-No protected purpose, prepared terminal handoff, executor endpoint, Root retirement
-or native release is activated. The terminal managed workflow, native/Root quiescence and
+Control additionally implements a separate typed terminal challenge/authorizer and
+prepared one-use handoff. Full material must recompute the canonical digest before
+protected review; actual linked history and independent facts are reloaded after
+interaction. Exact fresh evidence remains bound into the refreshed candidate and
+durable prepare. Volatile nested observation IDs and valid later physical frame
+counters are evidence, not new human intent; only those already-validated finding
+projections are normalized, with exact complete evidence retained in the terminal
+observation digest. Source, post-write epoch, lock and lineage must remain equal.
+
+Complete material is retained in a bounded versioned opaque journal record before
+prepare. A separate small immutable owner record binds the restoration to one
+terminal request/digest/material. Another operation ID cannot silently supersede
+it; explicit qualified supersession remains separate. Request, material, owner,
+reservation and dispatch readback precede the one-use port. Prepared/dispatched
+duplicates never repeat approval or effects. Qualified v0.6 startup behavior still
+aborts never-dispatched Prepared authority; this API cannot revive it.
+Indeterminate duplicates return retained uncertainty, including after lost replies
+or native refusal. No reply commits completion.
+
+No native protected terminal purpose, production executor endpoint, Root retirement
+or native release is activated. The remaining terminal managed workflow, native/Root quiescence and
 finalization, normal Keep/Revert ordering, Committed adoption, safe supersession
 and reference-aware cleanup still require coherent implementation.
 

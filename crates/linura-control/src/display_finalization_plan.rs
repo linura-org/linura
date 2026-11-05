@@ -217,6 +217,38 @@ impl PlanPreviewControl {
             ));
         }
         let mut findings = proof.plan.findings;
+        // Exact fresh contributor bytes remain in the observation digest below.
+        // They are not stable human intent: a nested evidence ID or a later
+        // valid frame cannot manufacture a different release operation. Retain
+        // every finding, replacing only these two already-validated projections.
+        let mut observations = 0;
+        let mut presentations = 0;
+        for finding in &mut findings {
+            if finding.code == "authoritative-observation" {
+                observations += 1;
+                finding.code = "display-terminal-restoration-proof".into();
+                finding.message = "Fresh canonical five-source restoration proof; exact contributors remain bound in the terminal observation".into();
+            } else if finding.code
+                == format!(
+                    "native-display-{}",
+                    linura_observation::DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY
+                )
+            {
+                presentations += 1;
+                finding.message = format!(
+                    "Fresh physical post-write proof for restoration {} / checkpoint {} / source {} / epoch {} and its complete output inventory",
+                    material.restoration_request().as_str(),
+                    material.restoration().original_checkpoint(),
+                    material.restored_source_guard(),
+                    material.post_write_epoch()
+                );
+            }
+        }
+        if observations != 1 || presentations != 1 {
+            return Err(fail(
+                "terminal canonical restoration proof contributors changed",
+            ));
+        }
         findings.push(crate::display_plan::native_finding(&mechanism));
         crate::plan_preview::restrict_session_validity(
             &mut mechanism,

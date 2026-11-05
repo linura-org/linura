@@ -1331,8 +1331,8 @@ terminal receipt, forged digests or a truncated/oversized terminal intent as
 permission to release protection. Separate bounded `LNRF:1` material preserves
 the old `LNRI:1` bytes and uses a distinct effect/reservation domain; none of these
 data formats is an approval or executor credential. Registered terminal planning
-is non-executable; protected terminal authorization, prepared handoff and Root/native
-release endpoints remain unavailable.
+is non-executable. The separate Control authorization/prepare path cannot activate
+the still-unavailable native protected terminal purpose or Root/native release endpoint.
 
 The read-only Control inspection loads actual authenticated requests, exact
 committed restoration and linked original retirement, complete phase history and
@@ -1372,8 +1372,32 @@ also re-reads all durable anchors. Failure after context admission still retires
 the context. Wrong capability/key/operation cannot turn restoration into terminal
 authority or downgrade its registered managed semantics and trusted risk floor.
 
-Fresh protected terminal review, canonical prepare/revalidation, authenticated
-native/Root quiescence and one-use release, lost-ack repair, current lock/input
-preservation and shared-ownership-aware retention still require implementation
-and native qualification. No report, parser test or simulated SQLite fixture is
-that qualification.
+The typed terminal challenge must bind both the complete material and its canonical
+managed digest before fresh protected administrator interaction. An unbound local
+approval, old-purpose proof or foreign principal refuses. After interaction,
+Control reloads actual linked history and every current fact. A nested observation
+ID or valid later frame is fresh evidence, not a new intent; exact contributor
+bytes remain in the fresh observation digest while the already-validated intent
+finding stays stable. Source, post-write epoch, lock, mapping and binding checks
+are unchanged, and stale/substituted physical proof still refuses.
+
+An attacker cannot retry ambiguity under another operation ID: an immutable
+per-restoration owner record binds the request/digest/complete material, with
+exact readback before prepare and handoff. Missing, corrupt, conflicting or unsafe
+history refuses; old material and quotas are not reinterpreted. Complete material
+is separately retained before prepare so restart cannot reconstruct it from a
+digest or conversation. The one-use port is delivered only after durable
+reservation/dispatch readback and original freshness/history checks. Failure
+after prepare remains non-replayable durable history; native acknowledgements and
+lost replies remain uncertainty. Never-dispatched Prepared authority is still
+aborted at startup under the qualified v0.6 rule. Duplicate calls cannot revive
+that authority, reapprove or redispatch, and no reply
+qualifies completion. Qualified supersession and reference-aware retirement remain
+separate, unimplemented workflows; owner records cannot be deleted to retry.
+
+The native protected terminal-purpose adapter, authenticated native/Root
+quiescence and one-use release, lost-ack repair, current lock/input preservation
+and shared-ownership-aware retention still require implementation and native
+qualification. Control's typed review and prepared handoff do not supply those
+native mechanisms. No report, parser test or simulated SQLite fixture is that
+qualification.

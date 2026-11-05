@@ -49,6 +49,11 @@ struct Machine {
     restoration_root_state_fault: u8,
     restoration_root_reads: usize,
     finalization_probe_fault_after: Option<usize>,
+    finalization_approvals: usize,
+    finalization_calls: usize,
+    finalization_outcome: u8,
+    restoration_frame_version: u32,
+    finalization_history_fault: u8,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -411,6 +416,52 @@ struct FailingJournal {
 }
 impl ApprovedRequestJournal for FailingJournal {
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+        let fault = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .finalization_history_fault;
+        if (fault == 1
+            && record
+                .request_id()
+                .as_str()
+                .starts_with("request:v010:display-finalization-material:"))
+            || (fault == 2
+                && record
+                    .request_id()
+                    .as_str()
+                    .starts_with("request:v010:display-finalization-owner:"))
+            || (fault == 3
+                && record
+                    .request_id()
+                    .as_str()
+                    .starts_with("request:v010:display-recovery:")
+                && record.request_id().as_str().ends_with(":dispatched"))
+            || (fault == 4
+                && record
+                    .request_id()
+                    .as_str()
+                    .starts_with("request:v010:display-finalization:"))
+            || (fault == 5
+                && record
+                    .request_id()
+                    .as_str()
+                    .starts_with("request:v010:display-recovery:")
+                && record.request_id().as_str().ends_with(":reserved"))
+        {
+            return Ok(());
+        } // Acknowledgement is not durable readback.
+        if fault == 6
+            && record
+                .request_id()
+                .as_str()
+                .starts_with("request:v010:display-recovery:")
+            && record.request_id().as_str().ends_with(":dispatched")
+        {
+            // Deliberately cross the unchanged two-second observation expiry
+            // after handoff bookkeeping. No stale authorization reaches a port.
+            std::thread::sleep(std::time::Duration::from_millis(2_100));
+        }
         if record
             .request_id()
             .as_str()

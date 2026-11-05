@@ -18,6 +18,7 @@ mod approval;
 mod approval_review;
 mod authority_clock;
 mod display_checkpoint;
+mod display_finalization_intent;
 mod display_finalization_plan;
 mod display_plan;
 mod display_recovery_journal;
@@ -81,15 +82,17 @@ pub use durable_authority::{
 };
 pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
-    AuthorizedEffectExecutor, AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS,
-    DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
-    DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
-    IndependentDisplayVerifier, IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY,
-    MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER,
-    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
-    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
-    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
-    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationRequest,
+    AuthorizedEffectExecutor, AuthorizedOriginalDisplayFinalization,
+    AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
+    DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
+    DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
+    IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN,
+    MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
+    MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer, ManagedApprovalChallenge,
+    ManagedApprovalClass, ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
+    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
+    OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
     TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,

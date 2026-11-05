@@ -6,13 +6,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod display;
 pub use display::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation,
-    AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
-    DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
-    DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
-    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationRequest,
-    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    TrustedDisplayDecision,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRestoration,
+    DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
+    DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
+    DisplayVerificationTarget, IndependentDisplayVerifier, OriginalDisplayFinalizationAuthorizer,
+    OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
+    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
+    OriginalDisplayFinalizationRequest, OriginalDisplayRestorationPort,
+    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
+    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
 };
 
 use linura_core::{

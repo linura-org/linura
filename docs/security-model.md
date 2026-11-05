@@ -761,9 +761,9 @@ unchanged nonterminal `LNRI:1` history and binds the restoration request/dispatc
 immutable link, restored source guard, post-write epoch and current login/lock.
 Its purpose-separated SDK effect and adapter reservation cannot validate an old
 Apply or restoration binding. A codec or reservation is never execution authority.
-The separate registered terminal operation currently supports non-executable
-canonical planning only; protected authorization, prepared terminal handoff and
-privileged/native release endpoints remain unavailable.
+The separate registered terminal operation supports canonical planning and an
+internal separately authorized/prepared Control handoff. Its native protected
+terminal-purpose adapter and privileged/native release endpoints remain unavailable.
 
 Control's read-only `inspect_original_display_finalization` authenticates both
 actual requests, exact committed restoration, reserved/dispatched history, link,
@@ -797,3 +797,26 @@ post-write epoch or lock drift, intersects original expiries, and re-reads linke
 history afterward. Registration and trusted risk classification require a
 SecuritySensitive ManagedExternalEffect; Apply, restoration, transient or local
 operation classes cannot substitute. No planning result is approval or prepare.
+
+The separate typed terminal authorizer receives Control's exact managed challenge
+and complete material, which must recompute the canonical digest. Policy allow,
+an unbound local approval or foreign principal cannot substitute for fresh exact
+protected administrator proof. Control reloads linked history and independently
+probes all facts after interaction, then compares the reviewed intent semantics.
+Exact nested observation IDs and valid later KMS/frame counters stay in the fresh
+observation binding; only their already-validated finding projections are kept
+stable for human intent comparison. Native/source/binding/epoch/lock checks remain.
+
+Before prepare, the existing authenticated journal immutably retains the canonical
+request, complete bounded versioned material and a small per-restoration owner
+record. Owner conflict prevents another operation ID from bypassing unresolved
+terminal authority. Qualified supersession, never deletion or a renewed old grant,
+is required to replace it. Material/owner and reserved/dispatched records must
+read back exactly. Actual linked history, material, owner and original candidate
+freshness are checked again before the sealed one-use handoff. Persistence loss,
+conflict or stale proof refuses without delivering a port call. Once prepared,
+duplicates are observation-only across restart; rejected/lost replies never mint
+another authorization or cause redispatch. The qualified v0.6 startup abort of
+never-dispatched Prepared authority remains intact; this API refuses to revive it.
+Returned indeterminate receipts remain uncertainty;
+no reply commits terminal completion or becomes native/Root release authority.
