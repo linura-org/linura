@@ -1346,19 +1346,35 @@ continuity refuse the report without effects or implicit bookkeeping repair.
 The current same-lock query refuses a replaced owner/generation. A previous
 successful report cannot freshen any contributor or authorize later release.
 
-Root separately exposes only retained `protected` state through authenticated
+Root separately exposes retained `protected` or `reserved` state through authenticated
 `ReadFinalization`, sharing the existing bounded read worker. It checks the same
 live original witnesses and replacement recovery admission before and after
 reading the complete immutable restoration reservation. Every retained directory
 entry is bounded and validated; duplicate scope, corruption, unsafe metadata and
 unknown history refuse without repair. The adapter authenticates the Root owner
 before and after the call within one probe budget and checks full nested codec
-identity. Control independently matches transaction, effect, dispatch and
+identity and the complete parent dispatch/request-transaction binding. Control independently matches transaction, effect, dispatch and
 checkpoint to durable history, then intersects this observation's expiry with the
 fresh canonical restoration proof. Neither a substituted reservation nor a forged
 released phase without terminal lineage can pass inspection. No current producer
 reports quiescence, retirement or release; future released-current evidence must
 also prove this Root invocation's live ordinary admission.
+
+An executor cannot reserve terminal work against a substituted parent or turn a
+lost publication reply into another attempt. Root verifies the actual supervised
+executor, original live witnesses and recovery admission before and after the
+bounded private operation. Complete restoration bytes, parent dispatch, canonical
+UID/request transaction and current lock must match the actual retained parent.
+The terminal directory scan requires that exact parent under the same lock;
+removing or replacing it refuses readback. Reservation first enters a bounded
+in-memory ownership map, then publishes an exclusive synced `LNRT:1` file under
+the unchanged 256-record quota. Missing/torn storage, failed sync/readback, expired
+dispatch and lost replies retain memory ownership; no retry, eviction, repair or
+release follows. A fresh operation ID cannot supersede the same restoration or
+current boot/UID/seat. Files alone cannot reconstruct this invocation's live
+reservation, and a reservation acknowledgement proves no native quiescence,
+retirement or current admission. Root/native release and qualified supersession
+remain separate unfinished requirements.
 
 A client may submit an otherwise valid terminal digest without the complete
 material or authenticated linked history. The canonical terminal recipe requires

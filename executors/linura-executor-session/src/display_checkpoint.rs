@@ -6,7 +6,10 @@ use std::io::{Read, Write};
 use std::os::fd::OwnedFd;
 use std::path::Component;
 
-use linura_linux_session::{NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation};
+use linura_linux_session::{
+    NativeDisplayFinalizationReservation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayRestorationReservation,
+};
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
 use sha2::{Digest, Sha256};
@@ -14,6 +17,7 @@ use sha2::{Digest, Sha256};
 const DIRECTORY: &str = "/var/lib/linura/display-recovery";
 const MAGIC: &[u8] = b"LNRJ:1\n";
 const RESTORATION_MAGIC: &[u8] = b"LNRR:1\n";
+const FINALIZATION_MAGIC: &[u8] = b"LNRT:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
@@ -22,24 +26,30 @@ const HEADER: usize = MAGIC.len() + 32 + 8;
 enum Kind {
     Original,
     Restoration,
+    Finalization,
 }
 impl Kind {
     fn prefix(self) -> &'static str {
         match self {
             Self::Original => "attempt-",
             Self::Restoration => "restoration-",
+            Self::Finalization => "finalization-",
         }
     }
     fn magic(self) -> &'static [u8] {
         match self {
             Self::Original => MAGIC,
             Self::Restoration => RESTORATION_MAGIC,
+            Self::Finalization => FINALIZATION_MAGIC,
         }
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
         match self {
             Self::Original => NativeDisplayRecoveryCheckpoint::stored_dispatch(payload),
             Self::Restoration => Ok(NativeDisplayRestorationReservation::decode(payload)?
+                .binding()
+                .dispatch_digest),
+            Self::Finalization => Ok(NativeDisplayFinalizationReservation::decode(payload)?
                 .binding()
                 .dispatch_digest),
         }
@@ -49,7 +59,7 @@ impl Kind {
     }
 }
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
-    for kind in [Kind::Original, Kind::Restoration] {
+    for kind in [Kind::Original, Kind::Restoration, Kind::Finalization] {
         let prefix = kind.prefix().as_bytes();
         if name.len() == prefix.len() + 64 + 11
             && name.starts_with(prefix)
@@ -241,6 +251,12 @@ fn reserve_kind_at(
     // publication across threads/processes. It stays held through both fsyncs.
     fs::flock(fd, FlockOperation::NonBlockingLockExclusive).map_err(|_| unavailable())?;
     let result = (|| {
+        let terminal = if kind == Kind::Finalization {
+            Some(NativeDisplayFinalizationReservation::decode(payload)?)
+        } else {
+            None
+        };
+        let mut parent_seen = false;
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -257,6 +273,39 @@ fn reserve_kind_at(
             // Inspect type before opening, so a malformed device/FIFO entry
             // cannot turn a history scan into a native device operation.
             let (old_kind, _, previous) = read_named_record(fd, uid, name)?;
+            if let Some(terminal) = &terminal {
+                let material = terminal.decoded_material()?;
+                if old_kind == Kind::Restoration {
+                    let retained = NativeDisplayRestorationReservation::decode(&previous)?;
+                    if retained
+                        .decoded_material()?
+                        .recovery_scope()
+                        .map_err(|error| error.to_string())?
+                        == material
+                            .recovery_scope()
+                            .map_err(|error| error.to_string())?
+                    {
+                        if parent_seen {
+                            return Err(unavailable());
+                        }
+                        terminal.validate_restoration(&retained)?;
+                        parent_seen = true;
+                    }
+                }
+                if old_kind == Kind::Finalization {
+                    let old = NativeDisplayFinalizationReservation::decode(&previous)?;
+                    let old = old.decoded_material()?;
+                    let new_scope = material.restoration().replacement().topology();
+                    let old_scope = old.restoration().replacement().topology();
+                    if material.restoration_dispatch() == old.restoration_dispatch()
+                        || (new_scope.session().boot() == old_scope.session().boot()
+                            && new_scope.session().uid() == old_scope.session().uid()
+                            && new_scope.seat() == old_scope.seat())
+                    {
+                        return Err(unavailable()); // Explicit qualified supersession only.
+                    }
+                }
+            }
             if kind == Kind::Restoration && old_kind == Kind::Restoration {
                 let new = NativeDisplayRestorationReservation::decode(payload)?;
                 let old = NativeDisplayRestorationReservation::decode(&previous)?;
@@ -275,6 +324,9 @@ fn reserve_kind_at(
                     return Err(unavailable());
                 }
             }
+        }
+        if terminal.is_some() && !parent_seen {
+            return Err(unavailable());
         }
         let name = kind.name(dispatch);
         let record = fs::openat(
@@ -323,6 +375,94 @@ pub(super) fn reserve_restoration(
         &record.canonical_bytes(),
         Kind::Restoration,
     )
+}
+
+pub(super) fn reserve_finalization(
+    record: &NativeDisplayFinalizationReservation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::Finalization,
+    )
+}
+
+fn read_finalization_at(
+    fd: &OwnedFd,
+    uid: u32,
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayFinalizationReservation>, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let scope = retained
+            .decoded_material()?
+            .recovery_scope()
+            .map_err(|error| error.to_string())?;
+        let mut found = None;
+        let mut parent_seen = false;
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
+            if kind == Kind::Restoration {
+                let parent = NativeDisplayRestorationReservation::decode(&bytes)?;
+                if parent
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|error| error.to_string())?
+                    == scope
+                {
+                    if parent_seen || bytes != retained.canonical_bytes() {
+                        return Err(unavailable());
+                    }
+                    parent_seen = true;
+                }
+            }
+            if kind != Kind::Finalization {
+                continue;
+            }
+            let terminal = NativeDisplayFinalizationReservation::decode(&bytes)?;
+            if terminal
+                .decoded_material()?
+                .recovery_scope()
+                .map_err(|error| error.to_string())?
+                == scope
+            {
+                if found.is_some() {
+                    return Err(unavailable());
+                }
+                terminal.validate_restoration(retained)?;
+                found = Some(terminal);
+            }
+        }
+        if !parent_seen {
+            return Err(unavailable());
+        }
+        Ok(found)
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        _ => Err(unavailable()),
+    }
+}
+
+/// Reservation comparison only. The caller verifies actual original live
+/// witnesses and current recovery startup before/after; no release proof exists.
+pub(super) fn read_finalization(
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayFinalizationReservation>, String> {
+    read_finalization_at(&open()?, 0, retained)
 }
 
 fn read_restoration_at(

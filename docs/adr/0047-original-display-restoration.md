@@ -352,6 +352,20 @@ remains unresolved without replay or automatic cleanup.
 
 ## Compatibility and qualification
 
+Root terminal reservation is a separate narrow mechanism. It admits the actual
+supervised executor, compares the complete retained restoration and its canonical
+UID/request transaction, parent dispatch and exact lock, and uses the existing
+absolute dispatch bounds and shared worker/transfer slots. A bounded one-use
+in-memory reservation precedes exclusive synced `LNRT:1` publication under the
+unchanged private 256-record quota. Failed publication, sync, readback or liveness
+checks retain ownership; neither missing files nor a new operation ID permit a
+second attempt or ordinary startup. Readback requires the exact parent during
+the same locked scan. `ReadFinalization` reports `reserved` only when the complete
+file matches this Root invocation's memory and current original protection;
+files alone cannot reconstruct that lifetime. Existing `LNRJ:1` and `LNRR:1`
+remain immutable and unchanged. This reservation acknowledgement releases no
+protection and supplies no quiescence, retirement or current-admission proof.
+
 Experimental wire changes update all in-repository consumers together. Original
 durable checkpoints and Control history remain immutable and retain their
 original version/meaning. A legacy record that cannot establish complete native

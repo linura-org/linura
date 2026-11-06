@@ -442,16 +442,33 @@ scope (`s`) and returns the complete immutable restoration reservation (`ay`),
 closed phase (`u`) and optional terminal reservation (`ay`). It admits only the
 freshly attested supervised Control process, shares the existing original-read
 worker limit, and uses the ordinary 64 KiB reply limit and original two-second
-probe budget. The current Root producer returns only phase 0 (`protected`) with
-empty terminal bytes after checking live original witnesses and replacement
-recovery admission before and after strict history readback. Unknown, duplicate,
-corrupt or unsafe history refuses without repair or deletion.
+probe budget. The current Root producer returns phase 0 (`protected`) with empty
+terminal bytes, or phase 1 (`reserved`) only when this Root invocation's retained
+reservation matches the exact durable terminal record. It checks live original
+witnesses and replacement recovery admission before and after strict history
+readback. The terminal scan requires the same complete parent restoration under
+its directory lock. Unknown, duplicate, corrupt or unsafe history refuses without
+repair or deletion.
+
+The private Experimental `DisplayProtection1.ReserveFinalization` accepts the
+complete bounded terminal reservation and unchanged absolute dispatch/sample
+clocks (`aytt`), returning only a reservation acknowledgement (`b`). It admits only
+the freshly attested supervised executor and shares the restoration worker and
+transfer limits. The complete nested restoration, parent dispatch, canonical
+UID/request transaction and exact current lock must match Root's actual retained
+restoration. An immutable `LNRT:1` record uses the existing 256-record private
+quota; `LNRJ:1` and `LNRR:1` retain their bytes and meaning. A bounded in-memory
+reservation is recorded before publication and retained after failed publication
+or readback. Missing storage cannot permit retry or ordinary startup. Existing
+restoration/current-seat ownership cannot be superseded by a fresh operation ID.
+No acknowledgement grants quiescence, retirement or release.
 
 The adapter emits the canonical `display.original-finalization.observe`
 `ObservationEnvelope`; full restoration/terminal codecs and unchanged nested
-restoration bytes are mandatory for future terminal phases. Reserved, quiesced,
-retired and released-current are comparison states only, with no current Root
-producer. A historical spent record cannot supply released-current admission.
+restoration bytes and the complete actual-parent binding are mandatory for
+terminal phases. Quiesced, retired and released-current remain comparison states
+with no current Root producer. A historical spent record cannot supply
+released-current admission.
 Control's inspection matches these new Root facts to actual authenticated history
 and joins the independent five-source proof without extending either expiry.
 The report includes the canonical restoration postcondition digest, not a permit.

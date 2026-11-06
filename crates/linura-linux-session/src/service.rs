@@ -314,6 +314,24 @@ impl NativeSessionChannel {
         Ok(descriptor)
     }
 
+    /// Root's exclusive durable terminal reservation, not a release grant.
+    /// Actual original protection remains mandatory; ambiguous calls never retry.
+    pub fn reserve_display_finalization(
+        &self,
+        record: &crate::NativeDisplayFinalizationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> Result<(), String> {
+        self.display_protection_call(
+            "ReserveFinalization",
+            &(
+                record.canonical_bytes(),
+                dispatch_deadline_unix_ms,
+                sampled_boot_ms,
+            ),
+        )
+    }
+
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
         self.display_protection_call("Verify", &(dispatch.to_hex(),))
     }

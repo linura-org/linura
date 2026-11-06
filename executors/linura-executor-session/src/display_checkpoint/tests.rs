@@ -390,7 +390,18 @@ fn startup_never_ignores_retained_unknown_or_busy_history() {
 }
 
 pub(crate) fn restoration(original: u8, attempt: u8) -> NativeDisplayRestorationReservation {
-    let old = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3".replace("seat0",if original==4 {"seat1"} else {"seat0"});
+    restoration_on_seat(
+        original,
+        attempt,
+        if original == 4 { "seat1" } else { "seat0" },
+    )
+}
+fn restoration_on_seat(
+    original: u8,
+    attempt: u8,
+    seat: &str,
+) -> NativeDisplayRestorationReservation {
+    let old = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3".replace("seat0",seat);
     let new = old.replace("c2:42", "c3:99").replace(
         "33333333-3333-4333-8333-333333333333",
         "44444444-4444-4444-8444-444444444444",
@@ -606,4 +617,233 @@ fn read_only_restoration_lookup_refuses_unknown_or_duplicate_history_without_rep
             !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
         );
     }
+}
+
+// Synthetic metadata correlation only; no live Root/PAM/native evidence.
+pub(crate) fn terminal(
+    original: u8,
+    attempt: u8,
+    terminal: u8,
+    seat: &str,
+) -> (
+    NativeDisplayRestorationReservation,
+    NativeDisplayFinalizationReservation,
+) {
+    let source = restoration_on_seat(original, attempt, seat);
+    let request =
+        linura_core::RequestId::new(format!("request:v010:display-restoration:r-{attempt}"))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    let mut hash = Sha256::new();
+    for field in [
+        "linura.transaction.id.v1",
+        "unix:uid:1000",
+        request.as_str(),
+    ] {
+        hash.update((field.len() as u64).to_be_bytes());
+        hash.update(field.as_bytes());
+    }
+    let transaction = format!(
+        "transaction:v1:{}",
+        ComponentDigest::from_bytes(hash.finalize().into()).to_hex()
+    );
+    let effect = linura_provider_sdk::display_restoration_effect(source.material())
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = linura_provider_sdk::ExecutionBinding::new(
+        transaction,
+        0,
+        1,
+        source.binding().authority_binding_digest,
+        source.binding().authority_use_digest,
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let retained = NativeDisplayRestorationReservation::new(source.material(), &binding)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let material = retained
+        .decoded_material()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let text = linura_core::DisplayFinalizationMaterial::encode(
+        &request,
+        &retained.binding().dispatch_digest.to_hex(),
+        &"e".repeat(64),
+        &"f".repeat(64),
+        1,
+        material.replacement().lock(),
+        retained.material(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let effect = linura_provider_sdk::display_finalization_effect(&text)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = linura_provider_sdk::ExecutionBinding::new(
+        format!("transaction:terminal-{terminal}"),
+        0,
+        1,
+        ComponentDigest::from_bytes([1; 32]),
+        ComponentDigest::from_bytes([terminal; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let finalization = NativeDisplayFinalizationReservation::new(&text, &binding)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    (retained, finalization)
+}
+fn reserve_terminal(
+    fixture: &Fixture,
+    record: &NativeDisplayFinalizationReservation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &fixture.fd,
+        fixture.uid,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::Finalization,
+    )
+}
+#[test]
+fn terminal_reservation_needs_actual_parent_and_is_immutable_exclusive_and_reopenable() {
+    let fixture = Fixture::new();
+    let (parent, record) = terminal(1, 2, 3, "seat0");
+    assert!(record.validate_restoration(&parent).is_ok());
+    assert!(reserve_terminal(&fixture, &record).is_err());
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(
+        read_finalization_at(&fixture.fd, fixture.uid, &parent)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .is_none()
+    );
+    assert!(reserve_terminal(&fixture, &record).is_ok());
+    let observed = read_finalization_at(&fixture.fd, fixture.uid, &parent)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        observed.map(|value| value.canonical_bytes()),
+        Some(record.canonical_bytes())
+    );
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        read_finalization_at(&reopened, fixture.uid, &parent)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .is_some()
+    );
+    assert!(reserve_terminal(&fixture, &record).is_err());
+    let (_, competing) = terminal(1, 2, 4, "seat0");
+    assert!(reserve_terminal(&fixture, &competing).is_err());
+    assert!(read_finalization_at(&fixture.fd, fixture.uid + 1, &parent).is_err());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    let name = fixture
+        .path
+        .join(Kind::Finalization.name(&record.binding().dispatch_digest));
+    let original = std::fs::read(&name).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(original.starts_with(FINALIZATION_MAGIC));
+    assert_eq!(&original[HEADER..], record.canonical_bytes());
+}
+#[test]
+fn corrupted_or_substituted_terminal_history_blocks_all_reads_and_reservations_without_repair() {
+    for fault in 0..7 {
+        let fixture = Fixture::new();
+        let (parent, record) = terminal(1, 2, 3, "seat0");
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_terminal(&fixture, &record).is_ok());
+        let name = fixture
+            .path
+            .join(Kind::Finalization.name(&record.binding().dispatch_digest));
+        let original = std::fs::read(&name).unwrap_or_else(|e| unreachable!("{e}"));
+        match fault {
+            0 => std::fs::set_permissions(&name, std::fs::Permissions::from_mode(0o644))
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            1 => std::fs::write(&name, b"torn terminal reservation")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            2 => {
+                let mut changed = original.clone();
+                changed.push(0);
+                std::fs::write(&name, &changed).unwrap_or_else(|e| unreachable!("{e}"));
+            }
+            3 => {
+                let mut changed = original.clone();
+                changed[HEADER] ^= 1;
+                std::fs::write(&name, &changed).unwrap_or_else(|e| unreachable!("{e}"));
+            }
+            4 => std::fs::hard_link(&name, fixture.path.join("linked-terminal"))
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            5 => {
+                std::fs::remove_file(&name).unwrap_or_else(|e| unreachable!("{e}"));
+                std::os::unix::fs::symlink(
+                    fixture
+                        .path
+                        .join(Kind::Restoration.name(&parent.binding().dispatch_digest)),
+                    &name,
+                )
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            }
+            _ => {
+                std::fs::rename(
+                    &name,
+                    fixture
+                        .path
+                        .join(Kind::Original.name(&record.binding().dispatch_digest)),
+                )
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            }
+        }
+        assert!(read_finalization_at(&fixture.fd, fixture.uid, &parent).is_err());
+        let scope = parent
+            .decoded_material()
+            .and_then(|value| value.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(read_restoration_at(&fixture.fd, fixture.uid, &scope).is_err());
+        assert!(reserve_terminal(&fixture, &record).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+        );
+    }
+}
+#[test]
+fn terminal_readback_requires_the_same_actual_parent_during_its_locked_scan() {
+    for substitute in [false, true] {
+        let fixture = Fixture::new();
+        let (parent, record) = terminal(1, 2, 3, "seat0");
+        assert!(read_finalization_at(&fixture.fd, fixture.uid, &parent).is_err());
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_terminal(&fixture, &record).is_ok());
+        std::fs::remove_file(
+            fixture
+                .path
+                .join(Kind::Restoration.name(&parent.binding().dispatch_digest)),
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        if substitute {
+            let (other, _) = terminal(1, 4, 5, "seat0");
+            assert_ne!(other.canonical_bytes(), parent.canonical_bytes());
+            assert!(reserve_recovery(&fixture, &other).is_ok());
+        }
+        assert!(read_finalization_at(&fixture.fd, fixture.uid, &parent).is_err());
+        assert!(reserve_terminal(&fixture, &record).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+        );
+    }
+}
+#[test]
+fn terminal_reservation_does_not_increase_or_evict_full_checkpoint_quota() {
+    let fixture = Fixture::new();
+    let (parent, record) = terminal(1, 2, 3, "seat0");
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    for byte in 1..=255u8 {
+        assert!(
+            fixture
+                .reserve(byte, b"bounded retained quota fixture")
+                .is_ok()
+        );
+    }
+    assert!(reserve_terminal(&fixture, &record).is_err());
+    assert_eq!(
+        std::fs::read_dir(&fixture.path)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .count(),
+        MAX_RECORDS
+    );
 }

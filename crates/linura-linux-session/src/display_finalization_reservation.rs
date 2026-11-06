@@ -2,6 +2,7 @@
 //! no protection and cannot replace Control's freshly prepared sealed handoff.
 use linura_core::{DisplayFinalizationMaterial, MAX_DISPLAY_FINALIZATION_BYTES};
 use linura_provider_sdk::{ComponentDigest, ExecutionBinding, display_finalization_effect};
+use sha2::{Digest, Sha256};
 
 const DOMAIN: &str = "linura.native-display.finalization-reservation.v1";
 pub const MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION: usize = 16 * 1024;
@@ -106,6 +107,41 @@ impl NativeDisplayFinalizationReservation {
         }
         Ok(record)
     }
+    /// Exact comparison with Root's actual immutable retained restoration.
+    /// This does not prove current native frames, approval, quiescence or release.
+    pub fn validate_restoration(
+        &self,
+        retained: &crate::NativeDisplayRestorationReservation,
+    ) -> Result<(), String> {
+        let material = self.decoded_material()?;
+        let original = retained.decoded_material()?;
+        let principal = format!("unix:uid:{}", original.replacement().lock().epoch().uid());
+        let mut hash = Sha256::new();
+        // Canonical transaction namespace comparison, shared with Control and
+        // the native held-scene reader. These bytes alone authenticate no identity.
+        for field in [
+            "linura.transaction.id.v1",
+            &principal,
+            material.restoration_request().as_str(),
+        ] {
+            hash.update((field.len() as u64).to_be_bytes());
+            hash.update(field.as_bytes());
+        }
+        let transaction = format!(
+            "transaction:v1:{}",
+            ComponentDigest::from_bytes(hash.finalize().into()).to_hex()
+        );
+        if material.restoration_text() != retained.material()
+            || material.restoration_dispatch() != retained.binding().dispatch_digest.to_hex()
+            || material.current_lock() != original.replacement().lock()
+            || transaction != retained.binding().transaction_id
+            || self.binding.transaction_id == retained.binding().transaction_id
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -235,5 +271,129 @@ mod tests {
             .material()
             .replacen(&"3".repeat(64), &"4".repeat(64), 1);
         assert!(NativeDisplayFinalizationReservation::new(&changed, record.binding()).is_err());
+    }
+    #[test]
+    fn terminal_context_requires_complete_actual_parent_and_canonical_request_transaction() {
+        let original =
+            include_str!("../../linura-core/src/display_recovery/fixtures/original-baseline.txt")
+                .trim_end();
+        let request = value(linura_core::RequestId::new("restore-before-finalization"));
+        // Shared transaction/hash vector with the actual native held-scene codec.
+        let transaction =
+            "transaction:v1:ae393480ff2a701ad2b95c237c1fea76adcf9b866471d3550847c6eff3f519a4";
+        let effect = value(linura_provider_sdk::display_restoration_effect(original));
+        let binding = value(ExecutionBinding::new(
+            transaction,
+            0,
+            1,
+            ComponentDigest::from_bytes([1; 32]),
+            ComponentDigest::from_bytes([2; 32]),
+            &effect,
+        ));
+        let retained = value(crate::NativeDisplayRestorationReservation::new(
+            original, &binding,
+        ));
+        let material = value(retained.decoded_material());
+        let make = |request: &linura_core::RequestId,
+                    lock: &linura_core::SessionLockId,
+                    source: &str,
+                    dispatch: &str,
+                    transaction: &str| {
+            let text = value(DisplayFinalizationMaterial::encode(
+                request,
+                dispatch,
+                &"2".repeat(64),
+                &"3".repeat(64),
+                29,
+                lock,
+                source,
+            ));
+            let effect = value(display_finalization_effect(&text));
+            let binding = value(ExecutionBinding::new(
+                transaction,
+                0,
+                1,
+                ComponentDigest::from_bytes([3; 32]),
+                ComponentDigest::from_bytes([4; 32]),
+                &effect,
+            ));
+            value(NativeDisplayFinalizationReservation::new(&text, &binding))
+        };
+        let lock = material.replacement().lock();
+        let dispatch = retained.binding().dispatch_digest.to_hex();
+        let terminal = make(&request, lock, original, &dispatch, "transaction:terminal");
+        assert!(terminal.validate_restoration(&retained).is_ok());
+        let changed_source =
+            original.replacen(material.replacement_baseline_guard(), &"f".repeat(64), 1);
+        assert_ne!(changed_source, original);
+        assert!(
+            make(
+                &request,
+                lock,
+                &changed_source,
+                &dispatch,
+                "transaction:terminal"
+            )
+            .validate_restoration(&retained)
+            .is_err()
+        );
+        assert!(
+            make(
+                &value(linura_core::RequestId::new("another-request")),
+                lock,
+                original,
+                &dispatch,
+                "transaction:terminal"
+            )
+            .validate_restoration(&retained)
+            .is_err()
+        );
+        assert!(
+            make(
+                &request,
+                lock,
+                original,
+                &"f".repeat(64),
+                "transaction:terminal"
+            )
+            .validate_restoration(&retained)
+            .is_err()
+        );
+        assert!(
+            make(&request, lock, original, &dispatch, transaction)
+                .validate_restoration(&retained)
+                .is_err()
+        );
+        let other = value(ExecutionBinding::new(
+            "transaction:foreign",
+            0,
+            1,
+            ComponentDigest::from_bytes([1; 32]),
+            ComponentDigest::from_bytes([2; 32]),
+            &effect,
+        ));
+        let changed = value(crate::NativeDisplayRestorationReservation::new(
+            original, &other,
+        ));
+        assert!(terminal.validate_restoration(&changed).is_err());
+        let resource = value(lock.resource_id())
+            .as_str()
+            .trim_end_matches(":1")
+            .to_owned()
+            + ":2";
+        let changed = value(linura_core::SessionLockId::from_resource(&value(
+            linura_core::ResourceId::new(resource),
+        )));
+        assert!(
+            make(
+                &request,
+                &changed,
+                original,
+                &dispatch,
+                "transaction:terminal"
+            )
+            .validate_restoration(&retained)
+            .is_err()
+        );
     }
 }

@@ -787,8 +787,10 @@ original checkpoint and exact linked original retirement before provider probes.
 It separately queries Root's immutable restoration reservation through the bounded
 `ReadFinalization` mechanism. Root checks the original live kernel/power witnesses,
 exited original compositor and healthy replacement recovery admission before and
-after reading strictly validated retained history. This producer reports only
-`protected`, with no terminal reservation; a file alone never reports release.
+after reading strictly validated retained history. This producer reports
+`protected`, or `reserved` only after matching this Root invocation's in-memory
+reservation to the complete immutable terminal file and actual parent. A file
+alone cannot establish a reservation or release.
 Control matches the actual restoration transaction, effect, dispatch and checkpoint,
 obtains the same independent fresh five-source canonical restoration proof,
 then re-reads the durable anchors and checks every contributor's original expiry. It
@@ -799,6 +801,22 @@ owner/generation is unsupported until separately qualified current-lock admissio
 Reports are expiring comparison data, never reusable terminal authority. Fresh
 protected review, durable prepare/revalidation, native/Root quiescence and release,
 independent completion proof and ownership-aware cleanup remain required.
+
+Root's private terminal reservation mechanism admits only the actual supervised
+executor, with the existing bounded worker/transfer slots and absolute dispatch
+clock checks. It compares the complete nested restoration, parent dispatch,
+canonical authenticated-UID/request transaction and exact current lock against
+actual retained restoration history. Comparison bytes authenticate no caller and
+cannot replace Control's prepared handoff. The immutable `LNRT:1` file uses the
+existing private directory metadata, no-follow/inode, integrity, exclusive lock,
+sync and 256-record limits. Its readback scans and validates the same complete
+parent under the directory lock. A bounded one-use in-memory reservation is
+retained before publication, including on publication, sync, readback or later
+liveness failure. File loss therefore cannot reopen reservation or ordinary
+startup. Neither matching disk history without live memory nor memory without
+exact disk readback reports `reserved`. Parent/current-seat ownership cannot be
+silently superseded, and no record is evicted to admit work. This mechanism
+releases no witness, power blocker, input or output fence.
 
 Canonical terminal planning accepts a restoration request reference and semantic
 reason, never caller-selected original sources or terminal material. It reloads

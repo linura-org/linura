@@ -10,11 +10,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use linura_linux_session::{
-    MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayKernelSubscription,
+    MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION,
+    NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
     NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation, NativeDisplayStartupPeer,
     NativeDisplayStartupRequest, NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
+use sha2::Digest;
 use zbus::message::Header;
 use zbus::zvariant::OwnedFd;
 
@@ -96,6 +98,82 @@ impl StartupLease {
 struct Admission {
     pending: BTreeMap<String, Pending<NativeDisplayKernelSubscription>>,
     startups: Vec<StartupLease>,
+    // Reserve before publication and retain even after failed sync/readback or
+    // missing files. Neither disk loss nor restart reconstructs this lifetime.
+    finalizations: BTreeMap<String, (linura_core::DisplayRecoveryScope, ComponentDigest)>,
+}
+
+fn reserve_finalization_memory(
+    memory: &mut BTreeMap<String, (linura_core::DisplayRecoveryScope, ComponentDigest)>,
+    scope: &linura_core::DisplayRecoveryScope,
+    bytes: &[u8],
+) -> zbus::fdo::Result<()> {
+    if memory.len() >= MAX_STARTUPS
+        || bytes.is_empty()
+        || bytes.len() > MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION
+    {
+        return Err(unavailable());
+    }
+    if NativeDisplayFinalizationReservation::decode(bytes)
+        .map_err(|_| unavailable())?
+        .decoded_material()
+        .map_err(|_| unavailable())?
+        .recovery_scope()
+        .map_err(|_| unavailable())?
+        != *scope
+    {
+        return Err(unavailable());
+    }
+    for (old, _) in memory.values() {
+        let a = old.replacement();
+        let b = scope.replacement();
+        if old.original_dispatch() == scope.original_dispatch()
+            || (a.session().boot() == b.session().boot()
+                && a.session().uid() == b.session().uid()
+                && a.seat() == b.seat())
+        {
+            return Err(unavailable());
+        }
+    }
+    let key = scope
+        .resource_id()
+        .map_err(|_| unavailable())?
+        .as_str()
+        .to_owned();
+    let digest = ComponentDigest::from_bytes(sha2::Sha256::digest(bytes).into());
+    memory.insert(key, (scope.clone(), digest));
+    Ok(())
+}
+
+fn finalization_reservation_phase(
+    memory: &BTreeMap<String, (linura_core::DisplayRecoveryScope, ComponentDigest)>,
+    scope: &linura_core::DisplayRecoveryScope,
+    record: Option<&NativeDisplayFinalizationReservation>,
+) -> zbus::fdo::Result<u32> {
+    let key = scope.resource_id().map_err(|_| unavailable())?;
+    if let Some(record) = record
+        && record
+            .decoded_material()
+            .map_err(|_| unavailable())?
+            .recovery_scope()
+            .map_err(|_| unavailable())?
+            != *scope
+    {
+        return Err(unavailable());
+    }
+    match (memory.get(key.as_str()), record) {
+        (None, None) => Ok(0),
+        (Some((retained, digest)), Some(record))
+            if retained == scope
+                && *digest
+                    == ComponentDigest::from_bytes(
+                        sha2::Sha256::digest(record.canonical_bytes()).into(),
+                    ) =>
+        {
+            Ok(1)
+        }
+        _ => Err(unavailable()), // Files alone or missing readback never prove a reservation.
+    }
 }
 
 struct Pending<T> {
@@ -184,6 +262,13 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
     ) -> zbus::fdo::Result<OwnedFd>;
+    fn reserve_finalization(
+        &self,
+        sender: &str,
+        record: NativeDisplayFinalizationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> zbus::fdo::Result<bool>;
     fn read_original(
         &self,
         sender: &str,
@@ -437,6 +522,51 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn reserve_finalization(
+        &self,
+        sender: &str,
+        record: NativeDisplayFinalizationReservation,
+        deadline: u64,
+        sampled_boot: u64,
+    ) -> zbus::fdo::Result<bool> {
+        let _slot = StartupSlot::enter(&self.transfer_pending)?;
+        self.admit(sender)?;
+        valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+        let material = record.decoded_material().map_err(|_| unavailable())?;
+        let scope = material.recovery_scope().map_err(|_| unavailable())?;
+        let mut admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
+        let payload = self.original_for_scope(&admission, &scope)?;
+        let restoration =
+            super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
+        NativeDisplayRecoveryCheckpoint::validate_restoration_source(&payload, &restoration)
+            .map_err(|_| unavailable())?;
+        record
+            .validate_restoration(&restoration)
+            .map_err(|_| unavailable())?;
+        self.admit(sender)?;
+        valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+        self.original_for_scope(&admission, &scope)?;
+        reserve_finalization_memory(
+            &mut admission.finalizations,
+            &scope,
+            &record.canonical_bytes(),
+        )?;
+        // Synced exclusive publication is non-repeatable, even if any later
+        // readback, witness check or reply fails. No fence is released here.
+        super::display_checkpoint::reserve_finalization(&record).map_err(|_| unavailable())?;
+        let observed = super::display_checkpoint::read_finalization(&restoration)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+        if observed.canonical_bytes() != record.canonical_bytes() {
+            return Err(unavailable());
+        }
+        self.admit(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+        Ok(true) // Reservation acknowledgement only; never a terminal grant.
+    }
     fn reserve_restoration(
         &self,
         sender: &str,
@@ -573,9 +703,19 @@ impl ProtectionPort for NativeProtection {
             .map_err(|_| unavailable())?;
         self.admit_control(sender)?;
         self.original_for_scope(&admission, &scope)?;
-        // Only the protected branch exists at present. This is not a terminal
-        // completion producer: retained files alone never yield release state.
-        Ok((record.canonical_bytes(), 0, Vec::new()))
+        let terminal =
+            super::display_checkpoint::read_finalization(&record).map_err(|_| unavailable())?;
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        // Reserved means only the exact durable reservation plus current live
+        // protection. Files alone never produce quiescence/retirement/release.
+        Ok((
+            record.canonical_bytes(),
+            finalization_reservation_phase(&admission.finalizations, &scope, terminal.as_ref())?,
+            terminal
+                .map(|record| record.canonical_bytes())
+                .unwrap_or_default(),
+        ))
     }
     fn startup(
         &self,
@@ -609,7 +749,13 @@ impl ProtectionPort for NativeProtection {
         }
         let ordinary = ordinary_startup(
             &admission.pending,
-            || self.witnesses.clear_for_startup(),
+            || {
+                if admission.finalizations.is_empty() {
+                    self.witnesses.clear_for_startup()
+                } else {
+                    Ok(false)
+                }
+            },
             super::display_checkpoint::startup_clear,
         )
         .map_err(|_| startup_unavailable("history"))?;
@@ -716,6 +862,34 @@ impl<P: ProtectionPort> ProtectionService<P> {
         blocking::unblock(move || {
             let _slot = slot;
             service.port.reserve_restoration(
+                &sender,
+                record,
+                dispatch_deadline_unix_ms,
+                sampled_boot_ms,
+            )
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
+    async fn reserve_finalization(
+        &self,
+        reservation: &[u8],
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        if reservation.len() > MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION {
+            return Err(unavailable());
+        }
+        let record =
+            NativeDisplayFinalizationReservation::decode(reservation).map_err(|_| unavailable())?;
+        // Share the existing bounded restoration worker, not a new work queue.
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_finalization(
                 &sender,
                 record,
                 dispatch_deadline_unix_ms,
@@ -874,6 +1048,15 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn reserve_finalization(
+            &self,
+            _: &str,
+            _: NativeDisplayFinalizationReservation,
+            _: u64,
+            _: u64,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
         fn reserve_restoration(
             &self,
             _: &str,
@@ -924,7 +1107,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 7);
+            assert_eq!(text.matches("<method ").count(), 8);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -954,6 +1137,7 @@ mod tests {
             "ReadOriginal",
             "ReadFinalization",
             "ReserveRestoration",
+            "ReserveFinalization",
         ] {
             assert!(xml.contains(&format!("name=\"{method}\"")));
         }
@@ -1281,6 +1465,128 @@ mod tests {
             ))
             .is_err()
         );
+    }
+    #[test]
+    fn terminal_reservation_memory_prevents_missing_file_retry_and_files_alone_admission() {
+        let (_, record) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
+        let scope = record
+            .decoded_material()
+            .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let mut memory = BTreeMap::new();
+        assert_eq!(
+            finalization_reservation_phase(&memory, &scope, None)
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            0
+        );
+        assert!(finalization_reservation_phase(&memory, &scope, Some(&record)).is_err());
+        assert!(
+            reserve_finalization_memory(&mut memory, &scope, &record.canonical_bytes()).is_ok()
+        );
+        assert_eq!(
+            finalization_reservation_phase(&memory, &scope, Some(&record))
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            1
+        );
+        assert!(finalization_reservation_phase(&memory, &scope, None).is_err());
+        assert!(
+            reserve_finalization_memory(&mut memory, &scope, &record.canonical_bytes()).is_err()
+        );
+        let (_, other) = super::super::display_checkpoint::tests::terminal(1, 2, 4, "seat0");
+        assert!(finalization_reservation_phase(&memory, &scope, Some(&other)).is_err());
+        assert!(
+            reserve_finalization_memory(&mut memory, &scope, &other.canonical_bytes()).is_err()
+        );
+        assert_eq!(memory.len(), 1);
+    }
+    #[test]
+    fn terminal_reservation_memory_keeps_original_and_seat_exclusion_and_live_quota() {
+        let mut memory = BTreeMap::new();
+        for index in 1..=64u8 {
+            let (_, record) = super::super::display_checkpoint::tests::terminal(
+                index,
+                index,
+                index + 128,
+                &format!("seat{index:02}"),
+            );
+            let scope = record
+                .decoded_material()
+                .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert!(
+                reserve_finalization_memory(&mut memory, &scope, &record.canonical_bytes()).is_ok()
+            );
+        }
+        let (_, overflow) =
+            super::super::display_checkpoint::tests::terminal(65, 65, 193, "seat65");
+        let scope = overflow
+            .decoded_material()
+            .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            reserve_finalization_memory(&mut memory, &scope, &overflow.canonical_bytes()).is_err()
+        );
+        assert_eq!(memory.len(), MAX_STARTUPS);
+        let mut single = BTreeMap::new();
+        let (_, first) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
+        let scope = first
+            .decoded_material()
+            .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(reserve_finalization_memory(&mut single, &scope, &first.canonical_bytes()).is_ok());
+        for (original, attempt, seat) in [(1, 4, "seat1"), (6, 7, "seat0")] {
+            let (_, next) =
+                super::super::display_checkpoint::tests::terminal(original, attempt, 8, seat);
+            let next_scope = next
+                .decoded_material()
+                .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert!(
+                reserve_finalization_memory(&mut single, &next_scope, &next.canonical_bytes())
+                    .is_err()
+            );
+        }
+        assert_eq!(single.len(), 1);
+    }
+    #[test]
+    fn finalization_rpc_needs_transport_admission_and_shares_restoration_worker() {
+        let service = ProtectionService::new(DenyProtection);
+        let (_, record) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
+        let bytes = record.canonical_bytes();
+        let anonymous = zbus::Message::method_call(PATH, "ReserveFinalization")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(matches!(
+            async_io::block_on(service.reserve_finalization(&bytes, 15_000, 1, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let message = zbus::Message::method_call(PATH, "ReserveFinalization")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .sender(":1.7")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            async_io::block_on(service.reserve_finalization(&bytes, 15_000, 1, message.header()))
+                .is_err()
+        );
+        for bad in [
+            Vec::new(),
+            b"LNRT:1\n".to_vec(),
+            vec![0; MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION + 1],
+        ] {
+            assert!(
+                async_io::block_on(service.reserve_finalization(&bad, 15_000, 1, message.header()))
+                    .is_err()
+            );
+        }
+        let _slot = StartupSlot::enter(&service.restoration_pending)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(matches!(
+            async_io::block_on(service.reserve_finalization(&bytes, 15_000, 1, message.header())),
+            Err(zbus::fdo::Error::LimitsExceeded(_))
+        ));
     }
 }
 

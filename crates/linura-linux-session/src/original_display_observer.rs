@@ -134,11 +134,7 @@ pub(crate) fn finalization_facts(
         None
     } else {
         let terminal = crate::NativeDisplayFinalizationReservation::decode(terminal)?;
-        if terminal.decoded_material()?.restoration_text() != record.material() {
-            return Err(
-                "terminal finalization substituted the immutable restoration material".into(),
-            );
-        }
+        terminal.validate_restoration(&record)?;
         Some(
             DisplayFinalizationReservationFacts::new(
                 terminal.material().into(),
@@ -176,7 +172,8 @@ mod tests {
                 .trim_end();
         let effect = value(linura_provider_sdk::display_restoration_effect(material));
         let binding = value(ExecutionBinding::new(
-            "transaction:root-state-restoration",
+            // Canonical UID/request transaction vector shared with the native reader.
+            "transaction:v1:ae393480ff2a701ad2b95c237c1fea76adcf9b866471d3550847c6eff3f519a4",
             0,
             1,
             ComponentDigest::from_bytes([1; 32]),
@@ -191,10 +188,21 @@ mod tests {
         record: &crate::NativeDisplayRestorationReservation,
         text: &str,
     ) -> crate::NativeDisplayFinalizationReservation {
+        terminal_context(
+            text,
+            "restore-before-finalization",
+            &record.binding().dispatch_digest.to_hex(),
+        )
+    }
+    fn terminal_context(
+        text: &str,
+        request: &str,
+        dispatch: &str,
+    ) -> crate::NativeDisplayFinalizationReservation {
         let old = value(DisplayRestorationMaterial::decode(text));
         let material = value(DisplayFinalizationMaterial::encode(
-            &value(RequestId::new("request:root-state-restoration")),
-            &record.binding().dispatch_digest.to_hex(),
+            &value(RequestId::new(request)),
+            dispatch,
             &"3".repeat(64),
             &"4".repeat(64),
             29,
@@ -292,5 +300,25 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn root_state_requires_actual_parent_dispatch_and_canonical_request_transaction() {
+        let record = restoration();
+        let scope = value(value(record.decoded_material()).recovery_scope());
+        for (request, dispatch) in [
+            ("another-request", record.binding().dispatch_digest.to_hex()),
+            ("restore-before-finalization", "f".repeat(64)),
+        ] {
+            let terminal = terminal_context(record.material(), request, &dispatch);
+            assert!(
+                finalization_facts(
+                    &scope,
+                    &record.canonical_bytes(),
+                    1,
+                    &terminal.canonical_bytes()
+                )
+                .is_err()
+            );
+        }
     }
 }
