@@ -5,6 +5,8 @@
 #include <string>
 #include <cstddef>
 #include <optional>
+#include <memory>
+#include <string_view>
 
 struct wl_display;
 namespace Monitor {
@@ -15,6 +17,12 @@ class CMonitorRule;
 }
 
 namespace Linura::HyprlandDisplay {
+class OriginalFinalizationGrant;
+class OwnedNativeFd;
+[[nodiscard]] std::unique_ptr<OriginalFinalizationGrant>
+receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string_view material,
+                                 std::uint64_t sampledBootMs);
+[[nodiscard]] bool originalRestorationPresented(const Correlation &);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
 inline constexpr char UpstreamVersion[] = "0.56.2";

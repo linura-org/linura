@@ -56,6 +56,10 @@ class WireSceneFixture final : public ProtectedScene
     {
         return false; // No original Root witness in this transport fixture.
     }
+    bool quiesceFinalization(OwnedNativeFd, const Correlation &, std::uint64_t) override
+    {
+        return false; // No actual Root channel or native safety-frame proof.
+    }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
         return false;

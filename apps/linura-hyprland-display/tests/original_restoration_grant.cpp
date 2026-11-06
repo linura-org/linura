@@ -1,5 +1,6 @@
 #include "original_restoration_grant.h"
 #include "original_finalization_intent.h"
+#include "original_finalization_grant.h"
 #include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
@@ -142,6 +143,60 @@ void terminalComparison(const std::string &material)
     using namespace OriginalFinalizationCodec;
     const auto decoded = decode(material);
     assert(decoded && terminalMaterial(*decoded) == material);
+    const Correlation terminal{"transaction:terminal", std::string(64, 'a'), std::string(64, 'b'),
+                               10};
+    const std::vector<std::string> reservation{"linura.native-display.finalization-reservation.v1",
+                                               terminal.transaction,
+                                               "0",
+                                               "1",
+                                               std::string(64, 'c'),
+                                               std::string(64, 'd'),
+                                               terminal.effectDigest,
+                                               terminal.dispatchDigest,
+                                               material};
+    const auto bytes = framed(reservation);
+    assert(OriginalFinalizationGrantCodec::matches(bytes, terminal, material));
+    for (std::size_t size = 0; size < bytes.size(); ++size)
+        assert(!OriginalFinalizationGrantCodec::matches(std::string_view(bytes).substr(0, size),
+                                                        terminal, material));
+    assert(!OriginalFinalizationGrantCodec::matches(bytes + 'x', terminal, material));
+    assert(!OriginalFinalizationGrantCodec::matches(
+        std::string(OriginalGrantCodec::MaxReservation + 1, 'x'), terminal, material));
+    for (const auto &[index, bad] : std::vector<std::pair<std::size_t, std::string>>{
+             {0, "linura.native-display.restoration-reservation.v1"},
+             {1, "transaction:other"},
+             {2, "00"},
+             {3, "0"},
+             {3, "01"},
+             {4, std::string(64, '0')},
+             {5, std::string(64, 'G')},
+             {6, std::string(64, 'e')},
+             {7, std::string(64, 'f')},
+             {8, "LNRF:1;"}}) {
+        auto changed = reservation;
+        changed[index] = bad;
+        assert(!OriginalFinalizationGrantCodec::matches(framed(changed), terminal, material));
+    }
+    auto changed = *decoded;
+    changed.sourceGuard = std::string(64, 'e');
+    assert(!OriginalFinalizationGrantCodec::matches(bytes, terminal, terminalMaterial(changed)));
+    std::array<int, 2> lease{}, grant{};
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, lease.data()) == 0);
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, grant.data()) == 0);
+    StartupFence fence;
+    assert(fence.retain(lease[0], false));
+    assert(close(grant[1]) == 0);
+    // No actual Root producer or live transfer exists here. Denial consumes the
+    // descriptor and cannot admit ordinary frames, even in root-run unit tests.
+    timespec now{};
+    assert(clock_gettime(CLOCK_BOOTTIME, &now) == 0 && now.tv_sec >= 0 && now.tv_nsec >= 0);
+    const auto sampledBootMs = static_cast<std::uint64_t>(now.tv_sec) * 1000 +
+                               static_cast<std::uint64_t>(now.tv_nsec) / 1'000'000;
+    assert(!OriginalFinalizationGrant::receive(fence, OwnedNativeFd{grant[0]}, terminal, material,
+                                               sampledBootMs));
+    assert(fcntl(grant[0], F_GETFD) == -1 && errno == EBADF);
+    assert(fence.recoveryAvailable() && !fence.ordinaryAllowed());
+    assert(close(lease[1]) == 0);
     assert(decoded->postWriteEpoch == 29 && decoded->sourceGuard == std::string(64, '3'));
     assert(transaction(decoded->restorationRequest, decoded->currentLock) ==
            std::optional<std::string>{

@@ -24,6 +24,7 @@ struct Counts final
     std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0}, refresh{0};
     std::atomic<bool> throwAttach{false};
     std::atomic<unsigned> terminal{0};
+    std::atomic<unsigned> quiesce{0};
     std::atomic<unsigned> purpose{99};
 };
 class Scene final : public ProtectedScene
@@ -104,6 +105,11 @@ class Scene final : public ProtectedScene
             return false;
         terminal = true;
         return true;
+    }
+    bool quiesceFinalization(OwnedNativeFd, const Correlation &, std::uint64_t) override
+    {
+        ++counts.quiesce;
+        return false; // Transport fixtures cannot establish actual native quiescence.
     }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
@@ -315,7 +321,7 @@ void ownerReplacement()
 {
     // Every retained mutation/read step reattests the original supervised
     // invocation; same PID/UID cannot migrate a conversation to its successor.
-    for (unsigned operation = 0; operation != 6; ++operation) {
+    for (unsigned operation = 0; operation != 7; ++operation) {
         Harness h;
         Client c(h.descriptor);
         c.begin();
@@ -345,8 +351,18 @@ void ownerReplacement()
                 0x9abcdef1);
             c.roundtrip();
         }
+        if (operation == 6) {
+            std::array<int, 2> pair{};
+            assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0);
+            linura_protected_display_interaction_v1_quiesce_finalization(
+                c.interaction, pair[0], "transaction:terminal", std::string(64, 'b').c_str(),
+                std::string(64, 'c').c_str(), 0, 20'000, 0, 1);
+            c.roundtrip();
+            assert(close(pair[0]) == 0 && close(pair[1]) == 0);
+        }
         c.status();
         assert(h.counts.terminal == 0);
+        assert(h.counts.quiesce == 0);
         assert(c.denied >= 1 && h.counts.close == 1 && h.counts.acknowledge == 0 &&
                h.counts.consume == 0 && h.counts.refresh == 0);
     }
@@ -501,6 +517,26 @@ int main()
             c.roundtrip();
             assert(c.denied == 1 && h.counts.terminal == 2 && h.counts.close == 1);
         }
+    }
+    for (unsigned fault = 0; fault != 4; ++fault) {
+        Harness h;
+        Client c(h.descriptor);
+        c.begin(nullptr, 3);
+        linura_protected_display_interaction_v1_consume(c.interaction, std::string(64, 'a').c_str(),
+                                                        0, 4);
+        c.roundtrip();
+        if (fault == 1)
+            h.invocation.store(2);
+        std::array<int, 2> pair{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0);
+        linura_protected_display_interaction_v1_quiesce_finalization(
+            c.interaction, pair[0], fault == 2 ? "foreign" : "transaction:terminal",
+            std::string(64, fault == 3 ? '0' : 'b').c_str(), std::string(64, 'c').c_str(), 0,
+            20'000, 0, 1);
+        c.roundtrip();
+        assert(c.denied == 1 && h.counts.close == 1);
+        assert(h.counts.quiesce == (fault == 0 ? 1U : 0U));
+        assert(close(pair[0]) == 0 && close(pair[1]) == 0);
     }
     ownerReplacement();
 }

@@ -423,6 +423,34 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void quiesceFinalization(wl_client *, wl_resource *resource, std::int32_t descriptor,
+                                    const char *transaction, const char *effect,
+                                    const char *dispatch, std::uint32_t high, std::uint32_t low,
+                                    std::uint32_t bootHigh, std::uint32_t bootLow)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!transaction || strnlen(transaction, 257) > 256 ||
+                !std::string_view(transaction).starts_with("transaction:") || !digest(effect) ||
+                !digest(dispatch) || !state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) ||
+                !state->scene->quiesceFinalization(
+                    std::move(owned), {transaction, effect, dispatch, joined(high, low)},
+                    joined(bootHigh, bootLow))) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+                return;
+            }
+            status(nullptr, resource); // Acknowledgement only, never completion.
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static const struct linura_protected_display_manager_v1_interface managerImpl;
     static const struct linura_protected_display_interaction_v1_interface interactionImpl;
     static const struct linura_protected_display_surface_v1_interface surfaceImpl;
@@ -434,7 +462,8 @@ const struct linura_protected_display_manager_v1_interface ProtectedWireEndpoint
 const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
-    destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization
+    destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization,
+        quiesceFinalization
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {

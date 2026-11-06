@@ -98,6 +98,22 @@
       <arg name="deadline_boot_hi" type="uint"/>
       <arg name="deadline_boot_lo" type="uint"/>
     </request>
+    <request name="quiesce_finalization">
+      <description summary="retain protection while acknowledging native quiescence">
+        Only the actual consumed terminal scene may consume this distinct
+        original-Root channel. Complete reservation/material and current native
+        source, epoch, KMS safety frames and input retirement must verify. A
+        status reply remains nonterminal. No history or protection is released.
+      </description>
+      <arg name="grant" type="fd"/>
+      <arg name="transaction" type="string"/>
+      <arg name="effect_digest" type="string"/>
+      <arg name="dispatch_digest" type="string"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+      <arg name="sampled_boot_hi" type="uint"/>
+      <arg name="sampled_boot_lo" type="uint"/>
+    </request>
     <event name="status">
       <arg name="compositor_instance" type="string"/>
       <arg name="topology_hi" type="uint"/>

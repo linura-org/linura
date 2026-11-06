@@ -2,6 +2,7 @@
 #include "pinned_integration.h"
 #include "protected_wire.h"
 #include "original_finalization_intent.h"
+#include "original_finalization_grant.h"
 #include "protected_input_retirement.h"
 #include "protected_key_delivery.h"
 #include "protected_frame.h"
@@ -223,6 +224,9 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::function<bool()> originalAlive;
     std::string originalMaterial;
     bool terminalActive = false, terminalConsumed = false;
+    bool terminalQuiescenceAttempted = false;
+    std::string terminalMaterial;
+    std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
     bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
     std::uint64_t postWriteEpoch = 0, terminalEpoch = 0;
     bool decisionActive = false, decisionStarted = false, decisionUsed = false;
@@ -274,7 +278,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                           pointers[i].lock() == g_pInputManager->m_pointers[i];
         }
         if (mutation) {
-            if (originalRestoration && (!originalAlive || !originalAlive())) {
+            if (originalRestoration &&
+                (!originalAlive || !originalAlive() || (terminalGrant && !terminalGrant->live()))) {
                 mutationFault = true;
                 interaction.cancel();
                 return false;
@@ -755,8 +760,42 @@ class PinnedScene final : public ProtectedScene
         nextEpoch = epoch + 1;
         data->interaction = std::move(*terminal);
         data->terminalActive = true;
+        data->terminalMaterial = material;
         data->invalidateFrames();
         return reconfigureReview();
+    }
+    bool quiesceFinalization(OwnedNativeFd descriptor, const Correlation &bound,
+                             std::uint64_t sampledBootMs) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            return false; // Protection remains compositor-owned.
+        };
+        if (data->terminalQuiescenceAttempted)
+            return refuse();
+        data->terminalQuiescenceAttempted = true;
+        if (!data->originalRestoration || !data->mutation || !data->terminalActive ||
+            !data->terminalConsumed || data->terminalEpoch == 0 || data->writing ||
+            data->terminalGrant || heldInput().any ||
+            bound.transaction == data->bound.transaction ||
+            bound.dispatchDigest == data->bound.dispatchDigest || !data->refresh() ||
+            data->ownerLost || data->mutationFault)
+            return refuse();
+        const auto material = OriginalFinalizationCodec::decode(data->terminalMaterial);
+        if (!material ||
+            !OriginalFinalizationCodec::matchesHeld(*material, data->originalMaterial, data->bound,
+                                                    data->stableInventory, data->postWriteEpoch))
+            return refuse();
+        auto grant = receiveOriginalFinalizationGrant(std::move(descriptor), bound,
+                                                      data->terminalMaterial, sampledBootMs);
+        // Current KMS plus hardware-completed opaque buffers, not owner frames
+        // or acknowledgement, surround the actual-native Root transition.
+        if (!grant || !originalRestorationPresented(data->bound) || !data->refresh() ||
+            !grant->quiesce() || !originalRestorationPresented(data->bound) || !data->refresh() ||
+            !grant->verify())
+            return refuse();
+        data->terminalGrant = std::move(grant);
+        return true; // No witness, power, lock, input or startup fence is released.
     }
     bool reconfigureReview()
     {

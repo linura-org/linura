@@ -11,6 +11,7 @@
 #include "linura-display-integration-build.h"
 #include "startup_fence.h"
 #include "original_restoration_grant.h"
+#include "original_finalization_grant.h"
 #include "native_baseline_guard.h"
 #include "native_kernel_scanout.h"
 #include "protected_wire.h"
@@ -895,6 +896,19 @@ std::optional<std::uint32_t> originalNativeStatus(const Correlation &bound)
 }
 const std::string unavailable;
 } // namespace
+
+std::unique_ptr<OriginalFinalizationGrant>
+receiveOriginalFinalizationGrant(OwnedNativeFd descriptor, const Correlation &bound,
+                                 std::string_view material, std::uint64_t sampledBootMs)
+{
+    return OriginalFinalizationGrant::receive(startupFence, std::move(descriptor), bound, material,
+                                              sampledBootMs);
+}
+bool originalRestorationPresented(const Correlation &bound)
+{
+    return backend && backend->originalStatus(bound) == std::optional<std::uint32_t>{3} &&
+           backend->originalPresentation().has_value();
+}
 
 void initialize(wl_display &display, wl_event_loop &loop)
 {

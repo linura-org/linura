@@ -79,11 +79,15 @@ proof, and reads the durable anchors again before returning an expiring report.
 It performs no durable transition and cannot repair missing linked retirement.
 An additional bounded Root query reads the actual immutable restoration
 reservation while checking original live witnesses and current recovery admission
-before and after readback. It shares the existing original-read worker and emits
-only protected state. Control independently matches transaction/effect/dispatch
+before and after readback. It shares the existing original-read worker. Protected
+state requires live original protection; Reserved additionally joins this Root
+invocation's retained memory to an exclusive immutable `LNRT:1` reservation and
+its actual complete parent under the same locked scan. The actual-native channel
+can advance that retained lifetime to Quiesced, with no retirement or release.
+Control independently matches transaction/effect/dispatch
 and checkpoint to authenticated history, joins the fresh canonical restoration
 proof and preserves both original expiries. Closed future terminal comparison
-states do not activate a Root completion producer or supply release authority.
+states do not activate a Root retirement/release producer or supply release authority.
 This initial inspection requires the exact restoration lock identity; current
 owner/generation replacement fails closed. A fresh lock in the codec alone does
 not qualify that path.
@@ -109,8 +113,20 @@ execution authority, start standalone, repeat output writes or release protectio
 After consumption, native content/input returns to opaque safety frames while the
 one-use consumed correlation stays fixed. Root/source/clock/device checks and
 permanent loss latches remain. Existing Keep/Revert keep their original bounds.
-This mechanism has no production terminal authentication adapter or Root release
-endpoint yet; it does not establish journal retirement or qualify native release.
+Separate native terminal authentication is implemented. Complete prepared terminal
+dispatch and the Root release endpoint remain unfinished; this mechanism does not
+establish journal retirement or qualify native release.
+
+The pinned scene accepts a separate one-use terminal quiescence request only after
+actual terminal consumption. Its `LNFT:1` descriptor authenticates against the
+continuously held original Root startup peer and binds complete reservation and
+material, prepared correlation and original clocks. Current restored source/epoch,
+no held input and fresh KMS hardware-completed opaque safety frames are checked
+around the actual-native Root transition. Original witnesses remain continuously
+required alongside the retained terminal channel. Replay or loss poisons further
+continuation, retaining every fence. This is not durable retirement, release or
+ordinary admission; protected-owner/prepared dispatch integration and actual native
+qualification remain required.
 
 The separate operation registration has ManagedExternalEffect semantics and a
 trusted SecuritySensitive floor. Non-executable canonical planning requires a

@@ -763,7 +763,8 @@ Its purpose-separated SDK effect and adapter reservation cannot validate an old
 Apply or restoration binding. A codec or reservation is never execution authority.
 The separate registered terminal operation supports canonical planning and an
 internal separately authorized/prepared Control handoff. Its native protected
-terminal-purpose adapter and privileged/native release endpoints remain unavailable.
+terminal-purpose authentication adapter is implemented; the complete prepared
+terminal dispatch and privileged/native release endpoints remain unavailable.
 
 The compositor additionally implements a private held-scene terminal review
 transition. It accepts complete `LNRF:1` only over the actual consumed original
@@ -778,8 +779,22 @@ execution authority, start standalone, repeat output writes or release protectio
 After consumption, native content/input returns to opaque safety frames while the
 one-use consumed correlation stays fixed. Root/source/clock/device checks and
 permanent loss latches remain. Existing Keep/Revert keep their original bounds.
-This mechanism has no production terminal authentication adapter or Root release
-endpoint yet; it does not establish journal retirement or qualify native release.
+Separate native terminal authentication is implemented. The complete prepared
+terminal dispatch and Root release endpoint remain unfinished; this review
+mechanism does not establish journal retirement or qualify native release.
+
+The pinned scene additionally accepts a one-use `quiesce_finalization` request
+only after actual terminal consumption. Its Root descriptor must authenticate
+against the continuously retained original startup peer. The bounded `LNFT:1`
+reader matches the complete reservation/material, transaction/effect/dispatch and
+original clocks; old restoration grants cannot substitute. Native quiescence
+requires the actual retained restoration source/epoch, no held input, and fresh
+KMS state plus hardware-completed opaque safety frames before and after the Root
+transition. The same original witnesses remain mandatory alongside the new live
+terminal channel. Failure or replay poisons continuation and retains protection;
+no unconditional health callback or historical-file admission replaces a witness.
+This native mechanism releases no fence. Protected-owner/prepared dispatch wiring,
+durable retirement/release and actual native acceptance remain unfinished.
 
 Control's read-only `inspect_original_display_finalization` authenticates both
 actual requests, exact committed restoration, reserved/dispatched history, link,

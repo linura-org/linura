@@ -1016,6 +1016,10 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             return false; // No original Root witness in this transport fixture.
         }
+        bool quiesceFinalization(OwnedNativeFd, const Correlation &, std::uint64_t) override
+        {
+            return false; // No actual Root terminal channel or KMS proof in this fixture.
+        }
         bool beginDecision(const ProtectedInteraction::Scope &) override
         {
             return false;

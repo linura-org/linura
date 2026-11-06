@@ -426,9 +426,20 @@ transport avoids growing Wayland's ordinary connection buffer. No mutable file,
 pipe, socket or sender-selected stream offset is read. Consumed review retires
 owner content/input and requires fresh native safety frames before independent
 post-review verification. The transition releases no fence, renews no restoration
-execution window and does not activate production terminal authentication or
-Root/native finalization. Old Apply/Keep/Revert/Recovery purposes retain their
+execution window. Separate native terminal authentication is implemented;
+complete prepared Root/native finalization remains unavailable. Old Apply/Keep/Revert/Recovery purposes retain their
 meaning and bounds; there is no Stable compatibility shim.
+
+The same private interaction adds `quiesce_finalization` with one original-Root
+descriptor, bounded transaction/effect/dispatch correlation, absolute wall deadline
+and original BOOTTIME sample. It can consume only the actual terminal scene after
+fresh terminal review/PAM consumption. The native reader accepts only `LNFT:1`
+from the original live Root peer with exact complete reservation/material and
+clocks. Actual restored source/epoch and fresh KMS opaque safety-frame completion
+surround the one-use native quiescence acknowledgement. All original and current
+channel protection stays held; replay, channel/source/clock/input loss refuses.
+Status is still nonterminal. Protected-owner/prepared terminal dispatch and
+qualified retirement/release are not activated by this mechanism.
 
 The internal read-only `inspect_original_display_finalization` API returns an
 expiring material/evidence report only after exact authenticated linked retirement

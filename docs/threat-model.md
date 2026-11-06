@@ -1391,6 +1391,17 @@ renewing spent execution time. No channel command closes witnesses, deletes
 history or releases a fence. The actual native quiescence consumer and complete
 prepared dispatch are not integrated or qualified by socket fixtures.
 
+The pinned native consumer also refuses a Root-looking file, another Root process,
+old restoration channel or mismatched complete terminal reservation/material. Only
+the actual consumed terminal scene can attempt quiescence once. It verifies its
+retained original source and post-write epoch, no held input, current KMS state
+and hardware-completed opaque safety frames around the original-Root transition.
+Original witness checks stay active alongside the new terminal channel. Unknown,
+replayed, partial or lost context remains fenced; quiescence never becomes an
+unconditional health callback, checkpoint retirement or ordinary admission.
+Portable parser/transport cases do not qualify that physical native path, and
+protected-owner/prepared dispatch integration remains unfinished.
+
 A client may submit an otherwise valid terminal digest without the complete
 material or authenticated linked history. The canonical terminal recipe requires
 a private exact principal/request-bound context before any provider probe. Control
