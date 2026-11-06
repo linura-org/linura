@@ -295,13 +295,13 @@ void identityAndContinuationOwnership()
     assert(!owner.connection->decisionBootDeadline(substituted));
     assert(owner.connection->decide(correlation, true) == 4);
     assert(!owner.connection->decisionBootDeadline(correlation));
-    assert(owner.connection->securityTransitionAllowed(false));
-    assert(observer.connection->securityTransitionAllowed(false));
+    assert(!owner.connection->securityTransitionAllowed(false));
+    assert(!observer.connection->securityTransitionAllowed(false));
     assert(!owner.connection->decide(correlation, false));
     assert(observer.connection->status(correlation) == 4 && harness.backend.writes == 1);
     const auto current = observer.connection->sample();
     assert(current && current->current.outputs[0].scaleMilli == 1126 &&
-           current->topology.heads[0].scaleMilli == 1126 && !current->fenced);
+           current->topology.heads[0].scaleMilli == 1126 && current->fenced);
 }
 void clientLossDoesNotDisarmNativeRecovery()
 {
@@ -324,9 +324,9 @@ void clientLossDoesNotDisarmNativeRecovery()
         std::this_thread::sleep_for(10ms);
     }
     const auto restored = replacement.connection->sample();
-    assert(restored && restored->current.outputs[0].x == 0 && !restored->fenced &&
+    assert(restored && restored->current.outputs[0].x == 0 && restored->fenced &&
            harness.backend.writes == 2);
-    assert(replacement.connection->securityTransitionAllowed(false));
+    assert(!replacement.connection->securityTransitionAllowed(false));
 }
 void explicitRevertCannotBecomeAnotherApplyOrDecision()
 {
@@ -348,8 +348,9 @@ void explicitRevertCannotBecomeAnotherApplyOrDecision()
         std::this_thread::sleep_for(10ms);
     }
     const auto restored = owner.connection->sample();
-    assert(restored && restored->current.outputs[0].x == 0 && !restored->fenced &&
+    assert(restored && restored->current.outputs[0].x == 0 && restored->fenced &&
            harness.backend.writes == 2);
+    assert(!owner.connection->securityTransitionAllowed(false));
 }
 void expiredDecisionLeavesTheIndependentNativeTimerResponsible()
 {
@@ -409,26 +410,37 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
 {
     Harness harness;
     Client owner(harness.descriptors[0]);
-    for (unsigned i = 1; i <= 70; ++i) {
-        // Control fixes its deadline before the executor captures native state.
-        // A new full window after capture would extend the original authority.
+    const auto original = bound(QStringLiteral("transaction:bounded-first"));
+    const auto captured = owner.connection->sample();
+    assert(captured);
+    auto prior = baseline(*captured), desired = prior;
+    desired.outputs[0].x = 100;
+    assert(owner.connection->apply(original, prior, desired, owner.protection()) == 2);
+    assert(owner.connection->decide(original, true) == 4);
+    assert(owner.connection->status(original) == 4);
+    // The consumed scene's wire objects are not qualified retirement.
+    // They may be destroyed, but the compositor must retain the actual
+    // native fence and original one-use reservation.
+    for (auto *scene : owner.protections)
+        linura_protected_display_interaction_v1_destroy(scene);
+    owner.protections.clear();
+    for (unsigned i = 2; i <= 70; ++i) {
         auto correlation = bound(QStringLiteral("transaction:bounded-%1").arg(i));
         correlation.dispatchDigest = QString::number(i, 16).rightJustified(64, QLatin1Char('0'));
-        const auto captured = owner.connection->sample();
-        assert(captured);
-        auto prior = baseline(*captured), desired = prior;
-        desired.outputs[0].x = (i % 2) ? 100 : 0;
-        assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
-        assert(owner.connection->decide(correlation, true) == 4);
-        assert(owner.connection->status(correlation) == 4);
-        assert(!owner.connection->apply(correlation, prior, desired, owner.protection()));
-        // The reservation is retained by the compositor. Terminal private
-        // conversation resources have their own, smaller bounded lifetime.
+        const auto sample = owner.connection->sample();
+        assert(sample && sample->fenced);
+        auto nextBaseline = baseline(*sample), nextDesired = nextBaseline;
+        nextDesired.outputs[0].x = 0;
+        assert(!owner.connection->apply(correlation, nextBaseline, nextDesired,
+                                        owner.protection()));
+        assert(!owner.connection->status(correlation));
+        assert(owner.connection->status(original) == 4);
         for (auto *scene : owner.protections)
             linura_protected_display_interaction_v1_destroy(scene);
         owner.protections.clear();
     }
-    assert(harness.backend.writes == 70);
+    assert(harness.backend.writes == 1 &&
+           !owner.connection->securityTransitionAllowed(false));
 }
 void finalNativePowerStateCannotReuseAnEarlierVisibilityReview()
 {
@@ -463,7 +475,7 @@ void finalNativePowerStateCannotReuseAnEarlierVisibilityReview()
         std::this_thread::sleep_for(10ms);
     }
     const auto restored = owner.connection->sample();
-    assert(restored && !restored->fenced && restored->current.outputs[0].x == 0);
+    assert(restored && restored->fenced && restored->current.outputs[0].x == 0);
     assert(harness.backend.writes == 2);
 }
 void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
