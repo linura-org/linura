@@ -723,6 +723,50 @@ impl NativeSessionChannel {
         self.decode_executor_outcome(&identity, reply, binding, Instant::now())
     }
 
+    /// Separately prepared terminal-purpose handoff; acknowledgement is not completion.
+    pub fn handoff_original_display_finalization(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_finalization_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let identity = self.trusted_service(NativeSessionRole::Executor, Instant::now())?;
+        // Separate fixed mechanism budget, including root's service policy and
+        // one native probe/dispatch. It cannot extend the human deadline or the
+        // native sample's freshness. Fault/timeout never requests redelivery.
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "QuiesceOriginalDisplayFinalization",
+            &(
+                material,
+                deadline_unix_ms,
+                binding.transaction_id.as_str(),
+                binding.generation,
+                binding.state_version,
+                binding.authority_binding_digest.to_hex(),
+                binding.authority_use_digest.to_hex(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+            ),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+        {
+            return Err(
+                "original restoration executor result has a different authenticated sender".into(),
+            );
+        }
+        self.decode_executor_outcome(&identity, reply, binding, Instant::now())
+    }
+
     fn decode_executor_outcome(
         &self,
         identity: &Identity,

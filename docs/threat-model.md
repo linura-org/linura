@@ -1331,8 +1331,8 @@ terminal receipt, forged digests or a truncated/oversized terminal intent as
 permission to release protection. Separate bounded `LNRF:1` material preserves
 the old `LNRI:1` bytes and uses a distinct effect/reservation domain; none of these
 data formats is an approval or executor credential. Registered terminal planning
-is non-executable. The separate Control authorization/prepare path cannot activate
-the still-unavailable native protected terminal purpose or Root/native release endpoint.
+is non-executable. Separate fresh native terminal authentication and prepared
+quiescence are implemented but unqualified; neither activates Root/native release.
 
 The read-only Control inspection loads actual authenticated requests, exact
 committed restoration and linked original retirement, complete phase history and
@@ -1388,8 +1388,8 @@ Exclusive memory ownership precedes file publication; its lifetime guard makes
 reports unavailable on publication/transfer failure, channel loss or replay.
 Later fresh continuity checks original protection and exact disk readback without
 renewing spent execution time. No channel command closes witnesses, deletes
-history or releases a fence. The actual native quiescence consumer and complete
-prepared dispatch are not integrated or qualified by socket fixtures.
+history or releases a fence. Socket fixtures do not qualify the integrated native
+quiescence consumer and prepared handoff.
 
 The pinned native consumer also refuses a Root-looking file, another Root process,
 old restoration channel or mismatched complete terminal reservation/material. Only
@@ -1399,8 +1399,21 @@ and hardware-completed opaque safety frames around the original-Root transition.
 Original witness checks stay active alongside the new terminal channel. Unknown,
 replayed, partial or lost context remains fenced; quiescence never becomes an
 unconditional health callback, checkpoint retirement or ordinary admission.
-Portable parser/transport cases do not qualify that physical native path, and
-protected-owner/prepared dispatch integration remains unfinished.
+Portable parser/transport cases do not qualify that physical native path or its
+prepared dispatch through the protected owner.
+
+An ordinary caller, old Recovery receipt or pre-consumption PAM generation cannot
+redeem terminal quiescence. The sealed Control port recomputes the distinct effect;
+the executor checks the current supervised Control identity and a separate
+default-deny service action before obtaining the single Root channel. The actual
+protected owner independently admits only its supervised executor and exact
+consumed terminal scope/material/canonical transaction/epoch/retired input
+generation. It spends that receipt before wire dispatch. Sampling restored desired
+state is private to this typed terminal path; Apply/restoration retain their
+pre-effect baseline and negative downgrade test. The same original owner/sample
+budget spans Root reservation and transfer. No resampling, reconnect, receipt
+reuse or lost-reply retry is permitted. The acknowledgement proves neither
+independent completion nor retirement/current admission.
 
 A client may submit an otherwise valid terminal digest without the complete
 material or authenticated linked history. The canonical terminal recipe requires
@@ -1437,10 +1450,10 @@ that authority, reapprove or redispatch, and no reply
 qualifies completion. Qualified supersession and reference-aware retirement remain
 separate, unimplemented workflows; owner records cannot be deleted to retry.
 
-The native protected terminal-purpose adapter, authenticated native/Root
-quiescence and one-use release, lost-ack repair, current lock/input preservation
-and shared-ownership-aware retention still require implementation and native
-qualification. Control's typed review and prepared handoff do not supply those
+The native protected terminal-purpose adapter and authenticated native/Root
+quiescence handoff are implemented but unqualified. One-use release, lost-ack
+repair, current lock/input preservation through release and shared-ownership-aware
+retention still require implementation and native qualification. Control's typed review and prepared handoff do not supply those
 native mechanisms. No report, parser test or simulated SQLite fixture is that
 qualification.
 
@@ -1453,8 +1466,8 @@ blocking stream reads without increasing connection buffers. Fresh purpose scope
 retain dual-clock limits, current device/source/lock checks, new output frames and
 permanent owner/witness failure latches. Consuming review returns to opaque native
 frames; it is neither prepared terminal execution nor proof of Root retirement.
-Production terminal authentication, release/admission, loss recovery, supersession
-and reference-aware cleanup remain separately required and unqualified.
+Production terminal authentication remains unqualified; release/admission, loss
+recovery, supersession and reference-aware cleanup remain unfinished.
 
 Terminal native approval uses a distinct fresh administrator purpose bound to the
 actual retained Recovery flow, current principal/lock, complete original material

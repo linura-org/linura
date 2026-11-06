@@ -763,8 +763,8 @@ Its purpose-separated SDK effect and adapter reservation cannot validate an old
 Apply or restoration binding. A codec or reservation is never execution authority.
 The separate registered terminal operation supports canonical planning and an
 internal separately authorized/prepared Control handoff. Its native protected
-terminal-purpose authentication adapter is implemented; the complete prepared
-terminal dispatch and privileged/native release endpoints remain unavailable.
+terminal-purpose authentication and prepared quiescence adapters are implemented;
+privileged/native retirement and release endpoints remain unavailable.
 
 The compositor additionally implements a private held-scene terminal review
 transition. It accepts complete `LNRF:1` only over the actual consumed original
@@ -779,9 +779,9 @@ execution authority, start standalone, repeat output writes or release protectio
 After consumption, native content/input returns to opaque safety frames while the
 one-use consumed correlation stays fixed. Root/source/clock/device checks and
 permanent loss latches remain. Existing Keep/Revert keep their original bounds.
-Separate native terminal authentication is implemented. The complete prepared
-terminal dispatch and Root release endpoint remain unfinished; this review
-mechanism does not establish journal retirement or qualify native release.
+Separate native terminal authentication and prepared quiescence dispatch are
+implemented. Root retirement/release remain unfinished; this review mechanism
+does not establish journal retirement or qualify native release.
 
 The pinned scene additionally accepts a one-use `quiesce_finalization` request
 only after actual terminal consumption. Its Root descriptor must authenticate
@@ -793,8 +793,23 @@ KMS state plus hardware-completed opaque safety frames before and after the Root
 transition. The same original witnesses remain mandatory alongside the new live
 terminal channel. Failure or replay poisons continuation and retains protection;
 no unconditional health callback or historical-file admission replaces a witness.
-This native mechanism releases no fence. Protected-owner/prepared dispatch wiring,
-durable retirement/release and actual native acceptance remain unfinished.
+This native mechanism releases no fence. Durable retirement/release and actual
+native acceptance remain unfinished.
+
+The prepared quiescence handoff consumes Control's sealed typed terminal
+authorization, recomputes the distinct complete-material effect, and crosses the
+actual supervised executor with a separate default-deny service action. Executor
+and owner reattest their callers; no raw correlation grants authority. The
+executor's fresh sample requires the restored desired layout and exact restored
+source guard. Original Apply/restoration retain their pre-effect baseline checks.
+Root reservation and owner transfer share the original two-second sample budget;
+neither service-policy time nor a new query renews it. The protected owner spends
+the consumed terminal receipt before the sole wire attempt, matching complete
+material, canonical transaction, current epoch and the input generation captured
+after terminal consumption retired focus. The pre-consumption PAM generation
+cannot redeem it. A lost acknowledgement leaves ownership spent and fences held;
+qualified lost-ack repair remains unfinished. Later continuity cannot rearm review,
+repeat effects, retire witnesses or release protection.
 
 Control's read-only `inspect_original_display_finalization` authenticates both
 actual requests, exact committed restoration, reserved/dispatched history, link,
@@ -847,8 +862,8 @@ budget. Initial quiescence remains inside the original dispatch/sample window;
 later health checks cannot renew it. Worker/transfer/publication failure, EOF,
 replay or clock regression permanently invalidates reports while ownership stays
 reserved. No message offers durable retirement, release or current admission.
-The deterministic native scene consumer and prepared dispatch still need
-integration and qualification; Root's protocol tests are component evidence only.
+The native scene consumer and prepared quiescence dispatch are integrated but
+remain unqualified; Root's protocol tests are component evidence only.
 
 Canonical terminal planning accepts a restoration request reference and semantic
 reason, never caller-selected original sources or terminal material. It reloads

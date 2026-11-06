@@ -438,8 +438,22 @@ from the original live Root peer with exact complete reservation/material and
 clocks. Actual restored source/epoch and fresh KMS opaque safety-frame completion
 surround the one-use native quiescence acknowledgement. All original and current
 channel protection stays held; replay, channel/source/clock/input loss refuses.
-Status is still nonterminal. Protected-owner/prepared terminal dispatch and
-qualified retirement/release are not activated by this mechanism.
+Status is still nonterminal. The protected-owner/prepared handoff below connects
+this request; qualified retirement/release remain unavailable.
+
+The private Experimental executor method `QuiesceOriginalDisplayFinalization`
+takes complete `LNRF:1`, the unchanged absolute dispatch deadline and all existing
+prepared transaction/generation/state/authority-use/effect/dispatch bindings.
+Its distinct service action defaults to denial and permits only the supervised
+Control service. The adapter samples the already-restored desired layout and
+exact restored source guard; Apply and original restoration still require their
+pre-effect baseline. It reserves exactly one Root channel, rechecks the same
+owner and original two-second sample, and transfers the descriptor to the actual
+supervised protected owner through its same-named private method. That method
+accepts the existing `(sssst)` query, sample digest, BOOTTIME sample and descriptor.
+Only its consumed terminal purpose can redeem the exact canonical transaction,
+complete material, current epoch and retired input generation once. Phase 2 is
+quiescence acknowledgement only; lost replies never trigger retry or completion.
 
 The internal read-only `inspect_original_display_finalization` API returns an
 expiring material/evidence report only after exact authenticated linked retirement
@@ -485,14 +499,14 @@ verification and reply. Quiescence must occur inside the original dispatch/sampl
 window. Later continuity cannot renew execution authority. Channel loss, failure
 or clock rollback permanently invalidates its reports without reopening ownership.
 No message retires history, releases protection or admits ordinary frames. The
-native consumer and prepared terminal dispatch integration remain unfinished.
+native consumer and prepared quiescence handoff require actual native qualification.
 
 The adapter emits the canonical `display.original-finalization.observe`
 `ObservationEnvelope`; full restoration/terminal codecs and unchanged nested
 restoration bytes and the complete actual-parent binding are mandatory for
 terminal phases. The Root mechanism can report phase 2 (`quiesced`) only after
 that actual-native channel transition while its original protection still holds.
-Native quiescence is not yet integrated or qualified. Retired and released-current
+Native quiescence is integrated but unqualified. Retired and released-current
 have no current producer. A historical spent record cannot supply
 released-current admission.
 Control's inspection matches these new Root facts to actual authenticated history

@@ -113,8 +113,8 @@ execution authority, start standalone, repeat output writes or release protectio
 After consumption, native content/input returns to opaque safety frames while the
 one-use consumed correlation stays fixed. Root/source/clock/device checks and
 permanent loss latches remain. Existing Keep/Revert keep their original bounds.
-Separate native terminal authentication is implemented. Complete prepared terminal
-dispatch and the Root release endpoint remain unfinished; this mechanism does not
+Separate native terminal authentication and prepared quiescence dispatch are
+implemented. Root retirement/release remain unfinished; this mechanism does not
 establish journal retirement or qualify native release.
 
 The pinned scene accepts a separate one-use terminal quiescence request only after
@@ -125,8 +125,18 @@ no held input and fresh KMS hardware-completed opaque safety frames are checked
 around the actual-native Root transition. Original witnesses remain continuously
 required alongside the retained terminal channel. Replay or loss poisons further
 continuation, retaining every fence. This is not durable retirement, release or
-ordinary admission; protected-owner/prepared dispatch integration and actual native
-qualification remain required.
+ordinary admission; actual native qualification remains required.
+
+The private prepared handoff now connects the sealed typed Control port to the
+actual supervised executor, one Root reservation and the protected owner's
+consumed terminal scene. A separate default-deny service action protects this
+mechanism. The adapter samples the restored desired layout/source; existing
+Apply/restoration pre-effect checks remain unchanged. Complete material, canonical
+transaction, native epoch and the generation after focus retirement must match
+the consumed terminal receipt. It is spent before the single wire attempt. The
+original two-second sample and absolute dispatch bounds survive every handoff.
+Quiescence acknowledgement remains nonterminal; loss cannot reapprove, replay,
+retire witnesses or release fences. Qualified lost-ack repair is still required.
 
 The separate operation registration has ManagedExternalEffect semantics and a
 trusted SecuritySensitive floor. Non-executable canonical planning requires a
@@ -172,9 +182,9 @@ resource, checks the exact principal/administrator class, and consumes that sepa
 native proof. Generic approval cannot substitute. Root/native prepared release,
 current admission and final completion verification remain unimplemented.
 
-No production terminal executor endpoint, Root retirement
-or native release is activated. The remaining terminal managed workflow, native/Root quiescence and
-finalization, normal Keep/Revert ordering, Committed adoption, safe supersession
+The private prepared executor endpoint acknowledges quiescence only. No public
+production mutation, Root retirement or native release is activated. The remaining
+terminal finalization workflow, normal Keep/Revert ordering, Committed adoption, safe supersession
 and reference-aware cleanup still require coherent implementation.
 
 Before activation, qualify the complete exact-source native failure matrix:

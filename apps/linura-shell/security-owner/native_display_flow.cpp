@@ -119,6 +119,15 @@ bool NativeDisplayFlow::window()
 {
     const auto now = NativeDisplayClock::sample();
     if (!failed_ && spent_ && dispatched_ && !decisionMode_) {
+        if (scope_.purpose == ApprovalPurpose::FinalizeOriginalDisplay) {
+            if (!now || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
+                !backend_.heldOriginalDisplayFinalization(*dispatched_)) {
+                cancel();
+                return false;
+            }
+            last_ = *now;
+            return true; // Continuity only; the terminal receipt remains spent.
+        }
         if (scope_.purpose == ApprovalPurpose::RestoreOriginalDisplay) {
             // Continuity of a consumed original Recovery scene is not renewed
             // execution authority. No effect can redeem this spent receipt.
@@ -302,6 +311,33 @@ bool NativeDisplayFlow::consume(const NativeApprovalScope &scope)
     // The consumed scene can repaint, but cannot rearm proof or route input.
     // Do not leave an obsolete PAM prompt visible while Control prepares.
     presentation_.present(NativePresentation::State::PreparingDisplay);
+    if (scope_.purpose == ApprovalPurpose::FinalizeOriginalDisplay) {
+        // Terminal consumption intentionally retires owner focus and proof.
+        // Bind dispatch to that exact resulting generation, never the old PAM
+        // generation or a later regenerated interaction.
+        consumedTerminalGeneration_ = backend_.protectedInteractionGeneration();
+        inputGeneration_ = backend_.protectedInputGeneration();
+    }
+    return true;
+}
+bool NativeDisplayFlow::redeemFinalization(const NativeDisplayFinalizationIntent &intent,
+                                           const NativeDisplayCorrelation &correlation)
+{
+    if (scope_.purpose != ApprovalPurpose::FinalizeOriginalDisplay || !consumed_ || spent_ ||
+        consumedTerminalGeneration_ == 0 || !window() || !revalidate_() || !correlation.valid() ||
+        !NativeDisplayFinalizationIntent::parse(intent.encode()) ||
+        intent.encode() != scope_.display->material ||
+        correlation.transaction != transaction(scope_) ||
+        correlation.deadlineUnixMs > scope_.display->deadlineUnixMs)
+        return false;
+    const auto status = backend_.protectedDisplayStatus();
+    if (!status || status->phase != NativeDisplayPromptStatus::Phase::Consumed ||
+        status->epoch != epoch_ || !window() || !revalidate_() ||
+        consumedTerminalGeneration_ != backend_.protectedInteractionGeneration() ||
+        inputGeneration_ != backend_.protectedInputGeneration())
+        return false;
+    spent_ = true;
+    dispatched_ = correlation;
     return true;
 }
 bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
@@ -375,6 +411,7 @@ bool NativeDisplayFlow::beginFinalization(const NativeApprovalScope &scope,
     dispatched_.reset();
     epoch_ = proofGeneration_ = inputGeneration_ = 0;
     consumed_ = spent_ = reviewArmed_ = authenticateSelected_ = authenticationArmed_ = false;
+    consumedTerminalGeneration_ = 0;
     awaitingRevision_ = true;
     page_ = 0;
     pageCount_ = pages->size();

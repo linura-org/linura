@@ -13,6 +13,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QMetaClassInfo>
+#include <QMetaMethod>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QXmlStreamReader>
@@ -558,6 +559,11 @@ int main(int argc, char **argv)
            -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("restoreOriginalDisplay()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("quiesceOriginalDisplayFinalization()") ==
+           -1);
+    for (int method = 0; method < NativeRuntime::staticMetaObject.methodCount(); ++method)
+        assert(NativeRuntime::staticMetaObject.method(method).name() !=
+               QByteArrayLiteral("quiesceOriginalDisplayFinalization"));
     assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
     for (const char *method :
          {"armDisplayApproval()", "displayApprovalReady()", "consumeDisplayApproval()",
@@ -586,7 +592,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 29 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 30 && signals == 1 && annotations == 3);
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
           "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",
@@ -594,6 +600,7 @@ int main(int argc, char **argv)
         assert(introspection.contains(QString::fromLatin1(method)));
     assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RestoreOriginalDisplay")));
+    assert(introspection.contains(QStringLiteral("QuiesceOriginalDisplayFinalization")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));

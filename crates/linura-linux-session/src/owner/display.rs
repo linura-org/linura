@@ -33,6 +33,7 @@ mod power;
 mod preimage;
 mod startup;
 pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
+mod finalization;
 mod original;
 mod prepared;
 mod presentation;
@@ -41,6 +42,37 @@ pub use power::NativeDisplayPowerFence;
 pub use preimage::NativeDisplayRecoveryCheckpoint;
 
 type Wire = (String, String, String, u64, String, String, bool);
+
+#[derive(Clone, Copy)]
+enum SampleLayout {
+    PreEffect,
+    Restored,
+}
+
+fn validate_prepared_layout(
+    material: &linura_core::DisplayLayoutMaterial<'_>,
+    facts: &linura_observation::DisplayObservationFacts,
+    expected: SampleLayout,
+) -> Result<(), String> {
+    let intent = material
+        .validate_native(facts.inventory(), facts.capabilities())
+        .map_err(|e| e.to_string())?;
+    let expected_layout = match expected {
+        SampleLayout::PreEffect => intent.baseline(),
+        SampleLayout::Restored => intent.desired(),
+    };
+    if facts.layout() != expected_layout
+        || !facts.has_powered_independent_output()
+        || !intent.desired().outputs().iter().any(|row| {
+            matches!(row,
+            DisplayOutputLayout::Enabled { output, mirror: None, .. }
+                if facts.powered_outputs().contains(output))
+        })
+    {
+        return Err("prepared display baseline or visible recovery output changed".into());
+    }
+    Ok(())
+}
 
 // Process-local, one-call correlation with the exact owner/boot sampled by the
 // strict native decoder. This is never serialized or reusable authority.
@@ -491,6 +523,35 @@ impl NativeSessionChannel {
         material: &linura_core::DisplayLayoutMaterial<'_>,
         sequence: u64,
     ) -> Result<PreparedSample, String> {
+        self.prepared_display_material_for_layout(material, sequence, SampleLayout::PreEffect)
+    }
+
+    fn prepared_restored_display_material(
+        &self,
+        terminal: &linura_core::DisplayFinalizationMaterial<'_>,
+        sequence: u64,
+    ) -> Result<PreparedSample, String> {
+        let restored = terminal.restoration().replacement();
+        if terminal.current_lock() != restored.lock() {
+            return Err("terminal current lock differs from the actual restoration lock".into());
+        }
+        let sample =
+            self.prepared_display_material_for_layout(restored, sequence, SampleLayout::Restored)?;
+        let guard =
+            linura_provider_sdk::ComponentDigest::parse_hex(terminal.restored_source_guard())
+                .map_err(|e| e.to_string())?;
+        if sample.native_baseline_guard != Some(guard) {
+            return Err("restored native source changed before terminal reservation".into());
+        }
+        Ok(sample)
+    }
+
+    fn prepared_display_material_for_layout(
+        &self,
+        material: &linura_core::DisplayLayoutMaterial<'_>,
+        sequence: u64,
+        expected: SampleLayout,
+    ) -> Result<PreparedSample, String> {
         self.require_role(NativeSessionRole::Executor)?;
         let started = Instant::now();
         let boot = current_boot()?;
@@ -562,19 +623,7 @@ impl NativeSessionChannel {
             unix_ms()?,
         )
         .map_err(|e| e.to_string())?;
-        let intent = material
-            .validate_native(facts.inventory(), facts.capabilities())
-            .map_err(|e| e.to_string())?;
-        if facts.layout() != intent.baseline()
-            || !facts.has_powered_independent_output()
-            || !intent.desired().outputs().iter().any(|row| {
-                matches!(row,
-                DisplayOutputLayout::Enabled { output, mirror: None, .. }
-                    if facts.powered_outputs().contains(output))
-            })
-        {
-            return Err("prepared display baseline or visible recovery output changed".into());
-        }
+        validate_prepared_layout(material, &facts, expected)?;
         if started.elapsed() >= crate::bus::PROBE_BUDGET {
             return Err("prepared display validation exceeded its original deadline".into());
         }

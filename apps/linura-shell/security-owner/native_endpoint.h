@@ -173,6 +173,11 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
         "<arg name=\"original_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
+        "<method name=\"QuiesceOriginalDisplayFinalization\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/><arg name=\"sample_digest\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"terminal_grant\" type=\"h\" direction=\"in\"/>"
+        "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"ContinuePreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" direction=\"in\"/>"
         "<arg name=\"protected_decision_digest\" type=\"s\" direction=\"in\"/>"
@@ -252,6 +257,10 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     quint32 RestoreOriginalDisplay(const NativeDisplayAttemptQueryWire &,
                                    const QString &sample_digest, quint64 sampled_boot_ms,
                                    const QDBusUnixFileDescriptor &original_grant);
+    quint32 QuiesceOriginalDisplayFinalization(const NativeDisplayAttemptQueryWire &,
+                                               const QString &sample_digest,
+                                               quint64 sampled_boot_ms,
+                                               const QDBusUnixFileDescriptor &terminal_grant);
     quint32 ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &,
                                     const QString &decision_digest,
                                     const QString &protected_decision_digest, bool confirm);

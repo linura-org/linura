@@ -13,6 +13,7 @@
 #include "native_transition_fence.h"
 #include "native_display_watchdog.h"
 #include "native_display_flow.h"
+#include "native_display_finalization.h"
 #include "peer_guard.h"
 #include "session_bootstrap.h"
 
@@ -1159,6 +1160,36 @@ std::optional<quint32> NativeRuntime::restoreOriginalDisplay(
     // the one-use native request. The compositor authenticates Root itself.
     return impl_->backend->restoreOriginalDisplay(intent, correlation, sampledBootMs,
                                                   originalGrant);
+}
+
+std::optional<quint32> NativeRuntime::quiesceOriginalDisplayFinalization(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    int terminalGrant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || terminalGrant < 0 || intent.currentLock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayFinalizationIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs) ||
+        !impl_->display || !impl_->display->redeemFinalization(intent, correlation))
+        return std::nullopt;
+    // The exact retired terminal receipt is spent before the sole wire attempt.
+    // No ordinary Apply/Recovery/Keep/unlock receipt can enter this path.
+    return impl_->backend->quiesceOriginalDisplayFinalization(intent, correlation, sampledBootMs,
+                                                              terminalGrant);
 }
 
 // This narrow effect is reachable only from the current supervised executor.

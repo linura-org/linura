@@ -54,6 +54,33 @@ fn decode(
     )
 }
 #[test]
+fn restored_terminal_sampling_cannot_weaken_apply_or_original_restoration_baselines() {
+    let (topology, monitors) = inputs();
+    let (mut envelope, _) = value(decode(&topology, &monitors));
+    let identity = value(DisplayTopologyId::from_resource(&envelope.resource));
+    let before = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &envelope, &identity, 10000,
+    ));
+    let baseline = value(before.layout().canonical_text());
+    let desired = baseline.replace(":0:0:-;", ":100:0:-;");
+    assert_ne!(desired, baseline);
+    let text = format!(
+        "LNDI:1;{};{baseline}{desired}",
+        coverage(true).resource.as_str()
+    );
+    let material = value(linura_core::DisplayLayoutMaterial::decode(&text));
+    assert!(validate_prepared_layout(&material, &before, SampleLayout::PreEffect).is_ok());
+    assert!(validate_prepared_layout(&material, &before, SampleLayout::Restored).is_err());
+    envelope
+        .attributes
+        .insert("layout".into(), ObservedValue::Text(desired));
+    let after = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &envelope, &identity, 10000,
+    ));
+    assert!(validate_prepared_layout(&material, &after, SampleLayout::Restored).is_ok());
+    assert!(validate_prepared_layout(&material, &after, SampleLayout::PreEffect).is_err());
+}
+#[test]
 fn exact_native_modes_scale_and_coverage_enter_only_canonical_envelopes() {
     let (topology, monitors) = inputs();
     let (display, coverage) = value(decode(&topology, &monitors));

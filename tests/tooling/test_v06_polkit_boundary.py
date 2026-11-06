@@ -233,7 +233,11 @@ matrix() {
         actions = ET.parse(
             ROOT / "packaging/polkit-1/actions/org.linura.executor.session.policy"
         ).getroot()
-        for operation in ("apply-display-layout", "restore-original-display-layout"):
+        for operation in (
+            "apply-display-layout",
+            "restore-original-display-layout",
+            "quiesce-original-display-finalization",
+        ):
             action_id = f"org.linura.executor.session.{operation}"
             action = actions.find(f"action[@id='{action_id}']")
             self.assertIsNotNone(action)
@@ -243,7 +247,11 @@ matrix() {
         rule = (
             ROOT / "packaging/polkit-1/rules.d/50-linura-executor-session.rules"
         ).read_text()
-        for operation in ("apply-display-layout", "restore-original-display-layout"):
+        for operation in (
+            "apply-display-layout",
+            "restore-original-display-layout",
+            "quiesce-original-display-finalization",
+        ):
             self.assertIn(
                 f'action.id === "org.linura.executor.session.{operation}"', rule
             )

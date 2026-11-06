@@ -29,6 +29,21 @@ impl linura_control::OriginalDisplayRestorationPort for SessionExecutorClient {
             .handoff_original_display_restoration(&material, &binding, deadline)
     }
 }
+impl linura_control::OriginalDisplayFinalizationPort for SessionExecutorClient {
+    fn dispatch_finalization(
+        &mut self,
+        finalization: linura_control::AuthorizedOriginalDisplayFinalization,
+    ) -> Result<linura_provider_sdk::ExecutionOutcome, String> {
+        let (authorization, material, deadline) = finalization.into_executor_request();
+        let (effect, binding) = authorization.into_executor_request();
+        if effect != linura_provider_sdk::display_finalization_effect(&material)? {
+            return Err("prepared terminal effect differs from its complete intent".into());
+        }
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        self.channel
+            .handoff_original_display_finalization(&material, &binding, deadline)
+    }
+}
 
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(

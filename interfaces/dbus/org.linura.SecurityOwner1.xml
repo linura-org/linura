@@ -149,6 +149,16 @@
       <arg name="original_grant" type="h" direction="in"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <!-- Separately consumed terminal purpose/current supervised executor only.
+         Exact retired receipt, fresh sample and one-use original-Root channel;
+         acknowledgement never releases protection or proves completion. -->
+    <method name="QuiesceOriginalDisplayFinalization">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="sample_digest" type="s" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="terminal_grant" type="h" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <!-- Current attested executor only, following Control's consumed/durable
          protected decision. Original connection/reservation, layout, lock/input
          coverage and original deadline remain mandatory. No new apply, replay,

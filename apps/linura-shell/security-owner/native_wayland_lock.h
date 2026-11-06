@@ -13,6 +13,7 @@ struct wl_display;
 
 namespace Linura::SecurityOwner {
 struct NativeDisplayRestorationIntent;
+struct NativeDisplayFinalizationIntent;
 
 class SecretEntry;
 struct NativeDisplayCorrelation;
@@ -77,6 +78,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     [[nodiscard]] std::optional<quint32>
     restoreOriginalDisplay(const NativeDisplayRestorationIntent &, const NativeDisplayCorrelation &,
                            quint64 validatedSampledBootMs, int originalGrant);
+    [[nodiscard]] std::optional<quint32>
+    quiesceOriginalDisplayFinalization(const NativeDisplayFinalizationIntent &,
+                                       const NativeDisplayCorrelation &,
+                                       quint64 validatedSampledBootMs, int terminalGrant);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &,
                                                                  quint64 originalSampledBootMs);
@@ -93,6 +98,7 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Holding consumed Recovery is not a renewal of approval/dispatch. This
     // probes the actual retained native attempt and its original Root witness.
     [[nodiscard]] bool heldOriginalDisplayRestoration(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool heldOriginalDisplayFinalization(const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,
                                                          const QString &material,
                                                          const NativeDisplayCorrelation &);

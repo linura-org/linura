@@ -1,5 +1,6 @@
 #include "native_endpoint.h"
 #include "native_display_restoration.h"
+#include "native_display_finalization.h"
 #include "native_runtime.h"
 #include "native_display_flow.h"
 
@@ -419,6 +420,29 @@ quint32 NativeEndpoint::RestoreOriginalDisplay(const NativeDisplayAttemptQueryWi
         sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
                        QStringLiteral("Native original display restoration unavailable"));
     return 7; // Ambiguity never creates another grant or dispatch right.
+}
+
+quint32 NativeEndpoint::QuiesceOriginalDisplayFinalization(
+    const NativeDisplayAttemptQueryWire &query, const QString &sampleDigest, quint64 sampledBootMs,
+    const QDBusUnixFileDescriptor &terminalGrant)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        sampleDigest.size() == 64 && terminalGrant.isValid()) {
+        const auto intent = NativeDisplayFinalizationIntent::parse(query.intent);
+        const NativeDisplayCorrelation correlation{query.transaction, query.effectDigest,
+                                                   query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent ? runtime_.quiesceOriginalDisplayFinalization(
+                                         message(), *intent, correlation, sampleDigest,
+                                         sampledBootMs, terminalGrant.fileDescriptor())
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native original display terminal quiescence unavailable"));
+    return 7; // Neither rejection nor lost acknowledgement permits another attempt.
 }
 
 quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &query,

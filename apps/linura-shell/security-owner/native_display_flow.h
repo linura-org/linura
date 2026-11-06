@@ -9,6 +9,7 @@
 #include <functional>
 
 namespace Linura::SecurityOwner {
+struct NativeDisplayFinalizationIntent;
 class NativeWaylandLock;
 class NativePresentation;
 class AuthenticationAgent;
@@ -43,6 +44,8 @@ class NativeDisplayFlow final : public QObject
     [[nodiscard]] bool redeemOriginal(const NativeDisplayRestorationIntent &,
                                       const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginFinalization(const NativeApprovalScope &, const NativePeerIdentity &);
+    [[nodiscard]] bool redeemFinalization(const NativeDisplayFinalizationIntent &,
+                                          const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginDecision(const NativeDisplayChoiceChallenge &);
     [[nodiscard]] bool matchesDecision(const NativeDisplayChoiceChallenge &) const;
     [[nodiscard]] bool decisionReady(const NativeDisplayChoiceChallenge &);
@@ -76,6 +79,7 @@ class NativeDisplayFlow final : public QObject
     QTimer timer_;
     NativeDisplayClock last_{};
     quint64 deadlineBoot_ = 0, epoch_ = 0, proofGeneration_ = 0, inputGeneration_ = 0;
+    quint64 consumedTerminalGeneration_ = 0;
     std::size_t page_ = 0, pageCount_ = 0;
     bool failed_ = false, reviewArmed_ = false, authenticateSelected_ = false;
     bool authenticationArmed_ = false, consumed_ = false, spent_ = false;
