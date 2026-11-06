@@ -20,8 +20,10 @@ pub(super) struct RetainedKeepReview {
 use linura_protocol::{DisplayLayoutReceipt, DisplayLayoutState};
 mod decision;
 mod finalization;
+mod release;
 mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
+pub use release::OrdinaryDisplayReleaseInspection;
 pub use finalization::{
     AuthorizedOriginalDisplayFinalization, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
