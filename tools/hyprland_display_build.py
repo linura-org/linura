@@ -217,13 +217,15 @@ def build_script(jobs: int) -> str:
     return f"""set -euo pipefail
 cd /home/linura/s21
 cmake -S native -B mechanism-build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \\
-    -DLINURA_DISPLAY_RECOVERY_FIXTURE=/home/linura/s21/original-baseline.txt
+    -DLINURA_DISPLAY_RECOVERY_FIXTURE=/home/linura/s21/original-baseline.txt \\
+    -DLINURA_DISPLAY_FINALIZATION_FIXTURE=/home/linura/s21/original-finalization.txt
 cmake --build mechanism-build --parallel {jobs}
 ctest --test-dir mechanism-build --output-on-failure
 cmake -S upstream/hyprland-source -B compositor-build -G Ninja \\
     -DCMAKE_BUILD_TYPE=Debug '-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g1' \\
     -DCMAKE_SKIP_RPATH=ON \\
     -DLINURA_DISPLAY_RECOVERY_FIXTURE=/home/linura/s21/original-baseline.txt \\
+    -DLINURA_DISPLAY_FINALIZATION_FIXTURE=/home/linura/s21/original-finalization.txt \\
     -DLINURA_DISPLAY_INTEGRATION_DIR=/home/linura/s21/native \\
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 # Compile the integration against real private headers first for useful SDK
@@ -264,17 +266,20 @@ def package_inputs(archive: Path, temporary: Path) -> Path:
             or path.stat().st_size > 2 * 1024 * 1024
         ):
             raise ValueError("native source must contain only bounded regular files")
-    fixture = (
-        ROOT / "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt"
+    fixture_root = ROOT / "crates/linura-core/src/display_recovery/fixtures"
+    fixtures = (
+        (fixture_root / "original-baseline.txt", 12 * 1024),
+        (fixture_root / "original-finalization.txt", 14 * 1024),
     )
-    if (
-        any(part.is_symlink() for part in (fixture, *fixture.parents))
-        or not fixture.is_file()
-        or not 0 < fixture.stat().st_size <= 12 * 1024
-    ):
-        raise ValueError(
-            "canonical original display fixture must be a bounded regular file"
-        )
+    for fixture, maximum in fixtures:
+        if (
+            any(part.is_symlink() for part in (fixture, *fixture.parents))
+            or not fixture.is_file()
+            or not 0 < fixture.stat().st_size <= maximum
+        ):
+            raise ValueError(
+                "canonical original display fixture must be a bounded regular file"
+            )
     packed = temporary / "build-input.tar"
     with tarfile.open(packed, "x") as output:
         output.add(
@@ -288,7 +293,8 @@ def package_inputs(archive: Path, temporary: Path) -> Path:
                 arcname="native/" + path.relative_to(native).as_posix(),
                 recursive=False,
             )
-        output.add(fixture, arcname="original-baseline.txt", recursive=False)
+        for fixture, _ in fixtures:
+            output.add(fixture, arcname=fixture.name, recursive=False)
     return packed
 
 
