@@ -90,6 +90,12 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     displayDecisionBootDeadline(const NativeDisplayCorrelation &);
     [[nodiscard]] std::optional<quint64>
     displayRestorationBootDeadline(const NativeDisplayCorrelation &);
+    // Holding consumed Recovery is not a renewal of approval/dispatch. This
+    // probes the actual retained native attempt and its original Root witness.
+    [[nodiscard]] bool heldOriginalDisplayRestoration(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,
+                                                         const QString &material,
+                                                         const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginProtectedDisplayDecision(const NativeDisplayPromptScope &,
                                                      const NativeDisplayIntent &,
                                                      const NativeDisplayCorrelation &);

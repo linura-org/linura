@@ -506,3 +506,20 @@ qualified v0.6 recovery rule; this API refuses revival or redispatch.
 - canonical ABI: `interfaces/dbus/org.linura.Session1.xml`.
 
 The first method, `SetAudioOutputVolume`, accepts only a caller request identity, an exact numeric PipeWire output-node ID, an integer percentage in the bounded 0–100 range and a bounded semantic reason. The transport authenticates the session-bus sender and requires the sender's Unix UID to equal the UID owning the service connection. It delegates to `linura_control::TransientEffectControl`; Session1 owns no risk downgrade, policy decision, executor permit or verification shortcut. The default-output alias remains discovery-only so a moving default cannot become mutation authority. The concrete provider adapter binds the numeric resource to pre-effect `object.serial` and `node.name` evidence, and WirePlumber resolves and mutates that exact object in one helper event-loop callback before Control independently re-observes the postcondition.
+
+The private native display approval purpose 12 is original-restoration finalization,
+with the `request:v010:display-finalization:` request namespace, bounded complete
+`LNRF:1` and `org.linura.authority.finalize-original-display-restoration` fresh
+`auth_admin` action. Apply/Keep/Revert/Recovery and S17 scopes cannot substitute.
+`NativeDisplayApprovalRequest::new_finalization` validates the current material
+principal and separate namespace while preserving both original review deadlines.
+The owner arms this purpose only by transitioning the actual held Recovery flow;
+its manager/standalone scene path rejects it. Control's distinct typed authorizer
+compares the complete material's recomputed canonical payload/resource before native
+review and returns only the exact challenge's approval. It has no executor handle.
+A spent original Recovery flow retains its native opaque/input/Root protection
+under fresh native status probes after its old write window expires; this does not
+renew that receipt or grant another effect. Current-source/Root witness loss or
+clock rollback remains terminal. Production Root/native finalization and public
+Authority1 display mutation remain unavailable until the remaining workflow and
+native acceptance are complete.

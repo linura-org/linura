@@ -57,17 +57,19 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
                        n == '-' || n == '_' || n == '.';
             }))
             return std::nullopt;
+    const bool terminal = scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay;
     const bool recovery = scope.purpose == ApprovalPurpose::RestoreOriginalDisplay;
     if (recovery) {
         const auto material = NativeDisplayRestorationIntent::parse(scope.display->material);
         if (!material || !material->nativeOptions(snapshot, intent->baseline.topology, scope.lock))
             return std::nullopt;
     }
-    const auto purpose = recovery ? QStringLiteral("Restore original")
+    const auto purpose = terminal   ? QStringLiteral("Finish recovery")
+                         : recovery ? QStringLiteral("Restore original")
                          : scope.purpose == ApprovalPurpose::ApplyDisplay ? QStringLiteral("Apply")
                          : scope.purpose == ApprovalPurpose::KeepDisplay  ? QStringLiteral("Keep")
                                                                          : QStringLiteral("Revert");
-    if (!recovery && scope.purpose != ApprovalPurpose::ApplyDisplay) {
+    if (!recovery && !terminal && scope.purpose != ApprovalPurpose::ApplyDisplay) {
         // Apply already reviewed every setting and authenticated the canonical
         // plan. The fixed confirmation window needs one fresh human decision,
         // not another multi-page review or administrator conversation.
@@ -89,7 +91,18 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
             .arg(purpose)
             .arg(scope.lock.uid);
     std::vector<NativeDisplayReviewPage> pages;
-    pages.push_back({purpose + QStringLiteral(" display layout?"), introduction});
+    pages.push_back({terminal ? QStringLiteral("Finish display recovery?")
+                              : purpose + QStringLiteral(" display layout?"),
+                     introduction});
+    if (terminal && !intent->desired.matchesGeometry(snapshot))
+        return std::nullopt;
+    if (terminal)
+        pages.push_back({QStringLiteral("Finish the verified display recovery"),
+                         QStringLiteral("The original display settings have been restored and "
+                                        "independently checked. Fresh administrator authentication "
+                                        "allows Linura to finish recovery. It cannot change the "
+                                        "layout, unlock the session or authorize a power action. "
+                                        "Protection remains active until final checks complete.")});
     if (recovery)
         pages.push_back({QStringLiteral("Recover after an interrupted display change"),
                          QStringLiteral("Authorize restoring the original monitor rules, layout "
@@ -123,29 +136,35 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
         const auto previous = describe(before, snapshot), desired = describe(after, snapshot);
         if (previous.isEmpty() || desired.isEmpty())
             return std::nullopt;
-        pages.push_back({QStringLiteral("%1 — output %2 of %3")
-                             .arg(head->name)
-                             .arg(i + 1)
-                             .arg(intent->baseline.outputs.size()),
-                         QStringLiteral("Previous: %1\nRequested: %2").arg(previous, desired)});
+        pages.push_back(
+            {QStringLiteral("%1 — output %2 of %3")
+                 .arg(head->name)
+                 .arg(i + 1)
+                 .arg(intent->baseline.outputs.size()),
+             terminal ? QStringLiteral("Restored settings: %1").arg(desired)
+                      : QStringLiteral("Previous: %1\nRequested: %2").arg(previous, desired)});
     }
-    pages.push_back({purpose + QStringLiteral(" this exact layout?"),
-                     recovery
-                         ? QStringLiteral("Restore only the original display settings. This "
-                                          "approval cannot apply a different layout, unlock the "
-                                          "session or authorize a power transition.")
-                     : scope.purpose == ApprovalPurpose::ApplyDisplay
-                         ? QStringLiteral("Linura will apply the reviewed layout temporarily. "
-                                          "Keep requires a separate protected decision within "
-                                          "15 seconds; otherwise Linura restores the previous "
-                                          "layout. Existing session-lock protection stays active.")
-                     : scope.purpose == ApprovalPurpose::KeepDisplay
-                         ? QStringLiteral("Keep the reviewed layout before the ORIGINAL "
-                                          "confirmation deadline. This decision cannot change "
-                                          "the layout or authorize another apply.")
-                         : QStringLiteral("Restore the previous reviewed layout. This decision "
-                                          "cannot authorize a different layout or release a "
-                                          "session lock.")});
+    pages.push_back(
+        {terminal ? QStringLiteral("Finish this verified recovery?")
+                  : purpose + QStringLiteral(" this exact layout?"),
+         terminal   ? QStringLiteral("Finish only this verified recovery. Existing session-lock "
+                                       "protection stays active. Ordinary content returns only "
+                                       "after the final independent checks complete.")
+         : recovery ? QStringLiteral("Restore only the original display settings. This "
+                                     "approval cannot apply a different layout, unlock the "
+                                     "session or authorize a power transition.")
+         : scope.purpose == ApprovalPurpose::ApplyDisplay
+             ? QStringLiteral("Linura will apply the reviewed layout temporarily. "
+                              "Keep requires a separate protected decision within "
+                              "15 seconds; otherwise Linura restores the previous "
+                              "layout. Existing session-lock protection stays active.")
+         : scope.purpose == ApprovalPurpose::KeepDisplay
+             ? QStringLiteral("Keep the reviewed layout before the ORIGINAL "
+                              "confirmation deadline. This decision cannot change "
+                              "the layout or authorize another apply.")
+             : QStringLiteral("Restore the previous reviewed layout. This decision "
+                              "cannot authorize a different layout or release a "
+                              "session lock.")});
     return pages;
 }
 } // namespace Linura::SecurityOwner

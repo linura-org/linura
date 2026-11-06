@@ -14,6 +14,6 @@ bool NativeDisplayPromptScope::valid() const noexcept
                        }) &&
            deadlineUnixMs != 0 && deadlineBootMs != 0 &&
            (purpose == Purpose::Apply || purpose == Purpose::Keep || purpose == Purpose::Revert ||
-            purpose == Purpose::Recovery);
+            purpose == Purpose::Recovery || purpose == Purpose::Finalization);
 }
 } // namespace Linura::SecurityOwner

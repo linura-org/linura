@@ -1,4 +1,6 @@
 #include "native_display_finalization.h"
+#include "native_approval.h"
+#include "native_display_review.h"
 
 #include <QFile>
 #include <cassert>
@@ -196,4 +198,65 @@ void terminalMaterialBoundaries()
     scope.purpose = ApprovalPurpose::ApplyDisplay;
     scope.request = scope.plan = QStringLiteral("request:v010:display-layout:review");
     assert(!scope.valid() && scope.protectedDisplayDigest().isEmpty());
+    scope.purpose = ApprovalPurpose::FinalizeOriginalDisplay;
+    scope.request = scope.plan = QStringLiteral("request:v010:display-finalization:review");
+    assert(scope.valid() && scope.isDisplay() && !scope.requiresSessionOwnerAuthentication());
+    assert(QString::fromLatin1(scope.authenticationAction()) ==
+           QStringLiteral("org.linura.authority.finalize-original-display-restoration"));
+    const auto digest = scope.protectedDisplayDigest();
+    const auto presentation = nativeDisplayApprovalIntent(scope);
+    assert(digest.size() == 64 && presentation &&
+           presentation->baseline.encode() == parsed->restoration.replacement.desired.encode() &&
+           presentation->desired.encode() == presentation->baseline.encode());
+    auto substitute = scope;
+    substitute.reviewDigest[7] = QLatin1Char('4');
+    assert(substitute.protectedDisplayDigest() != digest);
+    substitute = scope;
+    substitute.display->decisionDigest = QStringLiteral("sha256:") + QString(64, QLatin1Char('4'));
+    assert(!substitute.valid());
+    substitute = scope;
+    substitute.display->material = parsed->restoration.encode();
+    assert(!substitute.valid());
+    for (const auto &prefix :
+         {QStringLiteral("display-layout"), QStringLiteral("display-restoration"),
+          QStringLiteral("session-lock"), QStringLiteral("session-transition")}) {
+        substitute = scope;
+        substitute.request = substitute.plan =
+            QStringLiteral("request:v010:") + prefix + QStringLiteral(":review");
+        assert(!substitute.valid());
+    }
+    quint64 clock = 100;
+    NativeApproval approval(scope.lock, [&] { return clock; });
+    NativeDisplayPromptStatus ready{5, 7, NativeDisplayPromptStatus::Phase::Ready};
+    assert(!approval.begin(scope, true)); // S17 is purpose-separated.
+    assert(!approval.beginDisplay(scope, ready, 60'001));
+    assert(approval.beginDisplay(scope, ready, 60'000));
+    assert(approval.nativePrompt(scope) && approval.nativeCompleted(scope, true));
+    substitute = scope;
+    substitute.reviewDigest[7] = QLatin1Char('4');
+    assert(!approval.consume(substitute));
+    assert(approval.consume(scope) && !approval.consume(scope));
+    auto currentScope = scope;
+    currentScope.lock = material.currentLock;
+    currentScope.display->material = material.encode();
+    const auto pages = nativeDisplayReviewPages(currentScope, snapshot);
+    assert(pages && pages->size() > restored.outputs.size());
+    assert(pages->front().heading == QStringLiteral("Finish display recovery?"));
+    assert(pages->back().explanation.contains(QStringLiteral("session-lock")));
+    for (const auto &page : *pages)
+        assert(!page.explanation.contains(QStringLiteral("15 seconds")));
+    NativeApproval expired(scope.lock, [&] { return clock; });
+    assert(expired.beginDisplay(scope, ready, 100));
+    clock += 100;
+    assert(!expired.nativeCompleted(scope, true) && !expired.consume(scope));
+    NativeApproval cancelled(scope.lock, [&] { return clock; });
+    assert(cancelled.beginDisplay(scope, ready, 100));
+    cancelled.cancel();
+    assert(!cancelled.nativeCompleted(scope, true) && !cancelled.consume(scope));
+    const NativeDisplayPromptScope prompt{digest, NativeDisplayPromptScope::Purpose::Finalization,
+                                          1000, 900};
+    assert(prompt.valid());
+    auto invalid = prompt;
+    invalid.purpose = static_cast<NativeDisplayPromptScope::Purpose>(5);
+    assert(!invalid.valid());
 }

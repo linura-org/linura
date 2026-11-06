@@ -40,6 +40,7 @@ enum class ApprovalPurpose {
     KeepDisplay = 9,
     RevertDisplay = 10,
     RestoreOriginalDisplay = 11,
+    FinalizeOriginalDisplay = 12,
 };
 
 // Exact native presentation material in addition to the ORIGINAL canonical

@@ -74,4 +74,10 @@
     <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
   </action>
+  <action id="org.linura.authority.finalize-original-display-restoration">
+    <description>Authorize finishing this independently verified display recovery</description>
+    <message>Fresh administrator authentication authorizes finalizing this verified recovery while preserving the session lock</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
 </policyconfig>

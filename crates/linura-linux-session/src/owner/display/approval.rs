@@ -15,6 +15,7 @@ pub enum NativeDisplayApprovalPurpose {
     Keep,
     Revert,
     RestoreOriginal,
+    FinalizeOriginal,
 }
 impl NativeDisplayApprovalPurpose {
     fn wire(self) -> u32 {
@@ -23,6 +24,7 @@ impl NativeDisplayApprovalPurpose {
             Self::Keep => 9,
             Self::Revert => 10,
             Self::RestoreOriginal => 11,
+            Self::FinalizeOriginal => 12,
         }
     }
 
@@ -31,6 +33,9 @@ impl NativeDisplayApprovalPurpose {
             NativeDisplayApprovalPurpose::Apply => "org.linura.authority.apply-display-layout",
             NativeDisplayApprovalPurpose::RestoreOriginal => {
                 "org.linura.authority.restore-original-display-layout"
+            }
+            NativeDisplayApprovalPurpose::FinalizeOriginal => {
+                "org.linura.authority.finalize-original-display-restoration"
             }
             NativeDisplayApprovalPurpose::Keep | NativeDisplayApprovalPurpose::Revert => {
                 return Err("display decisions require the retained native attempt".into());
@@ -124,6 +129,37 @@ impl NativeDisplayApprovalRequest {
         )
     }
 
+    /// Fresh terminal review on the actual retained original Recovery scene.
+    /// Complete material remains comparison data; no old approval or historical
+    /// completion becomes prepared terminal execution authority.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_finalization(
+        principal: PrincipalId,
+        request: RequestId,
+        plan: PlanId,
+        request_digest: ComponentDigest,
+        observation_digest: ComponentDigest,
+        review_digest: ComponentDigest,
+        material: &str,
+        reason: &str,
+        budget: Duration,
+    ) -> Result<Self, String> {
+        Self::at(
+            principal,
+            request,
+            plan,
+            request_digest,
+            observation_digest,
+            review_digest,
+            material,
+            reason,
+            budget,
+            unix_ms()?,
+            boot_ms()?,
+            NativeDisplayApprovalPurpose::FinalizeOriginal,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn at(
         principal: PrincipalId,
@@ -139,10 +175,14 @@ impl NativeDisplayApprovalRequest {
         started_boot_ms: u64,
         purpose: NativeDisplayApprovalPurpose,
     ) -> Result<Self, String> {
-        let maximum = if purpose == NativeDisplayApprovalPurpose::RestoreOriginal {
-            linura_core::MAX_DISPLAY_RESTORATION_BYTES
-        } else {
-            linura_core::MAX_DISPLAY_INTENT_BYTES
+        let maximum = match purpose {
+            NativeDisplayApprovalPurpose::FinalizeOriginal => {
+                linura_core::MAX_DISPLAY_FINALIZATION_BYTES
+            }
+            NativeDisplayApprovalPurpose::RestoreOriginal => {
+                linura_core::MAX_DISPLAY_RESTORATION_BYTES
+            }
+            _ => linura_core::MAX_DISPLAY_INTENT_BYTES,
         };
         if material.len() > maximum
             || reason.is_empty()
@@ -164,6 +204,13 @@ impl NativeDisplayApprovalRequest {
                     .lock()
                     .clone(),
                 "request:v010:display-layout:",
+            ),
+            NativeDisplayApprovalPurpose::FinalizeOriginal => (
+                linura_core::DisplayFinalizationMaterial::decode(material)
+                    .map_err(|e| e.to_string())?
+                    .current_lock()
+                    .clone(),
+                "request:v010:display-finalization:",
             ),
             NativeDisplayApprovalPurpose::RestoreOriginal => (
                 linura_core::DisplayRestorationMaterial::decode(material)
@@ -417,6 +464,126 @@ mod tests {
             NativeDisplayApprovalPurpose::Apply,
         ))
     }
+    #[test]
+    fn finalization_has_fresh_material_principal_purpose_and_clock_bounds() {
+        let source = fixture();
+        let material = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../linura-core/src/display_recovery/fixtures/original-finalization.txt"
+        ))
+        .trim_end();
+        let make = |purpose, text: &str, request: &str, principal: &str, budget| {
+            NativeDisplayApprovalRequest::at(
+                value(PrincipalId::new(principal)),
+                value(RequestId::new(request)),
+                value(PlanId::new(request)),
+                source.request_digest,
+                source.observation_digest,
+                source.review_digest,
+                text,
+                "Finish independently verified recovery",
+                budget,
+                100,
+                200,
+                purpose,
+            )
+        };
+        let purpose = NativeDisplayApprovalPurpose::FinalizeOriginal;
+        let request = "request:v010:display-finalization:review";
+        let terminal = value(make(
+            purpose,
+            material,
+            request,
+            "unix:uid:1000",
+            Duration::from_secs(60),
+        ));
+        assert_eq!(purpose.wire(), 12);
+        assert_eq!(
+            purpose.authentication_action(),
+            Ok("org.linura.authority.finalize-original-display-restoration")
+        );
+        assert_eq!(terminal.material, material);
+        assert_eq!(
+            (terminal.deadline_unix_ms, terminal.deadline_boot_ms),
+            (60_100, 60_200)
+        );
+        assert!(terminal.remaining_at(101, 60_200).is_err());
+        assert!(terminal.remaining_at(101, 201).is_err()); // A failed clock/window is terminal.
+        for other in [
+            NativeDisplayApprovalPurpose::Apply,
+            NativeDisplayApprovalPurpose::Keep,
+            NativeDisplayApprovalPurpose::Revert,
+            NativeDisplayApprovalPurpose::RestoreOriginal,
+        ] {
+            assert!(
+                make(
+                    other,
+                    material,
+                    request,
+                    "unix:uid:1000",
+                    Duration::from_secs(1)
+                )
+                .is_err()
+            );
+        }
+        for bad_request in [
+            "request:v010:display-layout:review",
+            "request:v010:display-restoration:review",
+            "request:v010:session-lock:review",
+        ] {
+            assert!(
+                make(
+                    purpose,
+                    material,
+                    bad_request,
+                    "unix:uid:1000",
+                    Duration::from_secs(1)
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            make(
+                purpose,
+                &source.material,
+                request,
+                "unix:uid:1000",
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
+        assert!(
+            make(
+                purpose,
+                material,
+                request,
+                "unix:uid:1001",
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
+        assert!(
+            make(
+                purpose,
+                material,
+                request,
+                "unix:uid:1000",
+                Duration::from_secs(61)
+            )
+            .is_err()
+        );
+        assert!(
+            make(
+                purpose,
+                &"x".repeat(linura_core::MAX_DISPLAY_FINALIZATION_BYTES + 1),
+                request,
+                "unix:uid:1000",
+                Duration::from_secs(1)
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn fresh_original_restoration_cannot_enter_apply_or_reuse_its_window() {
         let source = fixture();

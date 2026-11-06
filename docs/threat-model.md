@@ -1413,3 +1413,14 @@ permanent owner/witness failure latches. Consuming review returns to opaque nati
 frames; it is neither prepared terminal execution nor proof of Root retirement.
 Production terminal authentication, release/admission, loss recovery, supersession
 and reference-aware cleanup remain separately required and unqualified.
+
+Terminal native approval uses a distinct fresh administrator purpose bound to the
+actual retained Recovery flow, current principal/lock, complete original material
+and canonical challenge. Restored geometry, a historical commit, an old PAM proof,
+another purpose or a reconnecting Control/owner cannot arm it. The consumed original
+Recovery scene may remain held after its output-write window expires, but its spent
+receipt cannot redeem again; native Root/connection/source/device health and bounded
+status probes remain mandatory. A fresh terminal scope has new independently bounded
+review clocks, never a renewed old execution window. Ordinary unlock and power
+preemption gates stay intact while display protection is held. Native approval does
+not quiesce witnesses, retire Root protection or qualify ordinary admission.

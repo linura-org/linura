@@ -1,5 +1,6 @@
 #include "native_display_flow.h"
 #include "native_display_restoration.h"
+#include "native_display_finalization.h"
 #include "native_wayland_lock.h"
 #include "native_presentation.h"
 #include "authentication_agent.h"
@@ -118,9 +119,18 @@ bool NativeDisplayFlow::window()
 {
     const auto now = NativeDisplayClock::sample();
     if (!failed_ && spent_ && dispatched_ && !decisionMode_) {
-        const auto boot = scope_.purpose == ApprovalPurpose::RestoreOriginalDisplay
-                              ? backend_.displayRestorationBootDeadline(*dispatched_)
-                              : backend_.displayDecisionBootDeadline(*dispatched_);
+        if (scope_.purpose == ApprovalPurpose::RestoreOriginalDisplay) {
+            // Continuity of a consumed original Recovery scene is not renewed
+            // execution authority. No effect can redeem this spent receipt.
+            if (!now || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
+                !backend_.heldOriginalDisplayRestoration(*dispatched_)) {
+                cancel(); // Observed loss/rollback cannot revive this held flow.
+                return false;
+            }
+            last_ = *now;
+            return true;
+        }
+        const auto boot = backend_.displayDecisionBootDeadline(*dispatched_);
         if (!now || !boot || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
             now->unixMs >= dispatched_->deadlineUnixMs || now->bootMs >= *boot)
             return false;
@@ -322,6 +332,53 @@ bool NativeDisplayFlow::redeemReceipt(const QString &material,
     dispatched_ = correlation;
     presentation_.present(NativePresentation::State::ApplyingDisplay);
     return true;
+}
+bool NativeDisplayFlow::beginFinalization(const NativeApprovalScope &scope,
+                                          const NativePeerIdentity &control)
+{
+    if (scope_.purpose != ApprovalPurpose::RestoreOriginalDisplay || failed_ || decisionMode_ ||
+        !consumed_ || !spent_ || !dispatched_ || control != control_ || !scope.valid() ||
+        scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay || scope.lock != scope_.lock ||
+        scope.principal != scope_.principal || !revalidate_() || !window())
+        return false;
+    const auto terminal = NativeDisplayFinalizationIntent::parse(scope.display->material);
+    const auto intent = nativeDisplayApprovalIntent(scope);
+    const auto sample = backend_.observeDisplayTopology();
+    const auto now = NativeDisplayClock::sample();
+    if (!terminal || !intent || !sample || !now ||
+        terminal->restoration.encode() != scope_.display->material ||
+        terminal->restorationRequest != scope_.request ||
+        terminal->restorationDispatch != dispatched_->dispatchDigest ||
+        scope.display->deadlineUnixMs <= now->unixMs ||
+        scope.display->deadlineBootMs <= now->bootMs ||
+        scope.display->deadlineUnixMs - now->unixMs > 60'000 ||
+        scope.display->deadlineBootMs - now->bootMs > 60'000)
+        return false;
+    const auto pages = nativeDisplayReviewPages(scope, *sample);
+    if (!pages || pages->empty())
+        return false;
+    const NativeDisplayPromptScope prompt{
+        scope.protectedDisplayDigest(), NativeDisplayPromptScope::Purpose::Finalization,
+        scope.display->deadlineUnixMs, scope.display->deadlineBootMs};
+    if (!presentation_.presentDisplayReview(scope, *sample, 0) ||
+        !backend_.beginProtectedDisplayFinalization(prompt, scope.display->material,
+                                                    *dispatched_)) {
+        cancel();
+        return false;
+    }
+    scope_ = scope;
+    intent_ = *intent;
+    snapshot_ = *sample;
+    prompt_ = prompt;
+    deadlineBoot_ = scope.display->deadlineBootMs;
+    last_ = *now;
+    dispatched_.reset();
+    epoch_ = proofGeneration_ = inputGeneration_ = 0;
+    consumed_ = spent_ = reviewArmed_ = authenticateSelected_ = authenticationArmed_ = false;
+    awaitingRevision_ = true;
+    page_ = 0;
+    pageCount_ = pages->size();
+    return revalidate_() && window();
 }
 bool NativeDisplayFlow::beginDecision(const NativeDisplayChoiceChallenge &challenge)
 {

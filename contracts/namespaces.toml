@@ -169,6 +169,11 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.authority.finalize-original-display-restoration"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "org.linura.authority.enable-protective-lock"
 kind = "polkit-action"
 status = "active"
@@ -372,6 +377,13 @@ source = "crates/linura-linux-session/src/owner/display/approval.rs"
 usage = "native-approval-action"
 token = '"org.linura.authority.restore-original-display-layout"'
 action = "org.linura.authority.restore-original-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.finalize-original-display-restoration"'
+action = "org.linura.authority.finalize-original-display-restoration"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]

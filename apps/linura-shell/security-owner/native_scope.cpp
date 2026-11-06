@@ -159,7 +159,8 @@ bool NativeApprovalScope::valid() const
                         }) ||
             QString::fromUtf8(display->reason.toUtf8()) != display->reason ||
             ((purpose == ApprovalPurpose::ApplyDisplay ||
-              purpose == ApprovalPurpose::RestoreOriginalDisplay)
+              purpose == ApprovalPurpose::RestoreOriginalDisplay ||
+              purpose == ApprovalPurpose::FinalizeOriginalDisplay)
                  ? !display->decisionDigest.isEmpty()
                  : (!digest(display->decisionDigest) ||
                     display->decisionDigest ==
@@ -168,6 +169,7 @@ bool NativeApprovalScope::valid() const
         const auto intent = nativeDisplayApprovalIntent(*this);
         if (!intent || intent->lock != lock ||
             (purpose != ApprovalPurpose::RestoreOriginalDisplay &&
+             purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
              intent->encode() != display->material))
             return false;
     } else if (display)
@@ -206,7 +208,9 @@ bool NativeApprovalScope::valid() const
         }
     } else if (transition)
         return false;
-    const QString prefix = purpose == ApprovalPurpose::RestoreOriginalDisplay
+    const QString prefix = purpose == ApprovalPurpose::FinalizeOriginalDisplay
+                               ? QStringLiteral("request:v010:display-finalization:")
+                           : purpose == ApprovalPurpose::RestoreOriginalDisplay
                                ? QStringLiteral("request:v010:display-restoration:")
                            : isDisplay() ? QStringLiteral("request:v010:display-layout:")
                            : power       ? QStringLiteral("request:v010:session-transition:")
@@ -236,6 +240,7 @@ bool NativeApprovalScope::valid() const
     case ApprovalPurpose::KeepDisplay:
     case ApprovalPurpose::RevertDisplay:
     case ApprovalPurpose::RestoreOriginalDisplay:
+    case ApprovalPurpose::FinalizeOriginalDisplay:
         return true;
     }
     return false;
@@ -262,6 +267,8 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
         return "org.linura.authority.revoke-protective-lock";
     case ApprovalPurpose::RestoreOriginalDisplay:
         return "org.linura.authority.restore-original-display-layout";
+    case ApprovalPurpose::FinalizeOriginalDisplay:
+        return "org.linura.authority.finalize-original-display-restoration";
     case ApprovalPurpose::ApplyDisplay:
         return "org.linura.authority.apply-display-layout";
     case ApprovalPurpose::KeepDisplay:
@@ -276,7 +283,8 @@ bool NativeApprovalScope::isDisplay() const noexcept
 {
     return purpose == ApprovalPurpose::ApplyDisplay || purpose == ApprovalPurpose::KeepDisplay ||
            purpose == ApprovalPurpose::RevertDisplay ||
-           purpose == ApprovalPurpose::RestoreOriginalDisplay;
+           purpose == ApprovalPurpose::RestoreOriginalDisplay ||
+           purpose == ApprovalPurpose::FinalizeOriginalDisplay;
 }
 
 QString NativeApprovalScope::protectedDisplayDigest() const

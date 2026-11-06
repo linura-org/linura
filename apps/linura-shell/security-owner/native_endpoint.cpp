@@ -74,7 +74,8 @@ std::optional<NativeApprovalScope> NativeApprovalWire::displayScope(const QStrin
                                                                     quint64 deadlineUnixMs,
                                                                     quint64 deadlineBootMs) const
 {
-    if ((purpose != 8 && purpose != 11) || material.size() > (purpose == 11 ? 12 * 1024 : 4096) ||
+    const auto maximum = purpose == 12 ? 14 * 1024 : purpose == 11 ? 12 * 1024 : 4096;
+    if ((purpose != 8 && purpose != 11 && purpose != 12) || material.size() > maximum ||
         reason.size() > 2048 || principal.size() > 64 || request.size() > 128 || plan.size() > 128)
         return std::nullopt;
     const auto lock = NativeLockIdentity::parse(resource);

@@ -1,6 +1,7 @@
 // Official client/server wire-component harness only. It does not attest a
 // compositor, login session, PAM account, deployed owner or native qualification.
 #include "native_wayland_lock.h"
+#include "native_display_connection.h"
 #include "native_wayland_readiness.h"
 #include "native_lock_protocol.h"
 #include "secret_entry.h"
@@ -1232,6 +1233,12 @@ void client(Case scenario, int descriptor, int commands)
             const NativeDisplayPromptScope unsupportedPrompt{
                 QString(64, QLatin1Char('a')), NativeDisplayPromptScope::Purpose::Apply, 1000, 500};
             assert(!backend.showProtectedDisplay(unsupportedPrompt, NativeDisplayIntent{}));
+            auto terminal = unsupportedPrompt;
+            terminal.purpose = NativeDisplayPromptScope::Purpose::Finalization;
+            assert(!backend.showProtectedDisplay(terminal, NativeDisplayIntent{}));
+            assert(!backend.heldOriginalDisplayRestoration(NativeDisplayCorrelation{}));
+            assert(!backend.beginProtectedDisplayFinalization(terminal, QString{},
+                                                              NativeDisplayCorrelation{}));
             assert(!backend.protectedDisplayStatus());
             assert(!backend.consumeProtectedDisplay(unsupportedPrompt, 1));
             backend.cancelProtectedDisplay();

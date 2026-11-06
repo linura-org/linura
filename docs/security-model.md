@@ -836,3 +836,19 @@ another authorization or cause redispatch. The qualified v0.6 startup abort of
 never-dispatched Prepared authority remains intact; this API refuses to revive it.
 Returned indeterminate receipts remain uncertainty;
 no reply commits terminal completion or becomes native/Root release authority.
+
+The native owner and Rust transport additionally implement a separate terminal
+approval purpose (12) and fresh non-retained administrator action. The owner can
+transition only its actual retained original Recovery flow on the same authenticated
+Control connection, current login/lock and exact original material/request/dispatch.
+It cannot create a terminal scene from historical bytes or a new owner connection.
+The new review retains both fresh absolute clocks, complete material and canonical
+request/observation/review binding, and needs fresh pages, frames and administrator
+proof. The original spent Recovery receipt remains non-redeemable. Healthy consumed
+Recovery retention no longer expires with the old output-write window; actual
+native/Root continuity, original connection, monotonic clocks and bounded status
+probes still govern that held lifetime. Loss never reconstructs or renews authority.
+The typed Control finalization authorizer recomputes material's SDK payload and
+resource, checks the exact principal/administrator class, and consumes that separate
+native proof. Generic approval cannot substitute. Root/native prepared release,
+current admission and final completion verification remain unimplemented.

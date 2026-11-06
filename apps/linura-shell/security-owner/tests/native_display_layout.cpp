@@ -43,7 +43,7 @@ int main()
             prompt.deadlineBootMs = 0;
             break;
         default:
-            prompt.purpose = static_cast<NativeDisplayPromptScope::Purpose>(4);
+            prompt.purpose = static_cast<NativeDisplayPromptScope::Purpose>(5);
             break;
         }
         assert(!prompt.valid());

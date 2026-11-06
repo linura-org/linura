@@ -188,7 +188,12 @@ class NativePresentation::Impl final
             explanation = displayPage->explanation;
             break;
         case State::PreparingDisplay:
-            if (authenticationPurpose == ApprovalPurpose::RestoreOriginalDisplay) {
+            if (authenticationPurpose == ApprovalPurpose::FinalizeOriginalDisplay) {
+                title = QStringLiteral("Finishing display recovery");
+                explanation =
+                    QStringLiteral("Authentication completed. Linura is repeating the "
+                                   "independent recovery checks. Protection stays active.");
+            } else if (authenticationPurpose == ApprovalPurpose::RestoreOriginalDisplay) {
                 title = QStringLiteral("Preparing display recovery");
                 explanation = QStringLiteral("Authentication completed. Linura is checking the "
                                              "original display settings before restoration.");

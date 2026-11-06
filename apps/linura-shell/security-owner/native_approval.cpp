@@ -98,7 +98,8 @@ bool NativeApproval::beginDisplay(const NativeApprovalScope &scope,
 {
     const auto time = now();
     const quint64 maximum = (scope.purpose == ApprovalPurpose::ApplyDisplay ||
-                             scope.purpose == ApprovalPurpose::RestoreOriginalDisplay)
+                             scope.purpose == ApprovalPurpose::RestoreOriginalDisplay ||
+                             scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay)
                                 ? ConversationMs
                                 : 15'000;
     if (!time || state_ != State::Idle || !scope.isDisplay() || !scope.valid() ||

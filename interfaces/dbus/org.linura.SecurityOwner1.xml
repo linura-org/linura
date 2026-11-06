@@ -29,10 +29,13 @@
       <arg name="resource" type="s" direction="in"/>
       <arg name="ready" type="b" direction="out"/>
     </method>
-    <!-- Separate display Apply and fresh original-restoration handshake. Original canonical scope/review,
-         complete material/reason and original deadline are immutable comparison
-         data; no bool or digest becomes prepared execution authority. Keep and
-         Revert must continue the retained original native transaction. -->
+    <!-- Separate display Apply (purpose 8), fresh original restoration (11)
+         and original-restoration finalization (12). Original canonical scope/review,
+         complete material/reason and both original review bounds are immutable
+         comparison data; no bool or digest becomes prepared execution authority.
+         Finalization requires the actual held Recovery scene and a fresh bounded
+         administrator conversation. Keep/Revert continue their original native
+         transaction. No approval releases startup, input, power or lock fences. -->
     <method name="ArmDisplayApproval">
       <arg name="scope" type="(sssssssu)" direction="in"/>
       <arg name="material" type="s" direction="in"/>

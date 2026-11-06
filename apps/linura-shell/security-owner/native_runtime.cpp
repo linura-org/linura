@@ -689,9 +689,12 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
     if (!peer ||
         (scope.purpose != ApprovalPurpose::ApplyDisplay &&
-         scope.purpose != ApprovalPurpose::RestoreOriginalDisplay) ||
+         scope.purpose != ApprovalPurpose::RestoreOriginalDisplay &&
+         scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay) ||
         !scope.valid() || scope.lock != identity() || impl_->approvalScope ||
-        impl_->displayRetiring || (impl_->display && impl_->display->fenced()) ||
+        impl_->displayRetiring ||
+        (scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay && impl_->display &&
+         impl_->display->fenced()) ||
         impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
         impl_->transitionRequest)
         return false;
@@ -705,6 +708,9 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
     if (!settled || (*settled != NativeObservedLockState::Secure &&
                      *settled != NativeObservedLockState::Unlocked))
         return false;
+    if (scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay)
+        return impl_->display && impl_->display->fenced() &&
+               impl_->display->beginFinalization(scope, *peer);
     // An earlier display conversation can be canceled or lose its native owner
     // while the compositor still holds a pending/recovery-failed mutation. Do
     // not present another protected approval over that unresolved native fence.

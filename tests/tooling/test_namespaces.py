@@ -184,6 +184,10 @@ class NamespaceContractTests(unittest.TestCase):
         for purpose, action in (
             ("Apply", "org.linura.authority.apply-display-layout"),
             ("RestoreOriginal", "org.linura.authority.restore-original-display-layout"),
+            (
+                "FinalizeOriginal",
+                "org.linura.authority.finalize-original-display-restoration",
+            ),
         ):
             with (
                 self.subTest(purpose=purpose),

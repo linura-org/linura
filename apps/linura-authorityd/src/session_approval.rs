@@ -26,6 +26,15 @@ impl linura_control::DisplayDecisionAuthorizer for NativeSessionApprovalAuthoriz
     }
 }
 
+impl linura_control::OriginalDisplayFinalizationAuthorizer for NativeSessionApprovalAuthorizer {
+    fn authorize_finalization(
+        &self,
+        challenge: &linura_control::OriginalDisplayFinalizationChallenge,
+    ) -> Result<TrustedHumanApproval, String> {
+        crate::display_approval::authorize_finalization(&self.channel, &self.principal, challenge)
+    }
+}
+
 impl ManagedApprovalAuthorizer for NativeSessionApprovalAuthorizer {
     fn authorize(
         &self,

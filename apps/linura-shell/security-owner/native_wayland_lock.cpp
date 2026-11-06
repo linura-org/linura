@@ -1,5 +1,7 @@
 #include "native_wayland_lock.h"
 #include "native_display_restoration.h"
+#include "native_display_finalization.h"
+#include "sealed_native_material.h"
 #include "native_deadline.h"
 #include "native_lock_protocol.h"
 #include "native_keyboard.h"
@@ -212,6 +214,7 @@ class NativeWaylandLock::Impl final
     quint64 protectedReviewEpochUsed = 0;
     bool protectedPollPending = false, protectedConsumed = false;
     bool protectedRevisionPending = false;
+    std::optional<NativeDisplayCorrelation> heldRestoration;
     std::map<quint64, std::unique_ptr<Output>> protectedOutputs;
     QTimer protectedTimer;
 
@@ -221,7 +224,10 @@ class NativeWaylandLock::Impl final
             return false;
         const auto now = NativeDisplayClock::sample();
         if (!now || now->unixMs < protectedLast.unixMs || now->bootMs < protectedLast.bootMs ||
-            now->unixMs >= protectedScope->deadlineUnixMs || now->bootMs >= protectedBootDeadline)
+            (!(heldRestoration && protectedConsumed &&
+               protectedScope->purpose == NativeDisplayPromptScope::Purpose::Recovery) &&
+             (now->unixMs >= protectedScope->deadlineUnixMs ||
+              now->bootMs >= protectedBootDeadline)))
             return false;
         protectedLast = *now;
         return true;
@@ -248,6 +254,7 @@ class NativeWaylandLock::Impl final
             keyboard->resetFocus();
         protectedStatus.reset();
         protectedScope.reset();
+        heldRestoration.reset();
         protectedPollPending = protectedConsumed = protectedRevisionPending = false;
         protectedOutputs.clear();
         if (protectedInteraction)
@@ -918,10 +925,11 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
                                              const NativeDisplayIntent &intent)
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
-        impl_->pumping || !scope.valid() || !impl_->protectedManager || !impl_->keyboard ||
-        !impl_->keyboard->available() || impl_->confirmation || impl_->protectedInteraction ||
-        impl_->releaseAck || requestedSecure() != secureCoverage() ||
-        !NativeDisplayIntent::parse(intent.encode()))
+        impl_->pumping || !scope.valid() ||
+        scope.purpose == NativeDisplayPromptScope::Purpose::Finalization ||
+        !impl_->protectedManager || !impl_->keyboard || !impl_->keyboard->available() ||
+        impl_->confirmation || impl_->protectedInteraction || impl_->releaseAck ||
+        requestedSecure() != secureCoverage() || !NativeDisplayIntent::parse(intent.encode()))
         return false;
     const auto current = impl_->displayConnection->sample();
     const auto now = NativeDisplayClock::sample();
@@ -1052,6 +1060,66 @@ NativeWaylandLock::displayRestorationBootDeadline(const NativeDisplayCorrelation
         impl_->pumping || impl_->displayConnection->status(bound) != 3)
         return std::nullopt;
     return impl_->displayConnection->restorationBootDeadline(bound);
+}
+bool NativeWaylandLock::heldOriginalDisplayRestoration(const NativeDisplayCorrelation &bound)
+{
+    return thread() == QThread::currentThread() && impl_->initialized && !impl_->painting &&
+           !impl_->pumping && impl_->heldRestoration == std::optional(bound) &&
+           impl_->protectedInteraction && impl_->protectedConsumed && impl_->protectedWindow() &&
+           impl_->displayConnection->status(bound) == 3;
+}
+bool NativeWaylandLock::beginProtectedDisplayFinalization(const NativeDisplayPromptScope &scope,
+                                                          const QString &material,
+                                                          const NativeDisplayCorrelation &bound)
+{
+    if (!scope.valid() || scope.purpose != NativeDisplayPromptScope::Purpose::Finalization ||
+        !heldOriginalDisplayRestoration(bound) || !impl_->protectedScope ||
+        impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Recovery ||
+        scope.digest == impl_->protectedScope->digest || requestedSecure() != secureCoverage())
+        return false;
+    const auto terminal = NativeDisplayFinalizationIntent::parse(material);
+    const auto sample = impl_->displayConnection->sample();
+    const auto now = NativeDisplayClock::sample();
+    if (!terminal || !sample || !now || !sample->fenced || sample->startupPhase != 2 ||
+        sample->compositor != impl_->displayInvocation ||
+        sample->topology.generation != impl_->protectedTopology ||
+        sample->coverage != (secureCoverage() ? 1U : 0U) ||
+        (secureCoverage() && !impl_->inputCovered()) ||
+        !terminal->restoration.replacement.desired.matchesGeometry(sample->topology) ||
+        sample->topology.baselineGuard(terminal->restoration.replacement.desired.encode()) !=
+            std::optional(terminal->restoredSourceGuard) ||
+        scope.deadlineUnixMs <= now->unixMs || scope.deadlineBootMs <= now->bootMs ||
+        scope.deadlineUnixMs - now->unixMs > 60'000 || scope.deadlineBootMs - now->bootMs > 60'000)
+        return false;
+    const auto bytes = material.toUtf8();
+    const auto descriptor = Linura::HyprlandDisplay::SealedNativeMaterial::create(
+        std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size())));
+    if (!descriptor || !waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) ||
+        !impl_->protectedInteraction || !heldOriginalDisplayRestoration(bound))
+        return false;
+    for (const auto &head : sample->topology.heads) {
+        const auto at = impl_->protectedOutputs.find(head.handle);
+        if (at == impl_->protectedOutputs.end() || at->second->displayGeneration != head.generation)
+            return false;
+        at->second->dormantDisplay = !head.enabled;
+    }
+    impl_->protectedScope = scope;
+    impl_->protectedBootDeadline = scope.deadlineBootMs;
+    impl_->protectedStatus.reset();
+    impl_->protectedConsumed = impl_->protectedPollPending = false;
+    impl_->protectedRevisionEpoch = impl_->protectedReviewEpochUsed = 0;
+    impl_->protectedRevisionPending = true;
+    impl_->invalidateOutputConfiguration();
+    const auto digest = scope.digest.toLatin1();
+    linura_protected_display_interaction_v1_begin_finalization(
+        impl_->protectedInteraction, digest.constData(), descriptor->get(),
+        static_cast<quint32>(scope.deadlineUnixMs >> 32U),
+        static_cast<quint32>(scope.deadlineUnixMs),
+        static_cast<quint32>(scope.deadlineBootMs >> 32U),
+        static_cast<quint32>(scope.deadlineBootMs));
+    impl_->flush();
+    return waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) &&
+           impl_->protectedInteraction && impl_->protectedWindow();
 }
 bool NativeWaylandLock::beginProtectedDisplayDecision(const NativeDisplayPromptScope &scope,
                                                       const NativeDisplayIntent &intent,
@@ -1323,8 +1391,12 @@ NativeWaylandLock::restoreOriginalDisplay(const NativeDisplayRestorationIntent &
         !intent.nativeOptions(current->topology, intent.replacement.baseline.topology,
                               intent.replacement.lock))
         return std::nullopt;
-    return impl_->displayConnection->restoreOriginal(correlation, intent, originalGrant,
-                                                     impl_->protectedInteraction);
+    const auto phase = impl_->displayConnection->restoreOriginal(correlation, intent, originalGrant,
+                                                                 impl_->protectedInteraction);
+    if (phase == 3 && impl_->protectedConsumed && impl_->protectedScope &&
+        impl_->protectedScope->purpose == NativeDisplayPromptScope::Purpose::Recovery)
+        impl_->heldRestoration = correlation;
+    return phase;
 }
 std::optional<quint32>
 NativeWaylandLock::continuePreparedDisplay(const NativeDisplayIntent &intent,

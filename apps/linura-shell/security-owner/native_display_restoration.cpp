@@ -1,4 +1,5 @@
 #include "native_display_restoration.h"
+#include "native_display_finalization.h"
 
 #include <QStringList>
 #include <algorithm>
@@ -166,6 +167,13 @@ std::optional<NativeDisplayIntent> nativeDisplayApprovalIntent(const NativeAppro
 {
     if (!scope.display || !scope.isDisplay())
         return std::nullopt;
+    if (scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay) {
+        const auto terminal = NativeDisplayFinalizationIntent::parse(scope.display->material);
+        if (!terminal || terminal->currentLock != scope.lock)
+            return std::nullopt;
+        const auto &restored = terminal->restoration.replacement.desired;
+        return NativeDisplayIntent{terminal->currentLock, restored, restored};
+    }
     if (scope.purpose == ApprovalPurpose::RestoreOriginalDisplay) {
         const auto recovery = NativeDisplayRestorationIntent::parse(scope.display->material);
         return recovery ? std::optional(recovery->replacement) : std::nullopt;

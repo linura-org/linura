@@ -1,4 +1,4 @@
-//! Composition of a sealed canonical Apply challenge with native review/PAM.
+//! Composition of sealed canonical Apply/terminal challenges with native review/PAM.
 //! Public display execution remains unavailable until its complete recovery and
 //! native acceptance are qualified. Neither this proof nor Polkit is an executor
 //! credential; managed prepare and fresh pre-dispatch revalidation remain inward.
@@ -27,6 +27,49 @@ pub(crate) fn authorize(
     Ok(TrustedHumanApproval::from_authorized_challenge(
         principal.clone(),
         challenge,
+    ))
+}
+
+pub(crate) fn authorize_finalization(
+    channel: &NativeSessionChannel,
+    principal: &PrincipalId,
+    challenge: &linura_control::OriginalDisplayFinalizationChallenge,
+) -> Result<TrustedHumanApproval, String> {
+    let managed = challenge.managed();
+    if managed.principal() != principal
+        || managed.change_key() != "finalize_original"
+        || managed.approval_class() != ManagedApprovalClass::Administrator
+    {
+        return Err("terminal native approval has another principal/class/purpose".into());
+    }
+    let effect = linura_provider_sdk::display_finalization_effect(challenge.material())?;
+    if effect.resource != *managed.resource()
+        || effect.canonical_payload.as_slice() != managed.desired_value().as_bytes()
+    {
+        return Err(
+            "terminal native approval material differs from the canonical challenge".into(),
+        );
+    }
+    let request = NativeDisplayApprovalRequest::new_finalization(
+        principal.clone(),
+        managed.request_id().clone(),
+        managed.plan_id().clone(),
+        super::session_approval::digest(managed.request_digest())?,
+        super::session_approval::digest(managed.observation_digest())?,
+        super::session_approval::digest(managed.review_digest())?,
+        challenge.material(),
+        managed.reason(),
+        INTERACTION_BUDGET,
+    )?;
+    complete(
+        &ProductionPort { channel },
+        &request,
+        &|| request.remaining(),
+        &thread::sleep,
+    )?;
+    Ok(TrustedHumanApproval::from_authorized_challenge(
+        principal.clone(),
+        managed,
     ))
 }
 

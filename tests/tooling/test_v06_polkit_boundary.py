@@ -396,7 +396,11 @@ matrix() {
                 encoding="utf-8"
             )
         )
-        for operation in ("apply-display-layout", "restore-original-display-layout"):
+        for operation in (
+            "apply-display-layout",
+            "restore-original-display-layout",
+            "finalize-original-display-restoration",
+        ):
             with self.subTest(operation=operation):
                 actions = root.findall(
                     f"action[@id='org.linura.authority.{operation}']"

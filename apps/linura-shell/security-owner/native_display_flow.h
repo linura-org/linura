@@ -42,6 +42,7 @@ class NativeDisplayFlow final : public QObject
     [[nodiscard]] bool redeem(const NativeDisplayIntent &, const NativeDisplayCorrelation &);
     [[nodiscard]] bool redeemOriginal(const NativeDisplayRestorationIntent &,
                                       const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginFinalization(const NativeApprovalScope &, const NativePeerIdentity &);
     [[nodiscard]] bool beginDecision(const NativeDisplayChoiceChallenge &);
     [[nodiscard]] bool matchesDecision(const NativeDisplayChoiceChallenge &) const;
     [[nodiscard]] bool decisionReady(const NativeDisplayChoiceChallenge &);
