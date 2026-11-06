@@ -95,7 +95,8 @@ pub use managed_lifecycle::{
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
     OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
-    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision, TrustedHumanApproval,
+    OriginalDisplayRestorationTerminalReceipt, OrdinaryDisplayReleaseInspection,
+    TrustedDisplayDecision, TrustedHumanApproval,
     managed_request_id,
 };
 pub use operation_registry::{

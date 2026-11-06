@@ -15,7 +15,7 @@ pub use display::{
     OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    TrustedDisplayDecision,
+    OrdinaryDisplayReleaseInspection, TrustedDisplayDecision,
 };
 
 use linura_core::{
