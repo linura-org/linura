@@ -100,14 +100,20 @@ struct Admission {
     startups: Vec<StartupLease>,
     // Reserve before publication and retain even after failed sync/readback or
     // missing files. Neither disk loss nor restart reconstructs this lifetime.
-    finalizations: BTreeMap<String, (linura_core::DisplayRecoveryScope, ComponentDigest)>,
+    finalizations: BTreeMap<String, FinalizationReservation>,
+}
+
+struct FinalizationReservation {
+    scope: linura_core::DisplayRecoveryScope,
+    digest: ComponentDigest,
+    channel: Arc<super::display_finalization_grant::ChannelState>,
 }
 
 fn reserve_finalization_memory(
-    memory: &mut BTreeMap<String, (linura_core::DisplayRecoveryScope, ComponentDigest)>,
+    memory: &mut BTreeMap<String, FinalizationReservation>,
     scope: &linura_core::DisplayRecoveryScope,
     bytes: &[u8],
-) -> zbus::fdo::Result<()> {
+) -> zbus::fdo::Result<Arc<super::display_finalization_grant::ChannelState>> {
     if memory.len() >= MAX_STARTUPS
         || bytes.is_empty()
         || bytes.len() > MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION
@@ -124,7 +130,7 @@ fn reserve_finalization_memory(
     {
         return Err(unavailable());
     }
-    for (old, _) in memory.values() {
+    for old in memory.values().map(|record| &record.scope) {
         let a = old.replacement();
         let b = scope.replacement();
         if old.original_dispatch() == scope.original_dispatch()
@@ -141,12 +147,20 @@ fn reserve_finalization_memory(
         .as_str()
         .to_owned();
     let digest = ComponentDigest::from_bytes(sha2::Sha256::digest(bytes).into());
-    memory.insert(key, (scope.clone(), digest));
-    Ok(())
+    let channel = super::display_finalization_grant::ChannelState::reserved();
+    memory.insert(
+        key,
+        FinalizationReservation {
+            scope: scope.clone(),
+            digest,
+            channel: channel.clone(),
+        },
+    );
+    Ok(channel)
 }
 
 fn finalization_reservation_phase(
-    memory: &BTreeMap<String, (linura_core::DisplayRecoveryScope, ComponentDigest)>,
+    memory: &BTreeMap<String, FinalizationReservation>,
     scope: &linura_core::DisplayRecoveryScope,
     record: Option<&NativeDisplayFinalizationReservation>,
 ) -> zbus::fdo::Result<u32> {
@@ -163,14 +177,14 @@ fn finalization_reservation_phase(
     }
     match (memory.get(key.as_str()), record) {
         (None, None) => Ok(0),
-        (Some((retained, digest)), Some(record))
-            if retained == scope
-                && *digest
+        (Some(retained), Some(record))
+            if retained.scope == *scope
+                && retained.digest
                     == ComponentDigest::from_bytes(
                         sha2::Sha256::digest(record.canonical_bytes()).into(),
                     ) =>
         {
-            Ok(1)
+            retained.channel.phase()
         }
         _ => Err(unavailable()), // Files alone or missing readback never prove a reservation.
     }
@@ -268,7 +282,7 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         record: NativeDisplayFinalizationReservation,
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
-    ) -> zbus::fdo::Result<bool>;
+    ) -> zbus::fdo::Result<OwnedFd>;
     fn read_original(
         &self,
         sender: &str,
@@ -418,6 +432,16 @@ fn write_grant(
     writer: &mut UnixStream,
     bytes: &[u8],
     budget: Duration,
+    verify: impl FnMut() -> zbus::fdo::Result<()>,
+) -> zbus::fdo::Result<()> {
+    write_grant_with_marker(writer, bytes, b"LNRG-END:2\n", budget, verify)
+}
+
+fn write_grant_with_marker(
+    writer: &mut UnixStream,
+    bytes: &[u8],
+    marker: &[u8; 11],
+    budget: Duration,
     mut verify: impl FnMut() -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     if bytes.len() > 384 * 1024 + MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION + 23 {
@@ -426,7 +450,7 @@ fn write_grant(
     let deadline = Instant::now().checked_add(budget).ok_or_else(unavailable)?;
     // A complete frame also requires this final marker, disclosed only after
     // fresh retained-witness checks. EOF or partial bytes cannot mean success.
-    for mut rest in [bytes, b"LNRG-END:2\n".as_slice()] {
+    for mut rest in [bytes, marker.as_slice()] {
         while !rest.is_empty() {
             verify()?;
             let remaining = deadline
@@ -528,8 +552,9 @@ impl ProtectionPort for NativeProtection {
         record: NativeDisplayFinalizationReservation,
         deadline: u64,
         sampled_boot: u64,
-    ) -> zbus::fdo::Result<bool> {
+    ) -> zbus::fdo::Result<OwnedFd> {
         let _slot = StartupSlot::enter(&self.transfer_pending)?;
+        let grant_slot = GrantSlot::enter(&self.live_grants)?;
         self.admit(sender)?;
         valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
         let material = record.decoded_material().map_err(|_| unavailable())?;
@@ -548,11 +573,12 @@ impl ProtectionPort for NativeProtection {
         self.admit(sender)?;
         valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
         self.original_for_scope(&admission, &scope)?;
-        reserve_finalization_memory(
+        let state = reserve_finalization_memory(
             &mut admission.finalizations,
             &scope,
             &record.canonical_bytes(),
         )?;
+        let lifetime = super::display_finalization_grant::Lifetime::new(state);
         // Synced exclusive publication is non-repeatable, even if any later
         // readback, witness check or reply fails. No fence is released here.
         super::display_checkpoint::reserve_finalization(&record).map_err(|_| unavailable())?;
@@ -565,7 +591,102 @@ impl ProtectionPort for NativeProtection {
         self.admit(sender)?;
         self.original_for_scope(&admission, &scope)?;
         valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
-        Ok(true) // Reservation acknowledgement only; never a terminal grant.
+        let (_, integration) = NativeDisplayRecoveryCheckpoint::original_startup_scope(
+            &payload,
+            &dispatch(scope.original_dispatch())?,
+        )
+        .map_err(|_| unavailable())?;
+        let (mut writer, native) = UnixStream::pair().map_err(|_| unavailable())?;
+        rustix::net::sockopt::set_socket_passcred(&writer, true).map_err(|_| unavailable())?;
+        writer.set_nonblocking(true).map_err(|_| unavailable())?;
+        let encoded = record.canonical_bytes();
+        let digest: [u8; 32] = sha2::Sha256::digest(&encoded).into();
+        let mut grant = b"LNFT:1\n".to_vec();
+        grant.extend_from_slice(&(encoded.len() as u64).to_be_bytes());
+        grant.extend_from_slice(&encoded);
+        grant.extend_from_slice(&deadline.to_be_bytes());
+        grant.extend_from_slice(&sampled_boot.to_be_bytes());
+        let service = self.clone();
+        let mut last_clock = (unix_ms()?, boot_ms()?);
+        drop(admission);
+        std::thread::Builder::new()
+            .name("display-terminal-grant".into())
+            .spawn(move || {
+                let _grant_slot = grant_slot;
+                let mut verify = |dispatching: bool| {
+                    let admission = super::protection_lock::acquire(
+                        &service.admission,
+                        super::protection_lock::BUDGET,
+                    )
+                    .map_err(|_| unavailable())?;
+                    service.original_for_scope(&admission, &scope)?;
+                    let actual = super::display_checkpoint::read_finalization(&restoration)
+                        .map_err(|_| unavailable())?
+                        .ok_or_else(unavailable)?;
+                    finalization_reservation_phase(
+                        &admission.finalizations,
+                        &scope,
+                        Some(&actual),
+                    )?;
+                    if actual.canonical_bytes() != encoded {
+                        return Err(unavailable());
+                    }
+                    let current_clock = (unix_ms()?, boot_ms()?);
+                    if current_clock.0 < last_clock.0 || current_clock.1 < last_clock.1 {
+                        return Err(unavailable());
+                    }
+                    last_clock = current_clock;
+                    if dispatching {
+                        valid_dispatch_window(
+                            deadline,
+                            sampled_boot,
+                            current_clock.0,
+                            current_clock.1,
+                        )?;
+                    }
+                    Ok(())
+                };
+                let sent = write_grant_with_marker(
+                    &mut writer,
+                    &grant,
+                    b"LNFT-END:1\n",
+                    ORIGINAL_PROBE,
+                    || verify(true),
+                );
+                drop(_slot);
+                if sent.is_ok() {
+                    let authenticate = |sender: &rustix::net::UCred| {
+                        let admission = super::protection_lock::acquire(
+                            &service.admission,
+                            super::protection_lock::BUDGET,
+                        )
+                        .map_err(|_| unavailable())?;
+                        let startup = admission
+                            .startups
+                            .iter()
+                            .find(|startup| {
+                                startup
+                                    .peer
+                                    .matches_preimage(scope.replacement(), &integration)
+                            })
+                            .ok_or_else(unavailable)?;
+                        startup.live().map_err(|_| unavailable())?;
+                        startup
+                            .peer
+                            .require_message_sender(sender)
+                            .map_err(|_| unavailable())
+                    };
+                    let _result = super::display_finalization_grant::serve(
+                        &mut writer,
+                        &digest,
+                        lifetime,
+                        authenticate,
+                        verify,
+                    );
+                }
+            })
+            .map_err(|_| unavailable())?;
+        Ok(OwnedFd::from(std::os::fd::OwnedFd::from(native)))
     }
     fn reserve_restoration(
         &self,
@@ -707,8 +828,9 @@ impl ProtectionPort for NativeProtection {
             super::display_checkpoint::read_finalization(&record).map_err(|_| unavailable())?;
         self.admit_control(sender)?;
         self.original_for_scope(&admission, &scope)?;
-        // Reserved means only the exact durable reservation plus current live
-        // protection. Files alone never produce quiescence/retirement/release.
+        // Reserved needs exact disk/memory and live protection; Quiesced also
+        // needs the original actual-native channel transition. Files alone
+        // never produce either lifetime, retirement or release.
         Ok((
             record.canonical_bytes(),
             finalization_reservation_phase(&admission.finalizations, &scope, terminal.as_ref())?,
@@ -870,14 +992,14 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
-    #[zbus(out_args("accepted"))]
+    #[zbus(out_args("grant"))]
     async fn reserve_finalization(
         &self,
         reservation: &[u8],
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
         #[zbus(header)] header: Header<'_>,
-    ) -> zbus::fdo::Result<bool> {
+    ) -> zbus::fdo::Result<OwnedFd> {
         let sender = sender(&header)?;
         if reservation.len() > MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION {
             return Err(unavailable());
@@ -1054,7 +1176,7 @@ mod tests {
             _: NativeDisplayFinalizationReservation,
             _: u64,
             _: u64,
-        ) -> zbus::fdo::Result<bool> {
+        ) -> zbus::fdo::Result<OwnedFd> {
             Err(unavailable())
         }
         fn reserve_restoration(
@@ -1500,6 +1622,29 @@ mod tests {
         assert_eq!(memory.len(), 1);
     }
     #[test]
+    fn terminal_channel_loss_keeps_memory_ownership_and_forbids_disk_only_phase_recovery() {
+        let (_, record) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
+        let scope = record
+            .decoded_material()
+            .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let mut memory = BTreeMap::new();
+        let state = reserve_finalization_memory(&mut memory, &scope, &record.canonical_bytes())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            finalization_reservation_phase(&memory, &scope, Some(&record)).ok(),
+            Some(1)
+        );
+        drop(super::super::display_finalization_grant::Lifetime::new(
+            state,
+        ));
+        assert!(finalization_reservation_phase(&memory, &scope, Some(&record)).is_err());
+        assert!(
+            reserve_finalization_memory(&mut memory, &scope, &record.canonical_bytes()).is_err()
+        );
+        assert_eq!(memory.len(), 1);
+    }
+    #[test]
     fn terminal_reservation_memory_keeps_original_and_seat_exclusion_and_live_quota() {
         let mut memory = BTreeMap::new();
         for index in 1..=64u8 {
@@ -1594,6 +1739,45 @@ mod tests {
 mod grant_tests {
     use super::*;
     use std::io::Read;
+    #[test]
+    fn terminal_transfer_has_a_distinct_marker_and_needs_final_fresh_verification() {
+        for lost in [false, true] {
+            let (mut root, mut native) = UnixStream::pair().unwrap_or_else(|e| unreachable!("{e}"));
+            root.set_nonblocking(true)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            let mut checks = 0;
+            let result = write_grant_with_marker(
+                &mut root,
+                b"bounded terminal comparison",
+                b"LNFT-END:1\n",
+                ORIGINAL_PROBE,
+                || {
+                    checks += 1;
+                    if lost && checks == 2 {
+                        Err(unavailable())
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(result.is_err(), lost);
+            assert_eq!(checks, 2);
+            drop(root);
+            let mut bytes = Vec::new();
+            native
+                .read_to_end(&mut bytes)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert_eq!(
+                bytes,
+                if lost {
+                    b"bounded terminal comparison".as_slice()
+                } else {
+                    b"bounded terminal comparisonLNFT-END:1\n".as_slice()
+                }
+            );
+            assert!(!bytes.ends_with(b"LNRG-END:2\n"));
+        }
+    }
     #[test]
     fn complete_transfer_requires_a_final_fresh_check_and_marker() {
         let (mut writer, mut reader) = UnixStream::pair().unwrap_or_else(|e| unreachable!("{e}"));

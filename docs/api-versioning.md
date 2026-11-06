@@ -444,7 +444,8 @@ freshly attested supervised Control process, shares the existing original-read
 worker limit, and uses the ordinary 64 KiB reply limit and original two-second
 probe budget. The current Root producer returns phase 0 (`protected`) with empty
 terminal bytes, or phase 1 (`reserved`) only when this Root invocation's retained
-reservation matches the exact durable terminal record. It checks live original
+reservation matches the exact durable terminal record; phase 2 also requires the
+separate actual-native channel described below. It checks live original
 witnesses and replacement recovery admission before and after strict history
 readback. The terminal scan requires the same complete parent restoration under
 its directory lock. Unknown, duplicate, corrupt or unsafe history refuses without
@@ -452,7 +453,7 @@ repair or deletion.
 
 The private Experimental `DisplayProtection1.ReserveFinalization` accepts the
 complete bounded terminal reservation and unchanged absolute dispatch/sample
-clocks (`aytt`), returning only a reservation acknowledgement (`b`). It admits only
+clocks (`aytt`), returning a private native channel (`h`). It admits only
 the freshly attested supervised executor and shares the restoration worker and
 transfer limits. The complete nested restoration, parent dispatch, canonical
 UID/request transaction and exact current lock must match Root's actual retained
@@ -461,13 +462,27 @@ quota; `LNRJ:1` and `LNRR:1` retain their bytes and meaning. A bounded in-memory
 reservation is recorded before publication and retained after failed publication
 or readback. Missing storage cannot permit retry or ordinary startup. Existing
 restoration/current-seat ownership cannot be superseded by a fresh operation ID.
-No acknowledgement grants quiescence, retirement or release.
+The purpose-separated `LNFT:1` transfer contains the complete reservation and
+original clocks; its final marker requires a further fresh witness check. It
+shares the existing live-grant quota and two-second transfer budget. The channel
+accepts exactly one `LNFQ:1` message from the actual retained native process,
+then strictly increasing `LNFV:1` continuity probes. Every fragment requires
+kernel sender credentials matched to the original pidfd, immutable image and
+startup lease. Each fixed 48-byte message binds the SHA-256 of the complete
+reservation and shares one absolute one-second budget across authentication,
+verification and reply. Quiescence must occur inside the original dispatch/sample
+window. Later continuity cannot renew execution authority. Channel loss, failure
+or clock rollback permanently invalidates its reports without reopening ownership.
+No message retires history, releases protection or admits ordinary frames. The
+native consumer and prepared terminal dispatch integration remain unfinished.
 
 The adapter emits the canonical `display.original-finalization.observe`
 `ObservationEnvelope`; full restoration/terminal codecs and unchanged nested
 restoration bytes and the complete actual-parent binding are mandatory for
-terminal phases. Quiesced, retired and released-current remain comparison states
-with no current Root producer. A historical spent record cannot supply
+terminal phases. The Root mechanism can report phase 2 (`quiesced`) only after
+that actual-native channel transition while its original protection still holds.
+Native quiescence is not yet integrated or qualified. Retired and released-current
+have no current producer. A historical spent record cannot supply
 released-current admission.
 Control's inspection matches these new Root facts to actual authenticated history
 and joins the independent five-source proof without extending either expiry.

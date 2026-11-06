@@ -363,8 +363,15 @@ second attempt or ordinary startup. Readback requires the exact parent during
 the same locked scan. `ReadFinalization` reports `reserved` only when the complete
 file matches this Root invocation's memory and current original protection;
 files alone cannot reconstruct that lifetime. Existing `LNRJ:1` and `LNRR:1`
-remain immutable and unchanged. This reservation acknowledgement releases no
-protection and supplies no quiescence, retirement or current-admission proof.
+remain immutable and unchanged. The purpose-separated original-Root channel
+transfers the complete reservation and original clocks under the unchanged live
+grant/transfer limits. Per-fragment actual-native process admission, full record
+digest and strict sequence gate one held-scene quiescence transition, followed
+only by fresh continuity. Authentication, verification and acknowledgement share
+one absolute partial-message budget; channel loss permanently invalidates reports
+without reopening ownership. Root/native quiescence integration and qualification
+remain unfinished. No channel message retires durable history, releases protection
+or supplies current ordinary admission.
 
 Experimental wire changes update all in-repository consumers together. Original
 durable checkpoints and Control history remain immutable and retain their

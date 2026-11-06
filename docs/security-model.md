@@ -789,8 +789,9 @@ It separately queries Root's immutable restoration reservation through the bound
 exited original compositor and healthy replacement recovery admission before and
 after reading strictly validated retained history. This producer reports
 `protected`, or `reserved` only after matching this Root invocation's in-memory
-reservation to the complete immutable terminal file and actual parent. A file
-alone cannot establish a reservation or release.
+reservation to the complete immutable terminal file and actual parent. The
+separate actual-native channel can advance this to `quiesced`; files alone
+cannot establish either lifetime or release.
 Control matches the actual restoration transaction, effect, dispatch and checkpoint,
 obtains the same independent fresh five-source canonical restoration proof,
 then re-reads the durable anchors and checks every contributor's original expiry. It
@@ -817,6 +818,22 @@ startup. Neither matching disk history without live memory nor memory without
 exact disk readback reports `reserved`. Parent/current-seat ownership cannot be
 silently superseded, and no record is evicted to admit work. This mechanism
 releases no witness, power blocker, input or output fence.
+
+The private terminal channel is created only after exclusive synced reservation
+and exact readback. Its purpose-separated transfer binds complete reservation
+bytes and original dispatch/sample clocks, within the existing two-second
+transfer and shared live-grant quota. Every native fragment requires kernel
+credentials matched to the actual retained pidfd/start identity, immutable image
+and original startup lease. A fixed 48-byte message binds the full reservation
+digest and strictly increasing sequence. One `LNFQ:1` transition records held
+native quiescence; only `LNFV:1` continuity follows. Authentication, fresh original
+protection/readback and reply share one absolute one-second partial-message
+budget. Initial quiescence remains inside the original dispatch/sample window;
+later health checks cannot renew it. Worker/transfer/publication failure, EOF,
+replay or clock regression permanently invalidates reports while ownership stays
+reserved. No message offers durable retirement, release or current admission.
+The deterministic native scene consumer and prepared dispatch still need
+integration and qualification; Root's protocol tests are component evidence only.
 
 Canonical terminal planning accepts a restoration request reference and semantic
 reason, never caller-selected original sources or terminal material. It reloads

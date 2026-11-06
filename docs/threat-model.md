@@ -1356,8 +1356,9 @@ before and after the call within one probe budget and checks full nested codec
 identity and the complete parent dispatch/request-transaction binding. Control independently matches transaction, effect, dispatch and
 checkpoint to durable history, then intersects this observation's expiry with the
 fresh canonical restoration proof. Neither a substituted reservation nor a forged
-released phase without terminal lineage can pass inspection. No current producer
-reports quiescence, retirement or release; future released-current evidence must
+released phase without terminal lineage can pass inspection. Quiescence requires
+the separate actual-native channel; no producer reports retirement or release.
+Future released-current evidence must
 also prove this Root invocation's live ordinary admission.
 
 An executor cannot reserve terminal work against a substituted parent or turn a
@@ -1375,6 +1376,20 @@ current boot/UID/seat. Files alone cannot reconstruct this invocation's live
 reservation, and a reservation acknowledgement proves no native quiescence,
 retirement or current admission. Root/native release and qualified supersession
 remain separate unfinished requirements.
+
+A copied terminal descriptor or correctly encoded message cannot impersonate the
+actual native process. Root enables sender credentials before disclosure and
+checks every received fragment against the retained startup pidfd/start identity
+and immutable executable. The complete reservation digest and monotonic sequence
+bind each fixed-size request. An initial continuity message, another reservation,
+skipped/repeated sequence or repeated quiescence refuses. Slow authentication or
+verification cannot extend the original one-second partial-message budget.
+Exclusive memory ownership precedes file publication; its lifetime guard makes
+reports unavailable on publication/transfer failure, channel loss or replay.
+Later fresh continuity checks original protection and exact disk readback without
+renewing spent execution time. No channel command closes witnesses, deletes
+history or releases a fence. The actual native quiescence consumer and complete
+prepared dispatch are not integrated or qualified by socket fixtures.
 
 A client may submit an otherwise valid terminal digest without the complete
 material or authenticated linked history. The canonical terminal recipe requires

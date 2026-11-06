@@ -278,15 +278,29 @@ impl NativeSessionChannel {
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
     ) -> Result<std::os::fd::OwnedFd, String> {
+        self.reserve_display_grant(
+            "ReserveRestoration",
+            &record.canonical_bytes(),
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
+        )
+    }
+
+    fn reserve_display_grant(
+        &self,
+        method: &'static str,
+        bytes: &[u8],
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> Result<std::os::fd::OwnedFd, String> {
         self.require_role(NativeSessionRole::Executor)?;
         let started = Instant::now();
         let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
-        let bytes = record.canonical_bytes();
         let reply = self.call(
             &identity.sender,
             "/org/linura/DisplayProtection1",
             "org.linura.DisplayProtection1",
-            "ReserveRestoration",
+            method,
             &(bytes, dispatch_deadline_unix_ms, sampled_boot_ms),
             started,
         )?;
@@ -314,21 +328,20 @@ impl NativeSessionChannel {
         Ok(descriptor)
     }
 
-    /// Root's exclusive durable terminal reservation, not a release grant.
+    /// Root's exclusive durable terminal reservation and native-only channel.
+    /// The channel offers no retirement, release or ordinary admission.
     /// Actual original protection remains mandatory; ambiguous calls never retry.
     pub fn reserve_display_finalization(
         &self,
         record: &crate::NativeDisplayFinalizationReservation,
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
-    ) -> Result<(), String> {
-        self.display_protection_call(
+    ) -> Result<std::os::fd::OwnedFd, String> {
+        self.reserve_display_grant(
             "ReserveFinalization",
-            &(
-                record.canonical_bytes(),
-                dispatch_deadline_unix_ms,
-                sampled_boot_ms,
-            ),
+            &record.canonical_bytes(),
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
         )
     }
 

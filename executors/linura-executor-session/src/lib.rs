@@ -14,6 +14,7 @@ use linura_provider_sdk::{
 use zbus::message::Header;
 
 mod display_checkpoint;
+mod display_finalization_grant;
 mod display_kernel;
 mod display_protection_service;
 mod introspection;
