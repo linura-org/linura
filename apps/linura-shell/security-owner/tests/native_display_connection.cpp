@@ -431,8 +431,8 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
         assert(sample && sample->fenced);
         auto nextBaseline = baseline(*sample), nextDesired = nextBaseline;
         nextDesired.outputs[0].x = 0;
-        assert(!owner.connection->apply(correlation, nextBaseline, nextDesired,
-                                        owner.protection()));
+        const auto protection = owner.protection();
+        assert(!owner.connection->apply(correlation, nextBaseline, nextDesired, protection));
         // An unreserved attempt can report Building (0), never a retained
         // successful phase or permission for a second native write.
         assert(owner.connection->status(correlation) == 0);
@@ -441,8 +441,7 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
             linura_protected_display_interaction_v1_destroy(scene);
         owner.protections.clear();
     }
-    assert(harness.backend.writes == 1 &&
-           !owner.connection->securityTransitionAllowed(false));
+    assert(harness.backend.writes == 1 && !owner.connection->securityTransitionAllowed(false));
 }
 void finalNativePowerStateCannotReuseAnEarlierVisibilityReview()
 {
