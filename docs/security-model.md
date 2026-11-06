@@ -902,6 +902,17 @@ never-dispatched Prepared authority remains intact; this API refuses to revive i
 Returned indeterminate receipts remain uncertainty;
 no reply commits terminal completion or becomes native/Root release authority.
 
+Control's separate read-only held-quiescence inspection loads the actual terminal
+request, immutable complete intent/claim and prepared/dispatched history, requiring
+its current Indeterminate snapshot before provider access. It matches Root's
+Quiesced phase to that exact material/transaction/effect/dispatch and repeats the
+independent five-source restoration proof. Reconstructed current source/epoch/lock
+and linked material must remain identical. A second Root query detects loss or
+phase change during the join; exact terminal and linked snapshots/history are read
+again afterward. Validity is the intersection of the original contributors, never
+renewed by readback. This report neither changes durable state nor supplies
+retirement/current admission authority.
+
 The native owner and Rust transport additionally implement a separate terminal
 approval purpose (12) and fresh non-retained administrator action. The owner can
 transition only its actual retained original Recovery flow on the same authenticated

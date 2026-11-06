@@ -52,6 +52,10 @@ struct Machine {
     finalization_approvals: usize,
     finalization_calls: usize,
     finalization_outcome: u8,
+    finalization_binding: Option<ExecutionBinding>,
+    finalization_material: Option<String>,
+    finalization_native_phase: u8,
+    finalization_state_fault: u8,
     restoration_frame_version: u32,
     finalization_history_fault: u8,
 }
@@ -281,11 +285,67 @@ impl Observer for LiveFixtureObserver {
                 binding.transaction_id.clone(),
                 binding.effect_digest.to_hex(),
                 binding.dispatch_digest.to_hex(),
-                linura_observation::DisplayFinalizationPhase::Protected,
-                None,
+                match machine.finalization_native_phase {
+                    0 => linura_observation::DisplayFinalizationPhase::Protected,
+                    1 => linura_observation::DisplayFinalizationPhase::Reserved,
+                    2 => linura_observation::DisplayFinalizationPhase::Quiesced,
+                    3 => linura_observation::DisplayFinalizationPhase::Retired,
+                    4 => linura_observation::DisplayFinalizationPhase::ReleasedCurrent,
+                    _ => unreachable!("unsupported simulated terminal phase"),
+                },
+                if machine.finalization_native_phase == 0 {
+                    None
+                } else {
+                    let terminal = machine
+                        .finalization_binding
+                        .as_ref()
+                        .unwrap_or_else(|| unreachable!("terminal reservation"));
+                    Some(value(
+                        linura_observation::DisplayFinalizationReservationFacts::new(
+                            machine
+                                .finalization_material
+                                .clone()
+                                .unwrap_or_else(|| unreachable!("terminal material")),
+                            terminal.transaction_id.clone(),
+                            terminal.effect_digest.to_hex(),
+                            terminal.dispatch_digest.to_hex(),
+                        ),
+                    ))
+                },
             ));
             sample.capability = capability.clone();
             sample.attributes = facts.attributes();
+            let substituted = match machine.finalization_state_fault {
+                1 => Some(("terminal_transaction", "transaction:another".to_owned())),
+                2 => Some(("terminal_effect", "f".repeat(64))),
+                3 => Some(("terminal_dispatch", "f".repeat(64))),
+                4 => {
+                    let decoded = value(linura_core::DisplayFinalizationMaterial::decode(
+                        machine
+                            .finalization_material
+                            .as_deref()
+                            .unwrap_or_else(|| unreachable!("terminal material")),
+                    ));
+                    Some((
+                        "terminal_material",
+                        value(linura_core::DisplayFinalizationMaterial::encode(
+                            decoded.restoration_request(),
+                            decoded.restoration_dispatch(),
+                            decoded.terminal_link(),
+                            &"f".repeat(64),
+                            decoded.post_write_epoch(),
+                            decoded.current_lock(),
+                            decoded.restoration_text(),
+                        )),
+                    ))
+                }
+                _ => None,
+            };
+            if let Some((key, text)) = substituted {
+                sample
+                    .attributes
+                    .insert(key.into(), ObservedValue::Text(text));
+            }
             let fault =
                 if machine.finalization_probe_fault_after == Some(machine.restoration_root_reads) {
                     1 // Fresh first inspection cannot excuse a stale planning probe.

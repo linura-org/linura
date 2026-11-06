@@ -614,6 +614,9 @@ impl OriginalDisplayFinalizationPort for TerminalPort {
                 .dispatch_digest
         );
         m.finalization_calls += 1;
+        m.finalization_binding = Some(binding.clone());
+        m.finalization_material = Some(material);
+        // A port acknowledgement deliberately does not advance native phase.
         if m.finalization_outcome == 1 {
             return Err("simulated terminal lost reply".into());
         }
@@ -725,6 +728,17 @@ fn terminal_finalization_is_separately_authorized_prepared_and_never_replayed() 
             assert_eq!(m.applies, 1);
             assert_eq!(m.decisions, 0);
         }
+        if handoff && outcome == 0 {
+            quiescence_requires_exact_dispatched_history_and_independent_live_proof(
+                &mut control,
+                &database,
+                &machine,
+                &result
+                    .as_ref()
+                    .unwrap_or_else(|_| unreachable!("terminal receipt"))
+                    .request_id,
+            );
+        }
         // All acknowledgement dispositions remain durable uncertainty. A new
         // process has no live providers and no authorizer able to approve.
         if handoff || fail_at >= 4 || matches!(history_fault, 3 | 5 | 6) {
@@ -806,6 +820,208 @@ fn terminal_finalization_is_separately_authorized_prepared_and_never_replayed() 
         }
     }
 }
+// Simulated provider matrix, not native/Root/PAM/physical-frame qualification.
+fn quiescence_requires_exact_dispatched_history_and_independent_live_proof(
+    control: &mut ManagedLifecycleControl<SqliteTransactionStore>,
+    database: &TestDatabase,
+    machine: &Arc<Mutex<Machine>>,
+    terminal_request: &RequestId,
+) {
+    let transaction = TransactionId::for_namespace(
+        &value(PrincipalId::new(principal().as_str())),
+        terminal_request,
+    );
+    let before = snapshot(database, &transaction);
+    // An acknowledgement and a reservation still do not prove quiescence.
+    for phase in [0, 1, 3, 4] {
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .finalization_native_phase = phase;
+        assert!(
+            control
+                .inspect_quiesced_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    terminal_request
+                )
+                .is_err()
+        );
+    }
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .finalization_native_phase = 2;
+    let checked = value(control.inspect_quiesced_original_display_finalization(
+        principal(),
+        actor(true),
+        terminal_request,
+    ));
+    assert_eq!(checked.terminal(), &before);
+    assert!(
+        checked
+            .restoration()
+            .observation()
+            .require_current(now_unix_ms())
+            .is_ok()
+    );
+    for fault in 1..=4 {
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .finalization_state_fault = fault;
+        assert!(
+            control
+                .inspect_quiesced_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    terminal_request
+                )
+                .is_err(),
+            "terminal substitution {fault}"
+        );
+    }
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .finalization_state_fault = 0;
+    for fault in 1..=9 {
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_root_state_fault = fault;
+        assert!(
+            control
+                .inspect_quiesced_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    terminal_request
+                )
+                .is_err(),
+            "Root fault {fault}"
+        );
+    }
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .restoration_root_state_fault = 0;
+    // Fresh independent presentation checks remain mandatory after Q.
+    for fault in 1..=9 {
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .restoration_proof_fault = fault;
+        assert!(
+            control
+                .inspect_quiesced_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    terminal_request
+                )
+                .is_err(),
+            "restoration proof {fault}"
+        );
+    }
+    {
+        let mut m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        m.restoration_proof_fault = 0;
+        m.finalization_probe_fault_after = Some(m.restoration_root_reads + 2);
+    }
+    assert!(
+        control
+            .inspect_quiesced_original_display_finalization(
+                principal(),
+                actor(true),
+                terminal_request
+            )
+            .is_err(),
+        "Root loss after native join"
+    );
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .finalization_probe_fault_after = None;
+    value(control.inspect_quiesced_original_display_finalization(
+        principal(),
+        actor(true),
+        terminal_request,
+    ));
+    {
+        let mut m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        m.native_base_drift = true;
+    }
+    assert!(
+        control
+            .inspect_quiesced_original_display_finalization(
+                principal(),
+                actor(true),
+                terminal_request
+            )
+            .is_err(),
+        "restored source drift"
+    );
+    {
+        let mut m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        m.native_base_drift = false;
+        m.restoration_frame_version += 1;
+    }
+    // A fresh genuinely later frame is evidence of the same held material.
+    value(control.inspect_quiesced_original_display_finalization(
+        principal(),
+        actor(true),
+        terminal_request,
+    ));
+    let sampled = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .sequence;
+    for id in [
+        "request:v010:display-finalization:missing",
+        "request:v010:display-restoration:old",
+    ] {
+        assert!(
+            control
+                .inspect_quiesced_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    &value(RequestId::new(id))
+                )
+                .is_err()
+        );
+    }
+    assert!(
+        control
+            .inspect_quiesced_original_display_finalization(
+                value(AuthenticatedPrincipal::new("unix:uid:99999")),
+                actor(true),
+                terminal_request
+            )
+            .is_err()
+    );
+    let m = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+    assert_eq!(m.sequence, sampled); // Foreign history refused before any probe.
+    assert_eq!(m.finalization_calls, 1);
+    assert_eq!(m.finalization_approvals, 1);
+    assert_eq!(m.restoration_calls, 1);
+    assert_eq!(m.applies, 1);
+    assert_eq!(m.decisions, 0);
+    assert_eq!(snapshot(database, &transaction), before); // Query never commits.
+    drop(m);
+    // Leave the earlier retry/supersession matrix's simulated state unchanged.
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .finalization_native_phase = 0;
+}
+
 fn original_transaction_id(original: &PlanDesiredStateRequest) -> TransactionId {
     TransactionId::for_namespace(
         &value(PrincipalId::new(principal().as_str())),

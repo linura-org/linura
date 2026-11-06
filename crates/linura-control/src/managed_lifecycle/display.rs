@@ -26,7 +26,7 @@ pub use finalization::{
     AuthorizedOriginalDisplayFinalization, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
-    OriginalDisplayFinalizationRequest,
+    OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
 };
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,

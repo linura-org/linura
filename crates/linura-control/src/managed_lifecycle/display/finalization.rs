@@ -124,6 +124,45 @@ impl OriginalDisplayFinalizationInspection {
     }
 }
 
+/// Read-only independent proof of held quiescence for one actual dispatched
+/// terminal transaction. It cannot retire witnesses, release fences or commit.
+#[derive(Debug)]
+pub struct OriginalDisplayQuiescenceInspection {
+    restoration: OriginalDisplayFinalizationInspection,
+    terminal: TransactionSnapshot,
+}
+impl OriginalDisplayQuiescenceInspection {
+    #[must_use]
+    pub const fn restoration(&self) -> &OriginalDisplayFinalizationInspection {
+        &self.restoration
+    }
+    #[must_use]
+    pub const fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct TerminalInspectionContext {
+    request: PlanDesiredStateRequest,
+    intent: FinalizationIntent,
+    snapshot: TransactionSnapshot,
+    receipt: OriginalDisplayFinalizationReceipt,
+}
+impl TerminalInspectionContext {
+    fn matches(&self, state: &DisplayOriginalFinalizationFacts) -> bool {
+        let Some(terminal) = state.terminal() else {
+            return false;
+        };
+        state.phase() == DisplayFinalizationPhase::Quiesced
+            && terminal.material() == self.intent.material()
+            && terminal.transaction() == self.snapshot.transaction_id.as_str()
+            && effect_from_request(&self.request)
+                .is_ok_and(|effect| terminal.effect() == effect.digest().to_hex())
+            && Some(terminal.dispatch()) == self.receipt.dispatch_digest.as_deref()
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct LinkedHistory {
     original: PlanDesiredStateRequest,
@@ -723,28 +762,116 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         actor: Actor,
         restoration_request: &RequestId,
     ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
-        // Authenticate every durable anchor before contacting any provider.
         let history = self.finalization_history(&principal, restoration_request)?;
+        self.inspect_finalization_state(principal, actor, restoration_request, history, None)
+    }
+
+    /// AuthoritativeQuery only. Authenticate the actual dispatched terminal
+    /// history before probing, then join fresh quiescence and restoration facts.
+    /// Neither an executor reply nor this expiring report is release authority.
+    pub fn inspect_quiesced_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+            .map_err(|_| invalid())?;
+        let restoration_request = material.restoration_request().clone();
+        let history = self.finalization_history(&principal, &restoration_request)?;
+        if material.terminal_link() != history.link.digest().hex()
+            || material.restoration_text() != history.restoration.desired_state["restore_original"]
+            || Some(material.restoration_dispatch())
+                != history.dispatched.dispatch_digest.as_deref()
+        {
+            return Err(invalid());
+        }
+        let restoration = self.inspect_finalization_state(
+            principal,
+            actor,
+            &restoration_request,
+            history,
+            Some(&terminal),
+        )?;
+        Ok(OriginalDisplayQuiescenceInspection {
+            restoration,
+            terminal: terminal.snapshot,
+        })
+    }
+
+    fn terminal_inspection_context(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
+        validate_operation_id(
+            request_id
+                .as_str()
+                .strip_prefix(DISPLAY_FINALIZATION_REQUEST_PREFIX)
+                .ok_or_else(invalid)?,
+        )?;
+        self.display_journal()?
+            .integrity_check()
+            .map_err(|_| invalid())?;
+        self.authority.integrity_check()?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let retained = self
+            .display_journal()?
+            .load(&principal_id, request_id)
+            .map_err(|_| invalid())?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(invalid());
+        }
+        let request = crate::retained_request::decode(&retained)?;
+        validate_public_request(&request)?;
+        validate_request_identity(&request)?;
+        self.authority.assert_request_matches(principal, &request)?;
+        if retained.digest() != &crate::durable_authority::digest_request(&request)? {
+            return Err(invalid());
+        }
+        let intent = FinalizationIntent::load(self.display_journal()?, &principal_id, &request)?;
+        let receipt = self.finalization_receipt(principal, &request)?;
+        let snapshot = self.authority.snapshot(&receipt.transaction_id)?;
+        if snapshot.state != TransactionState::Indeterminate || receipt.dispatch_digest.is_none() {
+            return Err(invalid());
+        }
+        Ok(TerminalInspectionContext {
+            request,
+            intent,
+            snapshot,
+            receipt,
+        })
+    }
+
+    fn inspect_finalization_state(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        restoration_request: &RequestId,
+        history: LinkedHistory,
+        terminal: Option<&TerminalInspectionContext>,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
         let text = &history.restoration.desired_state["restore_original"];
         let restoration = DisplayRestorationMaterial::decode(text).map_err(|_| invalid())?;
         let scope = restoration.recovery_scope().map_err(|_| invalid())?;
+        let observation_request = linura_protocol::ObservationRequest {
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY)
+                .map_err(|_| invalid())?,
+            resource: scope.resource_id().map_err(|_| invalid())?,
+        };
         let mut mechanism = self
             .previews
-            .observe(&linura_protocol::ObservationRequest {
-                provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
-                capability: linura_core::CapabilityId::new(
-                    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
-                )
-                .map_err(|_| invalid())?,
-                resource: scope.resource_id().map_err(|_| invalid())?,
-            })
+            .observe(&observation_request)
             .map_err(|_| invalid())?
             .observation;
         let state = DisplayOriginalFinalizationFacts::from_envelope(&mechanism, &scope, now_ms()?)
             .map_err(|_| invalid())?;
-        if state.phase() != DisplayFinalizationPhase::Protected
-            || state.terminal().is_some()
-            || state.checkpoint() != restoration.original_checkpoint()
+        if !terminal.map_or_else(
+            || state.phase() == DisplayFinalizationPhase::Protected && state.terminal().is_none(),
+            |terminal| terminal.matches(&state),
+        ) || state.checkpoint() != restoration.original_checkpoint()
             || state.restoration_transaction()
                 != history.restoration_snapshot.transaction_id.as_str()
             || state.restoration_effect()
@@ -792,9 +919,38 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             text,
         )
         .map_err(|_| invalid())?;
+        if let Some(terminal) = terminal {
+            if material != terminal.intent.material()
+                || self.terminal_inspection_context(&principal, &terminal.request.request_id)?
+                    != *terminal
+            {
+                return Err(invalid());
+            }
+            // Quiescence can be lost while native/KMS facts are sampled. Read
+            // the same live Root state again, without renewing either expiry.
+            let after = self
+                .previews
+                .observe(&observation_request)
+                .map_err(|_| invalid())?
+                .observation;
+            let current =
+                DisplayOriginalFinalizationFacts::from_envelope(&after, &scope, now_ms()?)
+                    .map_err(|_| invalid())?;
+            if current != state || !terminal.matches(&current) {
+                return Err(invalid());
+            }
+            crate::plan_preview::restrict_session_validity(&mut mechanism, &after, now_ms()?)
+                .map_err(|_| invalid())?;
+        }
         // A read-only probe can race another Control connection. Re-read all
         // immutable history and both exact snapshots after the provider join.
         if self.finalization_history(&principal, restoration_request)? != history {
+            return Err(invalid());
+        }
+        if let Some(terminal) = terminal
+            && self.terminal_inspection_context(&principal, &terminal.request.request_id)?
+                != *terminal
+        {
             return Err(invalid());
         }
         proof

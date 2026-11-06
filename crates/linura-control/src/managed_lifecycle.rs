@@ -12,9 +12,10 @@ pub use display::{
     DisplayVerificationTarget, IndependentDisplayVerifier, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
-    OriginalDisplayFinalizationRequest, OriginalDisplayRestorationPort,
-    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
-    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
+    OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    TrustedDisplayDecision,
 };
 
 use linura_core::{

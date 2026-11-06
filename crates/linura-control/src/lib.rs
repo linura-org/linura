@@ -93,9 +93,10 @@ pub use managed_lifecycle::{
     OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
     OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
-    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
+    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
+    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision, TrustedHumanApproval,
+    managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

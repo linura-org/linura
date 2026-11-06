@@ -166,6 +166,15 @@ aborts never-dispatched Prepared authority; this API cannot revive it.
 Indeterminate duplicates return retained uncertainty, including after lost replies
 or native refusal. No reply commits completion.
 
+A separate read-only held-quiescence query authenticates the actual terminal
+request, intent/claim, dispatched history and Indeterminate snapshot before any
+provider probe. Root Quiesced must match its exact complete material and canonical
+transaction/effect/dispatch. The same independent five-source restoration proof
+must reconstruct unchanged source/epoch/lock/link material. Root is read again
+after the join and all durable anchors are reread; validity intersects original
+contributor expiries. The returned terminal snapshot and restoration evidence are
+comparison facts, never retirement/release authority or terminal completion.
+
 The native owner and Rust transport additionally implement a separate terminal
 approval purpose (12) and fresh non-retained administrator action. The owner can
 transition only its actual retained original Recovery flow on the same authenticated

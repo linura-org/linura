@@ -513,6 +513,16 @@ Control's inspection matches these new Root facts to actual authenticated histor
 and joins the independent five-source proof without extending either expiry.
 The report includes the canonical restoration postcondition digest, not a permit.
 
+The separate internal `inspect_quiesced_original_display_finalization` query
+accepts only an actual retained terminal request reference. It authenticates its
+claimed complete intent, prepared/dispatched history and Indeterminate snapshot
+before probing. Root must report Quiesced with exactly that material, transaction,
+effect and dispatch; other phases refuse. The same independent five-source
+restoration join must reconstruct the unchanged terminal material. Root is queried
+again after that join, durable anchors are reread, and every original expiry is
+preserved. The returned report pairs restoration evidence with the actual terminal
+snapshot; it performs no approval, effect, retirement, release or commit.
+
 The internal `plan_original_display_finalization` API takes an operation ID,
 authenticated restoration request reference and semantic reason. A separate
 registered SecuritySensitive ManagedExternalEffect binds the single

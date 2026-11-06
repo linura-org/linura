@@ -1415,6 +1415,16 @@ budget spans Root reservation and transfer. No resampling, reconnect, receipt
 reuse or lost-reply retry is permitted. The acknowledgement proves neither
 independent completion nor retirement/current admission.
 
+A forged quiescence reply or correctly shaped Root reservation cannot replace
+Control's authenticated dispatched terminal history. Held-quiescence inspection
+requires the complete retained intent/claim and current Indeterminate terminal
+snapshot before any provider query. Exact terminal binding/material and Root phase
+must match, and independent restoration facts must reconstruct the same source,
+post-write epoch, lock and linked material. Root is probed again after the join;
+lost/stale/swapped proof, phase changes and durable history drift refuse. Every
+original expiry is preserved. The query cannot approve, replay, commit, retire
+witnesses or authorize ordinary frames.
+
 A client may submit an otherwise valid terminal digest without the complete
 material or authenticated linked history. The canonical terminal recipe requires
 a private exact principal/request-bound context before any provider probe. Control
