@@ -256,8 +256,9 @@ bool DisplayTransaction::confirm(const Correlation &correlation, ClockSample now
         if (!consumed || expired(*consumed))
             return false;
         phase_ = Phase::Confirmed;
-        backend_.releasePowerInhibitor();
-        protection_->release();
+        // Native success and a consumed Keep are NOT durable Control commitment.
+        // Retain the native presentation/input fence and power inhibitor.
+        // A separately authenticated post-commit release is still required.
         return true;
     } catch (...) {
         return false;
@@ -320,8 +321,8 @@ void DisplayTransaction::verifyRestoration()
             backend_.restoredOwnedState() &&
             protection_->presented(MutationProtection::Write::Restore)) {
             phase_ = Phase::Restored;
-            backend_.releasePowerInhibitor();
-            protection_->release();
+            // Native restoration plus presentation is comparison evidence,
+            // not independently committed Control retirement. Keep all fences.
         }
     } catch (...) {
         // A failed observation cannot become restoration, nor grant a retry.
@@ -346,7 +347,9 @@ DisplayTransaction::Phase DisplayTransaction::phase() const noexcept
 }
 bool DisplayTransaction::fenced() const noexcept
 {
-    return phase_ != Phase::Confirmed && phase_ != Phase::Restored;
+    // Until the separate verified post-commit release protocol exists, both
+    // native terminal phases remain protected. Neither phase is release proof.
+    return true;
 }
 const Correlation &DisplayTransaction::correlation() const noexcept
 {

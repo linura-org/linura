@@ -110,9 +110,9 @@ void independentTimerAfterClientDeath()
         // No surviving client, Control, Qt/QML or request handler drives
         // recovery. Only the compositor-owned BOOTTIME timer runs here.
         const auto deadline = compositorClock()->bootMs + 3000;
-        while (service.fenced() && compositorClock()->bootMs < deadline)
+        while (service.status(correlation) != CompositorDisplayService::Phase::Restored && compositorClock()->bootMs < deadline)
             assert(wl_event_loop_dispatch(loop, 100) == 0);
-        assert(!service.fenced() && native.writes == 2 && native.current == baseline[0]);
+        assert(service.fenced() && native.writes == 2 && native.current == baseline[0]);
         assert(service.status(correlation) == CompositorDisplayService::Phase::Restored);
         assert(begin(service, native, correlation, baseline, desired) ==
                CompositorDisplayService::Begin::Existing);
@@ -149,7 +149,7 @@ void admissionAndReservationLimits()
         assert(begin(service, native, correlation, baseline, desired) ==
                CompositorDisplayService::Begin::Existing);
         assert(service.confirm(correlation));
-        assert(!service.fenced() && native.writes == 1);
+        assert(service.fenced() && native.writes == 1);
         assert(!service.restore(correlation));
         assert(!service.confirm(correlation));
         assert(begin(service, native, another, desired, baseline) ==
@@ -214,7 +214,7 @@ void exclusionPrecedesEveryInitialBackendCallback()
                CompositorDisplayService::Begin::Started);
         assert(calls == 2 && native.writes == 1 && service.fenced());
         assert(service.confirm(original));
-        assert(!service.fenced() && !native.inhibited && native.writes == 1);
+        assert(service.fenced() && native.inhibited && native.writes == 1);
     }
     wl_event_loop_destroy(loop);
 }

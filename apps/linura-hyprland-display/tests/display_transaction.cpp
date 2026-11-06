@@ -126,7 +126,7 @@ void desiredVerificationAndCorrelation()
     assert(!attempt->confirm(Bound, {100'100, 50'100}));
     native.facts.heads[1].powered = true;
     assert(attempt->confirm(Bound, {100'100, 50'100}));
-    assert(!attempt->fenced() && attempt->phase() == DisplayTransaction::Phase::Confirmed);
+    assert(attempt->fenced() && attempt->phase() == DisplayTransaction::Phase::Confirmed);
     attempt->restore();
     attempt->tick(std::nullopt);
     assert(!attempt->confirm(Bound, {100'100, 50'100}) && native.writes == 1);
@@ -151,7 +151,7 @@ void deadlinesAndOneCompensation()
         assert(native.baseline() == baseline);
         assert(!attempt->confirm(Bound, {100'100, 50'100}));
         attempt->tick(std::nullopt);
-        assert(attempt->phase() == DisplayTransaction::Phase::Restored && !attempt->fenced());
+        assert(attempt->phase() == DisplayTransaction::Phase::Restored && attempt->fenced());
         attempt->restore();
         attempt->tick(std::nullopt);
         assert(native.writes == 2);
@@ -179,7 +179,7 @@ void replyLossAndIndependentRestoration()
         assert(attempt->fenced() && native.writes == 2);
         native.facts.heads[0].current = baseline[0];
         attempt->tick(Start);
-        assert(!attempt->fenced() && native.writes == 2);
+        assert(attempt->fenced() && native.writes == 2);
     }
     Fixture native;
     native.performWrite = false;
@@ -190,7 +190,7 @@ void replyLossAndIndependentRestoration()
     attempt->restore();
     assert(attempt->fenced()); // ACK, including a no-op ACK, is never verification.
     attempt->tick(Start);
-    assert(!attempt->fenced());
+    assert(attempt->fenced());
     Fixture delayed;
     delayed.expireAfterWrite = true;
     auto expired =
@@ -426,9 +426,9 @@ void powerCoordinationBeforeWriteAndThroughRecovery()
         assert(native.inhibited && attempt->fenced());
         native.available = true;
         attempt->tick(Start);
-        assert(!native.inhibited && native.inhibitorReleases == 1 && !attempt->fenced());
+        assert(native.inhibited && native.inhibitorReleases == 0 && attempt->fenced());
         attempt->tick(Start);
-        assert(native.inhibitorReleases == 1);
+        assert(native.inhibitorReleases == 0);
     }
     {
         Fixture native;
@@ -460,7 +460,7 @@ void numericBaselineCannotSubstituteForRestoredOwnership()
     assert(native.restores == 1 && native.writes == 2);
     native.ownedStateRestored = true;
     attempt->tick(Start);
-    assert(attempt->phase() == DisplayTransaction::Phase::Restored && !native.inhibited);
+    assert(attempt->phase() == DisplayTransaction::Phase::Restored && native.inhibited);
     assert(native.restores == 1 && native.writes == 2);
 }
 void overlayCheckpointCannotBeReplacedOrRetargeted()
@@ -542,8 +542,8 @@ void nativeProtectionIsRequiredAndRetainedThroughRecovery()
     assert(protection->releases == 0); // Numeric baseline is insufficient.
     protection->restorePresented = true;
     attempt->tick(Start);
-    assert(attempt->phase() == DisplayTransaction::Phase::Restored && !native.inhibited);
-    assert(protection->releases == 1 && native.restores == 1);
+    assert(attempt->phase() == DisplayTransaction::Phase::Restored && native.inhibited);
+    assert(protection->releases == 0 && native.restores == 1);
 }
 void ambiguousWriteAlwaysCompletesItsProtectionStack()
 {
@@ -559,7 +559,7 @@ void ambiguousWriteAlwaysCompletesItsProtectionStack()
     assert(attempt->fenced() && protection->releases == 0);
     protection->restorePresented = true;
     attempt->tick(Start);
-    assert(!attempt->fenced() && protection->releases == 1 && !native.inhibited);
+    assert(attempt->fenced() && protection->releases == 0 && native.inhibited);
 }
 
 void protectedMultiOutputChangesRequireIndependentRetirement()
@@ -593,7 +593,7 @@ void protectedMultiOutputChangesRequireIndependentRetirement()
             protection->keepDecision = true;
             assert(attempt->confirm(Bound, {100'100, 50'100}));
             assert(attempt->phase() == DisplayTransaction::Phase::Confirmed);
-            assert(!attempt->fenced() && native.writes == 1 && !native.inhibited);
+            assert(attempt->fenced() && native.writes == 1 && native.inhibited);
             assert(!attempt->requestRestore(Bound, {100'100, 50'100}));
         } else {
             protection->revertDecision = false;
@@ -613,7 +613,7 @@ void protectedMultiOutputChangesRequireIndependentRetirement()
             protection->restorePresented = true;
             attempt->tick(ClockSample{100'200, 50'200});
             assert(attempt->phase() == DisplayTransaction::Phase::Restored);
-            assert(!attempt->fenced() && !native.inhibited && protection->releases == 1);
+            assert(attempt->fenced() && native.inhibited && protection->releases == 0);
             assert(native.writes == 2 && native.restores == 1);
             assert(!attempt->confirm(Bound, {100'200, 50'200}));
             assert(!attempt->requestRestore(Bound, {100'200, 50'200}));
