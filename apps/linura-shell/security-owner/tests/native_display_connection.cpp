@@ -433,7 +433,9 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
         nextDesired.outputs[0].x = 0;
         assert(!owner.connection->apply(correlation, nextBaseline, nextDesired,
                                         owner.protection()));
-        assert(!owner.connection->status(correlation));
+        // An unreserved attempt can report Building (0), never a retained
+        // successful phase or permission for a second native write.
+        assert(owner.connection->status(correlation) == 0);
         assert(owner.connection->status(original) == 4);
         for (auto *scene : owner.protections)
             linura_protected_display_interaction_v1_destroy(scene);
