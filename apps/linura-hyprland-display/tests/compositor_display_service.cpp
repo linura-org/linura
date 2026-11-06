@@ -160,31 +160,44 @@ void admissionAndReservationLimits()
         changed[0].x = 100;
         assert(begin(service, native, correlation, baseline, changed) ==
                CompositorDisplayService::Begin::Rejected);
-        // A rejection also consumes its reserved identifier. Retry cannot turn
-        // it into a new native effect after changing its material.
+        // A native terminal phase still retains the active protection.
+        // A second request must not even acquire a new reservation tombstone.
         another.effectDigest = std::string(64, '0');
         another.dispatchDigest[0] = 'c';
         assert(begin(service, native, another, desired, baseline) ==
                CompositorDisplayService::Begin::Rejected);
-        assert(service.status(another) == CompositorDisplayService::Phase::RejectedBeforeDispatch);
-        assert(begin(service, native, another, desired, baseline) ==
-               CompositorDisplayService::Begin::Existing);
-        assert(native.writes == 1);
-        for (std::size_t i = 2; i < CompositorDisplayService::MaxReservations; ++i) {
+        assert(!service.status(another) && native.writes == 1);
+    }
+    wl_event_loop_destroy(loop);
+}
+// Reservation capacity is independently tested without an unresolved native
+// mutation. After any successful native write the protection remains fenced,
+// so new requests correctly fail before a reservation can be published.
+void rejectedReservationLimitsWithoutNativeWrite()
+{
+    auto *loop = wl_event_loop_create();
+    assert(loop);
+    {
+        NativeFixture native;
+        CompositorDisplayService service(*loop, native);
+        const Layout baseline{native.current};
+        auto desired = baseline;
+        desired[0].mode = native.small;
+        for (std::size_t i = 0; i < CompositorDisplayService::MaxReservations; ++i) {
             auto rejected = bound(("transaction:rejected-" + std::to_string(i)).c_str(), 15'000);
             rejected.effectDigest = std::string(64, '0');
-            // Distinct reserved dispatches; reuse is rejected before insertion.
             rejected.dispatchDigest = std::string(60, 'd') + std::to_string(1000 + i);
-            assert(begin(service, native, rejected, desired, baseline) ==
+            assert(begin(service, native, rejected, baseline, desired) ==
                    CompositorDisplayService::Begin::Rejected);
             assert(service.status(rejected) ==
                    CompositorDisplayService::Phase::RejectedBeforeDispatch);
+            assert(begin(service, native, rejected, baseline, desired) ==
+                   CompositorDisplayService::Begin::Existing);
         }
-        another = bound("transaction:overflow", 15'000);
-        another.dispatchDigest = std::string(64, 'e');
-        assert(begin(service, native, another, desired, baseline) ==
+        const auto overflow = bound("transaction:overflow", 15'000);
+        assert(begin(service, native, overflow, baseline, desired) ==
                CompositorDisplayService::Begin::Rejected);
-        assert(!service.status(another) && native.writes == 1);
+        assert(!service.status(overflow) && native.writes == 0 && !native.inhibited);
     }
     wl_event_loop_destroy(loop);
 }
@@ -225,5 +238,6 @@ int main()
 {
     independentTimerAfterClientDeath();
     admissionAndReservationLimits();
+    rejectedReservationLimitsWithoutNativeWrite();
     exclusionPrecedesEveryInitialBackendCallback();
 }
