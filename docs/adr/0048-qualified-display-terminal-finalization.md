@@ -96,6 +96,22 @@ aggregate fields are bounded before encoding. This arms no protected native
 purpose and supplies no Root/physical-frame attestation or release authority;
 existing Apply/Recovery parsers continue to reject terminal material.
 
+The compositor additionally implements a private held-scene terminal review
+transition. It accepts complete `LNRF:1` only over the actual consumed original
+Recovery scene with its continuously live Root grant, matching restoration
+transaction/dispatch, exact nested source, current lock, restored source guard,
+post-write epoch and completed native safety frames. The full material travels
+in an immutable sealed descriptor bounded to 14 KiB; mutable, oversized or
+non-file descriptors are rejected before reading. The native integration identity
+includes both readers. A new scope has fresh bounded wall/BOOTTIME deadlines and
+all outputs need new configure/presentation evidence. It cannot renew restoration
+execution authority, start standalone, repeat output writes or release protection.
+After consumption, native content/input returns to opaque safety frames while the
+one-use consumed correlation stays fixed. Root/source/clock/device checks and
+permanent loss latches remain. Existing Keep/Revert keep their original bounds.
+This mechanism has no production terminal authentication adapter or Root release
+endpoint yet; it does not establish journal retirement or qualify native release.
+
 The separate operation registration has ManagedExternalEffect semantics and a
 trusted SecuritySensitive floor. Non-executable canonical planning requires a
 private principal/request-bound context built from actual linked history; generic
@@ -124,7 +140,7 @@ aborts never-dispatched Prepared authority; this API cannot revive it.
 Indeterminate duplicates return retained uncertainty, including after lost replies
 or native refusal. No reply commits completion.
 
-No native protected terminal purpose, production executor endpoint, Root retirement
+No production terminal authentication adapter, executor endpoint, Root retirement
 or native release is activated. The remaining terminal managed workflow, native/Root quiescence and
 finalization, normal Keep/Revert ordering, Committed adoption, safe supersession
 and reference-aware cleanup still require coherent implementation.

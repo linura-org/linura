@@ -413,6 +413,23 @@ facts. Public aggregate encoding is bounded before allocation. This comparison
 does not attest Root continuity or physical frames, arm a protected purpose or
 release any protection. Existing Apply/Recovery scope parsers refuse these bytes.
 
+The private Experimental protected Wayland interaction adds `begin_finalization`
+with a scope digest (`s`), immutable sealed material (`h`) and the two absolute
+clock bounds (four `u` values). It operates only on the actual retained original
+Recovery scene. Its separate compositor presentation purpose is 4; the manager's
+standalone begin still rejects it. Native code compares complete material to the
+retained actual Root source, restoration transaction/dispatch, current lock,
+restored native source guard and post-write epoch before fresh all-output review.
+Material is at most 14 KiB, must be an immutable sealed unnamed file owned by the
+native UID, and is consumed/closed on denial as well as success. The bounded file
+transport avoids growing Wayland's ordinary connection buffer. No mutable file,
+pipe, socket or sender-selected stream offset is read. Consumed review retires
+owner content/input and requires fresh native safety frames before independent
+post-review verification. The transition releases no fence, renews no restoration
+execution window and does not activate production terminal authentication or
+Root/native finalization. Old Apply/Keep/Revert/Recovery purposes retain their
+meaning and bounds; there is no Stable compatibility shim.
+
 The internal read-only `inspect_original_display_finalization` API returns an
 expiring material/evidence report only after exact authenticated linked retirement
 and a new independent canonical restoration proof. It reads history again after

@@ -444,7 +444,7 @@ class PinnedBackend final : public Backend
             baseline.push_back(head.current);
         auto protection = ProtectedWireEndpoint::reserveOriginalRestoration(
             resource, client, bound, baseline, targets, captured, at, staged->sources,
-            [grant] { return grant->live(); });
+            grant->source().material, [grant] { return grant->live(); });
         if (!protection)
             return std::nullopt;
         // Retain before the first possible effect. An error/exception never

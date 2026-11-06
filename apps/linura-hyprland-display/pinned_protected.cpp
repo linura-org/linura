@@ -1,6 +1,7 @@
 #include "pinned_protected.h"
 #include "pinned_integration.h"
 #include "protected_wire.h"
+#include "original_finalization_intent.h"
 #include "protected_input_retirement.h"
 #include "protected_key_delivery.h"
 #include "protected_frame.h"
@@ -220,8 +221,10 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     bool originalRestoration = false;
     std::map<OutputKey, std::string> restoredSources;
     std::function<bool()> originalAlive;
+    std::string originalMaterial;
+    bool terminalActive = false, terminalConsumed = false;
     bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
-    std::uint64_t postWriteEpoch = 0;
+    std::uint64_t postWriteEpoch = 0, terminalEpoch = 0;
     bool decisionActive = false, decisionStarted = false, decisionUsed = false;
     MutationProtection::Write lastWrite = MutationProtection::Write::Apply;
     Snapshot mutationInventory, stableInventory;
@@ -246,7 +249,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     }
     bool refresh()
     {
-        if ((interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery
+        if (((originalRestoration ||
+              interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery)
                  ? !startupRecoveryAvailable()
                  : startupBlocked()) ||
             closed || !supportedPresentation() || !Pointer::mgr() ||
@@ -294,7 +298,11 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                 mutationFault = true;
             else
                 mutationClock = *clock;
-            if (decisionActive && !interaction.refresh(*facts, *clock))
+            if (terminalActive && (clock->unixMs >= interaction.scope().deadlineUnixMs ||
+                                   clock->bootMs >= interaction.scope().deadlineBootMs))
+                mutationFault = true;
+            if ((decisionActive || (terminalActive && !terminalConsumed)) &&
+                !interaction.refresh(*facts, *clock))
                 mutationFault = true;
             return true;
         }
@@ -442,9 +450,14 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         interaction.focus(std::nullopt);
         return nullptr;
     }
+    bool interactiveContent() const noexcept
+    {
+        return !mutation || decisionActive ||
+               (terminalActive && !terminalConsumed && !ownerLost && !mutationFault);
+    }
     bool inputReady()
     {
-        if (mutation && !decisionActive)
+        if (!interactiveContent())
             return false;
         if (!refresh())
             return false;
@@ -617,20 +630,22 @@ class PinnedScene final : public ProtectedScene
     reserveMutation(const Correlation &bound, const Layout &baseline, const Layout &desired,
                     const Snapshot &captured, ClockSample capturedClock) override
     {
-        return reserve(bound, baseline, desired, captured, capturedClock, false, {}, {});
+        return reserve(bound, baseline, desired, captured, capturedClock, false, {}, {}, {});
     }
     std::shared_ptr<MutationProtection>
     reserveOriginalRestoration(const Correlation &bound, const Layout &baseline,
                                const Layout &desired, const Snapshot &captured, ClockSample clock,
                                const std::map<OutputKey, std::string> &sources,
-                               std::function<bool()> alive) override
+                               const std::string &material, std::function<bool()> alive) override
     {
-        return reserve(bound, baseline, desired, captured, clock, true, sources, std::move(alive));
+        return reserve(bound, baseline, desired, captured, clock, true, sources, material,
+                       std::move(alive));
     }
     std::shared_ptr<MutationProtection> reserve(const Correlation &bound, const Layout &baseline,
                                                 const Layout &desired, const Snapshot &captured,
                                                 ClockSample capturedClock, bool original,
                                                 const std::map<OutputKey, std::string> &sources,
+                                                const std::string &material,
                                                 std::function<bool()> alive)
     {
         if (data->mutation || mutationFence || !data->refresh() ||
@@ -638,7 +653,8 @@ class PinnedScene final : public ProtectedScene
             data->interaction.scope().purpose != (original
                                                       ? ProtectedInteraction::Purpose::Recovery
                                                       : ProtectedInteraction::Purpose::Apply) ||
-            (original && (!alive || !alive() || sources.size() != captured.heads.size())) ||
+            (original && (!alive || !alive() || sources.size() != captured.heads.size() ||
+                          !OriginalGrantCodec::materialFields(material))) ||
             data->surfaces.size() != captured.heads.size() || (!original && baseline == desired) ||
             !DisplayTransaction::validLayout(baseline, captured) ||
             !DisplayTransaction::validLayout(desired, captured) || capturedClock.unixMs == 0 ||
@@ -660,6 +676,7 @@ class PinnedScene final : public ProtectedScene
         data->originalRestoration = original;
         data->restoredSources = sources;
         data->originalAlive = std::move(alive);
+        data->originalMaterial = material;
         data->baseline = original ? desired : baseline;
         data->desired = desired;
         data->bound = bound;
@@ -697,6 +714,52 @@ class PinnedScene final : public ProtectedScene
         data->interaction = std::move(*decision);
         data->invalidateFrames();
         data->decisionActive = true;
+        return reconfigureReview();
+    }
+    bool beginFinalization(const ProtectedInteraction::Scope &scope,
+                           const std::string &material) override
+    {
+        if (!data->mutation || !data->originalRestoration || !data->refresh() || data->ownerLost ||
+            data->mutationFault || data->writing || data->terminalActive || data->decisionStarted ||
+            data->lastWrite != MutationProtection::Write::Restore || data->postWriteEpoch == 0 ||
+            scope.purpose != ProtectedInteraction::Purpose::Finalization ||
+            scope.digest == data->interaction.scope().digest || heldInput().any)
+            return false;
+        const auto intent = OriginalFinalizationCodec::decode(material);
+        if (!intent ||
+            !OriginalFinalizationCodec::matchesHeld(*intent, data->originalMaterial, data->bound,
+                                                    data->stableInventory, data->postWriteEpoch))
+            return false;
+        // Review can begin only from actual held post-write safety frames, never
+        // an old owner frame, a pre-write buffer or an incomplete disabled head.
+        for (const auto &head : data->stableInventory.heads) {
+            const auto surface = data->surfaces.find(head.key);
+            if (surface == data->surfaces.end())
+                return false;
+            const auto &frame = surface->second;
+            if (head.current.enabled
+                    ? (!frame.submittedBuffer ||
+                       frame.frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+                       frame.frame.completedBuffer() != frame.submittedBuffer->buffer.get() ||
+                       frame.frame.completedCommit() == 0)
+                    : !frame.disableSubmitted)
+                return false;
+        }
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto terminal = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!terminal || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->interaction = std::move(*terminal);
+        data->terminalActive = true;
+        data->invalidateFrames();
+        return reconfigureReview();
+    }
+    bool reconfigureReview()
+    {
         // Retain roles, physical input bindings and native commit high-water
         // marks. Every enabled head receives a fresh logical-size configure.
         for (auto &[key, surface] : data->surfaces) {
@@ -817,7 +880,7 @@ class PinnedScene final : public ProtectedScene
                 }
                 if (presentation != ProtectedFrame::Presentation::Content)
                     return;
-                if (live->mutation && !live->decisionActive)
+                if (!live->interactiveContent())
                     return;
                 live->interaction.presented(key, event.commitID, true);
                 const auto focus = live->focused();
@@ -877,16 +940,21 @@ class PinnedScene final : public ProtectedScene
     {
         if (!data->refresh())
             return std::nullopt;
+        if (data->terminalActive && (data->ownerLost || data->mutationFault))
+            return std::nullopt;
         const auto facts = nativeBackend()->snapshot();
-        return facts
-                   ? std::optional(ProtectedSceneStatus{compositorInstance(), facts->generation,
-                                                        data->mutation && !data->decisionActive
-                                                            ? data->mutationEpoch
-                                                            : data->interaction.epoch(),
-                                                        data->mutation && !data->decisionActive
-                                                            ? ProtectedInteraction::Phase::Consumed
-                                                            : data->interaction.phase()})
-                   : std::nullopt;
+        if (facts && data->terminalActive && data->terminalConsumed)
+            return ProtectedSceneStatus{compositorInstance(), facts->generation,
+                                        data->terminalEpoch, ProtectedInteraction::Phase::Consumed};
+        return facts ? std::optional(ProtectedSceneStatus{
+                           compositorInstance(), facts->generation,
+                           data->mutation && !data->decisionActive && !data->terminalActive
+                               ? data->mutationEpoch
+                               : data->interaction.epoch(),
+                           data->mutation && !data->decisionActive && !data->terminalActive
+                               ? ProtectedInteraction::Phase::Consumed
+                               : data->interaction.phase()})
+                     : std::nullopt;
     }
     bool consume(const std::string &digest, std::uint64_t epoch) override
     {
@@ -896,7 +964,14 @@ class PinnedScene final : public ProtectedScene
         const auto clock = compositorClock();
         auto scope = data->interaction.scope();
         scope.digest = digest;
-        return facts && clock && data->interaction.consume(scope, epoch, *facts, *clock);
+        if (!facts || !clock || !data->interaction.consume(scope, epoch, *facts, *clock))
+            return false;
+        if (data->terminalActive) {
+            data->terminalConsumed = true;
+            data->terminalEpoch = epoch;
+            data->invalidateFrames(); // Fresh opaque frames for Control's post-review proof.
+        }
+        return true;
     }
 };
 } // namespace
@@ -1016,7 +1091,9 @@ bool startupBlocksProtectedScene()
 {
     const auto data = active.lock();
     return startupBlocked() &&
-           !(data && data->interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery &&
+           !(data &&
+             (data->originalRestoration ||
+              data->interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery) &&
              startupRecoveryAvailable());
 }
 } // namespace
@@ -1062,7 +1139,7 @@ bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &n
         // this pass. The actual completion callback supplies its own identity.
         surface->renderedBuffer.reset();
     }
-    if (!data->refresh() || !surface)
+    if (!data->refresh() || !surface || (data->terminalActive && !data->interactiveContent()))
         return true;
     const auto resource = surface->resource.lock();
     if (!surface->acknowledged || !surface->contentCommitted || !resource || !resource->m_mapped ||
@@ -1143,7 +1220,7 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     }
     // Revoke old interaction evidence BEFORE a black frame can replace it.
     // The opaque frame's own hardware event will remain safety-only.
-    if ((!data->mutation || data->decisionActive) &&
+    if (data->interactiveContent() &&
         surface->frame.pendingKind() == ProtectedFrame::Kind::Safety &&
         !data->interaction.safetyFrame(surface->output))
         return false;
@@ -1155,7 +1232,7 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     surface->renderedBuffer.reset();
     if (submission.id == 0 || submission.error != 0 ||
         !surface->frame.queued(buffer.get(), submission.id) ||
-        ((!data->mutation || data->decisionActive) &&
+        (data->interactiveContent() &&
          surface->frame.queuedKind() == ProtectedFrame::Kind::Content &&
          !data->interaction.commit(surface->output, surface->serial, submission.id))) {
         data->cancelInput();

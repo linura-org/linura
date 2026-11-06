@@ -1,4 +1,6 @@
 #include "original_restoration_grant.h"
+#include "original_finalization_intent.h"
+#include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
 #include "recovery_rule_fixture.h"
@@ -124,6 +126,144 @@ void comparisonOnly(const std::string &material)
           "LNOT:1;1;2;1;1920;1080;60000;1000;0;0;0;1;2;"})
         assert(!OriginalGrantCodec::target(bad));
 }
+std::string terminalMaterial(const OriginalFinalizationCodec::Intent &intent)
+{
+    std::string material = "LNRF:1;";
+    for (const auto &value :
+         {std::string(intent.restorationRequest), std::string(intent.restorationDispatch),
+          std::string(intent.terminalLink), std::string(intent.sourceGuard),
+          std::to_string(intent.postWriteEpoch), std::string(intent.currentLock),
+          std::string(intent.restoration)})
+        material += std::to_string(value.size()) + ':' + value + ';';
+    return material;
+}
+void terminalComparison(const std::string &material)
+{
+    using namespace OriginalFinalizationCodec;
+    const auto decoded = decode(material);
+    assert(decoded && terminalMaterial(*decoded) == material);
+    assert(decoded->postWriteEpoch == 29 && decoded->sourceGuard == std::string(64, '3'));
+    assert(transaction(decoded->restorationRequest, decoded->currentLock) ==
+           std::optional<std::string>{
+               "transaction:v1:ae393480ff2a701ad2b95c237c1fea76adcf9b866471d3550847c6eff3f519a4"});
+    assert(!OriginalGrantCodec::intent(material) && !OriginalGrantCodec::materialFields(material));
+    for (std::size_t size = 0; size < material.size(); ++size)
+        assert(!decode(std::string_view(material).substr(0, size)));
+    assert(!decode(material + 'x') && !decode(std::string(MaxMaterial + 1, 'x')));
+    assert(!decode("LNRF:2;" + material.substr(7)));
+    assert(!decode("LNRF:1;027:" + material.substr(10)));
+    assert(!decode("LNRF:1;18446744073709551616:" + material.substr(10)));
+    for (const auto &invalid :
+         {std::string("\x80"), std::string("\xc0\xaf"), std::string("\xed\xa0\x80"),
+          std::string("\xf4\x90\x80\x80"), std::string("\xe2\x82"), std::string("\xc2\x80"),
+          std::string("\x7f"), std::string("\0", 1)}) {
+        auto changed = *decoded;
+        changed.restorationRequest = invalid;
+        assert(!decode(terminalMaterial(changed)));
+    }
+    for (const auto &valid : {std::string("request with spaces"), std::string("r\xc3\xa9"),
+                              std::string("r\xf0\x9f\x98\x80"), std::string("\xe2\x80\xa8")}) {
+        auto changed = *decoded;
+        changed.restorationRequest = valid;
+        const auto encoded = terminalMaterial(changed);
+        const auto roundtrip = decode(encoded);
+        assert(roundtrip && roundtrip->restorationRequest == valid);
+    }
+    const auto nested = OriginalGrantCodec::materialFields(decoded->restoration);
+    assert(nested);
+    const auto replacement = OriginalGrantCodec::intent((*nested)[5]);
+    assert(replacement);
+    Snapshot snapshot;
+    snapshot.generation = 5;
+    for (const auto &target : replacement->desired) {
+        Head head;
+        head.key = target.output;
+        head.current = target;
+        head.baseRuleWitness = "actual native rules";
+        head.outputIdentityWitness = "actual native identity";
+        snapshot.heads.push_back(head);
+    }
+    const Correlation held{*transaction(decoded->restorationRequest, decoded->currentLock),
+                           std::string(64, 'a'), std::string(decoded->restorationDispatch), 10};
+    assert(!matchesHeld(*decoded, decoded->restoration, held, snapshot, 29));
+    const auto guard = nativeBaselineGuard(snapshot, replacement->desiredText);
+    assert(guard);
+    auto valid = *decoded;
+    valid.sourceGuard = *guard;
+    assert(matchesHeld(valid, decoded->restoration, held, snapshot, 29));
+    assert(!matchesHeld(valid, decoded->restoration, held, snapshot, 28));
+    assert(!matchesHeld(valid, decoded->restoration, held, snapshot, 0));
+    assert(!matchesHeld(valid, std::string(decoded->restoration) + 'x', held, snapshot, 29));
+    for (unsigned fault = 0; fault != 8; ++fault) {
+        auto changed = valid;
+        auto correlation = held;
+        auto facts = snapshot;
+        if (fault == 0)
+            changed.restorationRequest = (*nested)[0];
+        if (fault == 1)
+            changed.restorationDispatch = (*nested)[1];
+        if (fault == 2)
+            changed.currentLock = "session:lock:foreign";
+        if (fault == 3)
+            correlation.transaction += 'x';
+        if (fault == 4)
+            correlation.dispatchDigest[0] = 'a';
+        if (fault == 5)
+            facts.heads[0].baseRuleWitness += 'x';
+        if (fault == 6)
+            facts.heads[0].current.x = 1;
+        if (fault == 7)
+            ++facts.generation;
+        assert(!matchesHeld(changed, decoded->restoration, correlation, facts, 29));
+    }
+    assert(!transaction("request", "session:lock:boot:4294967296:session"));
+    assert(!transaction("request", "session:lock:boot:01000:session"));
+    assert(!transaction("request", "session:lock:incomplete"));
+}
+void sealedMaterialTransport()
+{
+    using namespace SealedNativeMaterial;
+    assert(!create("") && !create(std::string(MaxBytes + 1, 'x')));
+    for (const auto &bytes : {std::string("comparison"), std::string(MaxBytes, 'x'),
+                              std::string("embedded\0byte", 13)}) {
+        const auto sealed = create(bytes);
+        assert(sealed);
+        assert(lseek(sealed->get(), 3, SEEK_SET) == 3);
+        assert(pwrite(sealed->get(), "x", 1, 0) == -1 && errno == EPERM);
+        const auto duplicate = dup(sealed->get());
+        assert(duplicate >= 0);
+        assert(SealedNativeMaterial::read(OwnedNativeFd{duplicate}) == std::optional(bytes));
+        assert(fcntl(duplicate, F_GETFD) == -1 && errno == EBADF);
+        assert(lseek(sealed->get(), 0, SEEK_CUR) == 3);
+    }
+    assert(!SealedNativeMaterial::read(OwnedNativeFd{-1}));
+    for (const auto missing : {F_SEAL_WRITE, F_SEAL_SHRINK, F_SEAL_GROW, F_SEAL_SEAL}) {
+        const auto descriptor = memfd_create("mutable-comparison", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+        assert(descriptor >= 0 && write(descriptor, "x", 1) == 1);
+        assert(fcntl(descriptor, F_ADD_SEALS, Seals & ~missing) == 0);
+        assert(!SealedNativeMaterial::read(OwnedNativeFd{descriptor}));
+        assert(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF);
+    }
+    for (const auto size : {std::size_t{0}, MaxBytes + 1}) {
+        const auto descriptor =
+            memfd_create("invalid-size-comparison", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+        assert(descriptor >= 0 && ftruncate(descriptor, static_cast<off_t>(size)) == 0);
+        assert(fcntl(descriptor, F_ADD_SEALS, Seals) == 0);
+        assert(!SealedNativeMaterial::read(OwnedNativeFd{descriptor}));
+        assert(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF);
+    }
+    int sockets[2]{}, pipes[2]{};
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+    assert(pipe2(pipes, O_CLOEXEC) == 0);
+    // Neither an empty blocking socket nor an empty pipe is ever read.
+    for (const auto descriptor : {sockets[0], pipes[0]}) {
+        assert(!SealedNativeMaterial::read(OwnedNativeFd{descriptor}));
+        assert(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF);
+    }
+    close(sockets[1]);
+    close(pipes[1]);
+}
+
 void unauthenticatedEndpoints()
 {
     StartupFence fence;
@@ -180,7 +320,7 @@ void guardComparisonVector()
 } // namespace
 int main(int argc, char **argv)
 {
-    assert(argc == 2);
+    assert(argc == 3);
     std::ifstream input(argv[1]);
     assert(input.good());
     std::string material{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
@@ -193,6 +333,14 @@ int main(int argc, char **argv)
            std::optional<std::string>{
                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"});
     comparisonOnly(material);
+    std::ifstream terminalInput(argv[2]);
+    assert(terminalInput.good());
+    std::string terminal{std::istreambuf_iterator<char>(terminalInput),
+                         std::istreambuf_iterator<char>()};
+    assert(terminal.ends_with('\n'));
+    terminal.pop_back();
+    terminalComparison(terminal);
+    sealedMaterialTransport();
     guardComparisonVector();
     unauthenticatedEndpoints();
 }

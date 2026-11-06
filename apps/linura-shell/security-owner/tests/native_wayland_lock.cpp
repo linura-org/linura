@@ -1003,11 +1003,17 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             return {};
         }
-        std::shared_ptr<MutationProtection> reserveOriginalRestoration(
-            const Correlation &, const Layout &, const Layout &, const Snapshot &, ClockSample,
-            const std::map<OutputKey, std::string> &, std::function<bool()>) override
+        std::shared_ptr<MutationProtection>
+        reserveOriginalRestoration(const Correlation &, const Layout &, const Layout &,
+                                   const Snapshot &, ClockSample,
+                                   const std::map<OutputKey, std::string> &, const std::string &,
+                                   std::function<bool()>) override
         {
             return {}; // A simulated scene cannot restore native original state.
+        }
+        bool beginFinalization(const ProtectedInteraction::Scope &, const std::string &) override
+        {
+            return false; // No original Root witness in this transport fixture.
         }
         bool beginDecision(const ProtectedInteraction::Scope &) override
         {

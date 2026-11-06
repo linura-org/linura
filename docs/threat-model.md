@@ -1401,3 +1401,15 @@ and shared-ownership-aware retention still require implementation and native
 qualification. Control's typed review and prepared handoff do not supply those
 native mechanisms. No report, parser test or simulated SQLite fixture is that
 qualification.
+
+The held native terminal review transition treats complete material and its sealed
+file descriptor as comparison data. An authenticated owner cannot start it on a
+new scene, bypass the original live Root witness, substitute another restoration
+source/dispatch, reuse old input/frames, renew restoration execution or release
+fences. Immutable bounded files prevent mutable-payload races and oversized or
+blocking stream reads without increasing connection buffers. Fresh purpose scopes
+retain dual-clock limits, current device/source/lock checks, new output frames and
+permanent owner/witness failure latches. Consuming review returns to opaque native
+frames; it is neither prepared terminal execution nor proof of Root retirement.
+Production terminal authentication, release/admission, loss recovery, supersession
+and reference-aware cleanup remain separately required and unqualified.

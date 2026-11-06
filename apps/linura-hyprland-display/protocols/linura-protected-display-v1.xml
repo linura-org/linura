@@ -10,7 +10,7 @@
       is active, preserving the actual ext-session-lock state independently.
     </description>
     <enum name="purpose">
-      <entry name="apply" value="0"/><entry name="keep" value="1"/><entry name="revert" value="2"/><entry name="recovery" value="3"/>
+      <entry name="apply" value="0"/><entry name="keep" value="1"/><entry name="revert" value="2"/><entry name="recovery" value="3"/><entry name="finalization" value="4"/>
     </enum>
     <request name="destroy" type="destructor"/>
     <request name="begin">
@@ -74,6 +74,25 @@
       </description>
       <arg name="scope_digest" type="string"/>
       <arg name="purpose" type="uint" enum="linura_protected_display_manager_v1.purpose"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+      <arg name="deadline_boot_hi" type="uint"/>
+      <arg name="deadline_boot_lo" type="uint"/>
+    </request>
+    <request name="begin_finalization">
+      <description summary="fresh review over the retained original restoration">
+        Only the still-held healthy Recovery scene may begin this separate
+        purpose. Complete bounded LNRF material must match its actual original
+        Root grant, restoration dispatch and current restored source/epoch.
+        Material arrives in an immutable sealed file of at most 14 KiB. Pipes,
+        mutable files and oversized content are denied before reading.
+        New absolute wall/BOOTTIME bounds apply only to this review. They never
+        renew restoration execution authority. All outputs require fresh owner
+        frames. Consumption returns to fresh opaque native frames; it releases
+        no startup, input, power, lock or original checkpoint protection.
+      </description>
+      <arg name="scope_digest" type="string"/>
+      <arg name="material" type="fd"/>
       <arg name="deadline_unix_hi" type="uint"/>
       <arg name="deadline_unix_lo" type="uint"/>
       <arg name="deadline_boot_hi" type="uint"/>

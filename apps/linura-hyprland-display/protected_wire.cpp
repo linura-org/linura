@@ -1,4 +1,5 @@
 #include "protected_wire.h"
+#include "sealed_native_material.h"
 #include "linura-protected-display-v1-server-protocol.h"
 
 #include <algorithm>
@@ -353,12 +354,11 @@ class ProtectedWireEndpoint::Impl final
             return {};
         return state->scene->reserveMutation(bound, baseline, desired, captured, clock);
     }
-    static std::shared_ptr<MutationProtection>
-    reserveOriginalRestoration(wl_resource *resource, wl_client *client, const Correlation &bound,
-                               const Layout &baseline, const Layout &desired,
-                               const Snapshot &captured, ClockSample clock,
-                               const std::map<OutputKey, std::string> &restoredSources,
-                               std::function<bool()> originalAlive)
+    static std::shared_ptr<MutationProtection> reserveOriginalRestoration(
+        wl_resource *resource, wl_client *client, const Correlation &bound, const Layout &baseline,
+        const Layout &desired, const Snapshot &captured, ClockSample clock,
+        const std::map<OutputKey, std::string> &restoredSources,
+        const std::string &authenticatedMaterial, std::function<bool()> originalAlive)
     {
         if (!resource || !client || wl_resource_get_client(resource) != client ||
             !wl_resource_instance_of(resource, &linura_protected_display_interaction_v1_interface,
@@ -369,7 +369,8 @@ class ProtectedWireEndpoint::Impl final
         if (!state || state->closed || !state->scene || !interaction.owner.current(interaction))
             return {};
         return state->scene->reserveOriginalRestoration(bound, baseline, desired, captured, clock,
-                                                        restoredSources, std::move(originalAlive));
+                                                        restoredSources, authenticatedMaterial,
+                                                        std::move(originalAlive));
     }
     static void beginDecision(wl_client *, wl_resource *resource, const char *scope,
                               std::uint32_t purpose, std::uint32_t high, std::uint32_t low,
@@ -393,6 +394,35 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void beginFinalization(wl_client *, wl_resource *resource, const char *scope,
+                                  std::int32_t descriptor, std::uint32_t high, std::uint32_t low,
+                                  std::uint32_t bootHigh, std::uint32_t bootLow)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            // Reattest the actual retained owner before touching file content.
+            const bool current =
+                state && state->scene && !state->closed && interaction.owner.current(interaction);
+            const auto material =
+                current ? SealedNativeMaterial::read(std::move(owned)) : std::nullopt;
+            if (!digest(scope) || !material || !state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) ||
+                !state->scene->beginFinalization({scope,
+                                                  ProtectedInteraction::Purpose::Finalization,
+                                                  joined(high, low), joined(bootHigh, bootLow)},
+                                                 *material)) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+            }
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static const struct linura_protected_display_manager_v1_interface managerImpl;
     static const struct linura_protected_display_interaction_v1_interface interactionImpl;
     static const struct linura_protected_display_surface_v1_interface surfaceImpl;
@@ -404,7 +434,7 @@ const struct linura_protected_display_manager_v1_interface ProtectedWireEndpoint
 const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
-    destroy, getSurface, status, refreshPresentation, consume, beginDecision
+    destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {
@@ -428,9 +458,11 @@ std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveMutation(
 std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveOriginalRestoration(
     wl_resource *resource, wl_client *client, const Correlation &bound, const Layout &baseline,
     const Layout &desired, const Snapshot &captured, ClockSample clock,
-    const std::map<OutputKey, std::string> &restoredSources, std::function<bool()> originalAlive)
+    const std::map<OutputKey, std::string> &restoredSources,
+    const std::string &authenticatedMaterial, std::function<bool()> originalAlive)
 {
     return Impl::reserveOriginalRestoration(resource, client, bound, baseline, desired, captured,
-                                            clock, restoredSources, std::move(originalAlive));
+                                            clock, restoredSources, authenticatedMaterial,
+                                            std::move(originalAlive));
 }
 } // namespace Linura::HyprlandDisplay

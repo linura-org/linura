@@ -88,13 +88,19 @@ if(BUILD_TESTING)
     if(NOT EXISTS "${LINURA_DISPLAY_RECOVERY_FIXTURE}" OR IS_SYMLINK "${LINURA_DISPLAY_RECOVERY_FIXTURE}")
         message(FATAL_ERROR "Missing or substituted canonical original display fixture")
     endif()
+    set(LINURA_DISPLAY_FINALIZATION_FIXTURE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../crates/linura-core/src/display_recovery/fixtures/original-finalization.txt"
+        CACHE FILEPATH "Canonical cross-language original display finalization fixture")
+    if(NOT EXISTS "${LINURA_DISPLAY_FINALIZATION_FIXTURE}" OR IS_SYMLINK "${LINURA_DISPLAY_FINALIZATION_FIXTURE}")
+        message(FATAL_ERROR "Missing or substituted canonical original finalization fixture")
+    endif()
     add_executable(linura-hyprland-original-restoration-grant-tests tests/original_restoration_grant.cpp)
     target_link_libraries(linura-hyprland-original-restoration-grant-tests PRIVATE OpenSSL::Crypto)
     target_include_directories(linura-hyprland-original-restoration-grant-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(linura-hyprland-original-restoration-grant-tests PRIVATE
         -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
     add_test(NAME hyprland-original-restoration-grant COMMAND linura-hyprland-original-restoration-grant-tests
-        "${LINURA_DISPLAY_RECOVERY_FIXTURE}")
+        "${LINURA_DISPLAY_RECOVERY_FIXTURE}" "${LINURA_DISPLAY_FINALIZATION_FIXTURE}")
     set_tests_properties(hyprland-original-restoration-grant PROPERTIES TIMEOUT 10)
     # A real DSO constructor and an executable C++ constructor must both
     # observe the filtered vector, before main or any native group reset.

@@ -29,13 +29,15 @@ class ProtectedScopeHistory final
             return now.unixMs >= entry.second.unixMs && now.bootMs >= entry.second.bootMs;
         });
         const auto maximum = (scope.purpose == ProtectedInteraction::Purpose::Apply ||
-                              scope.purpose == ProtectedInteraction::Purpose::Recovery)
+                              scope.purpose == ProtectedInteraction::Purpose::Recovery ||
+                              scope.purpose == ProtectedInteraction::Purpose::Finalization)
                                  ? ProtectedInteraction::MaximumWindowMs
                                  : ProtectedInteraction::DecisionWindowMs;
         if ((scope.purpose != ProtectedInteraction::Purpose::Apply &&
              scope.purpose != ProtectedInteraction::Purpose::Keep &&
              scope.purpose != ProtectedInteraction::Purpose::Revert &&
-             scope.purpose != ProtectedInteraction::Purpose::Recovery) ||
+             scope.purpose != ProtectedInteraction::Purpose::Recovery &&
+             scope.purpose != ProtectedInteraction::Purpose::Finalization) ||
             scope.digest.size() != 64 || scope.digest == std::string(64, '0') ||
             !std::all_of(scope.digest.begin(), scope.digest.end(),
                          [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }) ||

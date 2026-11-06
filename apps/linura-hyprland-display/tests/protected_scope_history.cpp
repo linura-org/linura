@@ -29,6 +29,16 @@ int main()
     extended.purpose = ProtectedInteraction::Purpose::Recovery;
     assert(!recoveryHistory.reserve(extended, {10'000, 1000}));
     assert(!recoveryHistory.reserve(recovery, {70'000, 61'000}));
+    ProtectedScopeHistory finalizationHistory;
+    auto terminal = scope(3000, 70'000);
+    terminal.purpose = ProtectedInteraction::Purpose::Finalization;
+    assert(finalizationHistory.reserve(terminal, {10'000, 1000}));
+    auto wrongPurpose = terminal;
+    wrongPurpose.purpose = ProtectedInteraction::Purpose::Recovery;
+    assert(!finalizationHistory.reserve(wrongPurpose, {10'001, 1001}));
+    terminal.digest[0] = 'f';
+    ++terminal.deadlineBootMs;
+    assert(!finalizationHistory.reserve(terminal, {10'000, 1000}));
     ProtectedScopeHistory originalBound;
     auto shortBoot = scope(0);
     shortBoot.deadlineBootMs = 1200;

@@ -1,6 +1,7 @@
 // Actual private Wayland transport/admission tests. The scene below is a
 // mechanism fixture; it supplies no native frame, authentication or authority.
 #include "protected_wire.h"
+#include "sealed_native_material.h"
 #include "linura-protected-display-v1-client-protocol.h"
 
 #include <array>
@@ -22,6 +23,7 @@ struct Counts final
 {
     std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0}, refresh{0};
     std::atomic<bool> throwAttach{false};
+    std::atomic<unsigned> terminal{0};
     std::atomic<unsigned> purpose{99};
 };
 class Scene final : public ProtectedScene
@@ -29,7 +31,7 @@ class Scene final : public ProtectedScene
   public:
     Counts &counts;
     ProtectedInteraction::Scope scope;
-    bool closed = false, used = false;
+    bool closed = false, used = false, terminal = false;
     Configure configured;
     std::uint32_t serial = 7;
     Scene(Counts &facts, ProtectedInteraction::Scope value) : counts(facts), scope(std::move(value))
@@ -74,9 +76,11 @@ class Scene final : public ProtectedScene
         configured(++serial, 1920, 1080);
         return true;
     }
-    std::shared_ptr<MutationProtection> reserveOriginalRestoration(
-        const Correlation &, const Layout &, const Layout &, const Snapshot &, ClockSample,
-        const std::map<OutputKey, std::string> &, std::function<bool()>) override
+    std::shared_ptr<MutationProtection>
+    reserveOriginalRestoration(const Correlation &, const Layout &, const Layout &,
+                               const Snapshot &, ClockSample,
+                               const std::map<OutputKey, std::string> &, const std::string &,
+                               std::function<bool()>) override
     {
         return {}; // This fixture has no authenticated original-Root recovery.
     }
@@ -85,6 +89,21 @@ class Scene final : public ProtectedScene
                                                         ClockSample) override
     {
         return {};
+    }
+    bool beginFinalization(const ProtectedInteraction::Scope &next,
+                           const std::string &material) override
+    {
+        ++counts.terminal;
+        // Transport-only roundtrip. Synthetic bytes cannot create an actual
+        // Root source, native restoration, fresh frames or release authority.
+        if (scope.purpose != ProtectedInteraction::Purpose::Recovery || !used || terminal ||
+            next.purpose != ProtectedInteraction::Purpose::Finalization ||
+            next.digest != std::string(64, 'b') || next.deadlineUnixMs != 20'000 ||
+            next.deadlineBootMs != 0x123456789abcdef1ULL ||
+            (material != "bounded terminal comparison" && material != std::string(14 * 1024, 'x')))
+            return false;
+        terminal = true;
+        return true;
     }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
@@ -296,7 +315,7 @@ void ownerReplacement()
 {
     // Every retained mutation/read step reattests the original supervised
     // invocation; same PID/UID cannot migrate a conversation to its successor.
-    for (unsigned operation = 0; operation != 5; ++operation) {
+    for (unsigned operation = 0; operation != 6; ++operation) {
         Harness h;
         Client c(h.descriptor);
         c.begin();
@@ -318,7 +337,16 @@ void ownerReplacement()
             linura_protected_display_interaction_v1_refresh_presentation(c.interaction);
             c.roundtrip();
         }
+        if (operation == 5) {
+            const auto material = SealedNativeMaterial::create("bounded terminal comparison");
+            assert(material);
+            linura_protected_display_interaction_v1_begin_finalization(
+                c.interaction, std::string(64, 'b').c_str(), material->get(), 0, 20'000, 0x12345678,
+                0x9abcdef1);
+            c.roundtrip();
+        }
         c.status();
+        assert(h.counts.terminal == 0);
         assert(c.denied >= 1 && h.counts.close == 1 && h.counts.acknowledge == 0 &&
                h.counts.consume == 0 && h.counts.refresh == 0);
     }
@@ -440,6 +468,39 @@ int main()
         assert(wl_display_roundtrip(c.display) < 0);
         h.finish(); // Protocol error delivery precedes server resource teardown.
         assert(h.counts.begin == 127 && h.counts.close == 127);
+    }
+    for (unsigned fault = 0; fault != 7; ++fault) {
+        Harness h;
+        Client c(h.descriptor);
+        c.begin(nullptr, fault == 1 ? 0 : 3);
+        if (fault != 2) {
+            linura_protected_display_interaction_v1_consume(c.interaction,
+                                                            std::string(64, 'a').c_str(), 0, 4);
+            c.roundtrip();
+        }
+        const auto digest = std::string(64, fault == 3 ? '0' : 'b');
+        const auto material = SealedNativeMaterial::create(
+            fault == 6 ? std::string(14 * 1024, 'x') : std::string("bounded terminal comparison"));
+        assert(material);
+        OwnedNativeFd oversized{
+            memfd_create("oversized-comparison", MFD_CLOEXEC | MFD_ALLOW_SEALING)};
+        assert(oversized.get() >= 0);
+        assert(ftruncate(oversized.get(), 14 * 1024 + 1) == 0);
+        assert(fcntl(oversized.get(), F_ADD_SEALS, SealedNativeMaterial::Seals) == 0);
+        const auto wall = fault == 5 ? 20'001U : 20'000U;
+        linura_protected_display_interaction_v1_begin_finalization(
+            c.interaction, digest.c_str(), (fault == 4 ? oversized.get() : material->get()), 0,
+            wall, 0x12345678, 0x9abcdef1);
+        c.roundtrip();
+        assert(c.denied == ((fault == 0 || fault == 6) ? 0U : 1U));
+        assert(h.counts.terminal == ((fault == 3 || fault == 4) ? 0U : 1U));
+        if (fault == 0) {
+            linura_protected_display_interaction_v1_begin_finalization(
+                c.interaction, digest.c_str(), (fault == 4 ? oversized.get() : material->get()), 0,
+                wall, 0x12345678, 0x9abcdef1);
+            c.roundtrip();
+            assert(c.denied == 1 && h.counts.terminal == 2 && h.counts.close == 1);
+        }
     }
     ownerReplacement();
 }

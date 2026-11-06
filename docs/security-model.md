@@ -765,6 +765,22 @@ The separate registered terminal operation supports canonical planning and an
 internal separately authorized/prepared Control handoff. Its native protected
 terminal-purpose adapter and privileged/native release endpoints remain unavailable.
 
+The compositor additionally implements a private held-scene terminal review
+transition. It accepts complete `LNRF:1` only over the actual consumed original
+Recovery scene with its continuously live Root grant, matching restoration
+transaction/dispatch, exact nested source, current lock, restored source guard,
+post-write epoch and completed native safety frames. The full material travels
+in an immutable sealed descriptor bounded to 14 KiB; mutable, oversized or
+non-file descriptors are rejected before reading. The native integration identity
+includes both readers. A new scope has fresh bounded wall/BOOTTIME deadlines and
+all outputs need new configure/presentation evidence. It cannot renew restoration
+execution authority, start standalone, repeat output writes or release protection.
+After consumption, native content/input returns to opaque safety frames while the
+one-use consumed correlation stays fixed. Root/source/clock/device checks and
+permanent loss latches remain. Existing Keep/Revert keep their original bounds.
+This mechanism has no production terminal authentication adapter or Root release
+endpoint yet; it does not establish journal retirement or qualify native release.
+
 Control's read-only `inspect_original_display_finalization` authenticates both
 actual requests, exact committed restoration, reserved/dispatched history, link,
 original checkpoint and exact linked original retirement before provider probes.
