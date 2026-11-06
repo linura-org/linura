@@ -9,13 +9,13 @@ pub use display::{
     AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRestoration,
     DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
     DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
-    DisplayVerificationTarget, IndependentDisplayVerifier, OriginalDisplayFinalizationAuthorizer,
-    OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
-    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
-    OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
-    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    OrdinaryDisplayReleaseInspection, TrustedDisplayDecision,
+    DisplayVerificationTarget, IndependentDisplayVerifier, OrdinaryDisplayReleaseInspection,
+    OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
+    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
+    OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
+    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
+    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
 };
 
 use linura_core::{
