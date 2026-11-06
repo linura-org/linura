@@ -597,8 +597,10 @@ class PinnedMutation final : public MutationProtection
     }
     void release() noexcept override
     {
-        if (!data_->mutation || (data_->originalRestoration && wrote_))
-            return; // Only Stage 3's separate qualified terminal path can release.
+        if (!data_->mutation || wrote_)
+            return; // Any native write retains protection until qualified Control
+                    // retirement. Ordinary Keep/Revert are not an exception.
+                    // This path only clears never-written pre-effect scenes.
         data_->mutation = false;
         if (mutationFence == data_)
             mutationFence.reset();
