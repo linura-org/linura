@@ -23,13 +23,13 @@ mod finalization;
 mod release;
 mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
-pub use release::OrdinaryDisplayReleaseInspection;
 pub use finalization::{
     AuthorizedOriginalDisplayFinalization, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
 };
+pub use release::OrdinaryDisplayReleaseInspection;
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,

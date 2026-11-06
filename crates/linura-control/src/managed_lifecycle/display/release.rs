@@ -57,11 +57,7 @@ fn terminal_for_inspection(
     history: &DisplayHistory,
     state: TransactionState,
 ) -> Result<(&Record, &'static str, bool), ManagedLifecycleError> {
-    match (
-        history.confirmed.as_ref(),
-        history.restored.as_ref(),
-        state,
-    ) {
+    match (history.confirmed.as_ref(), history.restored.as_ref(), state) {
         (Some(confirmed), None, TransactionState::Committed)
             if history.confirmation.is_some() && history.revert.is_none() =>
         {
@@ -99,7 +95,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let request = self.retained_display_request(&principal, request_id)?;
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
-        self.authority.assert_request_matches(&principal, &request)?;
+        self.authority
+            .assert_request_matches(&principal, &request)?;
         let transaction = TransactionId::for_namespace(&principal_id, request_id);
         let snapshot = self.authority.snapshot(&transaction)?;
         let request_digest = crate::durable_authority::digest_request(&request)?;
@@ -234,6 +231,22 @@ mod tests {
         );
         let transaction = TransactionId::new("transaction:display-release-provenance-test")
             .unwrap_or_else(|error| unreachable!("{error}"));
+        let previous = if phase == Phase::Reserved {
+            None
+        } else {
+            Some(linura_transaction::digest_parts(
+                "display-release-provenance-parent-test",
+                [b"parent".as_slice()],
+            ))
+        };
+        let observation = if matches!(phase, Phase::Reserved | Phase::Dispatched) {
+            None
+        } else {
+            Some(linura_transaction::digest_parts(
+                "display-release-provenance-observation-test",
+                [b"observed".as_slice()],
+            ))
+        };
         Record::new(
             request,
             transaction,
@@ -245,8 +258,8 @@ mod tests {
             } else {
                 Some("a".repeat(64))
             },
-            None,
-            None,
+            previous,
+            observation,
         )
         .unwrap_or_else(|error| unreachable!("{error:?}"))
     }
