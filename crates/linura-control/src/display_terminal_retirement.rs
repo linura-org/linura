@@ -28,6 +28,30 @@ fn invalid() -> ManagedLifecycleError {
     )
 }
 
+/// Decode one complete bounded retained field; unknown or partial journal
+/// bytes are not repaired, silently ignored or promoted to current authority.
+fn retained_field<'a>(bytes: &mut &'a [u8], max: usize) -> Result<&'a str, ManagedLifecycleError> {
+    let (raw_len, rest) = bytes.split_at_checked(8).ok_or_else(invalid)?;
+    let len = usize::try_from(u64::from_be_bytes(
+        raw_len.try_into().map_err(|_| invalid())?,
+    ))
+    .map_err(|_| invalid())?;
+    if len == 0 || len > max {
+        return Err(invalid());
+    }
+    let (field, remaining) = rest.split_at_checked(len).ok_or_else(invalid)?;
+    *bytes = remaining;
+    std::str::from_utf8(field).map_err(|_| invalid())
+}
+
+fn retained_number(field: &str) -> Result<u64, ManagedLifecycleError> {
+    let n = field.parse::<u64>().map_err(|_| invalid())?;
+    if n.to_string() != field || n == 0 {
+        return Err(invalid());
+    }
+    Ok(n)
+}
+
 impl TerminalRetirementPrepared {
     pub(crate) fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
         let id = digest_bytes(KEY_DOMAIN, request.as_str().as_bytes());
@@ -144,6 +168,102 @@ impl TerminalRetirementPrepared {
         })
     }
 
+    /// Read-only recovery of exactly one previously spent Control operation.
+    /// No freshening of its original observation or retry of its Root/native
+    /// effect is possible. The caller independently verifies Root's *current*
+    /// phase and the same signed Control lineage before and after this query.
+    pub(crate) fn load_spent(
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+        snapshot: &TransactionSnapshot,
+        dispatch: &str,
+        material: &str,
+    ) -> Result<Self, ManagedLifecycleError> {
+        if snapshot.state != TransactionState::Indeterminate
+            || snapshot.principal != *principal
+            || snapshot.request_id != request.request_id
+            || snapshot.transaction_id
+                != linura_transaction::TransactionId::for_namespace(principal, &request.request_id)
+            || snapshot.state_version == 0
+            || snapshot.binding_digest == ContentDigest::zero()
+            || !request
+                .request_id
+                .as_str()
+                .starts_with("request:v010:display-finalization:")
+            || !linura_provider_sdk::ComponentDigest::parse_hex(dispatch)
+                .is_ok_and(|digest| digest.to_hex() == dispatch)
+        {
+            return Err(invalid());
+        }
+        let expected_effect =
+            linura_provider_sdk::display_finalization_effect(material).map_err(|_| invalid())?;
+        let decoded = DisplayFinalizationMaterial::decode(material).map_err(|_| invalid())?;
+        if request.provider != expected_effect.provider
+            || request.resource != expected_effect.resource
+            || request.observation_capability.as_str()
+                != linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+            || request.desired_state.len() != 1
+            || request.desired_state.get("finalize_original").map(String::as_bytes)
+                != Some(expected_effect.canonical_payload.as_slice())
+            || principal.as_str()
+                != format!("unix:uid:{}", decoded.current_lock().epoch().uid())
+        {
+            return Err(invalid());
+        }
+        let key = Self::key(&request.request_id)?;
+        journal.integrity_check().map_err(|_| invalid())?;
+        let retained = journal.load(principal, &key).map_err(|_| invalid())?;
+        let bytes = retained.canonical();
+        if retained.principal() != principal
+            || retained.request_id() != &key
+            || bytes.is_empty()
+            || bytes.len() > MAX_BYTES
+        {
+            return Err(invalid());
+        }
+        let mut rem = bytes;
+        let mut fields = Vec::with_capacity(12);
+        for bound in [
+            DOMAIN.len(), 128, 256, 256, 128, 20, 128, 64, 128, 128, 20, 20,
+        ] {
+            fields.push(retained_field(&mut rem, bound)?);
+        }
+        if !rem.is_empty()
+            || fields[0] != DOMAIN
+            || fields[1] != principal.as_str()
+            || fields[2] != request.request_id.as_str()
+            || fields[3] != snapshot.transaction_id.as_str()
+            || fields[4] != crate::durable_authority::digest_request(request)?.as_str()
+            || retained_number(fields[5])? != snapshot.state_version
+            || fields[6] != snapshot.binding_digest.as_str()
+            || fields[7] != dispatch
+            || fields[8]
+                != digest_bytes(
+                    "linura.display.original-terminal-retirement-intent.v1",
+                    material.as_bytes(),
+                ).as_str()
+        {
+            return Err(invalid());
+        }
+        let observation = ContentDigest::new(fields[9]).map_err(|_| invalid())?;
+        if observation == ContentDigest::zero() {
+            return Err(invalid());
+        }
+        let observed_at = retained_number(fields[10])?;
+        let expires_at = retained_number(fields[11])?;
+        if expires_at <= observed_at || expires_at - observed_at > 2_000 {
+            return Err(invalid());
+        }
+        // An expired stored observation is historical provenance, not grounds
+        // to renew a lost grant or retrospectively claim native success.
+        Ok(Self {
+            canonical: bytes.to_vec(),
+            expiry: expires_at,
+            observation,
+        })
+    }
+
     pub(crate) fn require_absent(
         journal: &dyn ApprovedRequestJournal,
         principal: &PrincipalId,
@@ -257,7 +377,11 @@ mod tests {
         for number in ["", "0", "01", "1.0", "-1", "18446744073709551616"] {
             assert!(retained_number(number).is_err());
         }
-        for (text, value) in [("1", 1_u64), ("2000", 2000_u64), ("18446744073709551615", u64::MAX)] {
+        for (text, value) in [
+            ("1", 1_u64),
+            ("2000", 2000_u64),
+            ("18446744073709551615", u64::MAX),
+        ] {
             assert_eq!(retained_number(text).ok(), Some(value));
         }
         let mut overlong = frame.clone();
