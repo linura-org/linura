@@ -167,6 +167,15 @@ if(BUILD_TESTING)
         -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
     add_test(NAME hyprland-protected-frame-boundary COMMAND linura-hyprland-protected-frame-tests)
     set_tests_properties(hyprland-protected-frame-boundary PROPERTIES TIMEOUT 5)
+    # Comparison-only first-ordinary-frame barrier, with no release authority.
+    # Native callbacks and independent Root/Control/KMS proof remain required.
+    add_executable(linura-hyprland-first-frame-gate-tests tests/protected_release_proof.cpp)
+    target_link_libraries(linura-hyprland-first-frame-gate-tests PRIVATE linura-hyprland-display-mechanism)
+    target_compile_options(linura-hyprland-first-frame-gate-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-native-first-frame-release-barrier
+        COMMAND linura-hyprland-first-frame-gate-tests)
+    set_tests_properties(hyprland-native-first-frame-release-barrier PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-protected-retirement-tests tests/protected_input_retirement.cpp)
     target_link_libraries(linura-hyprland-protected-retirement-tests PRIVATE linura-hyprland-display-mechanism)
     target_compile_options(linura-hyprland-protected-retirement-tests PRIVATE
