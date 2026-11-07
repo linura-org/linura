@@ -31,8 +31,11 @@ fn invalid() -> ManagedLifecycleError {
 impl TerminalRetirementPrepared {
     pub(crate) fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
         let id = digest_bytes(KEY_DOMAIN, request.as_str().as_bytes());
-        RequestId::new(format!("request:v010:display-terminal-retirement:{}", id.hex()))
-            .map_err(|_| invalid())
+        RequestId::new(format!(
+            "request:v010:display-terminal-retirement:{}",
+            id.hex()
+        ))
+        .map_err(|_| invalid())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -54,7 +57,10 @@ impl TerminalRetirementPrepared {
             || snapshot.binding_digest == ContentDigest::zero()
             || !linura_provider_sdk::ComponentDigest::parse_hex(dispatch)
                 .is_ok_and(|parsed| parsed.to_hex() == dispatch)
-            || !request.request_id.as_str().starts_with("request:v010:display-finalization:")
+            || !request
+                .request_id
+                .as_str()
+                .starts_with("request:v010:display-finalization:")
             || observation.observed_at_unix_ms == 0
             || observation.valid_for_ms == 0
             || now < observation.observed_at_unix_ms
@@ -62,8 +68,7 @@ impl TerminalRetirementPrepared {
             return Err(invalid());
         }
         let finalization = DisplayFinalizationMaterial::decode(material).map_err(|_| invalid())?;
-        if principal.as_str()
-            != format!("unix:uid:{}", finalization.current_lock().epoch().uid())
+        if principal.as_str() != format!("unix:uid:{}", finalization.current_lock().epoch().uid())
             || request.provider.as_str() != linura_observation::DISPLAY_RECOVERY_PROVIDER
             || request.observation_capability.as_str()
                 != linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
@@ -203,7 +208,7 @@ mod tests {
     use linura_transaction::ContentDigest;
     use std::collections::BTreeMap;
 
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     struct Journal(BTreeMap<(PrincipalId, RequestId), RetainedRequest>);
     impl ApprovedRequestJournal for Journal {
         fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
@@ -243,18 +248,37 @@ mod tests {
             observation: ContentDigest::zero(),
         };
         let mut journal = Journal::default();
-        valid(TerminalRetirementPrepared::require_absent(&journal, &principal, &request));
+        valid(TerminalRetirementPrepared::require_absent(
+            &journal, &principal, &request,
+        ));
         valid(record.append(&mut journal, principal.clone(), &request));
         valid(record.require_readback(&journal, &principal, &request));
-        assert!(TerminalRetirementPrepared::require_absent(&journal, &principal, &request).is_err());
-        assert!(TerminalRetirementPrepared::require_absent(&journal, &valid(PrincipalId::new("unix:uid:999")), &request).is_ok());
+        assert!(
+            TerminalRetirementPrepared::require_absent(&journal, &principal, &request).is_err()
+        );
+        assert!(
+            TerminalRetirementPrepared::require_absent(
+                &journal,
+                &valid(PrincipalId::new("unix:uid:999")),
+                &request
+            )
+            .is_ok()
+        );
         let mut changed = TerminalRetirementPrepared {
             canonical: vec![1, 2, 3, 5],
             expiry: 200,
             observation: ContentDigest::zero(),
         };
-        assert!(changed.require_readback(&journal, &principal, &request).is_err());
-        assert!(changed.append(&mut journal, principal.clone(), &request).is_err());
+        assert!(
+            changed
+                .require_readback(&journal, &principal, &request)
+                .is_err()
+        );
+        assert!(
+            changed
+                .append(&mut journal, principal.clone(), &request)
+                .is_err()
+        );
         changed.canonical = vec![1, 2, 3, 4];
         valid(changed.require_readback(&journal, &principal, &request));
     }

@@ -851,7 +851,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         })
     }
 
-
     /// Journal a one-use Control retirement-preparation decision before asking
     /// Root to reserve its independent immutable preparation. This method
     /// NEVER commits terminal completion, retires original witnesses, or
@@ -931,7 +930,9 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        observation.require_current(now_ms()?).map_err(|_| invalid())?;
+        observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
         // The port receives a non-cloneable private correlation, not a renewed
         // permit. Reconciliation may inspect only the already-spent history.
         port.prepare_retirement(prepared).map_err(|_| {

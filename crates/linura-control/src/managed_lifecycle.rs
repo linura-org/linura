@@ -13,7 +13,8 @@ pub use display::{
     OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
     OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
-    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
+    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
     OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
 };
