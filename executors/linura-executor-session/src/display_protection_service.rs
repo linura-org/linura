@@ -13,8 +13,8 @@ use linura_linux_session::{
     MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
     NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation,
-    NativeDisplayRetirementPreparation, NativeDisplayStartupPeer,
-    NativeDisplayStartupRequest, NativeSessionChannel, NativeSessionRole,
+    NativeDisplayRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
+    NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -578,14 +578,16 @@ impl ProtectionPort for NativeProtection {
             super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
         NativeDisplayRecoveryCheckpoint::validate_restoration_source(&original, &restoration)
             .map_err(|_| unavailable())?;
-        terminal.validate_restoration(&restoration).map_err(|_| unavailable())?;
-        let (retained, durable) =
-            super::display_checkpoint::read_finalization_state(&restoration)
-                .map_err(|_| unavailable())?;
+        terminal
+            .validate_restoration(&restoration)
+            .map_err(|_| unavailable())?;
+        let (retained, durable) = super::display_checkpoint::read_finalization_state(&restoration)
+            .map_err(|_| unavailable())?;
         let current = retained.ok_or_else(unavailable)?;
         if !durable
             || current.canonical_bytes() != terminal.canonical_bytes()
-            || finalization_reservation_phase(&admission.finalizations, &scope, Some(&current))? != 2
+            || finalization_reservation_phase(&admission.finalizations, &scope, Some(&current))?
+                != 2
         {
             return Err(unavailable());
         }
@@ -594,11 +596,16 @@ impl ProtectionPort for NativeProtection {
         // these opaque Control digests as an independent proof of commit.
         self.admit_control(sender)?;
         self.original_for_scope(&admission, &scope)?;
-        let key = scope.resource_id().map_err(|_| unavailable())?.as_str().to_owned();
+        let key = scope
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
         if admission.retirements.len() >= MAX_STARTUPS || admission.retirements.contains_key(&key) {
             return Err(unavailable());
         }
-        let digest = ComponentDigest::from_bytes(sha2::Sha256::digest(record.canonical_bytes()).into());
+        let digest =
+            ComponentDigest::from_bytes(sha2::Sha256::digest(record.canonical_bytes()).into());
         admission.retirements.insert(key.clone(), digest);
         super::display_checkpoint::reserve_retirement_preparation(&record)
             .map_err(|_| unavailable())?;
@@ -616,8 +623,11 @@ impl ProtectionPort for NativeProtection {
             super::display_checkpoint::read_finalization_state(&restoration)
                 .map_err(|_| unavailable())?;
         if !still_durable
-            || after.as_ref().is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
-            || finalization_reservation_phase(&admission.finalizations, &scope, after.as_ref())? != 2
+            || after
+                .as_ref()
+                .is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
+            || finalization_reservation_phase(&admission.finalizations, &scope, after.as_ref())?
+                != 2
         {
             return Err(unavailable());
         }
@@ -1149,8 +1159,8 @@ impl<P: ProtectionPort> ProtectionService<P> {
         if preparation.len() > linura_linux_session::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION {
             return Err(unavailable());
         }
-        let record = NativeDisplayRetirementPreparation::decode(preparation)
-            .map_err(|_| unavailable())?;
+        let record =
+            NativeDisplayRetirementPreparation::decode(preparation).map_err(|_| unavailable())?;
         let slot = StartupSlot::enter(&self.restoration_pending)?;
         let service = self.clone();
         blocking::unblock(move || {

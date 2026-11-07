@@ -1,10 +1,8 @@
 //! Exact one-use Root retirement-preparation comparison material. These bytes
 //! are NOT a release credential, signed authority, native acknowledgement or
 //! substitute for Control's durable committed history or live Root witnesses.
+use crate::{MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, NativeDisplayFinalizationReservation};
 use linura_provider_sdk::ComponentDigest;
-use crate::{
-    MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, NativeDisplayFinalizationReservation,
-};
 
 const DOMAIN: &[u8] = b"linura.native-display.retirement-preparation.v1";
 pub const MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION: usize =
@@ -21,7 +19,10 @@ impl std::fmt::Debug for NativeDisplayRetirementPreparation {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("NativeDisplayRetirementPreparation")
-            .field("terminal_transaction", &self.terminal.binding().transaction_id)
+            .field(
+                "terminal_transaction",
+                &self.terminal.binding().transaction_id,
+            )
             .field("control_state_version", &self.control_state_version)
             .finish_non_exhaustive()
     }
@@ -159,10 +160,9 @@ mod tests {
     }
 
     fn preparation() -> NativeDisplayRetirementPreparation {
-        let restored = include_str!(
-            "../../linura-core/src/display_recovery/fixtures/original-baseline.txt"
-        )
-        .trim_end();
+        let restored =
+            include_str!("../../linura-core/src/display_recovery/fixtures/original-baseline.txt")
+                .trim_end();
         let restoration = valid(DisplayRestorationMaterial::decode(restored));
         let material = valid(DisplayFinalizationMaterial::encode(
             &valid(RequestId::new("request:retirement-comparison")),
@@ -182,7 +182,9 @@ mod tests {
             ComponentDigest::from_bytes([2; 32]),
             &effect,
         ));
-        let terminal = valid(NativeDisplayFinalizationReservation::new(&material, &binding));
+        let terminal = valid(NativeDisplayFinalizationReservation::new(
+            &material, &binding,
+        ));
         valid(NativeDisplayRetirementPreparation::new(
             &terminal,
             7,
@@ -198,9 +200,18 @@ mod tests {
         let decoded = valid(NativeDisplayRetirementPreparation::decode(&bytes));
         assert_eq!(decoded.canonical_bytes(), bytes);
         assert_eq!(decoded.control_state_version(), 7);
-        assert_eq!(decoded.control_binding(), &ComponentDigest::from_bytes([3; 32]));
-        assert_eq!(decoded.control_observation(), &ComponentDigest::from_bytes([4; 32]));
-        assert_eq!(decoded.terminal().canonical_bytes(), record.terminal().canonical_bytes());
+        assert_eq!(
+            decoded.control_binding(),
+            &ComponentDigest::from_bytes([3; 32])
+        );
+        assert_eq!(
+            decoded.control_observation(),
+            &ComponentDigest::from_bytes([4; 32])
+        );
+        assert_eq!(
+            decoded.terminal().canonical_bytes(),
+            record.terminal().canonical_bytes()
+        );
         assert!(NativeDisplayFinalizationReservation::decode(&bytes).is_err());
         for at in 0..bytes.len() {
             assert!(NativeDisplayRetirementPreparation::decode(&bytes[..at]).is_err());
@@ -211,24 +222,44 @@ mod tests {
         let mut overflow = bytes.clone();
         overflow[..8].copy_from_slice(&u64::MAX.to_be_bytes());
         assert!(NativeDisplayRetirementPreparation::decode(&overflow).is_err());
-        assert!(NativeDisplayRetirementPreparation::decode(&vec![
-            0u8;
-            MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION + 1
-        ])
-        .is_err());
+        assert!(
+            NativeDisplayRetirementPreparation::decode(&vec![
+                0u8;
+                MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION
+                    + 1
+            ])
+            .is_err()
+        );
     }
 
     #[test]
     fn changed_anchor_or_trailing_material_refuses_without_release() {
         let record = preparation();
         for (version, binding, observation) in [
-            (0, ComponentDigest::from_bytes([3; 32]), ComponentDigest::from_bytes([4; 32])),
-            (7, ComponentDigest::from_bytes([0; 32]), ComponentDigest::from_bytes([4; 32])),
-            (7, ComponentDigest::from_bytes([3; 32]), ComponentDigest::from_bytes([0; 32])),
+            (
+                0,
+                ComponentDigest::from_bytes([3; 32]),
+                ComponentDigest::from_bytes([4; 32]),
+            ),
+            (
+                7,
+                ComponentDigest::from_bytes([0; 32]),
+                ComponentDigest::from_bytes([4; 32]),
+            ),
+            (
+                7,
+                ComponentDigest::from_bytes([3; 32]),
+                ComponentDigest::from_bytes([0; 32]),
+            ),
         ] {
             assert!(
-                NativeDisplayRetirementPreparation::new(record.terminal(), version, binding, observation)
-                    .is_err()
+                NativeDisplayRetirementPreparation::new(
+                    record.terminal(),
+                    version,
+                    binding,
+                    observation
+                )
+                .is_err()
             );
         }
         let bytes = record.canonical_bytes();

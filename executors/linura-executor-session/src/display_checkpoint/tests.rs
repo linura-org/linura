@@ -885,11 +885,8 @@ fn corrupt_or_orphan_root_retirement_preparation_quarantines_every_scope() {
             0 => std::fs::remove_file(parent_path).unwrap_or_else(|e| unreachable!("{e}")),
             1 => std::fs::write(checkpoint, b"torn preparation")
                 .unwrap_or_else(|e| unreachable!("{e}")),
-            _ => std::fs::set_permissions(
-                checkpoint,
-                std::fs::Permissions::from_mode(0o644),
-            )
-            .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::set_permissions(checkpoint, std::fs::Permissions::from_mode(0o644))
+                .unwrap_or_else(|e| unreachable!("{e}")),
         }
         assert!(read_retirement_preparation_at(&fixture.fd, fixture.uid, &other).is_err());
         assert!(read_finalization_state_at(&fixture.fd, fixture.uid, &other).is_err());

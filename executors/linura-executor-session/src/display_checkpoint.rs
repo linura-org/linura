@@ -63,12 +63,10 @@ impl Kind {
                     .binding()
                     .dispatch_digest)
             }
-            Self::RetirementPreparation => Ok(
-                NativeDisplayRetirementPreparation::decode(payload)?
-                    .terminal()
-                    .binding()
-                    .dispatch_digest,
-            ),
+            Self::RetirementPreparation => Ok(NativeDisplayRetirementPreparation::decode(payload)?
+                .terminal()
+                .binding()
+                .dispatch_digest),
         }
     }
     fn name(self, dispatch: &ComponentDigest) -> String {
