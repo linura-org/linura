@@ -201,11 +201,15 @@ struct TerminalInspectionContext {
     receipt: OriginalDisplayFinalizationReceipt,
 }
 impl TerminalInspectionContext {
-    fn matches(&self, state: &DisplayOriginalFinalizationFacts) -> bool {
+    fn matches(
+        &self,
+        state: &DisplayOriginalFinalizationFacts,
+        expected: DisplayFinalizationPhase,
+    ) -> bool {
         let Some(terminal) = state.terminal() else {
             return false;
         };
-        state.phase() == DisplayFinalizationPhase::Quiesced
+        state.phase() == expected
             && terminal.material() == self.intent.material()
             && terminal.transaction() == self.snapshot.transaction_id.as_str()
             && effect_from_request(&self.request)
@@ -826,6 +830,38 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         actor: Actor,
         terminal_request: &RequestId,
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_terminal_phase(
+            principal, actor, terminal_request, DisplayFinalizationPhase::Quiesced,
+        )
+    }
+
+    /// A read-only post-Root-retirement inspection. It does not infer native
+    /// first-frame continuity from the Root marker and it cannot release any
+    /// retained input, power, startup or compositor protection.
+    pub fn inspect_root_retired_held_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_terminal_phase(
+            principal, actor, terminal_request, DisplayFinalizationPhase::Retired,
+        )
+    }
+
+    fn inspect_terminal_phase(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        if !matches!(
+            expected,
+            DisplayFinalizationPhase::Quiesced | DisplayFinalizationPhase::Retired
+        ) {
+            return Err(invalid());
+        }
         let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
         let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
             .map_err(|_| invalid())?;
@@ -843,7 +879,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             actor,
             &restoration_request,
             history,
-            Some(&terminal),
+            Some((&terminal, expected)),
         )?;
         Ok(OriginalDisplayQuiescenceInspection {
             restoration,
@@ -948,7 +984,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         // Re-check Root and all independent current sources after the native
         // mechanism, even though this operation has no release side effect.
-        let after = self.inspect_quiesced_original_display_finalization(
+        let after = self.inspect_root_retired_held_original_display_finalization(
             principal,
             actor,
             terminal_request,
@@ -1009,7 +1045,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         actor: Actor,
         restoration_request: &RequestId,
         history: LinkedHistory,
-        terminal: Option<&TerminalInspectionContext>,
+        terminal: Option<(&TerminalInspectionContext, DisplayFinalizationPhase)>,
     ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
         let text = &history.restoration.desired_state["restore_original"];
         let restoration = DisplayRestorationMaterial::decode(text).map_err(|_| invalid())?;
@@ -1029,7 +1065,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .map_err(|_| invalid())?;
         if !terminal.map_or_else(
             || state.phase() == DisplayFinalizationPhase::Protected && state.terminal().is_none(),
-            |terminal| terminal.matches(&state),
+            |(terminal, phase)| terminal.matches(&state, phase),
         ) || state.checkpoint() != restoration.original_checkpoint()
             || state.restoration_transaction()
                 != history.restoration_snapshot.transaction_id.as_str()
@@ -1078,7 +1114,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             text,
         )
         .map_err(|_| invalid())?;
-        if let Some(terminal) = terminal {
+        if let Some((terminal, phase)) = terminal {
             if material != terminal.intent.material()
                 || self.terminal_inspection_context(&principal, &terminal.request.request_id)?
                     != *terminal
@@ -1095,7 +1131,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             let current =
                 DisplayOriginalFinalizationFacts::from_envelope(&after, &scope, now_ms()?)
                     .map_err(|_| invalid())?;
-            if current != state || !terminal.matches(&current) {
+            if current != state || !terminal.matches(&current, phase) {
                 return Err(invalid());
             }
             crate::plan_preview::restrict_session_validity(&mut mechanism, &after, now_ms()?)
@@ -1106,7 +1142,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if self.finalization_history(&principal, restoration_request)? != history {
             return Err(invalid());
         }
-        if let Some(terminal) = terminal
+        if let Some((terminal, _)) = terminal
             && self.terminal_inspection_context(&principal, &terminal.request.request_id)?
                 != *terminal
         {

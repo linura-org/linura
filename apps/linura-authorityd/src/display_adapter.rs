@@ -45,6 +45,24 @@ impl linura_control::OriginalDisplayFinalizationPort for SessionExecutorClient {
     }
 }
 
+impl linura_control::OriginalDisplayRetirementPreparationPort for SessionExecutorClient {
+    fn prepare_retirement(
+        &mut self,
+        preparation: linura_control::AuthorizedOriginalDisplayRetirementPreparation,
+    ) -> Result<(), String> {
+        let terminal = preparation.terminal();
+        self.channel.prepare_root_retired_held(
+            preparation.material(),
+            terminal.transaction_id.as_str(),
+            preparation.dispatch_digest(),
+            terminal.state_version,
+            terminal.binding_digest.as_str(),
+            preparation.observation_digest().as_str(),
+            preparation.expires_at_unix_ms(),
+        )
+    }
+}
+
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(
         &mut self,

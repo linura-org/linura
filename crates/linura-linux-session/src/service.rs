@@ -345,6 +345,122 @@ impl NativeSessionChannel {
         )
     }
 
+    /// A Control-only, exact-original Root handoff. Its caller must already
+    /// have durably retained its one-use terminal retirement preparation and
+    /// independently revalidated terminal quiescence. This adapter derives
+    /// native binding bytes from Root's OWN retained file, not reconstructed
+    /// approval or client-selected execution material. Neither RPC releases
+    /// native/S17/input/power fences.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_root_retired_held(
+        &self,
+        material: &str,
+        terminal_transaction: &str,
+        terminal_dispatch: &str,
+        control_state_version: u64,
+        control_binding: &str,
+        control_observation: &str,
+        expires_at_unix_ms: u64,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let now = crate::owner::unix_ms()?;
+        if now == 0 || now >= expires_at_unix_ms
+            || expires_at_unix_ms - now > 2_000
+        {
+            return Err("Root retirement Control evidence is expired or malformed".into());
+        }
+        let original = linura_core::DisplayFinalizationMaterial::decode(material)
+            .map_err(|_| "Root retirement terminal material is invalid")?;
+        let scope = original.recovery_scope().map_err(|e| e.to_string())?;
+        let key = scope.resource_id().map_err(|e| e.to_string())?;
+        let binding = ComponentDigest::parse_hex(control_binding).map_err(|e| e.to_string())?;
+        let observation =
+            ComponentDigest::parse_hex(control_observation).map_err(|e| e.to_string())?;
+        if binding.to_hex() != control_binding || observation.to_hex() != control_observation {
+            return Err("Root retirement Control anchor is not canonical".into());
+        }
+        let started = Instant::now();
+        let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let read = |expected: u32| {
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                "ReadFinalization",
+                &(key.as_str(),),
+                started,
+            )?;
+            if reply.header().sender()
+                    .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "ayuay"
+            {
+                return Err("Root retirement readback has another peer or format".into());
+            }
+            let (restoration, phase, terminal): (Vec<u8>, u32, Vec<u8>) = reply
+                .body()
+                .deserialize()
+                .map_err(|_| "Root retirement readback is malformed")?;
+            let retained = crate::NativeDisplayRestorationReservation::decode(&restoration)?;
+            let finalization = crate::NativeDisplayFinalizationReservation::decode(&terminal)?;
+            finalization.validate_restoration(&retained)?;
+            if phase != expected
+                || finalization.material() != material
+                || finalization.binding().transaction_id != terminal_transaction
+                || finalization.binding().dispatch_digest.to_hex() != terminal_dispatch
+                || retained.decoded_material()?.recovery_scope()
+                    .map_err(|e| e.to_string())? != scope
+            {
+                return Err("Root retirement held-native original lineage differs".into());
+            }
+            Ok((restoration, terminal, finalization))
+        };
+        let (initial_restoration, initial_terminal, terminal) = read(2)?;
+        let preparation = crate::NativeDisplayRetirementPreparation::new(
+            &terminal,
+            control_state_version,
+            binding,
+            observation,
+        )?;
+        let bytes = preparation.canonical_bytes();
+        let admit = |method| {
+            if crate::owner::unix_ms()? >= expires_at_unix_ms {
+                return Err("Root retirement original Control evidence expired".into());
+            }
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                method,
+                &(bytes.as_slice(),),
+                started,
+            )?;
+            if reply.header().sender()
+                    .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "b"
+            {
+                return Err("Root retirement writer peer or reply differs; no retry".into());
+            }
+            let (accepted,): (bool,) = reply.body().deserialize()
+                .map_err(|_| "Root retirement writer reply malformed; no retry")?;
+            if !accepted || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root {
+                return Err("Root retirement live original service changed; no retry".into());
+            }
+            Ok(())
+        };
+        // Neither action can be retried after a failed or lost ACK. A failed
+        // second step permanently leaves a reserved, fenced preparation.
+        admit("PrepareRetirement")?;
+        admit("RetireHeld")?;
+        let (restoration, terminal, _) = read(3)?;
+        if restoration != initial_restoration || terminal != initial_terminal
+            || crate::owner::unix_ms()? >= expires_at_unix_ms
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+        {
+            return Err("Root retirement post-publication lineage or freshness changed".into());
+        }
+        Ok(()) // Durable RootRetiredHeld only. No physical release.
+    }
+
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
         self.display_protection_call("Verify", &(dispatch.to_hex(),))
     }
