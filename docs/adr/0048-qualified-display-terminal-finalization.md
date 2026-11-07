@@ -210,7 +210,15 @@ durably spends an exact one-use terminal-retirement preparation. Under the
 existing Root admission lock, Root syncs the matching `LNRP:1` preparation
 and `LNRH:1` RootRetiredHeld checkpoint while retaining the live original
 witness, native scene, S17/input and power protection and ordinary startup
-exclusion. A separate pinned-native `NativeFirstFrameGate` is currently a
+exclusion. Root also has an **unpromoted**, one-use `LNRV:1` native-release
+reservation, with matching live Control/Root ownership, durable ancestry,
+quiescence and readback under the existing admission lock. The supervised
+Control-to-Root transport can reserve it once after a separate committed
+Control release decision exists; **no Control completion, native release
+grant/consumer, or physical-release effect is connected yet**. Losing a
+reservation acknowledgement cannot authorize a second reservation. Neither
+`LNRV:1` nor `LNRH:1` means `NativeReleaseSpent` or `ReleasedCurrent`.
+A separate pinned-native `NativeFirstFrameGate` is currently a
 comparison-only state machine: it enforces one spent attempt, absolute
 freshness, exact topology/source continuity and fresh hardware-completed
 ordinary frames or per-output disable commits. Its receipts do not prove an

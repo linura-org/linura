@@ -231,6 +231,7 @@ fn native_failure_label(category: &str, method: &str) -> String {
         "VerifyReleased" => "release-verification",
         "RetainedVerifiedRelease" => "retained-release",
         "CommitVerifiedRelease" => "release-commit",
+        "ReserveNativeRelease" => "display-release-reserve",
         "DispatchPreparedLock" => "lock-dispatch",
         _ => "mechanism",
     };

@@ -478,6 +478,101 @@ impl NativeSessionChannel {
         Ok(()) // Durable RootRetiredHeld only. No physical release.
     }
 
+    /// An authenticated Control-only, original-Root release reservation.
+    /// The caller must already own a separate durable Control release
+    /// decision. This call is NOT native consumption or a physical-release
+    /// credential. A lost Root acknowledgement is never retried.
+    pub fn reserve_root_native_release(
+        &self,
+        record: &crate::NativeDisplayRetirementPreparation,
+        expires_at_unix_ms: u64,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let now = crate::owner::unix_ms()?;
+        if now == 0 || now >= expires_at_unix_ms || expires_at_unix_ms - now > 2_000 {
+            return Err("native release reservation Control evidence expired".into());
+        }
+        let terminal = record.terminal();
+        let scope = terminal
+            .decoded_material()?
+            .recovery_scope()
+            .map_err(|error| error.to_string())?;
+        let key = scope.resource_id().map_err(|error| error.to_string())?;
+        let bytes = record.canonical_bytes();
+        let started = Instant::now();
+        let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let read = || -> Result<(Vec<u8>, Vec<u8>), String> {
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                "ReadFinalization",
+                &(key.as_str(),),
+                started,
+            )?;
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "ayuay"
+            {
+                return Err("native release Root readback peer or format changed".into());
+            }
+            let (restoration, phase, native): (Vec<u8>, u32, Vec<u8>) = reply
+                .body()
+                .deserialize()
+                .map_err(|_| "native release Root readback is malformed")?;
+            let parent = crate::NativeDisplayRestorationReservation::decode(&restoration)?;
+            terminal.validate_restoration(&parent)?;
+            if phase != 3
+                || native != terminal.canonical_bytes()
+                || parent
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|error| error.to_string())?
+                    != scope
+            {
+                return Err("native release lacks exact live RootRetiredHeld parent".into());
+            }
+            Ok((restoration, native))
+        };
+        let before = read()?;
+        if crate::owner::unix_ms()? >= expires_at_unix_ms {
+            return Err("native release Root reservation expired before effect".into());
+        }
+        // Root has already checked all of its live, durable and original-peer
+        // evidence. The independent adapter verifies exact immutable parent
+        // bytes and peer identity on both sides of this non-effectful handoff.
+        let reply = self.call(
+            &root.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReserveNativeRelease",
+            &(bytes.as_slice(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != root.sender)
+            || reply.body().signature().to_string() != "b"
+        {
+            return Err("native release reservation reply peer or format differs; no retry".into());
+        }
+        let (accepted,): (bool,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "native release reservation reply is malformed; no retry")?;
+        if !accepted
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            || read()? != before
+            || crate::owner::unix_ms()? >= expires_at_unix_ms
+        {
+            return Err("native release reservation lost its immutable Root lineage".into());
+        }
+        Ok(()) // No native grant, compositor release or startup admission.
+    }
+
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
         self.display_protection_call("Verify", &(dispatch.to_hex(),))
     }
