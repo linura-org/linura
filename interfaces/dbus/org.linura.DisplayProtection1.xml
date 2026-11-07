@@ -41,6 +41,14 @@
       <arg name="sampled_boot_ms" type="t" direction="in"/>
       <arg name="grant" type="h" direction="out"/>
     </method>
+    <method name="PrepareRetirement">
+      <!-- Supervised Control only; retains a synced, immutable preparation
+           anchored to the actual live Root quiescence and terminal records.
+           Caller-supplied Control digests are comparison data, not proof
+           of release. No input, S17, power or ordinary-admission release. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.
            Tuple: original lock/login, native PID, seat, compositor invocation,

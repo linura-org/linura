@@ -18,6 +18,10 @@ mod display_finalization_reservation;
 pub use display_finalization_reservation::{
     MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, NativeDisplayFinalizationReservation,
 };
+mod display_retirement_preparation;
+pub use display_retirement_preparation::{
+    MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION, NativeDisplayRetirementPreparation,
+};
 mod original_display_observer;
 pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;

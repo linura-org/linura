@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use linura_linux_session::{
     MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation, NativeDisplayStartupPeer,
+    NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayStartupPeer,
     NativeDisplayStartupRequest, NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
@@ -101,6 +102,9 @@ struct Admission {
     // Reserve before publication and retain even after failed sync/readback or
     // missing files. Neither disk loss nor restart reconstructs this lifetime.
     finalizations: BTreeMap<String, FinalizationReservation>,
+    // Reserve in memory before any synced preparation write; even disk errors
+    // cannot make this original live Control attempt look unused.
+    retirements: BTreeMap<String, ComponentDigest>,
 }
 
 struct FinalizationReservation {
@@ -283,6 +287,11 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
     ) -> zbus::fdo::Result<OwnedFd>;
+    fn prepare_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayRetirementPreparation,
+    ) -> zbus::fdo::Result<bool>;
     fn read_original(
         &self,
         sender: &str,
@@ -546,6 +555,74 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn prepare_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayRetirementPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        // This is retirement PREPARATION only: no native releases, no witness
+        // invalidation and no change to ordinary startup admission.
+        let _transfer = StartupSlot::enter(&self.transfer_pending)?;
+        self.admit_control(sender)?;
+        let terminal = record.terminal();
+        let scope = terminal
+            .decoded_material()
+            .map_err(|_| unavailable())?
+            .recovery_scope()
+            .map_err(|_| unavailable())?;
+        let mut admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
+        let original = self.original_for_scope(&admission, &scope)?;
+        let restoration =
+            super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
+        NativeDisplayRecoveryCheckpoint::validate_restoration_source(&original, &restoration)
+            .map_err(|_| unavailable())?;
+        terminal.validate_restoration(&restoration).map_err(|_| unavailable())?;
+        let (retained, durable) =
+            super::display_checkpoint::read_finalization_state(&restoration)
+                .map_err(|_| unavailable())?;
+        let current = retained.ok_or_else(unavailable)?;
+        if !durable
+            || current.canonical_bytes() != terminal.canonical_bytes()
+            || finalization_reservation_phase(&admission.finalizations, &scope, Some(&current))? != 2
+        {
+            return Err(unavailable());
+        }
+        // Only the continuously supervised Control sender may publish a
+        // correlation with its durable authority state. Root cannot treat
+        // these opaque Control digests as an independent proof of commit.
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        let key = scope.resource_id().map_err(|_| unavailable())?.as_str().to_owned();
+        if admission.retirements.len() >= MAX_STARTUPS || admission.retirements.contains_key(&key) {
+            return Err(unavailable());
+        }
+        let digest = ComponentDigest::from_bytes(sha2::Sha256::digest(record.canonical_bytes()).into());
+        admission.retirements.insert(key.clone(), digest);
+        super::display_checkpoint::reserve_retirement_preparation(&record)
+            .map_err(|_| unavailable())?;
+        let readback = super::display_checkpoint::read_retirement_preparation(&restoration)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+        if readback.canonical_bytes() != record.canonical_bytes()
+            || admission.retirements.get(&key) != Some(&digest)
+        {
+            return Err(unavailable());
+        }
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        let (after, still_durable) =
+            super::display_checkpoint::read_finalization_state(&restoration)
+                .map_err(|_| unavailable())?;
+        if !still_durable
+            || after.as_ref().is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
+            || finalization_reservation_phase(&admission.finalizations, &scope, after.as_ref())? != 2
+        {
+            return Err(unavailable());
+        }
+        Ok(true) // Durable preparation only; never an effect ACK.
+    }
     fn reserve_finalization(
         &self,
         sender: &str,
@@ -914,7 +991,7 @@ impl ProtectionPort for NativeProtection {
         let ordinary = ordinary_startup(
             &admission.pending,
             || {
-                if admission.finalizations.is_empty() {
+                if admission.finalizations.is_empty() && admission.retirements.is_empty() {
                     self.witnesses.clear_for_startup()
                 } else {
                     Ok(false)
@@ -1059,6 +1136,26 @@ impl<P: ProtectionPort> ProtectionService<P> {
                 dispatch_deadline_unix_ms,
                 sampled_boot_ms,
             )
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
+    async fn prepare_retirement(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        if preparation.len() > linura_linux_session::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION {
+            return Err(unavailable());
+        }
+        let record = NativeDisplayRetirementPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.prepare_retirement(&sender, record)
         })
         .await
     }
@@ -1212,6 +1309,13 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn prepare_retirement(
+            &self,
+            _: &str,
+            _: NativeDisplayRetirementPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
         fn reserve_finalization(
             &self,
             _: &str,
@@ -1271,7 +1375,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 8);
+            assert_eq!(text.matches("<method ").count(), 9);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -1284,6 +1388,7 @@ mod tests {
                 "name=\"phase\" type=\"u\" direction=\"out\"",
                 "name=\"terminal\" type=\"ay\" direction=\"out\"",
                 "name=\"reservation\" type=\"ay\" direction=\"in\"",
+                "name=\"preparation\" type=\"ay\" direction=\"in\"",
                 "name=\"dispatch_deadline_unix_ms\" type=\"t\" direction=\"in\"",
                 "name=\"grant\" type=\"h\" direction=\"out\"",
                 "name=\"accepted\" type=\"b\" direction=\"out\"",
@@ -1302,6 +1407,7 @@ mod tests {
             "ReadFinalization",
             "ReserveRestoration",
             "ReserveFinalization",
+            "PrepareRetirement",
         ] {
             assert!(xml.contains(&format!("name=\"{method}\"")));
         }

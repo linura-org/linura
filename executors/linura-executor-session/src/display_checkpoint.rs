@@ -9,7 +9,7 @@ use std::path::Component;
 
 use linura_linux_session::{
     NativeDisplayFinalizationReservation, NativeDisplayRecoveryCheckpoint,
-    NativeDisplayRestorationReservation,
+    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
@@ -20,6 +20,7 @@ const MAGIC: &[u8] = b"LNRJ:1\n";
 const RESTORATION_MAGIC: &[u8] = b"LNRR:1\n";
 const FINALIZATION_MAGIC: &[u8] = b"LNRT:1\n";
 const QUIESCENCE_MAGIC: &[u8] = b"LNRQ:1\n";
+const RETIREMENT_PREPARATION_MAGIC: &[u8] = b"LNRP:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
@@ -30,6 +31,7 @@ enum Kind {
     Restoration,
     Finalization,
     Quiescence,
+    RetirementPreparation,
 }
 impl Kind {
     fn prefix(self) -> &'static str {
@@ -38,6 +40,7 @@ impl Kind {
             Self::Restoration => "restoration-",
             Self::Finalization => "finalization-",
             Self::Quiescence => "quiescence-",
+            Self::RetirementPreparation => "retirement-",
         }
     }
     fn magic(self) -> &'static [u8] {
@@ -46,6 +49,7 @@ impl Kind {
             Self::Restoration => RESTORATION_MAGIC,
             Self::Finalization => FINALIZATION_MAGIC,
             Self::Quiescence => QUIESCENCE_MAGIC,
+            Self::RetirementPreparation => RETIREMENT_PREPARATION_MAGIC,
         }
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
@@ -59,6 +63,12 @@ impl Kind {
                     .binding()
                     .dispatch_digest)
             }
+            Self::RetirementPreparation => Ok(
+                NativeDisplayRetirementPreparation::decode(payload)?
+                    .terminal()
+                    .binding()
+                    .dispatch_digest,
+            ),
         }
     }
     fn name(self, dispatch: &ComponentDigest) -> String {
@@ -75,6 +85,7 @@ struct TerminalLineage {
     restorations: BTreeMap<String, NativeDisplayRestorationReservation>,
     terminals: BTreeMap<String, NativeDisplayFinalizationReservation>,
     quiescences: BTreeMap<String, NativeDisplayFinalizationReservation>,
+    preparations: BTreeMap<String, NativeDisplayRetirementPreparation>,
 }
 
 impl TerminalLineage {
@@ -92,6 +103,22 @@ impl TerminalLineage {
                     .as_str()
                     .to_owned();
                 if self.restorations.insert(scope, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::RetirementPreparation => {
+                let record = NativeDisplayRetirementPreparation::decode(bytes)?;
+                let scope = record
+                    .terminal()
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|_| unavailable())?
+                    .resource_id()
+                    .map_err(|_| unavailable())?
+                    .as_str()
+                    .to_owned();
+                if self.preparations.insert(scope, record).is_some() {
                     return Err(unavailable());
                 }
                 Ok(())
@@ -134,6 +161,15 @@ impl TerminalLineage {
                 return Err(unavailable());
             }
         }
+        for (scope, record) in &self.preparations {
+            let terminal = self.terminals.get(scope).ok_or_else(unavailable)?;
+            let quiesced = self.quiescences.get(scope).ok_or_else(unavailable)?;
+            if record.terminal().canonical_bytes() != terminal.canonical_bytes()
+                || record.terminal().canonical_bytes() != quiesced.canonical_bytes()
+            {
+                return Err(unavailable());
+            }
+        }
         Ok(())
     }
 }
@@ -144,6 +180,7 @@ fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
         Kind::Restoration,
         Kind::Finalization,
         Kind::Quiescence,
+        Kind::RetirementPreparation,
     ] {
         let prefix = kind.prefix().as_bytes();
         if name.len() == prefix.len() + 64 + 11
@@ -336,13 +373,23 @@ fn reserve_kind_at(
     // publication across threads/processes. It stays held through both fsyncs.
     fs::flock(fd, FlockOperation::NonBlockingLockExclusive).map_err(|_| unavailable())?;
     let result = (|| {
+        let retirement = if kind == Kind::RetirementPreparation {
+            Some(NativeDisplayRetirementPreparation::decode(payload)?)
+        } else {
+            None
+        };
         let terminal = if matches!(kind, Kind::Finalization | Kind::Quiescence) {
             Some(NativeDisplayFinalizationReservation::decode(payload)?)
+        } else if let Some(preparation) = &retirement {
+            Some(NativeDisplayFinalizationReservation::decode(
+                &preparation.terminal().canonical_bytes(),
+            )?)
         } else {
             None
         };
         let mut parent_seen = false;
         let mut terminal_seen = false;
+        let mut quiescence_seen = false;
         let mut lineage = TerminalLineage::default();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
@@ -385,7 +432,9 @@ fn reserve_kind_at(
                     let old = old.decoded_material()?;
                     let new_scope = material.restoration().replacement().topology();
                     let old_scope = old.restoration().replacement().topology();
-                    if kind == Kind::Quiescence && previous == payload {
+                    if matches!(kind, Kind::Quiescence | Kind::RetirementPreparation)
+                        && previous == terminal.canonical_bytes()
+                    {
                         if terminal_seen {
                             return Err(unavailable());
                         }
@@ -398,6 +447,15 @@ fn reserve_kind_at(
                         return Err(unavailable()); // Explicit qualified supersession only.
                     }
                 }
+            }
+            if kind == Kind::RetirementPreparation
+                && old_kind == Kind::Quiescence
+                && previous == terminal.as_ref().ok_or_else(unavailable)?.canonical_bytes()
+            {
+                if quiescence_seen {
+                    return Err(unavailable());
+                }
+                quiescence_seen = true;
             }
             if kind == Kind::Finalization && old_kind == Kind::Quiescence {
                 let old = NativeDisplayFinalizationReservation::decode(&previous)?;
@@ -436,7 +494,11 @@ fn reserve_kind_at(
             }
         }
         lineage.verify()?;
-        if terminal.is_some() && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen)) {
+        if terminal.is_some()
+            && (!parent_seen
+                || matches!(kind, Kind::Quiescence | Kind::RetirementPreparation) && !terminal_seen
+                || kind == Kind::RetirementPreparation && !quiescence_seen)
+        {
             return Err(unavailable());
         }
         let name = kind.name(dispatch);
@@ -513,6 +575,76 @@ pub(super) fn reserve_quiescence(
         &record.canonical_bytes(),
         Kind::Quiescence,
     )
+}
+
+/// Root-only durable preparation. It binds the exact immutable LNRT/LNRQ
+/// parents and records the Control correlation before any physical retirement.
+/// This never releases a witness, inhibitor, input fence or startup admission.
+pub(super) fn reserve_retirement_preparation(
+    record: &NativeDisplayRetirementPreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.terminal().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::RetirementPreparation,
+    )
+}
+
+fn read_retirement_preparation_at(
+    fd: &OwnedFd,
+    uid: u32,
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayRetirementPreparation>, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let scope = retained
+            .decoded_material()?
+            .recovery_scope()
+            .map_err(|_| unavailable())?
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        if lineage
+            .restorations
+            .get(&scope)
+            .is_none_or(|record| record.canonical_bytes() != retained.canonical_bytes())
+        {
+            return Err(unavailable());
+        }
+        Ok(lineage.preparations.remove(&scope))
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        _ => Err(unavailable()),
+    }
+}
+
+/// Read-only byte-for-byte readback of the one original Root preparation.
+/// Control must still prove current owner, authority and physical state.
+pub(super) fn read_retirement_preparation(
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayRetirementPreparation>, String> {
+    read_retirement_preparation_at(&open()?, 0, retained)
 }
 
 fn read_finalization_at(

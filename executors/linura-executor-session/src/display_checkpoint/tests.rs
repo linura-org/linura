@@ -783,6 +783,122 @@ fn quiescence_is_write_once_and_requires_exact_terminal_and_restoration_parents(
 }
 
 #[test]
+fn root_retirement_preparation_is_parent_bound_synced_and_write_once() {
+    let fixture = Fixture::new();
+    let (parent, terminal) = terminal(1, 2, 3, "seat0");
+    let preparation = NativeDisplayRetirementPreparation::new(
+        &terminal,
+        7,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([4; 32]),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let write = |record: &NativeDisplayRetirementPreparation| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &record.terminal().binding().dispatch_digest,
+            &record.canonical_bytes(),
+            Kind::RetirementPreparation,
+        )
+    };
+    assert!(write(&preparation).is_err());
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve_terminal(&fixture, &terminal).is_ok());
+    assert!(write(&preparation).is_err()); // Not before the durable native LNRQ marker.
+    assert!(
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &terminal.binding().dispatch_digest,
+            &terminal.canonical_bytes(),
+            Kind::Quiescence,
+        )
+        .is_ok()
+    );
+    assert!(write(&preparation).is_ok());
+    let observed = read_retirement_preparation_at(&fixture.fd, fixture.uid, &parent)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("retirement preparation missing after synced publication"));
+    assert_eq!(observed.canonical_bytes(), preparation.canonical_bytes());
+    assert!(write(&preparation).is_err()); // Never redeliver after a lost ACK.
+    let substituted = NativeDisplayRetirementPreparation::new(
+        &terminal,
+        8,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([5; 32]),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(write(&substituted).is_err());
+    let record = fixture
+        .path
+        .join(Kind::RetirementPreparation.name(&terminal.binding().dispatch_digest));
+    let bytes = std::fs::read(&record).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(bytes.starts_with(RETIREMENT_PREPARATION_MAGIC));
+    assert_eq!(&bytes[HEADER..], preparation.canonical_bytes());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+}
+
+#[test]
+fn corrupt_or_orphan_root_retirement_preparation_quarantines_every_scope() {
+    for fault in 0..3 {
+        let fixture = Fixture::new();
+        let (parent, finished) = terminal(1, 2, 3, "seat0");
+        let (other, _) = terminal(11, 12, 13, "seat12");
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_terminal(&fixture, &finished).is_ok());
+        assert!(
+            reserve_kind_at(
+                &fixture.fd,
+                fixture.uid,
+                &finished.binding().dispatch_digest,
+                &finished.canonical_bytes(),
+                Kind::Quiescence,
+            )
+            .is_ok()
+        );
+        let preparation = NativeDisplayRetirementPreparation::new(
+            &finished,
+            7,
+            ComponentDigest::from_bytes([3; 32]),
+            ComponentDigest::from_bytes([4; 32]),
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            reserve_kind_at(
+                &fixture.fd,
+                fixture.uid,
+                &finished.binding().dispatch_digest,
+                &preparation.canonical_bytes(),
+                Kind::RetirementPreparation,
+            )
+            .is_ok()
+        );
+        assert!(reserve_recovery(&fixture, &other).is_ok());
+        let checkpoint = fixture
+            .path
+            .join(Kind::RetirementPreparation.name(&finished.binding().dispatch_digest));
+        let parent_path = fixture
+            .path
+            .join(Kind::Quiescence.name(&finished.binding().dispatch_digest));
+        match fault {
+            0 => std::fs::remove_file(parent_path).unwrap_or_else(|e| unreachable!("{e}")),
+            1 => std::fs::write(checkpoint, b"torn preparation")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::set_permissions(
+                checkpoint,
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        }
+        assert!(read_retirement_preparation_at(&fixture.fd, fixture.uid, &other).is_err());
+        assert!(read_finalization_state_at(&fixture.fd, fixture.uid, &other).is_err());
+        let (new_parent, _) = terminal(21, 22, 23, "seat22");
+        assert!(reserve_recovery(&fixture, &new_parent).is_err());
+    }
+}
+
+#[test]
 fn missing_or_corrupt_quiescence_parent_cannot_repair_or_admit() {
     for fault in 0..3 {
         let fixture = Fixture::new();
