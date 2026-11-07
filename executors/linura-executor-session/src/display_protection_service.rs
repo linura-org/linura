@@ -105,6 +105,9 @@ struct Admission {
     // Reserve in memory before any synced preparation write; even disk errors
     // cannot make this original live Control attempt look unused.
     retirements: BTreeMap<String, ComponentDigest>,
+    // A separate Root-held barrier, spent before publication. Files cannot
+    // reconstruct the original retained invocation or its live native owner.
+    root_retirements: BTreeMap<String, ComponentDigest>,
 }
 
 struct FinalizationReservation {
@@ -288,6 +291,11 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sampled_boot_ms: u64,
     ) -> zbus::fdo::Result<OwnedFd>;
     fn prepare_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayRetirementPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn retire_held(
         &self,
         sender: &str,
         record: NativeDisplayRetirementPreparation,
@@ -555,6 +563,87 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn retire_held(
+        &self,
+        sender: &str,
+        record: NativeDisplayRetirementPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        // Root's durable admission barrier is independent of a Control reply
+        // and MUST precede any future native physical release. No Root witness,
+        // native surface/input, startup lease or inhibitor is retired here.
+        let _transfer = StartupSlot::enter(&self.transfer_pending)?;
+        self.admit_control(sender)?;
+        let terminal = record.terminal();
+        let scope = terminal
+            .decoded_material()
+            .map_err(|_| unavailable())?
+            .recovery_scope()
+            .map_err(|_| unavailable())?;
+        let mut admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
+        let original = self.original_for_scope(&admission, &scope)?;
+        let restoration =
+            super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
+        NativeDisplayRecoveryCheckpoint::validate_restoration_source(&original, &restoration)
+            .map_err(|_| unavailable())?;
+        terminal.validate_restoration(&restoration).map_err(|_| unavailable())?;
+        let (retained, durable_quiescence) =
+            super::display_checkpoint::read_finalization_state(&restoration)
+                .map_err(|_| unavailable())?;
+        let active = retained.ok_or_else(unavailable)?;
+        if !durable_quiescence
+            || active.canonical_bytes() != terminal.canonical_bytes()
+            || finalization_reservation_phase(&admission.finalizations, &scope, Some(&active))? != 2
+        {
+            return Err(unavailable());
+        }
+        let prepared = super::display_checkpoint::read_retirement_preparation(&restoration)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+        if prepared.canonical_bytes() != record.canonical_bytes() {
+            return Err(unavailable());
+        }
+        let key = scope
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
+        let digest =
+            ComponentDigest::from_bytes(sha2::Sha256::digest(record.canonical_bytes()).into());
+        if admission.retirements.get(&key) != Some(&digest)
+            || admission.root_retirements.len() >= MAX_STARTUPS
+            || admission.root_retirements.contains_key(&key)
+        {
+            return Err(unavailable());
+        }
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        admission.root_retirements.insert(key.clone(), digest);
+        // Failed sync, interrupted write and lost reply remain non-repeatable.
+        super::display_checkpoint::reserve_root_retired_held(&record)
+            .map_err(|_| unavailable())?;
+        let observed = super::display_checkpoint::read_root_retired_held(&restoration)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+        if observed.canonical_bytes() != record.canonical_bytes()
+            || admission.root_retirements.get(&key) != Some(&digest)
+        {
+            return Err(unavailable());
+        }
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        let (after, still_quiesced) =
+            super::display_checkpoint::read_finalization_state(&restoration)
+                .map_err(|_| unavailable())?;
+        if !still_quiesced
+            || after.as_ref().is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
+            || finalization_reservation_phase(&admission.finalizations, &scope, after.as_ref())? != 2
+        {
+            return Err(unavailable());
+        }
+        Ok(true) // RootRetiredHeld only; no physical native release.
+    }
     fn prepare_retirement(
         &self,
         sender: &str,
@@ -960,9 +1049,34 @@ impl ProtectionPort for NativeProtection {
             // ambiguous. Neither may be promoted to Root retirement/release.
             return Err(unavailable());
         }
+        let held = super::display_checkpoint::read_root_retired_held(&record)
+            .map_err(|_| unavailable())?;
+        let key = scope.resource_id().map_err(|_| unavailable())?;
+        let retired = match (admission.root_retirements.get(key.as_str()), held.as_ref()) {
+            (None, None) => false,
+            (Some(expected), Some(record))
+                if *expected
+                    == ComponentDigest::from_bytes(
+                        sha2::Sha256::digest(record.canonical_bytes()).into(),
+                    ) =>
+            {
+                true
+            }
+            // Durable history without original live admission, or a consumed
+            // in-memory attempt without synced readback, is not current proof.
+            _ => return Err(unavailable()),
+        };
+        let current_phase = if retired {
+            if phase != 2 {
+                return Err(unavailable());
+            }
+            3 // RootRetiredHeld; native input/power/admission still fenced.
+        } else {
+            phase
+        };
         Ok((
             record.canonical_bytes(),
-            phase,
+            current_phase,
             terminal
                 .map(|record| record.canonical_bytes())
                 .unwrap_or_default(),
@@ -1001,7 +1115,10 @@ impl ProtectionPort for NativeProtection {
         let ordinary = ordinary_startup(
             &admission.pending,
             || {
-                if admission.finalizations.is_empty() && admission.retirements.is_empty() {
+                if admission.finalizations.is_empty()
+                    && admission.retirements.is_empty()
+                    && admission.root_retirements.is_empty()
+                {
                     self.witnesses.clear_for_startup()
                 } else {
                     Ok(false)
@@ -1169,6 +1286,26 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
+    #[zbus(out_args("accepted"))]
+    async fn retire_held(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        if preparation.len() > linura_linux_session::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION {
+            return Err(unavailable());
+        }
+        let record =
+            NativeDisplayRetirementPreparation::decode(preparation).map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.retire_held(&sender, record)
+        })
+        .await
+    }
     #[zbus(out_args("checkpoint"))]
     async fn read_original(
         &self,
@@ -1319,6 +1456,13 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn retire_held(
+            &self,
+            _: &str,
+            _: NativeDisplayRetirementPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
         fn prepare_retirement(
             &self,
             _: &str,
@@ -1385,7 +1529,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 9);
+            assert_eq!(text.matches("<method ").count(), 10);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -1418,6 +1562,7 @@ mod tests {
             "ReserveRestoration",
             "ReserveFinalization",
             "PrepareRetirement",
+            "RetireHeld",
         ] {
             assert!(xml.contains(&format!("name=\"{method}\"")));
         }

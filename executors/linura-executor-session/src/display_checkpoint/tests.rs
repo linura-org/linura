@@ -840,6 +840,125 @@ fn root_retirement_preparation_is_parent_bound_synced_and_write_once() {
 }
 
 #[test]
+fn durable_root_retired_held_requires_exact_prepared_lineage_and_is_one_use() {
+    let fixture = Fixture::new();
+    let (parent, terminal) = terminal(1, 2, 3, "seat0");
+    let preparation = NativeDisplayRetirementPreparation::new(
+        &terminal,
+        7,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([4; 32]),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let publish = |kind| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &terminal.binding().dispatch_digest,
+            &preparation.canonical_bytes(),
+            kind,
+        )
+    };
+    assert!(publish(Kind::RootRetiredHeld).is_err());
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve_terminal(&fixture, &terminal).is_ok());
+    assert!(publish(Kind::RootRetiredHeld).is_err());
+    assert!(reserve_kind_at(
+        &fixture.fd,
+        fixture.uid,
+        &terminal.binding().dispatch_digest,
+        &terminal.canonical_bytes(),
+        Kind::Quiescence,
+    ).is_ok());
+    assert!(publish(Kind::RootRetiredHeld).is_err());
+    assert!(publish(Kind::RetirementPreparation).is_ok());
+    assert!(read_root_retired_held_at(&fixture.fd, fixture.uid, &parent)
+        .unwrap_or_else(|e| unreachable!("{e}")).is_none());
+    assert!(publish(Kind::RootRetiredHeld).is_ok());
+    let observed = read_root_retired_held_at(&fixture.fd, fixture.uid, &parent)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("synced RootRetiredHeld marker unavailable"));
+    assert_eq!(observed.canonical_bytes(), preparation.canonical_bytes());
+    assert!(publish(Kind::RootRetiredHeld).is_err());
+    assert!(
+        read_finalization_state_at(&fixture.fd, fixture.uid, &parent)
+            .unwrap_or_else(|e| unreachable!("{e}")).1
+    );
+    let native_record = fixture.path.join(
+        Kind::RootRetiredHeld.name(&terminal.binding().dispatch_digest),
+    );
+    let bytes = std::fs::read(&native_record).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(bytes.starts_with(ROOT_RETIRED_HELD_MAGIC));
+    assert_eq!(&bytes[HEADER..], preparation.canonical_bytes());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid)
+        .unwrap_or_else(|e| unreachable!("{e}")));
+}
+
+#[test]
+fn orphan_or_corrupt_root_retired_held_fences_unrelated_scope_and_admission() {
+    for fault in 0..3 {
+        let fixture = Fixture::new();
+        let (parent, native) = terminal(1, 2, 3, "seat0");
+        let (other, _) = terminal(11, 12, 13, "seat12");
+        let preparation = NativeDisplayRetirementPreparation::new(
+            &native,
+            7,
+            ComponentDigest::from_bytes([3; 32]),
+            ComponentDigest::from_bytes([4; 32]),
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_terminal(&fixture, &native).is_ok());
+        assert!(reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &native.binding().dispatch_digest,
+            &native.canonical_bytes(),
+            Kind::Quiescence,
+        ).is_ok());
+        for kind in [Kind::RetirementPreparation, Kind::RootRetiredHeld] {
+            assert!(reserve_kind_at(
+                &fixture.fd,
+                fixture.uid,
+                &native.binding().dispatch_digest,
+                &preparation.canonical_bytes(),
+                kind,
+            ).is_ok());
+        }
+        assert!(reserve_recovery(&fixture, &other).is_ok());
+        let held = fixture.path.join(
+            Kind::RootRetiredHeld.name(&native.binding().dispatch_digest),
+        );
+        let prepared = fixture.path.join(
+            Kind::RetirementPreparation.name(&native.binding().dispatch_digest),
+        );
+        match fault {
+            0 => std::fs::remove_file(&prepared).unwrap_or_else(|e| unreachable!("{e}")),
+            1 => std::fs::write(&held, b"torn Root retirement marker")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::set_permissions(
+                &held,
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        }
+        assert!(read_root_retired_held_at(&fixture.fd, fixture.uid, &other).is_err());
+        assert!(read_restoration_at(
+            &fixture.fd,
+            fixture.uid,
+            &other.decoded_material()
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .recovery_scope()
+                .unwrap_or_else(|e| unreachable!("{e}")),
+        ).is_err());
+        let (fresh, _) = terminal(21, 22, 23, "seat22");
+        assert!(reserve_recovery(&fixture, &fresh).is_err());
+        assert!(!startup_clear_at(&fixture.fd, fixture.uid)
+            .unwrap_or_else(|e| unreachable!("{e}")));
+    }
+}
+
+#[test]
 fn corrupt_or_orphan_root_retirement_preparation_quarantines_every_scope() {
     for fault in 0..3 {
         let fixture = Fixture::new();

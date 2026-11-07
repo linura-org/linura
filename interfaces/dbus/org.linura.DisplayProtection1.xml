@@ -49,6 +49,15 @@
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
+    <method name="RetireHeld">
+      <!-- Supervised Control only. Advances the original Root lifetime from
+           durably Prepared to durably RootRetiredHeld, after re-authenticating
+           current Root witnesses, quiescence and exact immutable parents.
+           It cannot unlock S17, release the compositor scene, drop inhibitors,
+           authorize ordinary startup, or claim physical first-frame evidence. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.
            Tuple: original lock/login, native PID, seat, compositor invocation,
