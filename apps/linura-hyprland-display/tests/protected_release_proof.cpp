@@ -125,10 +125,13 @@ int main()
     assert(!proof->observe(held, later, frames));
     completed(b, &second, 9, Kind::Content);
     const auto receipt = proof->observe(held, later, frames);
-    assert(receipt && receipt->generation == held.generation &&
-           receipt->securityEpoch == held.securityEpoch &&
-           receipt->postWriteEpoch == 13 && receipt->completed.size() == 2 &&
-           receipt->completed[0].second == 8 && receipt->completed[1].second == 9);
+    assert(receipt);
+    assert(receipt->generation == held.generation);
+    assert(receipt->securityEpoch == held.securityEpoch);
+    assert(receipt->postWriteEpoch == 13);
+    assert(receipt->completedCount == 2);
+    assert(receipt->completed[0].second == 8);
+    assert(receipt->completed[1].second == 9);
     assert(proof->phase() == Phase::Verified);
     assert(!proof->observe(held, later, frames)); // Never redeliver or renew.
     assert(!proof->spend(held, later));

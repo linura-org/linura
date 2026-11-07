@@ -3,6 +3,8 @@
 #include "display_transaction.h"
 #include "protected_frame.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -49,11 +51,14 @@ class NativeFirstFrameGate final
     {
         std::uint64_t generation = 0, securityEpoch = 0, postWriteEpoch = 0;
         std::uint64_t observedUnixMs = 0, observedBootMs = 0;
-        std::vector<std::pair<OutputKey, std::uint64_t>> completed;
+        // Fixed, bounded receipts: no heap allocation or exception while
+        // the physical output/input fence is being verified.
+        std::array<std::pair<OutputKey, std::uint64_t>, DisplayTransaction::MaxHeads> completed{};
+        std::size_t completedCount = 0;
     };
 
-    [[nodiscard]] static std::optional<NativeFirstFrameGate>
-    arm(const Snapshot &held, std::uint64_t postWriteEpoch, ClockSample sampled,
+    [[nodiscard]] static std::optional<NativeFirstFrameGate> arm(
+        const Snapshot &held, std::uint64_t postWriteEpoch, ClockSample sampled,
         const std::vector<Output> &before)
     {
         if (!postWriteEpoch || !sampled.unixMs || !sampled.bootMs ||
@@ -115,7 +120,6 @@ class NativeFirstFrameGate final
             return {};
         }
         Receipt receipt{held_.generation, held_.securityEpoch, epoch_, now.unixMs, now.bootMs, {}};
-        receipt.completed.reserve(before_.size());
         bool pending = false;
         for (std::size_t i = 0; i < before_.size(); ++i) {
             const auto &head = current.heads[i];
@@ -141,7 +145,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed.emplace_back(head.key, commit);
+                receipt.completed[receipt.completedCount++] = {head.key, commit};
             } else {
                 if (frame.frame || frame.retainedBuffer) {
                     phase_ = Phase::Faulted;
@@ -155,7 +159,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed.emplace_back(head.key, frame.disableCommit);
+                receipt.completed[receipt.completedCount++] = {head.key, frame.disableCommit};
             }
         }
         if (pending)
