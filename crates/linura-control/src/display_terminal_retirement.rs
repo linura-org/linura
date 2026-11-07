@@ -204,10 +204,12 @@ impl TerminalRetirementPrepared {
             || request.observation_capability.as_str()
                 != linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
             || request.desired_state.len() != 1
-            || request.desired_state.get("finalize_original").map(String::as_bytes)
+            || request
+                .desired_state
+                .get("finalize_original")
+                .map(String::as_bytes)
                 != Some(expected_effect.canonical_payload.as_slice())
-            || principal.as_str()
-                != format!("unix:uid:{}", decoded.current_lock().epoch().uid())
+            || principal.as_str() != format!("unix:uid:{}", decoded.current_lock().epoch().uid())
         {
             return Err(invalid());
         }
@@ -225,7 +227,18 @@ impl TerminalRetirementPrepared {
         let mut rem = bytes;
         let mut fields = Vec::with_capacity(12);
         for bound in [
-            DOMAIN.len(), 128, 256, 256, 128, 20, 128, 64, 128, 128, 20, 20,
+            DOMAIN.len(),
+            128,
+            256,
+            256,
+            128,
+            20,
+            128,
+            64,
+            128,
+            128,
+            20,
+            20,
         ] {
             fields.push(retained_field(&mut rem, bound)?);
         }
@@ -242,7 +255,8 @@ impl TerminalRetirementPrepared {
                 != digest_bytes(
                     "linura.display.original-terminal-retirement-intent.v1",
                     material.as_bytes(),
-                ).as_str()
+                )
+                .as_str()
         {
             return Err(invalid());
         }
