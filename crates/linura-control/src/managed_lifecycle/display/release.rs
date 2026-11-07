@@ -15,6 +15,7 @@ pub struct OrdinaryDisplayReleaseInspection {
     durable_binding_digest: String,
     observation_digest: String,
     observed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
     restored: bool,
 }
 
@@ -47,6 +48,11 @@ impl OrdinaryDisplayReleaseInspection {
     pub const fn observed_at_unix_ms(&self) -> u64 {
         self.observed_at_unix_ms
     }
+    /// Strict upper bound for this read-only report. Never an authority grant.
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
     #[must_use]
     pub const fn restored(&self) -> bool {
         self.restored
@@ -70,6 +76,36 @@ fn terminal_for_inspection(
             "ordinary display release requires matching durably retired terminal history".into(),
         )),
     }
+}
+
+/// Recheck the original observation's absolute freshness after all durable
+/// readbacks. Earlier probe validation is not enough: expensive store I/O can
+/// consume the entire two-second native observation window. A returned report
+/// must never silently acquire a new or extended validity period.
+fn terminal_release_expires_at(
+    observed_at_unix_ms: u64,
+    valid_for_ms: u64,
+    now: u64,
+) -> Result<u64, ManagedLifecycleError> {
+    let fail = || {
+        ManagedLifecycleError::Verification(
+            "ordinary display release observation expired during durable readback".into(),
+        )
+    };
+    if observed_at_unix_ms == 0
+        || valid_for_ms == 0
+        || valid_for_ms > 2_000
+        || now < observed_at_unix_ms
+    {
+        return Err(fail());
+    }
+    let deadline = observed_at_unix_ms
+        .checked_add(valid_for_ms)
+        .ok_or_else(fail)?;
+    if now >= deadline {
+        return Err(fail());
+    }
+    Ok(deadline)
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
@@ -205,6 +241,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "ordinary display release durable provenance changed".into(),
             ));
         }
+        let expires_at_unix_ms = terminal_release_expires_at(
+            after.observed_at_unix_ms,
+            after.valid_for_ms,
+            now_ms()?,
+        )?;
         Ok(OrdinaryDisplayReleaseInspection {
             request_id: request.request_id,
             transaction_id: transaction,
@@ -215,6 +256,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 .as_str()
                 .into(),
             observed_at_unix_ms: after.observed_at_unix_ms,
+            expires_at_unix_ms,
             restored,
         })
     }
@@ -272,6 +314,23 @@ mod tests {
             revert: None,
             confirmed: None,
             restored: None,
+        }
+    }
+
+    #[test]
+    fn release_report_expiry_is_strict_and_cannot_be_renewed_by_durable_readback() {
+        assert_eq!(terminal_release_expires_at(10_000, 2_000, 10_000).ok(), Some(12_000));
+        assert_eq!(terminal_release_expires_at(10_000, 2_000, 11_999).ok(), Some(12_000));
+        for (observed, validity, now) in [
+            (10_000, 2_000, 12_000),
+            (10_000, 2_000, 12_001),
+            (10_000, 2_000, 9_999),
+            (0, 2_000, 1),
+            (10_000, 0, 10_000),
+            (10_000, 2_001, 10_000),
+            (u64::MAX, 2_000, u64::MAX),
+        ] {
+            assert!(terminal_release_expires_at(observed, validity, now).is_err());
         }
     }
 
