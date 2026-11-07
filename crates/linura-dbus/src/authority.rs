@@ -52,6 +52,7 @@ pub type AuthorityReceiptWire = (
 );
 pub type SessionLockStatusWire = (String, String, String, bool, String);
 pub type SessionTransitionStatusWire = (String, String, String, String);
+pub(crate) type DisplayLayoutReceiptWire = (String, String, String, String, u64);
 pub(crate) type ProtectiveLockSettingWire = (String, String, bool, String, String, u64, bool);
 
 fn protective_setting_wire(
@@ -122,6 +123,43 @@ pub struct Authority1SessionContext {
 }
 
 pub trait Authority1Handler: Send + 'static {
+    fn own_display_snapshot(
+        &mut self,
+        _context: Authority1SessionContext,
+    ) -> Result<linura_protocol::DisplaySnapshot, String> {
+        Err("native display discovery is unsupported in this authority composition".into())
+    }
+    // Unsupported is explicit for authority compositions without the complete
+    // qualified native display admission/execution/recovery ports. Registering
+    // this transport contract must never silently activate a native effect.
+    fn begin_display_layout(
+        &mut self,
+        _context: Authority1SessionContext,
+        _request: linura_protocol::DisplayLayoutRequest,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, String> {
+        Err("native display management is unsupported in this authority composition".into())
+    }
+    fn display_layout_status(
+        &mut self,
+        _context: Authority1SessionContext,
+        _request_id: linura_core::RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, String> {
+        Err("native display management is unsupported in this authority composition".into())
+    }
+    fn confirm_display_layout(
+        &mut self,
+        _context: Authority1SessionContext,
+        _request_id: linura_core::RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, String> {
+        Err("native display management is unsupported in this authority composition".into())
+    }
+    fn revert_display_layout(
+        &mut self,
+        _context: Authority1SessionContext,
+        _request_id: linura_core::RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, String> {
+        Err("native display management is unsupported in this authority composition".into())
+    }
     fn own_native_sleep_gate_status(
         &mut self,
         context: Authority1SessionContext,
@@ -279,6 +317,97 @@ async fn session_context(
 
 #[zbus::interface(name = "org.linura.Authority1")]
 impl Authority1Service {
+    #[zbus(out_args("receipt"))]
+    async fn begin_display_layout(
+        &self,
+        operation_id: &str,
+        material: &str,
+        reason: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(DisplayLayoutReceiptWire,)> {
+        if operation_id.len() > 64
+            || material.len() > linura_core::MAX_DISPLAY_INTENT_BYTES
+            || reason.len() > 1024
+        {
+            return Err(fdo_failed("display request exceeds its bound"));
+        }
+        let context = session_context(connection, &header).await?;
+        let request = linura_protocol::DisplayLayoutRequest::from_material(
+            operation_id.into(),
+            material.into(),
+            reason.into(),
+        )
+        .map_err(fdo_failed)?;
+        let decoded = linura_core::DisplayLayoutMaterial::decode(request.material())
+            .map_err(|e| fdo_failed(e.to_string()))?;
+        if context.principal.as_str() != format!("unix:uid:{}", decoded.lock().epoch().uid()) {
+            return Err(fdo_failed(
+                "display intent belongs to another session owner",
+            ));
+        }
+        self.with_handler(move |handler| {
+            handler
+                .begin_display_layout(context, request)
+                .and_then(display_receipt_wire)
+        })
+        .await
+        .map(|receipt| (receipt,))
+    }
+    #[zbus(out_args("receipt"))]
+    async fn get_display_layout_status(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(DisplayLayoutReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        let request_id =
+            linura_protocol::display_layout_request_id(request_id).map_err(fdo_failed)?;
+        self.with_handler(move |handler| {
+            handler
+                .display_layout_status(context, request_id)
+                .and_then(display_receipt_wire)
+        })
+        .await
+        .map(|receipt| (receipt,))
+    }
+    #[zbus(out_args("receipt"))]
+    async fn confirm_display_layout(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(DisplayLayoutReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        let request_id =
+            linura_protocol::display_layout_request_id(request_id).map_err(fdo_failed)?;
+        self.with_handler(move |handler| {
+            handler
+                .confirm_display_layout(context, request_id)
+                .and_then(display_receipt_wire)
+        })
+        .await
+        .map(|receipt| (receipt,))
+    }
+    #[zbus(out_args("receipt"))]
+    async fn revert_display_layout(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(DisplayLayoutReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        let request_id =
+            linura_protocol::display_layout_request_id(request_id).map_err(fdo_failed)?;
+        self.with_handler(move |handler| {
+            handler
+                .revert_display_layout(context, request_id)
+                .and_then(display_receipt_wire)
+        })
+        .await
+        .map(|receipt| (receipt,))
+    }
     #[zbus(out_args("status"))]
     async fn get_own_native_sleep_gate_status(
         &self,
@@ -556,6 +685,26 @@ impl Authority1Service {
         let context = session_context(connection, &header).await?;
         self.with_handler(move |handler| handler.own_session_lock(context))
             .await
+    }
+
+    /// Read-only discovery; the caller cannot choose a UID, session or output.
+    #[zbus(out_args("snapshot"))]
+    async fn get_own_display_snapshot(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(crate::authority_display::DisplaySnapshotWire,)> {
+        let context = session_context(connection, &header).await?;
+        self.with_handler(move |handler| {
+            let principal = context.principal.as_str().to_owned();
+            crate::authority_display::encode_snapshot(
+                handler.own_display_snapshot(context)?,
+                &principal,
+                crate::authority_display::now_ms()?,
+            )
+            .map(|snapshot| (snapshot,))
+        })
+        .await
     }
 
     #[zbus(out_args("receipt"))]
@@ -841,6 +990,19 @@ fn systemd_receipt_wire(receipt: ManagedMutationReceipt) -> Result<AuthorityRece
     Ok(receipt_wire(receipt))
 }
 
+fn display_receipt_wire(
+    receipt: linura_protocol::DisplayLayoutReceipt,
+) -> Result<DisplayLayoutReceiptWire, String> {
+    receipt.validate()?;
+    Ok((
+        receipt.request_id.as_str().into(),
+        receipt.transaction_id,
+        receipt.resource.as_str().into(),
+        receipt.state.as_str().into(),
+        receipt.confirmation_expires_at_unix_ms,
+    ))
+}
+
 fn receipt_wire(receipt: ManagedMutationReceipt) -> AuthorityReceiptWire {
     (
         receipt.transaction_id,
@@ -1099,11 +1261,16 @@ mod tests {
         assert_eq!(canonical.matches(receipt).count(), 5, "canonical receipts");
         assert_eq!(live.matches(receipt).count(), 5, "live receipts");
         for method in [
+            "BeginDisplayLayout",
+            "GetDisplayLayoutStatus",
+            "ConfirmDisplayLayout",
+            "RevertDisplayLayout",
             "GetOwnNativeSleepGateStatus",
             "ConfigureProtectiveLock",
             "GetProtectiveLockSetting",
             "GetProtectiveLockSettingRequestStatus",
             "GetOwnSessionLock",
+            "GetOwnDisplaySnapshot",
             "ConvergeSessionLock",
             "RecoverSessionLock",
             "GetOwnSessionTransition",
@@ -1117,6 +1284,11 @@ mod tests {
             assert!(live.contains(&marker), "live {method}");
         }
         for (method, shape) in [
+            ("GetOwnDisplaySnapshot", "(sstta(ttba(uuu)b))"),
+            ("BeginDisplayLayout", "(sssst)"),
+            ("GetDisplayLayoutStatus", "(sssst)"),
+            ("ConfirmDisplayLayout", "(sssst)"),
+            ("RevertDisplayLayout", "(sssst)"),
             ("GetOwnNativeSleepGateStatus", "(ss)"),
             ("ConfigureProtectiveLock", "(ssbsstb)"),
             ("GetProtectiveLockSetting", "a(ssbsstb)"),

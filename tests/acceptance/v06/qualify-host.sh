@@ -52,6 +52,7 @@ scp "${ssh_common[@]}" -P "$ssh_port" \
     packaging/dbus-1/system.d/org.linura.Authority1.conf \
     packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf \
     packaging/dbus-1/system.d/org.linura.Executor.Session1.conf \
+    packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf \
     packaging/polkit-1/actions/org.linura.authority.policy \
     packaging/polkit-1/actions/org.linura.executor.systemd.policy \
     packaging/polkit-1/actions/org.linura.executor.session.policy \
@@ -60,6 +61,7 @@ scp "${ssh_common[@]}" -P "$ssh_port" \
     packaging/systemd/system/linura-authorityd.service \
     packaging/systemd/system/linura-executor-systemd.service \
     packaging/systemd/system/linura-executor-session.service \
+    packaging/systemd/system/linura-display-protection.service \
     packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf \
     packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf \
     tests/acceptance/v06/49-linura-v06-qualification.rules \

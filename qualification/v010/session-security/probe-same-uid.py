@@ -95,12 +95,14 @@ def require_guest() -> int:
     return uid
 
 
-def service_identity(uid: int) -> tuple[int, str]:
+def service_identity(uid: int, *, compositor: bool = False) -> tuple[int, str]:
     reply = bounded_command(
         [
             "/usr/bin/systemctl",
             "show",
-            f"linura-security-owner@{uid}.service",
+            "linura-s17-session.service"
+            if compositor
+            else f"linura-security-owner@{uid}.service",
             "--property=MainPID,InvocationID,ActiveState,SubState",
             "--no-pager",
         ]
@@ -172,15 +174,125 @@ def denied_open(path: Path) -> bool:
         return False
 
 
+def probe_secure_loader() -> dict[str, bool]:
+    library = Path("/usr/lib/linura/qualification/liblinura-s21-loader-canary.so")
+    for path in reversed(library.parents):
+        metadata = path.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_mode & 0o022
+        ):
+            raise RuntimeError("native loader canary parent is not root immutable")
+    metadata = library.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or metadata.st_mode & 0o022
+        or not 0 < metadata.st_size <= 1024 * 1024
+    ):
+        raise RuntimeError("native loader canary is not root immutable and bounded")
+    # Called only after require_guest(), as the unprivileged fixture account.
+    # Never place loader overrides on runuser or another privileged executable.
+    environment = {
+        **ENVIRONMENT,
+        "LD_PRELOAD": str(library),
+        "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+    }
+    marker = b"linura-loader-canary:loaded\n"
+    checks = {}
+    for name, arguments, expected in (
+        ("loader-canary-positive-control", ["/usr/bin/true"], True),
+        (
+            "compositor-loader-preload-refused",
+            ["/usr/bin/Hyprland", "--version"],
+            False,
+        ),
+    ):
+        result = subprocess.run(
+            arguments,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            check=False,
+        )
+        if (
+            result.returncode != 0
+            or len(result.stderr) > 65536
+            or ((marker in result.stderr) != expected)
+        ):
+            raise RuntimeError(
+                "native secure loader positive control or refusal failed"
+            )
+        checks[name] = True
+    return checks
+
+
+def probe_egl_vendor_override() -> dict[str, bool]:
+    directory = Path("/usr/lib/linura/qualification")
+    for name in ("linura-s21-egl-loader-probe", "linura-s21-egl-vendor.json"):
+        path = directory / name
+        for parent in reversed(path.parents):
+            metadata = parent.lstat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != 0
+                or metadata.st_mode & 0o022
+            ):
+                raise RuntimeError("native EGL fixture parent is not root immutable")
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_nlink != 1
+            or metadata.st_mode & 0o022
+            or not 0 < metadata.st_size <= 1024 * 1024
+        ):
+            raise RuntimeError("native EGL fixture is not root immutable and bounded")
+    result = subprocess.run(
+        [str(directory / "linura-s21-egl-loader-probe")],
+        env={
+            **ENVIRONMENT,
+            "__EGL_VENDOR_LIBRARY_FILENAMES": str(
+                directory / "linura-s21-egl-vendor.json"
+            ),
+        },
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=5,
+        check=False,
+    )
+    if (
+        result.returncode != 0
+        or len(result.stderr) > 65536
+        or b"linura-loader-canary:loaded\n" not in result.stderr
+    ):
+        raise RuntimeError("native EGL vendor override positive control failed")
+    return {"egl-vendor-override-positive-control": True}
+
+
 def probe() -> dict[str, object]:
     uid = require_guest()
     identity = service_identity(uid)
     pid, invocation = identity
     generation = process_state(pid, uid)
+    compositor_identity = service_identity(uid, compositor=True)
+    compositor_pid, compositor_invocation = compositor_identity
+    compositor_generation = process_state(compositor_pid, uid)
     checks = {
-        f"same-uid-{name}-open-denied": denied_open(Path(f"/proc/{pid}/{name}"))
+        f"{prefix}{name}-open-denied": denied_open(Path(f"/proc/{target}/{name}"))
+        for prefix, target in (
+            ("same-uid-", pid),
+            ("compositor-same-uid-", compositor_pid),
+        )
         for name in ("mem", "environ", "auxv")
     }
+    checks.update(probe_secure_loader())
+    checks.update(probe_egl_vendor_override())
     libc = ctypes.CDLL(None, use_errno=True)
     libc.ptrace.argtypes = [
         ctypes.c_uint,
@@ -193,20 +305,33 @@ def probe() -> dict[str, object]:
     # SEIZE does not stop the owner. No EXITKILL option, memory read/write,
     # signal injection or ptrace resume is used. If unexpectedly permitted,
     # this short-lived probe exits and the kernel detaches its tracee.
-    result = libc.ptrace(0x4206, pid, None, None)
-    checks["same-uid-ptrace-seize-denied"] = (
-        result == -1 and ctypes.get_errno() == errno.EPERM
-    )
+    for prefix, target in (
+        ("same-uid-", pid),
+        ("compositor-same-uid-", compositor_pid),
+    ):
+        ctypes.set_errno(0)
+        result = libc.ptrace(0x4206, target, None, None)
+        checks[f"{prefix}ptrace-seize-denied"] = (
+            result == -1 and ctypes.get_errno() == errno.EPERM
+        )
     if not all(checks.values()):
         raise RuntimeError("native owner same-UID protection failed")
     if service_identity(uid) != identity or process_state(pid, uid) != generation:
         raise RuntimeError("native owner changed during adversarial probes")
+    if (
+        service_identity(uid, compositor=True) != compositor_identity
+        or process_state(compositor_pid, uid) != compositor_generation
+    ):
+        raise RuntimeError("native compositor changed during adversarial probes")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "claim": "native-same-uid-process-access-cases-only",
         "native_owner_pid": pid,
         "native_owner_invocation": invocation,
         "owner_start_ticks": generation,
+        "native_compositor_pid": compositor_pid,
+        "native_compositor_invocation": compositor_invocation,
+        "compositor_start_ticks": compositor_generation,
         "ptrace_scope": 0,
         "checks": checks,
         "s17_complete": False,

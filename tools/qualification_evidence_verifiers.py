@@ -882,9 +882,43 @@ def _verify_v05(
     )
 
 
+def _v06_matrix_inventory(root: Path) -> tuple[str, ...]:
+    data = _stable_repository_bytes(root / "tests/acceptance/v06/fault-matrix.txt")
+    _require(len(data) <= 16 * 1024, "v0.6 test inventory exceeds its bound")
+    _require(
+        re.fullmatch(rb"(?:[a-z][a-z0-9_]*(?:::[a-z][a-z0-9_]*)*\n){67}", data)
+        is not None,
+        "v0.6 test inventory is malformed or has the wrong cardinality",
+    )
+    names = tuple(data.decode("ascii").splitlines())
+    _require(
+        names == tuple(sorted(set(names))),
+        "v0.6 test inventory is not sorted and unique",
+    )
+    _require(
+        sum(not name.startswith(("s17_managed_", "s21_managed_")) for name in names)
+        == 11,
+        "v0.6 original test inventory drifted",
+    )
+    return names
+
+
 def _require_v06_matrix_result(
-    text: str, cases: int, label: str, *, filtered_out: int
+    text: str,
+    cases: int,
+    label: str,
+    *,
+    filtered_out: int,
+    expected_tests: tuple[str, ...],
 ) -> None:
+    names = re.findall(r"(?m)^test ([a-z][a-z0-9_:]*) \.\.\. ok$", text)
+    _require(
+        len(expected_tests) == cases
+        and len(set(expected_tests)) == cases
+        and len(names) == cases
+        and set(names) == set(expected_tests),
+        f"{label} did not pass every reviewed test exactly once",
+    )
     _require(
         re.search(rf"(?m)^running {cases} tests?$", text) is not None,
         f"{label} did not run the exact declared test set",
@@ -901,6 +935,43 @@ def _require_v06_matrix_result(
         and "FAILED" not in text,
         f"{label} did not independently pass all {cases} cases",
     )
+
+
+def _require_v06_original_read_admission(text: str) -> None:
+    # These calls share one installed member-specific UID policy and service
+    # invocation. The malformed body's fixed parser failure proves transport
+    # reaches the RPC; only then can AccessDenied prove runtime admission.
+    for label, error, detail in (
+        (
+            "native-display-original-same-account-malformed-scope",
+            "org.freedesktop.DBus.Error.Failed",
+            "original display protection unavailable; no retry",
+        ),
+        (
+            "native-display-original-same-account-not-control-denied",
+            "org.freedesktop.DBus.Error.AccessDenied",
+            None,
+        ),
+    ):
+        exits = re.findall(rf"^{re.escape(label)}-rc=(.*)$", text, re.MULTILINE)
+        outputs = re.findall(rf"^{re.escape(label)}-output=(.*)$", text, re.MULTILINE)
+        _require(
+            exits == ["1"] and len(outputs) == 1,
+            "v0.6 original-read admission proof is missing or ambiguous",
+        )
+        # The guest's printf %q preserves these fixed one-line ASCII errors as
+        # backslash-quoted words. Do not accept a bare denial or another error.
+        prefix = "Error\\ " + error + ":\\ "
+        _require(
+            outputs[0].startswith(prefix),
+            "v0.6 original-read proof came from the wrong failure boundary",
+        )
+        if detail is not None:
+            quoted = detail.replace(" ", "\\ ").replace(";", "\\;")
+            _require(
+                outputs[0] == prefix + quoted,
+                "v0.6 original-read transport route was not proven",
+            )
 
 
 def _verify_v06(
@@ -935,7 +1006,7 @@ def _verify_v06(
             "real-idempotency=qualified",
             "real-verification-not-satisfied-explicit-recovery=qualified",
             "real-crash-restart-explicit-no-effect-recovery=qualified",
-            "deterministic-fault-matrix=49/49",
+            "deterministic-fault-matrix=67/67",
         ],
         "v0.6 qualification transcript",
     )
@@ -945,6 +1016,17 @@ def _verify_v06(
         [
             "native-stage=active-native-session-executor",
             "native-session-live-executor=qualified",
+            "native-display-protection-caller-and-lifetime-boundary=qualified",
+            "native-display-protection-Begin-ordinary-denied-rc=",
+            "native-display-protection-Begin-root-not-executor-denied-rc=",
+            "native-display-protection-Verify-ordinary-denied-rc=",
+            "native-display-protection-Verify-root-not-executor-denied-rc=",
+            "native-display-protection-reserve-root-not-executor-denied-rc=",
+            "native-display-startup-unqualified-ordinary-denied-rc=",
+            "native-display-startup-unqualified-root-denied-rc=",
+            "native-display-original-ordinary-denied-rc=",
+            "native-display-original-root-not-control-denied-rc=",
+            "native-display-original-same-account-not-control-denied-rc=",
             "native-session-ordinary-denied-rc=",
             "native-session-root-denied-rc=",
             "native-session-polkit-ordinary-denied-rc=",
@@ -955,6 +1037,7 @@ def _verify_v06(
         ],
         "v0.6 live native session transcript",
     )
+    _require_v06_original_read_admission(session)
     _require(
         "native-guest-error " not in session,
         "v0.6 live native session transcript contains a guest error",
@@ -967,9 +1050,24 @@ def _verify_v06(
         },
         "v0.6 native session boundary claim drifted",
     )
-    _require_v06_matrix_result(matrix, 49, "v0.6 complete fault matrix", filtered_out=0)
+    inventory = _v06_matrix_inventory(root)
     _require_v06_matrix_result(
-        legacy_matrix, 11, "v0.6 original fault matrix", filtered_out=38
+        matrix,
+        67,
+        "v0.6 complete fault matrix",
+        filtered_out=0,
+        expected_tests=inventory,
+    )
+    _require_v06_matrix_result(
+        legacy_matrix,
+        11,
+        "v0.6 original fault matrix",
+        filtered_out=56,
+        expected_tests=tuple(
+            name
+            for name in inventory
+            if not name.startswith(("s17_managed_", "s21_managed_"))
+        ),
     )
     fault_matrix = primary.get("fault_matrix")
     _require(
@@ -979,7 +1077,7 @@ def _verify_v06(
     expanded_matrix = primary.get("expanded_fault_matrix")
     _require(
         isinstance(expanded_matrix, dict)
-        and expanded_matrix.get("cases") == 49
+        and expanded_matrix.get("cases") == 67
         and expanded_matrix.get("includes_original_cases") == 11,
         "v0.6 expanded fault-matrix cardinality mismatch",
     )
@@ -995,12 +1093,15 @@ def _verify_v06(
         "executor": "retained:v06-executor-systemd.bin",
         "session_executor": "retained:v06-executor-session.bin",
         "fault_matrix": "retained:v06-qualification-matrix.bin",
+        "fault_matrix_inventory": "tests/acceptance/v06/fault-matrix.txt",
         "authority_dbus_contract": "interfaces/dbus/org.linura.Authority1.xml",
         "executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Systemd1.xml",
         "session_executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Session1.xml",
+        "display_protection_dbus_contract": "interfaces/dbus/org.linura.DisplayProtection1.xml",
         "authority_dbus_policy": "packaging/dbus-1/system.d/org.linura.Authority1.conf",
         "executor_dbus_policy": "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
         "session_executor_dbus_policy": "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
+        "display_protection_dbus_policy": "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
         "authority_polkit_policy": "packaging/polkit-1/actions/org.linura.authority.policy",
         "executor_polkit_policy": "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
         "session_executor_polkit_policy": "packaging/polkit-1/actions/org.linura.executor.session.policy",
@@ -1009,6 +1110,7 @@ def _verify_v06(
         "authority_systemd_unit": "packaging/systemd/system/linura-authorityd.service",
         "executor_systemd_unit": "packaging/systemd/system/linura-executor-systemd.service",
         "session_executor_systemd_unit": "packaging/systemd/system/linura-executor-session.service",
+        "display_protection_systemd_unit": "packaging/systemd/system/linura-display-protection.service",
         "qualification_rule": "tests/acceptance/v06/49-linura-v06-qualification.rules",
         "managed_fixture": "tests/acceptance/v06/linura-managed-v06-qualification.service",
         "not_satisfied_fixture": "tests/acceptance/v06/linura-managed-v06-notsatisfied.service",
@@ -1035,13 +1137,13 @@ def _verify_v06(
             "crash-restart-no-blind-replay-proved",
             "sqlite-integrity-proved",
             "fault-matrix-11-of-11-passed",
-            "expanded-fault-matrix-49-of-49-passed",
+            "expanded-fault-matrix-67-of-67-passed",
             "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
         details={
             "fault_matrix_cases": 11,
-            "expanded_fault_matrix_cases": 49,
+            "expanded_fault_matrix_cases": 67,
             "repository_artifacts": len(artifacts),
         },
     )

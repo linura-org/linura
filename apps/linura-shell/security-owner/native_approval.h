@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_scope.h"
+#include "native_display_prompt.h"
 
 #include <functional>
 #include <optional>
@@ -30,6 +31,12 @@ class NativeApproval final
 
     [[nodiscard]] State state();
     [[nodiscard]] bool begin(const NativeApprovalScope &scope, bool compositorSecure);
+    // Separate native-only admission. The S17 begin path never accepts display
+    // purposes. Runtime must freshly attest Ready and preserve/recheck this exact
+    // epoch through PAM and final dispatch; a lock boolean is insufficient.
+    [[nodiscard]] bool beginDisplay(const NativeApprovalScope &scope,
+                                    const NativeDisplayPromptStatus &presentation,
+                                    quint64 remainingMs);
     [[nodiscard]] bool confirmHuman(const NativeApprovalScope &scope);
     [[nodiscard]] bool nativePrompt(const NativeApprovalScope &scope);
     [[nodiscard]] bool nativeCompleted(const NativeApprovalScope &scope, bool success);
@@ -53,6 +60,7 @@ class NativeApproval final
     std::optional<NativeApprovalScope> scope_;
     quint64 lastNow_ = 0;
     quint64 deadline_ = 0;
+    quint64 displayDeadline_ = 0;
     quint32 prompts_ = 0;
 };
 

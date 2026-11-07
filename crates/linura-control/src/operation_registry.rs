@@ -20,6 +20,17 @@ pub(crate) const MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID: &str =
 
 pub const TRANSIENT_AUDIO_VOLUME_OPERATION_ID: &str = "operation:audio.output.set-session-volume";
 pub const MANAGED_SESSION_LOCK_OPERATION_ID: &str = "operation:session.lock.set-secure";
+pub const MANAGED_DISPLAY_LAYOUT_OPERATION_ID: &str = "operation:display.layout.apply";
+pub(crate) const MANAGED_DISPLAY_RESTORATION_OPERATION_ID: &str =
+    "operation:display.layout.restore-original";
+pub(crate) const MANAGED_DISPLAY_RESTORATION_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-display-restoration.risk-floor";
+pub(crate) const MANAGED_DISPLAY_FINALIZATION_OPERATION_ID: &str =
+    "operation:display.layout.finalize-original";
+pub(crate) const MANAGED_DISPLAY_FINALIZATION_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-display-finalization.risk-floor";
+pub(crate) const MANAGED_DISPLAY_LAYOUT_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-display-layout.risk-floor";
 pub const MANAGED_SESSION_LOCK_PROVIDER: &str = "session-locker";
 pub const MANAGED_SESSION_LOCK_CAPABILITY: &str = "session.secure-lock.observe";
 pub const MANAGED_SESSION_TRANSITION_PROVIDER: &str = "logind";
@@ -132,6 +143,39 @@ pub(crate) fn trusted_builtin_operation_registry()
     registry.register(managed_systemd_active_state_descriptor()?)?;
     registry.register(transient_audio_volume_descriptor()?)?;
     registry.register(managed_session_lock_descriptor()?)?;
+    registry.register(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_DISPLAY_LAYOUT_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(OperationEffectBinding::try_new(
+            ProviderId::new(linura_observation::DISPLAY_PROVIDER)?,
+            CapabilityId::new(linura_observation::DISPLAY_OUTPUTS_CAPABILITY)?,
+            "display:topology:",
+            vec!["layout".into()],
+        )?),
+    )?)?;
+    registry.register(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_DISPLAY_RESTORATION_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(OperationEffectBinding::try_new(
+            ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)?,
+            CapabilityId::new(linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY)?,
+            "display:recovery:",
+            vec!["restore_original".into()],
+        )?),
+    )?)?;
+    registry.register(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_DISPLAY_FINALIZATION_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(OperationEffectBinding::try_new(
+            ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)?,
+            CapabilityId::new(linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY)?,
+            "display:recovery:",
+            vec!["finalize_original".into()],
+        )?),
+    )?)?;
     for (_, operation, prefix, _, risk) in SESSION_TRANSITION_ROUTES {
         registry.register(OperationDescriptor::try_new(
             OperationId::new(operation)?,
@@ -199,6 +243,46 @@ fn transient_audio_volume_descriptor() -> Result<OperationDescriptor, TrustedOpe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_display_registration_has_separate_managed_purpose_and_exact_binding() {
+        let registry = trusted_builtin_operation_registry().unwrap_or_else(|e| unreachable!("{e}"));
+        let id = OperationId::new(MANAGED_DISPLAY_FINALIZATION_OPERATION_ID)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let terminal = registry
+            .descriptor(&id)
+            .unwrap_or_else(|| unreachable!("terminal registration"));
+        assert_eq!(terminal.class(), OperationClass::ManagedExternalEffect);
+        assert_eq!(terminal.risk_floor(), Some(RiskClass::SecuritySensitive));
+        let binding = terminal
+            .effect_binding()
+            .unwrap_or_else(|| unreachable!("terminal binding"));
+        assert_eq!(
+            binding.provider().as_str(),
+            linura_observation::DISPLAY_RECOVERY_PROVIDER
+        );
+        assert_eq!(
+            binding.observation_capability().as_str(),
+            linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+        );
+        assert_eq!(binding.resource_prefix(), "display:recovery:");
+        assert_eq!(binding.resource_suffix(), None);
+        assert_eq!(
+            binding
+                .change_keys()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["finalize_original"]
+        );
+        let restoration_id = OperationId::new(MANAGED_DISPLAY_RESTORATION_OPERATION_ID)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let old = registry
+            .descriptor(&restoration_id)
+            .unwrap_or_else(|| unreachable!("restoration registration"));
+        assert_ne!(terminal.id(), old.id());
+        assert_ne!(terminal.effect_binding(), old.effect_binding());
+    }
 
     #[test]
     fn session_lock_registration_is_managed_and_has_one_exact_security_sensitive_effect_shape() {
@@ -277,7 +361,37 @@ mod tests {
     fn builtin_registry_binds_the_qualified_managed_systemd_operation() {
         let registry =
             trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
-        assert_eq!(registry.len(), 7);
+        // Builtin registrations include the S21 managed display operation.
+        // Keep verifying the legacy systemd binding below; never drop it.
+        assert_eq!(registry.len(), 10);
+        let display = registry
+            .descriptor(
+                &OperationId::new(MANAGED_DISPLAY_LAYOUT_OPERATION_ID)
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+            )
+            .unwrap_or_else(|| unreachable!("managed display operation is not registered"));
+        assert_eq!(display.class(), OperationClass::ManagedExternalEffect);
+        assert_eq!(display.risk_floor(), Some(RiskClass::SecuritySensitive));
+        let display_effect = display
+            .effect_binding()
+            .unwrap_or_else(|| unreachable!("managed display effect binding is missing"));
+        assert_eq!(
+            display_effect.provider().as_str(),
+            linura_observation::DISPLAY_PROVIDER
+        );
+        assert_eq!(
+            display_effect.observation_capability().as_str(),
+            linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+        );
+        assert_eq!(display_effect.resource_prefix(), "display:topology:");
+        assert_eq!(
+            display_effect
+                .change_keys()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["layout"]
+        );
 
         let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
             .unwrap_or_else(|error| unreachable!("{error}"));

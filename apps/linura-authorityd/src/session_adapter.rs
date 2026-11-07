@@ -11,6 +11,7 @@ use linura_provider_sdk::{
 #[derive(Debug)]
 pub(crate) struct SessionExecutorClient {
     pub(crate) channel: NativeSessionChannel,
+    pub(crate) display_sequence: u64,
 }
 impl AuthorizedEffectExecutor for SessionExecutorClient {
     fn execute_authorized(

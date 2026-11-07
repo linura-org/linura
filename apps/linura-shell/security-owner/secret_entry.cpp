@@ -12,8 +12,21 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#include <time.h>
 
 namespace Linura::SecurityOwner {
+namespace {
+std::optional<quint64> promptBootMs()
+{
+    timespec value{};
+    if (clock_gettime(CLOCK_BOOTTIME, &value) != 0 || value.tv_sec < 0 || value.tv_nsec < 0 ||
+        value.tv_nsec >= 1'000'000'000 ||
+        static_cast<quint64>(value.tv_sec) > (std::numeric_limits<quint64>::max() - 30'999) / 1000)
+        return std::nullopt;
+    return static_cast<quint64>(value.tv_sec) * 1000 +
+           static_cast<quint64>(value.tv_nsec) / 1'000'000;
+}
+} // namespace
 
 SecretEntry::SecretEntry(QQuickItem *parent) : QQuickPaintedItem(parent)
 {
@@ -73,7 +86,7 @@ QColor SecretEntry::focusColor() const
 
 QString SecretEntry::nativeAccessibleName() const
 {
-    return accepting_ && !promptLabel_.isEmpty()
+    return (accepting_ || prepared_) && !promptLabel_.isEmpty()
                ? promptLabel_
                : QStringLiteral("Protected authentication response");
 }
@@ -121,29 +134,86 @@ void SecretEntry::paint(QPainter *painter)
     const auto area = boundingRect().adjusted(12, 0, -12, 0);
     painter->drawText(
         area, Qt::AlignVCenter | Qt::AlignLeft,
-        mask.isEmpty() && accepting_
+        mask.isEmpty() && (accepting_ || prepared_)
             ? painter->fontMetrics().elidedText(promptLabel_, Qt::ElideRight, int(area.width()))
             : mask);
 }
 
 bool SecretEntry::beginNativePrompt(NativePromptKind kind, quint32 step, std::optional<quint32> uid)
 {
+    const auto token = preparePrompt(kind, step, uid, false);
+    return token && activatePrepared(*token, false);
+}
+
+std::optional<quint64> SecretEntry::prepareNativePrompt(NativePromptKind kind, quint32 step,
+                                                        std::optional<quint32> uid)
+{
+    return preparePrompt(kind, step, uid, true);
+}
+
+std::optional<quint64> SecretEntry::preparePrompt(NativePromptKind kind, quint32 step,
+                                                  std::optional<quint32> uid, bool publish)
+{
     const auto label = nativePromptLabel(kind, step, uid);
-    if (QThread::currentThread() != thread() || !storageAvailable() || accepting_ || responding_ ||
-        !isEnabled() || !isVisible() || !label)
-        return false;
+    const auto time = promptBootMs();
+    if (QThread::currentThread() != thread() || !storageAvailable() || accepting_ || prepared_ ||
+        responding_ || !isEnabled() || !isVisible() || !label ||
+        preparationToken_ == std::numeric_limits<quint64>::max() || !time)
+        return std::nullopt;
     buffer_.clear();
     promptLabel_ = *label;
     identityChoices_.clear();
-    accepting_ = true;
-    announceProtectedInputMetadata(*this);
+    identityPresentationGated_ = false;
+    prepared_ = true;
+    ++preparationToken_;
+    const auto token = preparationToken_;
+    preparedBootStart_ = *time;
+    preparedBootDeadline_ = *time + 30'000;
     promptTimer_.start();
-    Q_EMIT inputChanged();
-    update();
-    return true;
+    if (publish) {
+        announceProtectedInputMetadata(*this);
+        Q_EMIT inputChanged();
+        update();
+    }
+    return token;
 }
 
-void SecretEntry::showIdentityChoice()
+bool SecretEntry::activatePrepared(quint64 token, bool requireNativeFocus)
+{
+    if (QThread::currentThread() != thread() || !prepared_ || accepting_ || responding_ ||
+        token == 0 || token != preparationToken_ || !storageAvailable() || !isEnabled() ||
+        !isVisible() || !promptTimer_.isActive() ||
+        (requireNativeFocus && (!nativeInputBound_ || !nativeFocused_)))
+        return false;
+    const auto time = promptBootMs();
+    if (!time || *time < preparedBootStart_ || *time >= preparedBootDeadline_) {
+        cancelFromInteraction();
+        return false;
+    }
+    prepared_ = false;
+    accepting_ = true;
+    // Do not restart the original timer or replace the prepared label/token.
+    announceProtectedInputMetadata(*this);
+    Q_EMIT inputChanged();
+    update();
+    return accepting_ && token == preparationToken_;
+}
+
+bool SecretEntry::activatePreparedNativePrompt(quint64 token)
+{
+    return activatePrepared(token, true);
+}
+
+bool SecretEntry::preparedNativePromptMatches(quint64 token) const
+{
+    const auto time = promptBootMs();
+    return QThread::currentThread() == thread() && prepared_ && !accepting_ && !responding_ &&
+           token != 0 && token == preparationToken_ && storageAvailable() && isEnabled() &&
+           isVisible() && promptTimer_.isActive() && time && *time >= preparedBootStart_ &&
+           *time < preparedBootDeadline_;
+}
+
+void SecretEntry::showIdentityChoice(bool publish)
 {
     if (identityChoices_.isEmpty())
         return;
@@ -151,30 +221,50 @@ void SecretEntry::showIdentityChoice()
                        .arg(identityIndex_ + 1)
                        .arg(identityChoices_.size())
                        .arg(identityChoices_[identityIndex_]);
-    announceProtectedInputMetadata(*this);
-    Q_EMIT inputChanged();
-    update();
+    if (publish) {
+        announceProtectedInputMetadata(*this);
+        Q_EMIT inputChanged();
+        update();
+    }
 }
 
 bool SecretEntry::beginNativeIdentitySelection(const QVector<quint32> &uids)
 {
-    if (QThread::currentThread() != thread() || accepting_ || responding_ || !storageAvailable() ||
-        !isEnabled() || !isVisible() || uids.size() < 2 || uids.size() > 8)
-        return false;
+    const auto token = prepareIdentity(uids, false);
+    return token && activatePrepared(*token, false);
+}
+
+std::optional<quint64> SecretEntry::prepareNativeIdentitySelection(const QVector<quint32> &uids)
+{
+    return prepareIdentity(uids, true);
+}
+
+std::optional<quint64> SecretEntry::prepareIdentity(const QVector<quint32> &uids, bool publish)
+{
+    const auto time = promptBootMs();
+    if (QThread::currentThread() != thread() || accepting_ || prepared_ || responding_ ||
+        !storageAvailable() || !isEnabled() || !isVisible() || uids.size() < 2 || uids.size() > 8 ||
+        preparationToken_ == std::numeric_limits<quint64>::max() || !time)
+        return std::nullopt;
     for (int index = 0; index < static_cast<int>(uids.size()); ++index) {
         if (uids[index] > static_cast<quint32>(std::numeric_limits<int>::max()))
-            return false;
+            return std::nullopt;
         for (int other = 0; other < index; ++other)
             if (uids[other] == uids[index])
-                return false;
+                return std::nullopt;
     }
     buffer_.clear();
     identityChoices_ = uids;
+    identityPresentationGated_ = publish;
     identityIndex_ = 0;
-    accepting_ = true;
+    prepared_ = true;
+    ++preparationToken_;
+    const auto token = preparationToken_;
+    preparedBootStart_ = *time;
+    preparedBootDeadline_ = *time + 30'000;
     promptTimer_.start();
-    showIdentityChoice();
-    return true;
+    showIdentityChoice(publish);
+    return token;
 }
 
 bool SecretEntry::respondToNativePrompt(const std::function<void(const char *)> &response)
@@ -182,6 +272,7 @@ bool SecretEntry::respondToNativePrompt(const std::function<void(const char *)> 
     if (QThread::currentThread() != thread() || !accepting_ || responding_)
         return false;
     accepting_ = false;
+    prepared_ = false;
     responding_ = true;
     promptTimer_.stop();
     try {
@@ -216,10 +307,13 @@ void SecretEntry::cancelNativePrompt()
         return;
     }
     accepting_ = false;
+    prepared_ = false;
+    preparedBootStart_ = preparedBootDeadline_ = 0;
     promptTimer_.stop();
     buffer_.clear();
     promptLabel_.clear();
     identityChoices_.clear();
+    identityPresentationGated_ = false;
     identityIndex_ = 0;
     announceProtectedInputMetadata(*this);
     Q_EMIT inputChanged();
@@ -232,10 +326,23 @@ void SecretEntry::cancelFromInteraction()
         cancelAfterResponse_ = true;
         return;
     }
-    const bool wasAccepting = accepting_;
+    const bool wasAccepting = accepting_ || prepared_;
     cancelNativePrompt();
     if (wasAccepting)
         Q_EMIT cancellationRequested();
+}
+
+void SecretEntry::suspendForExpectedPresentation()
+{
+    // Only zero-input prepared metadata may survive an expected frame revision.
+    // Active input, actual focus loss and all ordinary cancellation still wipe.
+    if (QThread::currentThread() != thread())
+        return;
+    if (prepared_ && !accepting_ && !responding_ && buffer_.length() == 0) {
+        nativeFocused_ = false;
+        return;
+    }
+    setNativeKeyboardFocus(false);
 }
 
 void SecretEntry::setNativeKeyboardFocus(bool focused)
@@ -274,7 +381,8 @@ void SecretEntry::keyPressEvent(QKeyEvent *event)
 
 bool SecretEntry::bindNativeInput()
 {
-    if (QThread::currentThread() != thread() || nativeInputBound_ || accepting_ || responding_)
+    if (QThread::currentThread() != thread() || nativeInputBound_ || accepting_ || prepared_ ||
+        responding_)
         return false;
     nativeInputBound_ = true;
     return true;
@@ -302,8 +410,23 @@ bool SecretEntry::handleCommand(int key)
         if (key == Qt::Key_Escape || key == Qt::Key_Tab || key == Qt::Key_Backtab) {
             cancelFromInteraction();
         } else if (key == Qt::Key_Up || key == Qt::Key_Down) {
+            if (identityPresentationGated_ &&
+                preparationToken_ == std::numeric_limits<quint64>::max()) {
+                cancelFromInteraction();
+                return true;
+            }
             const auto count = static_cast<int>(identityChoices_.size());
             identityIndex_ = (identityIndex_ + count + (key == Qt::Key_Up ? -1 : 1)) % count;
+            if (identityPresentationGated_) {
+                accepting_ = false;
+                prepared_ = true;
+                const auto token = ++preparationToken_;
+                // Preserve the original preparation BOOTTIME/timer window.
+                showIdentityChoice();
+                if (prepared_ && identityPresentationGated_ && token == preparationToken_)
+                    Q_EMIT identityPresentationRequested(token);
+                return true;
+            }
             showIdentityChoice();
         } else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
             // The native authentication owner must revalidate this candidate,
@@ -349,7 +472,7 @@ void SecretEntry::keyReleaseEvent(QKeyEvent *event)
 
 void SecretEntry::mousePressEvent(QMouseEvent *event)
 {
-    if (accepting_ && !nativeInputBound_)
+    if ((accepting_ || prepared_) && !nativeInputBound_)
         forceActiveFocus(Qt::MouseFocusReason);
     event->accept();
 }

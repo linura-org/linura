@@ -5,6 +5,7 @@ from __future__ import annotations
 import configparser
 import fnmatch
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -25,6 +26,209 @@ def unit(name: str) -> configparser.ConfigParser:
 
 
 class S17DeploymentTests(unittest.TestCase):
+    def test_secure_compositor_entry_assets_and_installer_refuse_arguments(self):
+        for source, destination in (
+            (
+                "packaging/hyprland-display/install-secure-entry.sh",
+                "usr/lib/linura/linura-hyprland-install-secure-entry",
+            ),
+            (
+                "packaging/sysusers.d/linura-display-entry.conf",
+                "usr/lib/sysusers.d/linura-display-entry.conf",
+            ),
+        ):
+            self.assertEqual(image.RUNTIME_ASSETS[ROOT / source], destination)
+        installer = ROOT / "packaging/hyprland-display/install-secure-entry.sh"
+        result = subprocess.run(
+            ["bash", str(installer), "unexpected-argument"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 78)
+        self.assertEqual(result.stdout, b"")
+        self.assertEqual(result.stderr, b"")
+
+    def test_failed_numeric_group_installation_leaves_setgid_disabled(self):
+        # Exercise only the fixed terminal transition on a non-executable temp
+        # fixture. No root guard, account database or installed image is changed.
+        source = (
+            ROOT / "packaging/hyprland-display/install-secure-entry.sh"
+        ).read_text()
+        terminal = source[source.index("# This group owns no Linura state") :]
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            image = parent / "image"
+            image.write_bytes(b"fixture only\n")
+            image.chmod(0o2755)
+            recorded = parent / "group-argument"
+            reject = parent / "reject-chgrp"
+            reject.write_text(
+                "#!/bin/bash\nprintf '%s' \"$2\" > "
+                + shlex.quote(str(recorded))
+                + "\nexit 78\n"
+            )
+            reject.chmod(0o755)
+            terminal = terminal.replace("/usr/bin/chgrp", shlex.quote(str(reject)))
+            script = (
+                "set -euo pipefail\nentry_gid=12345\nimage="
+                + shlex.quote(str(image))
+                + "\n"
+                + terminal
+            )
+            result = subprocess.run(
+                ["bash", "-c", script], capture_output=True, timeout=5, check=False
+            )
+            self.assertEqual(result.returncode, 78)
+            self.assertEqual(recorded.read_text(), "+12345")
+            self.assertEqual(image.stat().st_mode & 0o7777, 0o755)
+
+    def test_package_entry_group_parsers_reject_shared_membership_and_unknown_identity(
+        self,
+    ):
+        source = (
+            ROOT / "packaging/hyprland-display/install-secure-entry.sh"
+        ).read_text()
+        group = source.split("entry_gid=$(/usr/bin/awk -F: '", 1)[1].split(
+            "' /etc/group)", 1
+        )[0]
+        primary = source.split('/usr/bin/awk -F: -v entry_gid="$entry_gid" \'', 1)[
+            1
+        ].split("' /etc/passwd", 1)[0]
+        good = "root:x:0:\nlinura-display-entry:x:991:\nother:x:992:user\n"
+        for value, accepted in (
+            (good, True),
+            ("", False),
+            (good.replace(":991:", ":0:"), False),
+            (good.replace(":991:", ":0991:"), False),
+            (good.replace(":991:", ":4294967295:"), False),
+            (good.replace(":991:", ":991:user"), False),
+            (good + "alias:x:991:\n", False),
+            (good + "linura-display-entry:x:993:\n", False),
+            (good + "malformed\n", False),
+        ):
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    ["/usr/bin/awk", "-F:", group],
+                    input=value,
+                    text=True,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0 if accepted else 78)
+                if accepted:
+                    self.assertEqual(result.stdout, "991\n")
+        for value, accepted in (
+            ("root:x:0:0::/:/bin/bash\nuser:x:1000:1000::/:/bin/bash\n", True),
+            ("user:x:1000:991::/:/bin/bash\n", False),
+            ("user:x:1000:0991::/:/bin/bash\n", False),
+            ("user:x:1000:4294967296::/:/bin/bash\n", False),
+            ("malformed\n", False),
+        ):
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    ["/usr/bin/awk", "-F:", "-v", "entry_gid=991", primary],
+                    input=value,
+                    text=True,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0 if accepted else 78)
+
+    def test_original_display_protection_has_independent_fixed_supervision(self):
+        protection = unit("linura-display-protection.service")
+        service = protection["Service"]
+        self.assertEqual(service["BusName"], "org.linura.DisplayProtection1")
+        self.assertEqual(
+            service["ExecStart"],
+            "/usr/lib/linura/linura-executor-session --display-protection",
+        )
+        executor = unit("linura-executor-session.service")
+        for key in (
+            "StateDirectory",
+            "StateDirectoryMode",
+            "NoNewPrivileges",
+            "PrivateDevices",
+            "ProtectSystem",
+            "RestrictAddressFamilies",
+            "AmbientCapabilities",
+            "LimitCORE",
+        ):
+            self.assertEqual(service[key], executor["Service"][key], key)
+        # Nondumpable compositors require this one capability for the guard's
+        # authenticated, fixed-image read. The mutating executor stays cap-free.
+        self.assertEqual(service["CapabilityBoundingSet"], "CAP_SYS_PTRACE")
+        self.assertEqual(executor["Service"]["CapabilityBoundingSet"], "")
+        self.assertEqual(service["AmbientCapabilities"], "")
+        for dependency in ("PartOf", "BindsTo", "Requires", "After"):
+            self.assertNotIn(
+                "linura-executor-session.service",
+                protection["Unit"].get(dependency, ""),
+            )
+        self.assertIn("linura-display-protection.service", executor["Unit"]["Wants"])
+        for relative, destination in (
+            (
+                "packaging/systemd/system/linura-display-protection.service",
+                "usr/lib/systemd/system/linura-display-protection.service",
+            ),
+            (
+                "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf",
+                "usr/share/dbus-1/system.d/org.linura.DisplayProtection1.conf",
+            ),
+            (
+                "interfaces/dbus/org.linura.DisplayProtection1.xml",
+                "usr/share/dbus-1/interfaces/org.linura.DisplayProtection1.xml",
+            ),
+        ):
+            self.assertEqual(image.RUNTIME_ASSETS[ROOT / relative], destination)
+        policy = ET.parse(
+            ROOT / "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf"
+        ).getroot()
+        self.assertIsNotNone(
+            policy.find(
+                "policy[@context='default']/deny[@send_destination='org.linura.DisplayProtection1']"
+            )
+        )
+        self.assertEqual(
+            [p.get("user") for p in policy.findall("policy[@user]")],
+            ["linura-authority", "root"],
+        )
+        authority = policy.find("policy[@user='linura-authority']")
+        self.assertIsNotNone(authority)
+        assert authority is not None
+        self.assertEqual(
+            [dict(rule.attrib) for rule in authority],
+            [
+                {
+                    "send_destination": "org.linura.DisplayProtection1",
+                    "send_interface": "org.linura.DisplayProtection1",
+                    "send_member": "ReadOriginal",
+                },
+                {
+                    "send_destination": "org.linura.DisplayProtection1",
+                    "send_interface": "org.linura.DisplayProtection1",
+                    "send_member": "ReadFinalization",
+                },
+            ],
+        )
+
+    def test_display_kernel_witness_adds_only_local_read_only_observation(self):
+        service = unit("linura-executor-session.service")["Service"]
+        self.assertEqual(service["RestrictAddressFamilies"], "AF_UNIX AF_NETLINK")
+        self.assertEqual(service["PrivateDevices"], "yes")
+        self.assertEqual(service["ProtectKernelTunables"], "yes")
+        self.assertEqual(service["CapabilityBoundingSet"], "")
+        self.assertEqual(service["AmbientCapabilities"], "")
+        self.assertEqual(service["NoNewPrivileges"], "yes")
+        self.assertEqual(service["ProtectSystem"], "strict")
+        self.assertEqual(service["StateDirectory"], "linura/display-recovery")
+        self.assertEqual(service["StateDirectoryMode"], "0700")
+        for setting in ("DeviceAllow", "BindPaths", "ReadWritePaths", "PrivateNetwork"):
+            self.assertNotIn(setting, service)
+
     def test_native_sleep_gate_is_fixed_fail_closed_and_staged_with_runtime(self):
         relative = "systemd-suspend.service.d/50-linura-protective-lock.conf"
         drop_in = unit(relative)

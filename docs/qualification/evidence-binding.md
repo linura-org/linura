@@ -115,3 +115,11 @@ checks descriptor identity before and after the read, and then confirms the
 bundle path still names that same inode. Symlink swaps, hard-link aliases, path
 replacement, and concurrent mutation therefore fail closed instead of creating
 a check-then-open evidence gap.
+
+The v0.6 managed-lifecycle lane binds its reviewed fault-matrix test inventory as
+an exact-source repository artifact. Independent admission requires every named
+case exactly once, the complete zero-failure/zero-ignored summary, and a separate
+run of the original eleven cases. Source-inventory regression checks reject test
+additions or removals without corresponding reviewed guest and verifier updates.
+S21 component fixtures in that matrix remain simulations, not native display
+qualification.

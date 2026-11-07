@@ -1,0 +1,212 @@
+#include "native_display_startup.h"
+#include "native_display_startup_reply.h"
+#include "native_display_connection.h"
+#include "native_wayland_lock.h"
+#include "peer_guard.h"
+#include "session_bootstrap.h"
+#include "linura-display-integration-build.h"
+
+#include <QCryptographicHash>
+#include <QDBusArgument>
+#include <QDBusMetaType>
+#include <QDBusUnixFileDescriptor>
+#include <QElapsedTimer>
+#include <array>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+namespace Linura::SecurityOwner::StartupDetail {
+struct Transfer final
+{
+    QString lock;
+    quint32 pid = 0;
+    QString seat, compositor, integration, binary;
+};
+QDBusArgument &operator<<(QDBusArgument &wire, const Transfer &value)
+{
+    wire.beginStructure();
+    wire << value.lock << value.pid << value.seat << value.compositor << value.integration
+         << value.binary;
+    wire.endStructure();
+    return wire;
+}
+const QDBusArgument &operator>>(const QDBusArgument &wire, Transfer &value)
+{
+    wire.beginStructure();
+    wire >> value.lock >> value.pid >> value.seat >> value.compositor >> value.integration >>
+        value.binary;
+    wire.endStructure();
+    return wire;
+}
+} // namespace Linura::SecurityOwner::StartupDetail
+Q_DECLARE_METATYPE(Linura::SecurityOwner::StartupDetail::Transfer)
+
+namespace Linura::SecurityOwner {
+namespace {
+template <std::size_t N> std::nullopt_t unavailableImage(const char (&stage)[N])
+{
+    // Fixed stage identifiers only. Never log proc paths, native identities,
+    // image bytes or an OS error that could contain caller-controlled text.
+    const auto written = write(STDERR_FILENO, stage, N - 1);
+    (void)written;
+    return std::nullopt;
+}
+template <std::size_t N> NativeDisplayStartupAdmission unavailableReply(const char (&stage)[N])
+{
+    const auto written = write(STDERR_FILENO, stage, N - 1);
+    (void)written;
+    return NativeDisplayStartupAdmission::GuardReply;
+}
+class Descriptor final
+{
+  public:
+    explicit Descriptor(int value) : value_(value) {}
+    ~Descriptor()
+    {
+        if (value_ >= 0)
+            close(value_);
+    }
+    Descriptor(const Descriptor &) = delete;
+    Descriptor &operator=(const Descriptor &) = delete;
+    int get() const
+    {
+        return value_;
+    }
+
+  private:
+    int value_;
+};
+std::optional<QString> installedNativeImage()
+{
+    // Comparison data only: the independent root guard checks the admitted
+    // compositor's actual executable. The compositor is deliberately
+    // nondumpable; this capability-free owner never inspects /proc/PID/exe.
+    Descriptor root(open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
+    if (root.get() < 0)
+        return unavailableImage("linura-security-owner: native-image/root-open\n");
+    Descriptor usr(openat(root.get(), "usr", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    Descriptor bin(usr.get() < 0
+                       ? -1
+                       : openat(usr.get(), "bin", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    for (const int directory : {root.get(), usr.get(), bin.get()}) {
+        struct stat info
+        {};
+        if (directory < 0 || fstat(directory, &info) != 0 || !S_ISDIR(info.st_mode) ||
+            info.st_uid != 0 || (info.st_mode & 0022) != 0)
+            return unavailableImage("linura-security-owner: native-image/installed-directory\n");
+    }
+    Descriptor installed(
+        openat(bin.get(), "Hyprland", O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
+    if (installed.get() < 0)
+        return unavailableImage("linura-security-owner: native-image/installed-open\n");
+    struct stat before
+    {};
+    if (fstat(installed.get(), &before) != 0 || !S_ISREG(before.st_mode) || before.st_uid != 0 ||
+        before.st_nlink != 1 || (before.st_mode & 04022) != 0 || (before.st_mode & S_ISGID) == 0 ||
+        before.st_gid == 0 || (before.st_mode & S_IXUSR) == 0 || before.st_size <= 0 ||
+        before.st_size > 512LL * 1024 * 1024)
+        return unavailableImage("linura-security-owner: native-image/installed-identity\n");
+    QElapsedTimer budget;
+    budget.start();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    std::array<char, 65536> bytes{};
+    off_t consumed = 0;
+    for (;;) {
+        const ssize_t size = read(installed.get(), bytes.data(), bytes.size());
+        if (size < 0)
+            return unavailableImage("linura-security-owner: native-image/read\n");
+        if (budget.elapsed() >= 1000)
+            return unavailableImage("linura-security-owner: native-image/deadline\n");
+        if (size == 0)
+            break;
+        consumed += size;
+        if (consumed > before.st_size)
+            return unavailableImage("linura-security-owner: native-image/size\n");
+        hash.addData(QByteArrayView(bytes.data(), size));
+    }
+    struct stat after
+    {};
+    if (consumed != before.st_size || fstat(installed.get(), &after) != 0 ||
+        after.st_dev != before.st_dev || after.st_ino != before.st_ino ||
+        after.st_mode != before.st_mode || after.st_uid != before.st_uid ||
+        after.st_gid != before.st_gid || after.st_nlink != before.st_nlink ||
+        after.st_size != before.st_size || after.st_mtim.tv_sec != before.st_mtim.tv_sec ||
+        after.st_mtim.tv_nsec != before.st_mtim.tv_nsec ||
+        after.st_ctim.tv_sec != before.st_ctim.tv_sec ||
+        after.st_ctim.tv_nsec != before.st_ctim.tv_nsec)
+        return unavailableImage("linura-security-owner: native-image/changed\n");
+    return QString::fromLatin1(hash.result().toHex());
+}
+} // namespace
+
+NativeDisplayStartupAdmission admitNativeDisplayStartup(PeerGuard &peers,
+                                                        const NativeSessionBinding &binding,
+                                                        NativeWaylandLock &backend)
+{
+    if (!backend.displayStartupRequired())
+        return NativeDisplayStartupAdmission::Ready; // Preserve S17 on a compositor that never
+                                                     // advertised S21.
+    const auto sample = backend.displayStartupSample();
+    if (!sample)
+        return NativeDisplayStartupAdmission::NativeSample;
+    if (inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
+        return NativeDisplayStartupAdmission::Session;
+    if (sample->startupPhase != 0)
+        return NativeDisplayStartupAdmission::Ready; // Observe existing admission/loss; never
+                                                     // replace its lease.
+    const auto image = installedNativeImage();
+    if (!image)
+        return NativeDisplayStartupAdmission::NativeImage;
+    const auto guard = peers.namedPeer(NativePeerPurpose::DisplayProtection);
+    if (!guard)
+        return NativeDisplayStartupAdmission::OriginalGuard;
+    qDBusRegisterMetaType<StartupDetail::Transfer>();
+    const StartupDetail::Transfer transfer{binding.lock.resource,
+                                           binding.compositorPid,
+                                           binding.seat,
+                                           sample->compositor,
+                                           QLatin1String(HyprlandDisplay::IntegrationSourceDigest),
+                                           *image};
+    auto request = QDBusMessage::createMethodCall(
+        guard->uniqueOwner, QStringLiteral("/org/linura/DisplayProtection1"),
+        QStringLiteral("org.linura.DisplayProtection1"), QStringLiteral("NativeStartup"));
+    request.setArguments({QVariant::fromValue(transfer)});
+    const auto reply = peers.nativeConnection().call(request, QDBus::Block, 2000);
+    if (reply.type() != QDBusMessage::ReplyMessage) {
+        // Classify fixed protocol errors only. Never print the remote message,
+        // unique name, signature, arguments or caller-controlled error text.
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.AccessDenied"))
+            return unavailableReply("linura-security-owner: startup-reply/access-denied\n");
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.InvalidArgs"))
+            return unavailableReply("linura-security-owner: startup-reply/invalid-arguments\n");
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.Failed"))
+            return unavailableReply("linura-security-owner: startup-reply/service-refused\n");
+        if (reply.errorName() == QLatin1String("org.freedesktop.DBus.Error.NoReply"))
+            return unavailableReply("linura-security-owner: startup-reply/no-reply\n");
+        return unavailableReply("linura-security-owner: startup-reply/other-error\n");
+    }
+    switch (inspectNativeDisplayStartupReply(reply, *guard)) {
+    case NativeDisplayStartupReplyFault::None:
+        break;
+    case NativeDisplayStartupReplyFault::Sender:
+        return unavailableReply("linura-security-owner: startup-reply/sender\n");
+    case NativeDisplayStartupReplyFault::Signature:
+        return unavailableReply("linura-security-owner: startup-reply/signature\n");
+    case NativeDisplayStartupReplyFault::ArgumentTypes:
+        return unavailableReply("linura-security-owner: startup-reply/argument-types\n");
+    case NativeDisplayStartupReplyFault::KernelPeer:
+        return NativeDisplayStartupAdmission::KernelPeer;
+    }
+    if (!peers.stillCurrent(NativePeerPurpose::DisplayProtection, *guard))
+        return NativeDisplayStartupAdmission::GuardChanged;
+    if (inspectNativeSession(peers.nativeConnection(), backend.actualDisplayFd()) != binding)
+        return NativeDisplayStartupAdmission::SessionChanged;
+    const auto lease = reply.arguments()[0].value<QDBusUnixFileDescriptor>();
+    if (!backend.admitDisplayStartup(lease.fileDescriptor(), reply.arguments()[1].toBool(),
+                                     guard->pid, sample->compositor))
+        return NativeDisplayStartupAdmission::NativeTransfer;
+    return NativeDisplayStartupAdmission::Ready;
+}
+} // namespace Linura::SecurityOwner

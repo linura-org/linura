@@ -220,6 +220,347 @@ For Experimental D-Bus changes, these must remain coherent in the same candidate
 
 A live method not represented in canonical XML, or XML that does not match live signatures, is contract drift and fails qualification rather than being explained away as Experimental flexibility.
 
+The private Experimental `SecurityOwner1.ObserveDisplay` method is a read-only
+native display probe, separate from `ObserveLock`. Its `(ssstssb)` structure binds
+the exact native lock resource, compositor connection generation, seat,
+suspend-inclusive sample time, bounded typed topology JSON, bounded native
+monitor metadata and settled independently observed secure state. The Linux
+adapter retains the original two-second probe deadline and projects canonical
+`display.outputs.observe` and `session.display-coverage.observe` evidence.
+The larger reply cap applies only to this exact private method for supervised
+Control; existing methods and error replies retain their previous bounds.
+Unknown schemas, incomplete inventories and mismatched independent facts fail
+closed. This method creates no output configuration or execution authority.
+
+The public Experimental display contract adds `BeginDisplayLayout`,
+`GetDisplayLayoutStatus`, `ConfirmDisplayLayout` and `RevertDisplayLayout` on
+Authority1. The begin request contains only a bounded operation label, complete
+`LNDI:1` intent and semantic reason. The transport derives the principal and
+rejects a foreign-session intent; clients cannot choose policy, trusted risk,
+executor handles or a prepared plan. The single `(sssst)` receipt binds request,
+transaction, topology, closed lifecycle state and the original confirmation
+deadline. Unknown states, substituted requests and different wire shapes fail
+client decoding. Pending, restored and confirmed remain distinct; historical
+reports never assert current native layout or protection. Compositions without
+the complete native admission/execution/recovery ports explicitly refuse these
+methods. The current production composition remains unsupported; publishing the
+contract is not activation or S21-2 completion.
+
+The separate Experimental `GetOwnDisplaySnapshot` is an `AuthoritativeQuery`
+with no input arguments. Its `(sstta(ttba(uuu)b))` report carries the lock
+resource, complete canonical layout, original acquisition time/validity and
+ordered output capability rows (handle, generation, disable capability, exact
+mode tuples, power state). Control binds the native sample to the caller's
+independent active local logind epoch/seat; the client validates the closed
+shape, complete inventory and original expiry. Only this method has a 64 KiB
+client reply budget; existing replies retain their 16 KiB limit. Discovery may
+report no powered outputs and grants no mutation, coverage or approval authority.
+
+The owner display projection uses private schema 4, binding the exact native
+thousandth scale and its IEEE float bits to the independent wlr 24.8 projection,
+with generation-bound ownership/identity digests and actual DRM device/connector
+comparison data. Non-DRM outputs remain read-only for mutation qualification.
+The pinned compositor's UUID/output lifetimes replace owner-generated display
+identities. A missing/mismatched live source integration or inconsistent complete
+inventory is unsupported. No schema-1 compatibility path supplies authority.
+
+The separate private `ObservePreparedDisplay` method admits only the supervised
+session executor and returns `((ssstssb)ss)`: the same bounded sample, a
+length-framed SHA-256 content correlation and a separate private original-rule
+preimage. This replaces the Experimental shape coherently; no old-shape shim
+grants preparation. Rust checks the digest, typed complete
+native inventory, original baseline, available desired options, visible recovery
+output and independent per-output coverage before retaining this precondition.
+The digest excludes probe time because it correlates two distinct native probes;
+each conservative boot-clock deadline is checked independently. Neither a sample
+nor its digest is approval or prepared dispatch authority. Only this exact
+method/role pair receives the larger reply cap; errors and other endpoints retain
+their existing limits. This read-only addition does not activate a display write.
+
+The preimage has its own schema, exact upstream/integration identity, complete
+native output/kernel bindings, original owned-rule bytes and prior overlays.
+Private preimage schema 2 now uses `LNRL:2`: exact native selection index/order,
+underlying and effective `LNDR:2` owned rules, explicit source kind (no wlr,
+actual live wlr client or retained restored projection), committed fields and
+the original integer refresh. A restored projection binds its original checkpoint
+digest and never claims a live historical client. Fresh receivers/reservations
+require version 2. Stored `LNRL:1` bytes retain their exact original interpretation
+and bytes: its wlr flag means actual live-client presence, never a restored
+projection. Historical reading cannot promote it to a new current observation or
+reservation. Schema-1 rule-only durable preimages also retain their original
+meaning and cannot qualify a complete new restoration observation.
+The outer `LNRJ:1` framing and all existing byte limits remain unchanged.
+Rust independently validates its canonical rule encoding and matches every row
+against the sampled topology's hashes/ownership before retention. It stays out
+of ordinary observations. The root executor reserves an immutable private
+`LNRJ:1` checkpoint before native apply; file and directory durability must both
+succeed. Storage work consumes the original probe/confirmation clocks, followed
+by fresh revalidation. No stored bytes, digest or successful sync grants
+restoration authority. Independent continuity, replacement recovery, terminal
+verification and production activation remain incomplete.
+
+`SecurityOwner1.ObserveDisplayAttempt` is a separate read-only Control probe.
+Its `(sssst)` query carries the retained canonical intent and exact native
+transaction/effect/dispatch/deadline correlation. The `(sssttub)` response binds
+the current lock and topology, original transaction/deadline, conservative
+BOOTTIME sample, closed native phase and settled lock state. Discovery, peer and
+boot revalidation and the reply share the original two-second deadline. This
+small reply retains the existing reply cap. No configure/keep/restore request is
+sent, and reconnecting acquires no continuation right. The Rust adapter projects
+only `display.layout-attempt.observe` into the canonical envelope; native phase
+is neither independent layout verification, protected approval nor permission to
+replay. Production dispatch and full recovery remain unqualified and unsupported.
+
+The private Experimental `SecurityOwner1` display handshake additionally exposes
+`ArmDisplayApproval`, `DisplayApprovalReady`, `ConsumeDisplayApproval` and
+`CancelDisplayApproval`. Each takes the original `(sssssssu)` comparison scope,
+complete material, bounded reason and original wall/BOOTTIME deadlines as `(sssssssu)sstt`, and
+returns one boolean. Purpose 8 admits Apply; distinct purpose 11 admits a fresh
+original-restoration review using complete bounded `LNRI:1` material. The latter
+requires the separate non-retained administrator action
+`org.linura.authority.restore-original-display-layout`. Legacy S17 methods
+continue rejecting both display scopes. A retired readiness conversation returns the
+fixed unavailable error rather than indefinite pending. Cancellation compares
+the exact scope even after its deadline and cannot adopt another native owner or
+cancel a newer conversation. These private methods create neither public mutation
+support nor an executor credential. Keep/Revert must continue a retained original
+transaction; they cannot enter through this initial display handshake. The native
+protected protocol uses distinct Recovery purpose 3, with its original absolute
+wall/BOOTTIME review bounds. Only the replacement's continuously healthy original
+Root lease in recovery phase permits that private scene. Ordinary rendering,
+scanout, lock release and Apply redemption stay fenced. Protected approval is
+not a prepared restoration dispatch, terminal proof or release permission.
+
+The private Experimental `DisplayProtection1.ReserveRestoration` takes one
+bounded 16 KiB `ay` reservation, the exact absolute dispatch deadline (`t`) and
+original native sample BOOTTIME (`t`), and returns one original-root-created Unix
+endpoint (`h`). Runtime admission requires the exact supervised executor; Control
+retains member-specific read access, including the bounded `ReadFinalization`
+query described below. The reservation binds a
+fresh execution binding and complete `LNRI:1` material, not an old Apply/Keep
+approval. Typed `LNRR:1` files share the existing private quota and strict history
+checks; original `LNRJ:1` and `LNRR:1` files are unchanged. The unconsumed
+Experimental `LNRG:1` transfer is replaced by `LNRG:2`, containing the exact
+reservation and a native-only projection of the same strictly validated original
+source, the exact dispatch deadline and original sample BOOTTIME. A later native
+sample cannot refresh that original admission window. Complete framing and a
+final fresh-check marker precede fixed-size,
+strictly increasing `LNRV:1` witness probes on that original Root endpoint. Both
+the Root worker count and transfer/probe budgets are bounded. Serialized bytes,
+old transfers or a replacement service cannot reconstruct the original endpoint.
+The native recipient requires its kernel Root peer to match the continuously
+held startup lease; input/render lifetime checks never block on a witness query.
+
+Control's nonterminal restoration handoff uses canonical purpose-bound approval,
+fresh prepare and one-use durable CAS, and reads back request/dispatch history
+before calling its sealed complete-material restoration port. Repeated requests
+never transparently dispatch again. No reply verifies/commits restoration or
+releases a fence. Distinct private `Executor.Session1.RestoreOriginalDisplayLayout`
+and `SecurityOwner1.RestoreOriginalDisplay` methods carry the fresh full material,
+execution/sample bindings and one-use Root endpoint through consumed Recovery
+redemption to the compositor's `restore_original` request. All in-repository
+introspection, generated protocol clients and denial fixtures change together.
+The native writer restores only owned source fields and exact prior overlays;
+partial faults remain latched and every recovery fence remains held. Independent
+terminal composition and native qualification remain unfinished; these private
+changes create no public mutation support or qualification claim.
+
+Original-protection observation schema 2 additionally carries a complete map of
+expected restored source digests derived from the same immutable original
+checkpoint; it does not rewrite durable checkpoint history. The optional
+`original_restoration_presentation` event on the private display snapshot and
+supervised-Control-only `SecurityOwner1.ObserveOriginalDisplayPresentation` method
+expose a bounded post-write KMS/frame sample. The Linux adapter projects that
+sample into the canonical `display.original-presentation.observe` envelope for
+the exact recovery resource, including its complete output inventory and exact
+checkpoint/transaction/effect/dispatch/source bindings. All in-repository native,
+Rust, generated-protocol and introspection consumers change together. These
+Experimental observations are neither execution credentials nor terminal release
+permission. The observe-only Control reconciliation API commits the restoration
+only after the same fresh canonical proof, including after restart; linked
+original retirement and native/Root finalization remain separate required work.
+
+The internal transaction signer adds a distinct terminal-only Verified compensation
+resolution for the replacement-recovery crash gap. It preserves ordinary
+Indeterminate-only recovery and all existing persistence formats. New SQLite
+history explicitly uses `verified-compensated-v1`, retaining the prior verified
+provenance while closing authority as RecoveryBlocked. Old readers reject the new
+audit kind instead of misinterpreting it. No schema migration, historical event
+rewrite, desired-state commit, public method or executor credential is introduced.
+The linked Control/native terminal workflow remains required before activation.
+
+The internal `retire_original_display_restoration` bookkeeping API joins the
+restoration commit to its original authority through an immutable purpose-versioned
+`linura.display.original-restoration-link.v1` journal record. It binds exact
+principal, requests, snapshots, dispatches and checkpoint, preserves original
+non-success/provenance and requires fresh canonical proof again before its CAS or
+restart repair. Its returned receipt is historical correlation, with no public
+D-Bus/SDK mutation activation or native/Root release authority. This additional
+opaque journal payload does not reinterpret prior phase records or checkpoints.
+
+The separate private Experimental `LNRF:1` material preserves the complete original
+`LNRI:1` bytes and adds bounded terminal comparison bindings. Its purpose-separated
+`finalize-original-display-restoration` SDK descriptor and
+`linura.native-display.finalization-reservation.v1` adapter codec accept neither
+old Apply nor restoration bindings. Complete material and its digest are
+comparison data, not execution authority; they change no durable record.
+
+The owner has a bounded private `LNRF:1` reader with a shared canonical core
+fixture. It preserves complete nested restoration bytes, rejects original-purpose
+correlations and foreign login epochs, and compares the restored layout/source
+guard, exact current lock and post-write epoch against supplied current native
+facts. Public aggregate encoding is bounded before allocation. This comparison
+does not attest Root continuity or physical frames, arm a protected purpose or
+release any protection. Existing Apply/Recovery scope parsers refuse these bytes.
+
+The private Experimental protected Wayland interaction adds `begin_finalization`
+with a scope digest (`s`), immutable sealed material (`h`) and the two absolute
+clock bounds (four `u` values). It operates only on the actual retained original
+Recovery scene. Its separate compositor presentation purpose is 4; the manager's
+standalone begin still rejects it. Native code compares complete material to the
+retained actual Root source, restoration transaction/dispatch, current lock,
+restored native source guard and post-write epoch before fresh all-output review.
+Material is at most 14 KiB, must be an immutable sealed unnamed file owned by the
+native UID, and is consumed/closed on denial as well as success. The bounded file
+transport avoids growing Wayland's ordinary connection buffer. No mutable file,
+pipe, socket or sender-selected stream offset is read. Consumed review retires
+owner content/input and requires fresh native safety frames before independent
+post-review verification. The transition releases no fence, renews no restoration
+execution window. Separate native terminal authentication is implemented;
+complete prepared Root/native finalization remains unavailable. Old Apply/Keep/Revert/Recovery purposes retain their
+meaning and bounds; there is no Stable compatibility shim.
+
+The same private interaction adds `quiesce_finalization` with one original-Root
+descriptor, bounded transaction/effect/dispatch correlation, absolute wall deadline
+and original BOOTTIME sample. It can consume only the actual terminal scene after
+fresh terminal review/PAM consumption. The native reader accepts only `LNFT:1`
+from the original live Root peer with exact complete reservation/material and
+clocks. Actual restored source/epoch and fresh KMS opaque safety-frame completion
+surround the one-use native quiescence acknowledgement. All original and current
+channel protection stays held; replay, channel/source/clock/input loss refuses.
+Status is still nonterminal. The protected-owner/prepared handoff below connects
+this request; qualified retirement/release remain unavailable.
+
+The private Experimental executor method `QuiesceOriginalDisplayFinalization`
+takes complete `LNRF:1`, the unchanged absolute dispatch deadline and all existing
+prepared transaction/generation/state/authority-use/effect/dispatch bindings.
+Its distinct service action defaults to denial and permits only the supervised
+Control service. The adapter samples the already-restored desired layout and
+exact restored source guard; Apply and original restoration still require their
+pre-effect baseline. It reserves exactly one Root channel, rechecks the same
+owner and original two-second sample, and transfers the descriptor to the actual
+supervised protected owner through its same-named private method. That method
+accepts the existing `(sssst)` query, sample digest, BOOTTIME sample and descriptor.
+Only its consumed terminal purpose can redeem the exact canonical transaction,
+complete material, current epoch and retired input generation once. Phase 2 is
+quiescence acknowledgement only; lost replies never trigger retry or completion.
+
+The internal read-only `inspect_original_display_finalization` API returns an
+expiring material/evidence report only after exact authenticated linked retirement
+and a new independent canonical restoration proof. It reads history again after
+probing, never repairs or appends history, and cannot issue a release credential.
+Its initial same-lock scope refuses owner/generation changes. There is no new
+public D-Bus/SDK method, production mutation support or native qualification claim.
+
+The private Experimental `DisplayProtection1.ReadFinalization` takes a recovery
+scope (`s`) and returns the complete immutable restoration reservation (`ay`),
+closed phase (`u`) and optional terminal reservation (`ay`). It admits only the
+freshly attested supervised Control process, shares the existing original-read
+worker limit, and uses the ordinary 64 KiB reply limit and original two-second
+probe budget. The current Root producer returns phase 0 (`protected`) with empty
+terminal bytes, or phase 1 (`reserved`) only when this Root invocation's retained
+reservation matches the exact durable terminal record; phase 2 also requires the
+separate actual-native channel described below. It checks live original
+witnesses and replacement recovery admission before and after strict history
+readback. The terminal scan requires the same complete parent restoration under
+its directory lock. Unknown, duplicate, corrupt or unsafe history refuses without
+repair or deletion.
+
+The private Experimental `DisplayProtection1.ReserveFinalization` accepts the
+complete bounded terminal reservation and unchanged absolute dispatch/sample
+clocks (`aytt`), returning a private native channel (`h`). It admits only
+the freshly attested supervised executor and shares the restoration worker and
+transfer limits. The complete nested restoration, parent dispatch, canonical
+UID/request transaction and exact current lock must match Root's actual retained
+restoration. An immutable `LNRT:1` record uses the existing 256-record private
+quota; `LNRJ:1` and `LNRR:1` retain their bytes and meaning. A bounded in-memory
+reservation is recorded before publication and retained after failed publication
+or readback. Missing storage cannot permit retry or ordinary startup. Existing
+restoration/current-seat ownership cannot be superseded by a fresh operation ID.
+The purpose-separated `LNFT:1` transfer contains the complete reservation and
+original clocks; its final marker requires a further fresh witness check. It
+shares the existing live-grant quota and two-second transfer budget. The channel
+accepts exactly one `LNFQ:1` message from the actual retained native process,
+then strictly increasing `LNFV:1` continuity probes. Every fragment requires
+kernel sender credentials matched to the original pidfd, immutable image and
+startup lease. Each fixed 48-byte message binds the SHA-256 of the complete
+reservation and shares one absolute one-second budget across authentication,
+verification and reply. Quiescence must occur inside the original dispatch/sample
+window. Later continuity cannot renew execution authority. Channel loss, failure
+or clock rollback permanently invalidates its reports without reopening ownership.
+No message retires history, releases protection or admits ordinary frames. The
+native consumer and prepared quiescence handoff require actual native qualification.
+
+The adapter emits the canonical `display.original-finalization.observe`
+`ObservationEnvelope`; full restoration/terminal codecs and unchanged nested
+restoration bytes and the complete actual-parent binding are mandatory for
+terminal phases. The Root mechanism can report phase 2 (`quiesced`) only after
+that actual-native channel transition while its original protection still holds.
+Native quiescence is integrated but unqualified. Retired and released-current
+have no current producer. A historical spent record cannot supply
+released-current admission.
+Control's inspection matches these new Root facts to actual authenticated history
+and joins the independent five-source proof without extending either expiry.
+The report includes the canonical restoration postcondition digest, not a permit.
+
+The separate internal `inspect_quiesced_original_display_finalization` query
+accepts only an actual retained terminal request reference. It authenticates its
+claimed complete intent, prepared/dispatched history and Indeterminate snapshot
+before probing. Root must report Quiesced with exactly that material, transaction,
+effect and dispatch; other phases refuse. The same independent five-source
+restoration join must reconstruct the unchanged terminal material. Root is queried
+again after that join, durable anchors are reread, and every original expiry is
+preserved. The returned report pairs restoration evidence with the actual terminal
+snapshot; it performs no approval, effect, retirement, release or commit.
+
+The internal `plan_original_display_finalization` API takes an operation ID,
+authenticated restoration request reference and semantic reason. A separate
+registered SecuritySensitive ManagedExternalEffect binds the single
+`finalize_original` desired-state key to `display.original-finalization.observe`.
+The desired value is the canonical `LNRF-SHA256:1` payload, with the existing
+4 KiB generic attribute and 64 KiB normalized request bounds unchanged. Complete
+bounded material is private context and must recompute that exact payload; the
+SDK descriptor-from-payload helper validates only comparison syntax and scope.
+Neither a client-authored digest nor raw material can establish the authenticated
+history context. Planning repeats all independent probes and durable readback,
+preserves provenance, returns a non-executable canonical plan and retires context
+on every exit. Generic preview cannot establish its private context.
+
+The internal `begin_original_display_finalization` API adds a separate typed
+terminal authorizer/challenge and one-use prepared port. The challenge carries the
+complete bounded material alongside its exact managed canonical digest binding;
+old restoration/Apply/Keep/Revert/unlock/power approval cannot substitute. Fresh
+history and all independent observations are reloaded after interaction, with
+unchanged intent semantics and original contributor expiries required. Nested
+observation IDs and later valid frame counters remain exact evidence in the
+observation binding; they do not become different human intent.
+
+The existing authenticated opaque journal retains complete material under
+`linura.display.original-finalization-material.v1` (16 KiB maximum). A separate
+`linura.display.original-finalization-owner.v1` record (1 KiB maximum) binds one
+restoration to its terminal request/digest/material. Existing formats, quotas and
+immutability remain unchanged. Exact readback of request/material/owner and
+reserved/dispatched phases is required before the sealed port; history, owner and
+the candidate's original freshness are checked again at handoff. Another operation
+ID requires qualified supersession, which this API does not implement.
+
+An existing prepared/dispatched request is observation-only, including after
+persistence failure, rejected or lost native replies. Its receipt is retained
+uncertainty, never independent completion or release authority. No native terminal
+purpose, production executor/native release endpoint, public D-Bus/SDK facade or
+production mutation support is activated by this Control component.
+Never-dispatched Prepared authority still becomes Aborted at startup under the
+qualified v0.6 recovery rule; this API refuses revival or redispatch.
 
 ### Session1 bounded transient-effect contract
 
@@ -232,3 +573,20 @@ A live method not represented in canonical XML, or XML that does not match live 
 - canonical ABI: `interfaces/dbus/org.linura.Session1.xml`.
 
 The first method, `SetAudioOutputVolume`, accepts only a caller request identity, an exact numeric PipeWire output-node ID, an integer percentage in the bounded 0–100 range and a bounded semantic reason. The transport authenticates the session-bus sender and requires the sender's Unix UID to equal the UID owning the service connection. It delegates to `linura_control::TransientEffectControl`; Session1 owns no risk downgrade, policy decision, executor permit or verification shortcut. The default-output alias remains discovery-only so a moving default cannot become mutation authority. The concrete provider adapter binds the numeric resource to pre-effect `object.serial` and `node.name` evidence, and WirePlumber resolves and mutates that exact object in one helper event-loop callback before Control independently re-observes the postcondition.
+
+The private native display approval purpose 12 is original-restoration finalization,
+with the `request:v010:display-finalization:` request namespace, bounded complete
+`LNRF:1` and `org.linura.authority.finalize-original-display-restoration` fresh
+`auth_admin` action. Apply/Keep/Revert/Recovery and S17 scopes cannot substitute.
+`NativeDisplayApprovalRequest::new_finalization` validates the current material
+principal and separate namespace while preserving both original review deadlines.
+The owner arms this purpose only by transitioning the actual held Recovery flow;
+its manager/standalone scene path rejects it. Control's distinct typed authorizer
+compares the complete material's recomputed canonical payload/resource before native
+review and returns only the exact challenge's approval. It has no executor handle.
+A spent original Recovery flow retains its native opaque/input/Root protection
+under fresh native status probes after its old write window expires; this does not
+renew that receipt or grant another effect. Current-source/Root witness loss or
+clock rollback remains terminal. Production Root/native finalization and public
+Authority1 display mutation remain unavailable until the remaining workflow and
+native acceptance are complete.

@@ -20,6 +20,17 @@ struct Identity {
     invocation: Vec<u8>,
 }
 
+type ExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
+
+fn live_launch(role: NativeSessionRole, image: &str, pid: u32, launches: &[ExecStart]) -> bool {
+    let arguments = match role {
+        NativeSessionRole::DisplayProtection => vec![image, "--display-protection"],
+        NativeSessionRole::Control | NativeSessionRole::Executor => vec![image],
+    };
+    matches!(launches, [(exe, argv, false, real, mono, 0, 0, launch_pid, 0, 0)]
+        if exe == image && argv == &arguments && *real != 0 && *mono != 0 && *launch_pid == pid)
+}
+
 /// Fixed supervised pre-start helper only. The anonymous connection acquires
 /// no executor/Control name and exposes no channel/effect handle to its caller.
 /// Control independently authenticates this process and exact systemd program.
@@ -58,6 +69,458 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    pub(crate) fn observe_original_display_finalization(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err("original finalization observation scope unavailable".into());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|e| e.to_string())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadFinalization",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayuay"
+        {
+            return Err("original finalization observation peer or signature differs".into());
+        }
+        // This reply remains within the ordinary 64KiB transport limit; no
+        // display-preimage size exception or another probe clock is introduced.
+        let (restoration, phase, terminal): (Vec<u8>, u32, Vec<u8>) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "original finalization observation reply is malformed")?;
+        let facts = crate::original_display_observer::finalization_facts(
+            scope,
+            &restoration,
+            phase,
+            &terminal,
+        )?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err(
+                "original finalization service changed; no admission reconstruction".into(),
+            );
+        }
+        let age = crate::owner::boot_ms()?
+            .checked_sub(began_boot)
+            .ok_or("original finalization observation clock regressed")?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0 || age >= 2000 || started.elapsed() >= Duration::from_secs(2) {
+            return Err("original finalization observation exceeded its original budget".into());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|e| e.to_string())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            )
+            .map_err(|e| e.to_string())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: now
+                .checked_sub(age)
+                .filter(|ms| *ms != 0)
+                .ok_or("original finalization wall-clock mapping underflow")?,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        linura_observation::DisplayOriginalFinalizationFacts::from_envelope(
+            &observation,
+            scope,
+            now,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(observation)
+    }
+
+    pub(crate) fn observe_original_display_protection(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err("original display protection observation scope unavailable".into());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|e| e.to_string())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadOriginal",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ay"
+        {
+            return Err("original display protection observation peer or signature differs".into());
+        }
+        let (payload,): (Vec<u8>,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "original checkpoint observation reply is malformed")?;
+        let facts =
+            crate::NativeDisplayRecoveryCheckpoint::original_protection_facts(&payload, scope)?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err("original protection service changed; no witness reacquisition".into());
+        }
+        let now_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        let age = now_boot
+            .checked_sub(began_boot)
+            .ok_or("original protection observation clock regressed")?;
+        if began_boot == 0 || age >= 2000 || started.elapsed() >= Duration::from_secs(2) {
+            return Err(
+                "original display protection observation exceeded its original budget".into(),
+            );
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|e| e.to_string())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
+            )
+            .map_err(|e| e.to_string())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: now
+                .checked_sub(age)
+                .filter(|ms| *ms != 0)
+                .ok_or("original protection wall-clock mapping underflow")?,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        linura_observation::DisplayOriginalProtectionFacts::from_envelope(&observation, scope, now)
+            .map_err(|e| e.to_string())?;
+        Ok(observation)
+    }
+    fn display_protection_call<B: serde::Serialize + zbus::zvariant::DynamicType>(
+        &self,
+        method: &str,
+        body: &B,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        let started = Instant::now();
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            method,
+            body,
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "b"
+        {
+            return Err("display protection peer or reply is unavailable".into());
+        }
+        let (verified,): (bool,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "display protection reply is malformed")?;
+        if !verified
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+        {
+            return Err("original display protection is unavailable; no retry".into());
+        }
+        Ok(())
+    }
+
+    pub fn begin_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
+        self.display_protection_call("Begin", &(dispatch.to_hex(),))
+    }
+
+    pub fn reserve_display_protection(
+        &self,
+        record: &crate::NativeDisplayRecoveryCheckpoint,
+    ) -> Result<(), String> {
+        self.display_protection_call("Reserve", &(record.canonical_bytes(),))
+    }
+
+    /// Reserve exactly once after Control's fresh prepared handoff. This
+    /// private endpoint remains adapter data; the native recipient must match
+    /// its kernel peer to the continuously retained original startup lease.
+    /// This API never retries an ambiguous call or reconstructs a lost grant.
+    pub fn reserve_display_restoration(
+        &self,
+        record: &crate::NativeDisplayRestorationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> Result<std::os::fd::OwnedFd, String> {
+        self.reserve_display_grant(
+            "ReserveRestoration",
+            &record.canonical_bytes(),
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
+        )
+    }
+
+    fn reserve_display_grant(
+        &self,
+        method: &'static str,
+        bytes: &[u8],
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> Result<std::os::fd::OwnedFd, String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        let started = Instant::now();
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            method,
+            &(bytes, dispatch_deadline_unix_ms, sampled_boot_ms),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "h"
+        {
+            return Err("original restoration grant peer or signature differs; no retry".into());
+        }
+        let (descriptor,): (zbus::zvariant::OwnedFd,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "original restoration grant is malformed; no retry")?;
+        let descriptor: std::os::fd::OwnedFd = descriptor.into();
+        let peer = rustix::net::sockopt::socket_peercred(&descriptor)
+            .map_err(|_| "original restoration grant has no authenticated kernel peer")?;
+        if peer.uid.as_raw() != 0
+            || peer.pid.as_raw_nonzero().get() as u32 != identity.pid
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+        {
+            return Err("original restoration grant service changed; no reconnection".into());
+        }
+        Ok(descriptor)
+    }
+
+    /// Root's exclusive durable terminal reservation and native-only channel.
+    /// The channel offers no retirement, release or ordinary admission.
+    /// Actual original protection remains mandatory; ambiguous calls never retry.
+    pub fn reserve_display_finalization(
+        &self,
+        record: &crate::NativeDisplayFinalizationReservation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> Result<std::os::fd::OwnedFd, String> {
+        self.reserve_display_grant(
+            "ReserveFinalization",
+            &record.canonical_bytes(),
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
+        )
+    }
+
+    /// A Control-only, exact-original Root handoff. Its caller must already
+    /// have durably retained its one-use terminal retirement preparation and
+    /// independently revalidated terminal quiescence. This adapter derives
+    /// native binding bytes from Root's OWN retained file, not reconstructed
+    /// approval or client-selected execution material. Neither RPC releases
+    /// native/S17/input/power fences.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_root_retired_held(
+        &self,
+        material: &str,
+        terminal_transaction: &str,
+        terminal_dispatch: &str,
+        control_state_version: u64,
+        control_binding: &str,
+        control_observation: &str,
+        expires_at_unix_ms: u64,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let now = crate::owner::unix_ms()?;
+        if now == 0 || now >= expires_at_unix_ms || expires_at_unix_ms - now > 2_000 {
+            return Err("Root retirement Control evidence is expired or malformed".into());
+        }
+        let original = linura_core::DisplayFinalizationMaterial::decode(material)
+            .map_err(|_| "Root retirement terminal material is invalid")?;
+        let scope = original.recovery_scope().map_err(|e| e.to_string())?;
+        let key = scope.resource_id().map_err(|e| e.to_string())?;
+        let binding = ComponentDigest::parse_hex(control_binding).map_err(|e| e.to_string())?;
+        let observation =
+            ComponentDigest::parse_hex(control_observation).map_err(|e| e.to_string())?;
+        if binding.to_hex() != control_binding || observation.to_hex() != control_observation {
+            return Err("Root retirement Control anchor is not canonical".into());
+        }
+        let started = Instant::now();
+        let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let read = |expected: u32| -> Result<
+            (
+                Vec<u8>,
+                Vec<u8>,
+                crate::NativeDisplayFinalizationReservation,
+            ),
+            String,
+        > {
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                "ReadFinalization",
+                &(key.as_str(),),
+                started,
+            )?;
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "ayuay"
+            {
+                return Err("Root retirement readback has another peer or format".into());
+            }
+            let (restoration, phase, terminal): (Vec<u8>, u32, Vec<u8>) = reply
+                .body()
+                .deserialize()
+                .map_err(|_| "Root retirement readback is malformed")?;
+            let retained = crate::NativeDisplayRestorationReservation::decode(&restoration)?;
+            let finalization = crate::NativeDisplayFinalizationReservation::decode(&terminal)?;
+            finalization.validate_restoration(&retained)?;
+            if phase != expected
+                || finalization.material() != material
+                || finalization.binding().transaction_id != terminal_transaction
+                || finalization.binding().dispatch_digest.to_hex() != terminal_dispatch
+                || retained
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|e| e.to_string())?
+                    != scope
+            {
+                return Err("Root retirement held-native original lineage differs".into());
+            }
+            Ok((restoration, terminal, finalization))
+        };
+        let (initial_restoration, initial_terminal, terminal) = read(2)?;
+        let preparation = crate::NativeDisplayRetirementPreparation::new(
+            &terminal,
+            control_state_version,
+            binding,
+            observation,
+        )?;
+        let bytes = preparation.canonical_bytes();
+        let admit = |method: &str| -> Result<(), String> {
+            if crate::owner::unix_ms()? >= expires_at_unix_ms {
+                return Err("Root retirement original Control evidence expired".into());
+            }
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                method,
+                &(bytes.as_slice(),),
+                started,
+            )?;
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "b"
+            {
+                return Err("Root retirement writer peer or reply differs; no retry".into());
+            }
+            let (accepted,): (bool,) = reply
+                .body()
+                .deserialize()
+                .map_err(|_| "Root retirement writer reply malformed; no retry")?;
+            if !accepted
+                || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            {
+                return Err("Root retirement live original service changed; no retry".into());
+            }
+            Ok(())
+        };
+        // Neither action can be retried after a failed or lost ACK. A failed
+        // second step permanently leaves a reserved, fenced preparation.
+        admit("PrepareRetirement")?;
+        admit("RetireHeld")?;
+        let (restoration, terminal, _) = read(3)?;
+        if restoration != initial_restoration
+            || terminal != initial_terminal
+            || crate::owner::unix_ms()? >= expires_at_unix_ms
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+        {
+            return Err("Root retirement post-publication lineage or freshness changed".into());
+        }
+        Ok(()) // Durable RootRetiredHeld only. No physical release.
+    }
+
+    pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
+        self.display_protection_call("Verify", &(dispatch.to_hex(),))
+    }
+
+    /// Continue the already durably reserved operation once. The supplied
+    /// digests correlate Control's retained decision; they grant no authority.
+    pub fn handoff_display_continuation(
+        &self,
+        continuation: &crate::NativeDisplayContinuation,
+    ) -> Result<u32, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        continuation.validate_at(crate::owner::unix_ms()?)?;
+        let started = Instant::now();
+        let identity = self.trusted_service(NativeSessionRole::Executor, started)?;
+        continuation.validate_at(crate::owner::unix_ms()?)?;
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "ContinueDisplayLayout",
+            &continuation.wire(),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "u"
+        {
+            return Err("display executor decision reply identity or signature differs".into());
+        }
+        let (phase,): (u32,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "display executor decision reply is malformed")?;
+        if self.trusted_service(NativeSessionRole::Executor, Instant::now())? != identity
+            || !(2..=6).contains(&phase)
+        {
+            return Err("display executor decision outcome is indeterminate; no retry".into());
+        }
+        Ok(phase)
+    }
+
     fn trusted_service(
         &self,
         role: NativeSessionRole,
@@ -76,6 +539,12 @@ impl NativeSessionChannel {
                 "/usr/lib/linura/linura-executor-session",
                 "root",
             ),
+            NativeSessionRole::DisplayProtection => (
+                "linura-display-protection.service",
+                "/usr/lib/systemd/system/linura-display-protection.service",
+                "/usr/lib/linura/linura-executor-session",
+                "root",
+            ),
         };
         let sender: String = self
             .bus_call("GetNameOwner", &(role.service(),), started)?
@@ -90,7 +559,7 @@ impl NativeSessionChannel {
         let uid: u32 = field(&credentials, "UnixUserID")?;
         let pid: u32 = field(&credentials, "ProcessID")?;
         let expected_uid = match role {
-            NativeSessionRole::Executor => 0,
+            NativeSessionRole::Executor | NativeSessionRole::DisplayProtection => 0,
             NativeSessionRole::Control => {
                 crate::account::local_service_uid(crate::account::LocalServiceAccount::Authority)?
             }
@@ -145,7 +614,6 @@ impl NativeSessionChannel {
         let service = get("org.freedesktop.systemd1.Service")?;
         let invocation: Vec<u8> = array(&facts, "InvocationID")?;
         let drop_ins: Vec<String> = array(&facts, "DropInPaths")?;
-        type ExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
         let launches: Vec<ExecStart> = array(&service, "ExecStart")?;
         if field::<u32>(&service, "MainPID")? != pid
             || field::<&str>(&service, "User")? != account
@@ -155,7 +623,7 @@ impl NativeSessionChannel {
             || field::<&str>(&facts, "SubState")? != "running"
             || invocation.len() != 16
             || invocation.iter().all(|b| *b == 0)
-            || !matches!(launches.as_slice(), [(exe, argv, false, real, mono, 0, 0, launch_pid, 0, 0)] if exe == image && argv == &[image] && *real != 0 && *mono != 0 && *launch_pid == pid)
+            || !live_launch(role, image, pid, &launches)
             || !crate::owner::immutable_file(std::path::Path::new(fragment), false)
             || !crate::owner::immutable_file(std::path::Path::new(image), true)
         {
@@ -194,6 +662,39 @@ impl NativeSessionChannel {
                 != sender
         {
             return Err("session executor caller is not the supervised Control owner".into());
+        }
+        Ok(())
+    }
+
+    /// The protection process accepts only the current independently supervised
+    /// session executor. Root UID or possession of a dispatch digest is not
+    /// sufficient. This admits a bounded mechanism, not a new effect path.
+    pub fn require_trusted_display_executor_sender(&self, sender: &str) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        if !crate::owner::unique_name(sender)
+            || self
+                .trusted_service(NativeSessionRole::Executor, Instant::now())?
+                .sender
+                != sender
+        {
+            return Err("display protection caller is not the supervised executor".into());
+        }
+        Ok(())
+    }
+
+    /// Read-only original-protection observation admits the exact supervised
+    /// Control invocation, never an arbitrary root or same-account process.
+    pub fn require_trusted_display_control_sender(&self, sender: &str) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        if !crate::owner::unique_name(sender)
+            || self
+                .trusted_service(NativeSessionRole::Control, Instant::now())?
+                .sender
+                != sender
+        {
+            return Err(
+                "original display observation requires the supervised Control owner".into(),
+            );
         }
         Ok(())
     }
@@ -263,6 +764,142 @@ impl NativeSessionChannel {
         self.decode_executor_outcome(&identity, reply, binding, Instant::now())
     }
 
+    /// Single prepared full-layout handoff. Neither this adapter nor the root
+    /// executor can manufacture a Control permit from the correlation binding.
+    /// Native strict validation preserves its own original two-second sample.
+    pub fn handoff_prepared_display(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_layout_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let identity = self.trusted_service(NativeSessionRole::Executor, Instant::now())?;
+        // Separate fixed mechanism budget, including root's service policy and
+        // one native probe/dispatch. It cannot extend the human deadline or the
+        // native sample's freshness. Fault/timeout never requests redelivery.
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "ApplyDisplayLayout",
+            &(
+                material,
+                deadline_unix_ms,
+                binding.transaction_id.as_str(),
+                binding.generation,
+                binding.state_version,
+                binding.authority_binding_digest.to_hex(),
+                binding.authority_use_digest.to_hex(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+                native_baseline_guard.to_hex(),
+            ),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+        {
+            return Err(
+                "prepared display executor result has a different authenticated sender".into(),
+            );
+        }
+        self.decode_executor_outcome(&identity, reply, binding, Instant::now())
+    }
+
+    /// Fresh sealed Control handoff; historical Apply approvals cannot reach it.
+    pub fn handoff_original_display_restoration(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_restoration_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let identity = self.trusted_service(NativeSessionRole::Executor, Instant::now())?;
+        // Separate fixed mechanism budget, including root's service policy and
+        // one native probe/dispatch. It cannot extend the human deadline or the
+        // native sample's freshness. Fault/timeout never requests redelivery.
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "RestoreOriginalDisplayLayout",
+            &(
+                material,
+                deadline_unix_ms,
+                binding.transaction_id.as_str(),
+                binding.generation,
+                binding.state_version,
+                binding.authority_binding_digest.to_hex(),
+                binding.authority_use_digest.to_hex(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+            ),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+        {
+            return Err(
+                "original restoration executor result has a different authenticated sender".into(),
+            );
+        }
+        self.decode_executor_outcome(&identity, reply, binding, Instant::now())
+    }
+
+    /// Separately prepared terminal-purpose handoff; acknowledgement is not completion.
+    pub fn handoff_original_display_finalization(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_finalization_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let identity = self.trusted_service(NativeSessionRole::Executor, Instant::now())?;
+        // Separate fixed mechanism budget, including root's service policy and
+        // one native probe/dispatch. It cannot extend the human deadline or the
+        // native sample's freshness. Fault/timeout never requests redelivery.
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "QuiesceOriginalDisplayFinalization",
+            &(
+                material,
+                deadline_unix_ms,
+                binding.transaction_id.as_str(),
+                binding.generation,
+                binding.state_version,
+                binding.authority_binding_digest.to_hex(),
+                binding.authority_use_digest.to_hex(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+            ),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+        {
+            return Err(
+                "original restoration executor result has a different authenticated sender".into(),
+            );
+        }
+        self.decode_executor_outcome(&identity, reply, binding, Instant::now())
+    }
+
     fn decode_executor_outcome(
         &self,
         identity: &Identity,
@@ -317,4 +954,83 @@ where
         .try_clone()
         .map_err(|_| "native service array field is unavailable".to_owned())?;
     Vec::<T>::try_from(value).map_err(|_| "native service array field has the wrong type".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protection_mode_is_not_an_executor_or_control_launch() {
+        let image = "/usr/lib/linura/linura-executor-session";
+        let original: ExecStart = (
+            image.into(),
+            vec![image.into(), "--display-protection".into()],
+            false,
+            1,
+            2,
+            0,
+            0,
+            42,
+            0,
+            0,
+        );
+        assert!(live_launch(
+            NativeSessionRole::DisplayProtection,
+            image,
+            42,
+            std::slice::from_ref(&original)
+        ));
+        for role in [NativeSessionRole::Control, NativeSessionRole::Executor] {
+            assert!(!live_launch(
+                role,
+                image,
+                42,
+                std::slice::from_ref(&original)
+            ));
+            let mut regular = original.clone();
+            regular.1.pop();
+            assert!(live_launch(role, image, 42, std::slice::from_ref(&regular)));
+            assert!(!live_launch(
+                NativeSessionRole::DisplayProtection,
+                image,
+                42,
+                &[regular]
+            ));
+        }
+        for change in 0..12 {
+            let mut bad = original.clone();
+            match change {
+                0 => bad.0 = "/tmp/executor".into(),
+                1 => bad.1[0] = "/tmp/executor".into(),
+                2 => bad.1[1] = "--protect-before-sleep".into(),
+                3 => bad.1.push("unexpected".into()),
+                4 => bad.2 = true,
+                5 => bad.3 = 0,
+                6 => bad.4 = 0,
+                7 => bad.5 = 3,
+                8 => bad.6 = 4,
+                9 => bad.7 = 43,
+                10 => bad.8 = 1,
+                11 => bad.9 = 1,
+                _ => unreachable!(),
+            }
+            assert!(
+                !live_launch(NativeSessionRole::DisplayProtection, image, 42, &[bad]),
+                "field {change}"
+            );
+        }
+        assert!(!live_launch(
+            NativeSessionRole::DisplayProtection,
+            image,
+            42,
+            &[]
+        ));
+        assert!(!live_launch(
+            NativeSessionRole::DisplayProtection,
+            image,
+            42,
+            &[original.clone(), original]
+        ));
+    }
 }

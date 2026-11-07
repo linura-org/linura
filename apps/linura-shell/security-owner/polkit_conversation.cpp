@@ -7,6 +7,7 @@
 #include <gio/gio.h>
 
 #include <cstring>
+#include <limits>
 
 namespace Linura::SecurityOwner {
 namespace {
@@ -94,12 +95,22 @@ bool PolkitConversation::active() const noexcept
     return native_ != nullptr;
 }
 
+bool PolkitConversation::bindDisplayPromptPresentation(PromptPresentation presentation)
+{
+    if (QThread::currentThread() != thread() || native_ || scope_ || displayPresentation_ ||
+        !presentation)
+        return false;
+    displayPresentation_ = std::move(presentation);
+    return true;
+}
+
 bool PolkitConversation::begin(const NativeApprovalScope &scope, PolkitIdentity *identity,
                                const char *cookie, GCancellable *cancellable, SecretEntry *entry)
 {
     if (QThread::currentThread() != thread() || native_ || !entry || !identity || !cookie ||
         entry->thread() != thread() || !entry->storageAvailable() ||
         scope.purpose == ApprovalPurpose::ConfirmLock || !scope.valid() ||
+        (scope.isDisplay() && !displayPresentation_) ||
         approval_.state() != NativeApproval::State::Authenticating ||
         !POLKIT_IS_UNIX_USER(identity) || scope.lock.uid > quint32(G_MAXINT) ||
         polkit_unix_user_get_uid(POLKIT_UNIX_USER(identity)) < 0 ||
@@ -177,14 +188,67 @@ void PolkitConversation::requested(NativePromptKind kind)
         }
         return;
     }
-    if (!native_ || !scope_ || !entry_ || waiting_ || !approval_.nativePrompt(*scope_) ||
-        promptStep_ >= NativeApproval::MaximumConversationPrompts ||
-        !entry_->beginNativePrompt(kind, promptStep_ + 1, authenticatedUid_)) {
+    if (!native_ || !scope_ || !entry_ || waiting_ || preparedToken_ ||
+        !approval_.nativePrompt(*scope_) ||
+        promptStep_ >= NativeApproval::MaximumConversationPrompts) {
+        cancel();
+        return;
+    }
+    const auto expected = *scope_;
+    ++promptStep_;
+    if (expected.isDisplay()) {
+        const auto token = entry_->prepareNativePrompt(kind, promptStep_, authenticatedUid_);
+        if (!token || !native_ || !scope_ || *scope_ != expected || !entry_ ||
+            !entry_->preparedNativePromptMatches(*token) || !displayPresentation_ ||
+            presentationGeneration_ == std::numeric_limits<quint64>::max()) {
+            cancel();
+            return;
+        }
+        preparedToken_ = *token;
+        const auto generation = ++presentationGeneration_;
+        QPointer<PolkitConversation> live(this);
+        try {
+            displayPresentation_(
+                expected, *token, [live, expected, token = *token, generation](bool ready) {
+                    if (!live)
+                        return;
+                    QMetaObject::invokeMethod(
+                        live,
+                        [live, expected, token, generation, ready] {
+                            if (live)
+                                live->presented(expected, token, generation, ready);
+                        },
+                        Qt::QueuedConnection);
+                });
+        } catch (...) {
+            cancel();
+        }
+        return;
+    }
+    if (!entry_->beginNativePrompt(kind, promptStep_, authenticatedUid_) || !native_ || !scope_ ||
+        *scope_ != expected || !entry_ || !entry_->acceptsInput()) {
         cancel();
         return;
     }
     waiting_ = true;
-    ++promptStep_;
+    Q_EMIT inputRequested();
+}
+
+void PolkitConversation::presented(const NativeApprovalScope &expected, quint64 token,
+                                   quint64 generation, bool ready)
+{
+    if (QThread::currentThread() != thread() || !native_ || !scope_ || *scope_ != expected ||
+        !preparedToken_ || *preparedToken_ != token || generation != presentationGeneration_)
+        return;             // A stale callback cannot activate or consume another prompt.
+    preparedToken_.reset(); // Reserve before activation can emit native callbacks.
+    if (!ready || !entry_ || approval_.state() != NativeApproval::State::Authenticating ||
+        g_cancellable_is_cancelled(native_->cancellable) ||
+        !entry_->activatePreparedNativePrompt(token) || !native_ || !scope_ ||
+        *scope_ != expected || !entry_ || !entry_->acceptsInput()) {
+        cancel();
+        return;
+    }
+    waiting_ = true;
     Q_EMIT inputRequested();
 }
 
@@ -235,8 +299,9 @@ void PolkitConversation::completed(bool success)
         deferredCompletion_ = deferredCompletion_.has_value() ? false : success;
         return;
     }
-    const bool confirmed = !cancelling_ && !waiting_ && !deferredRequest_ && submitted_ &&
-                           success && !g_cancellable_is_cancelled(native_->cancellable) &&
+    const bool confirmed = !cancelling_ && !waiting_ && !preparedToken_ && !deferredRequest_ &&
+                           submitted_ && success &&
+                           !g_cancellable_is_cancelled(native_->cancellable) &&
                            approval_.nativeCompleted(*scope_, true);
     if (!confirmed)
         approval_.cancel();
@@ -279,6 +344,7 @@ void PolkitConversation::releaseNative()
     entry_.clear();
     scope_.reset();
     waiting_ = false;
+    preparedToken_.reset();
     responding_ = false;
     deferredRequest_ = false;
     submitted_ = false;
