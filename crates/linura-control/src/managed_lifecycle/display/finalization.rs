@@ -831,7 +831,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         terminal_request: &RequestId,
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
         self.inspect_terminal_phase(
-            principal, actor, terminal_request, DisplayFinalizationPhase::Quiesced,
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::Quiesced,
         )
     }
 
@@ -845,7 +848,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         terminal_request: &RequestId,
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
         self.inspect_terminal_phase(
-            principal, actor, terminal_request, DisplayFinalizationPhase::Retired,
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::Retired,
         )
     }
 

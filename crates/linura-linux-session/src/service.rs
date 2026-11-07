@@ -364,9 +364,7 @@ impl NativeSessionChannel {
     ) -> Result<(), String> {
         self.require_role(NativeSessionRole::Control)?;
         let now = crate::owner::unix_ms()?;
-        if now == 0 || now >= expires_at_unix_ms
-            || expires_at_unix_ms - now > 2_000
-        {
+        if now == 0 || now >= expires_at_unix_ms || expires_at_unix_ms - now > 2_000 {
             return Err("Root retirement Control evidence is expired or malformed".into());
         }
         let original = linura_core::DisplayFinalizationMaterial::decode(material)
@@ -390,8 +388,10 @@ impl NativeSessionChannel {
                 &(key.as_str(),),
                 started,
             )?;
-            if reply.header().sender()
-                    .is_none_or(|sender| sender.as_str() != root.sender)
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
                 || reply.body().signature().to_string() != "ayuay"
             {
                 return Err("Root retirement readback has another peer or format".into());
@@ -407,8 +407,11 @@ impl NativeSessionChannel {
                 || finalization.material() != material
                 || finalization.binding().transaction_id != terminal_transaction
                 || finalization.binding().dispatch_digest.to_hex() != terminal_dispatch
-                || retained.decoded_material()?.recovery_scope()
-                    .map_err(|e| e.to_string())? != scope
+                || retained
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|e| e.to_string())?
+                    != scope
             {
                 return Err("Root retirement held-native original lineage differs".into());
             }
@@ -434,15 +437,21 @@ impl NativeSessionChannel {
                 &(bytes.as_slice(),),
                 started,
             )?;
-            if reply.header().sender()
-                    .is_none_or(|sender| sender.as_str() != root.sender)
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
                 || reply.body().signature().to_string() != "b"
             {
                 return Err("Root retirement writer peer or reply differs; no retry".into());
             }
-            let (accepted,): (bool,) = reply.body().deserialize()
+            let (accepted,): (bool,) = reply
+                .body()
+                .deserialize()
                 .map_err(|_| "Root retirement writer reply malformed; no retry")?;
-            if !accepted || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root {
+            if !accepted
+                || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            {
                 return Err("Root retirement live original service changed; no retry".into());
             }
             Ok(())
@@ -452,7 +461,8 @@ impl NativeSessionChannel {
         admit("PrepareRetirement")?;
         admit("RetireHeld")?;
         let (restoration, terminal, _) = read(3)?;
-        if restoration != initial_restoration || terminal != initial_terminal
+        if restoration != initial_restoration
+            || terminal != initial_terminal
             || crate::owner::unix_ms()? >= expires_at_unix_ms
             || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
         {
