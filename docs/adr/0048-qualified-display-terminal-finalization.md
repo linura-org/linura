@@ -205,11 +205,22 @@ evidence. The PR remains draft until all remaining required work is complete.
 
 ## Stage 3 retirement/release state and crash-ordering contract
 
-**Implementation status: not yet implemented.** This is the acceptance contract
-for the remaining Root retirement, ordinary post-commit release and crash-safe
-repair; it does not activate an effect, extend a deadline or change public
-support. The original-restoration terminal and ordinary Keep/Revert paths must
-remain distinct even where they share low-level mechanisms.
+**Implementation status: partial, not qualified for release.** Control now
+durably spends an exact one-use terminal-retirement preparation. Under the
+existing Root admission lock, Root syncs the matching `LNRP:1` preparation
+and `LNRH:1` RootRetiredHeld checkpoint while retaining the live original
+witness, native scene, S17/input and power protection and ordinary startup
+exclusion. A separate pinned-native `NativeFirstFrameGate` is currently a
+comparison-only state machine: it enforces one spent attempt, absolute
+freshness, exact topology/source continuity and fresh hardware-completed
+ordinary frames or per-output disable commits. Its receipts do not prove an
+independent DRM/KMS read, authenticate a release grant or release any fence.
+
+The remaining requirements below are an acceptance contract, not currently
+implemented effect authority. The original-restoration terminal and ordinary
+Keep/Revert paths must stay distinct even where they share low-level mechanisms.
+No historical terminal or first-frame comparison may promote itself to
+`PhysicalReleaseVerified` or `ReleasedCurrent`.
 
 ### Two independent safety barriers
 
