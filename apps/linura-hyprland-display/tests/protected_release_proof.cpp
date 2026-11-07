@@ -105,6 +105,8 @@ int main()
             {held.heads[0].key, &a, target, 0, false},
             {held.heads[1].key, &b, &second, 0, false},
         };
+        if (scenario == 2)
+            frames[1].key = held.heads[0].key; // Other native output's completion.
         assert(!proof->observe(held, later, frames));
         assert(proof->phase() == Phase::Faulted);
         assert(!proof->spend(held, later));
