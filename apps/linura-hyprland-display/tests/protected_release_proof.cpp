@@ -83,7 +83,7 @@ int main()
 
     auto gate = NativeFirstFrameGate::arm({held, 13, start, before});
     assert(gate && gate->phase() == Phase::Held);
-    assert(!gate->observe(held, later, {}));
+    assert(!gate->observe({held, later, {}}));
     assert(!gate->spend(held, {9'999, 4'999}));
     assert(gate->phase() == Phase::Faulted);
     assert(!gate->spend(held, later));
@@ -107,7 +107,7 @@ int main()
         };
         if (scenario == 2)
             frames[1].key = held.heads[0].key; // Other native output's completion.
-        assert(!proof->observe(held, later, frames));
+        assert(!proof->observe({held, later, frames}));
         assert(proof->phase() == Phase::Faulted);
         assert(!proof->spend(held, later));
     }
@@ -121,12 +121,12 @@ int main()
         {held.heads[0].key, &a, &first, 0, false},
         {held.heads[1].key, &b, &second, 0, false},
     };
-    assert(!proof->observe(held, later, frames));
+    assert(!proof->observe({held, later, frames}));
     assert(proof->phase() == Phase::Spent);
     completed(a, &first, 8, Kind::Content);
-    assert(!proof->observe(held, later, frames));
+    assert(!proof->observe({held, later, frames}));
     completed(b, &second, 9, Kind::Content);
-    const auto receipt = proof->observe(held, later, frames);
+    const auto receipt = proof->observe({held, later, frames});
     assert(receipt);
     assert(receipt->generation == held.generation);
     assert(receipt->securityEpoch == held.securityEpoch);
@@ -135,7 +135,7 @@ int main()
     assert(receipt->completed[0].second == 8);
     assert(receipt->completed[1].second == 9);
     assert(proof->phase() == Phase::Verified);
-    assert(!proof->observe(held, later, frames)); // Never redeliver or renew.
+    assert(!proof->observe({held, later, frames})); // Never redeliver or renew.
     assert(!proof->spend(held, later));
 
     for (int scenario = 0; scenario < 5; ++scenario) {
@@ -151,7 +151,7 @@ int main()
         else if (scenario == 3)
             current.heads[0].current.x++;
         const auto when = scenario == 4 ? ClockSample{12'000, 7'000} : later;
-        assert(!candidate->observe(current, when, frames));
+        assert(!candidate->observe({current, when, frames}));
         assert(candidate->phase() == Phase::Faulted);
     }
 
@@ -165,13 +165,13 @@ int main()
         {partlyDisabled.heads[0].key, &a, &first, 0, false},
         {partlyDisabled.heads[1].key, nullptr, nullptr, 7, true},
     };
-    assert(!disabled->observe(partlyDisabled, later, disabledFrames));
+    assert(!disabled->observe({partlyDisabled, later, disabledFrames}));
     assert(disabled->phase() == Phase::Faulted);
     auto disabledFresh = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
     assert(disabledFresh && disabledFresh->spend(partlyDisabled, later));
     disabledFrames[1].disableCommit = 10;
-    assert(disabledFresh->observe(partlyDisabled, later, disabledFrames));
-    assert(!disabledFresh->observe(partlyDisabled, later, disabledFrames));
+    assert(disabledFresh->observe({partlyDisabled, later, disabledFrames}));
+    assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames}));
 
     const ClockSample exhaustedClock{std::numeric_limits<std::uint64_t>::max(), 5'000};
     auto exhaustion = NativeFirstFrameGate::arm({held, 13, exhaustedClock, before});

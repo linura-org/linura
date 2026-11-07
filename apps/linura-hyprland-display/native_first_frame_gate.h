@@ -119,9 +119,17 @@ class NativeFirstFrameGate final
     // This compares native physical evidence; it is never a durable release
     // receipt by itself. A missing first frame remains pending under the
     // ORIGINAL absolute deadline, not a new clock window.
-    [[nodiscard]] std::optional<Receipt>
-    observe(const Snapshot &current, ClockSample now, const std::vector<NativeFrame> &frames) noexcept
+    struct ObservationRequest final
     {
+        const Snapshot &current;
+        ClockSample now;
+        const std::vector<NativeFrame> &frames;
+    };
+    [[nodiscard]] std::optional<Receipt> observe(const ObservationRequest &sample) noexcept
+    {
+        const auto &current = sample.current;
+        const auto now = sample.now;
+        const auto &frames = sample.frames;
         if (phase_ != Phase::Spent)
             return {};
         if (!currentSample(current, now) || frames.size() != before_.size()) {
@@ -193,10 +201,13 @@ class NativeFirstFrameGate final
     {}
     [[nodiscard]] bool currentSample(const Snapshot &current, ClockSample now) const noexcept
     {
-        return current == held_ && now.unixMs >= sampled_.unixMs &&
-               now.unixMs < sampled_.unixMs + MaxProofWindowMs &&
-               now.bootMs >= sampled_.bootMs &&
-               now.bootMs < sampled_.bootMs + MaxProofWindowMs;
+        if (current != held_ || now.unixMs < sampled_.unixMs || now.bootMs < sampled_.bootMs)
+            return false;
+        if (now.unixMs >= sampled_.unixMs + MaxProofWindowMs)
+            return false;
+        if (now.bootMs >= sampled_.bootMs + MaxProofWindowMs)
+            return false;
+        return true;
     }
 
     Snapshot held_;
