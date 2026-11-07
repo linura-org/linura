@@ -855,6 +855,33 @@ fn unrelated_orphan_quiescence_fences_all_scope_reads_and_writes() {
 }
 
 #[test]
+fn unrelated_missing_restoration_parent_fences_quiescence_and_other_reads() {
+    let fixture = Fixture::new();
+    let (parent, terminal_record) = terminal(1, 2, 3, "seat0");
+    let (other_parent, _) = terminal(11, 12, 13, "seat12");
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve_terminal(&fixture, &terminal_record).is_ok());
+    assert!(reserve_recovery(&fixture, &other_parent).is_ok());
+    // A complete terminal by itself cannot retain authority if the unrelated
+    // restoration parent disappeared or its bytes were substituted.
+    std::fs::remove_file(
+        fixture
+            .path
+            .join(Kind::Restoration.name(&parent.binding().dispatch_digest)),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let other_scope = other_parent
+        .decoded_material()
+        .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_restoration_at(&fixture.fd, fixture.uid, &other_scope).is_err());
+    assert!(read_finalization_state_at(&fixture.fd, fixture.uid, &other_parent).is_err());
+    let (new_parent, _) = terminal(21, 22, 23, "seat22");
+    assert!(reserve_recovery(&fixture, &new_parent).is_err());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+}
+
+#[test]
 fn corrupted_or_substituted_terminal_history_blocks_all_reads_and_reservations_without_repair() {
     for fault in 0..7 {
         let fixture = Fixture::new();

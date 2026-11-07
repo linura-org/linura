@@ -1,7 +1,7 @@
 //! Immutable private mechanism preimages, not Control authority state. Reserve
 //! and fsync before a native write; any uncertainty preserves the record and
 //! refuses redelivery. Nothing in this module dispatches or authorizes effects.
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::OwnedFd;
@@ -65,6 +65,79 @@ impl Kind {
         format!("{}{}.checkpoint", self.prefix(), dispatch.to_hex())
     }
 }
+
+/// An immutable, bounded, directory-wide lineage check. A marker for one
+/// recovery scope cannot be silently ignored while another scope is queried
+/// or reserved. All bytes are read under the existing directory flock; this
+/// structure grants neither current native authority nor permission to retire.
+#[derive(Default)]
+struct TerminalLineage {
+    restorations: BTreeMap<String, NativeDisplayRestorationReservation>,
+    terminals: BTreeMap<String, NativeDisplayFinalizationReservation>,
+    quiescences: BTreeMap<String, NativeDisplayFinalizationReservation>,
+}
+
+impl TerminalLineage {
+    fn observe(&mut self, kind: Kind, bytes: &[u8]) -> Result<(), String> {
+        match kind {
+            Kind::Original => Ok(()),
+            Kind::Restoration => {
+                let record = NativeDisplayRestorationReservation::decode(bytes)?;
+                let scope = record
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|_| unavailable())?
+                    .resource_id()
+                    .map_err(|_| unavailable())?
+                    .as_str()
+                    .to_owned();
+                if self.restorations.insert(scope, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::Finalization | Kind::Quiescence => {
+                let record = NativeDisplayFinalizationReservation::decode(bytes)?;
+                let scope = record
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|_| unavailable())?
+                    .resource_id()
+                    .map_err(|_| unavailable())?
+                    .as_str()
+                    .to_owned();
+                let table = if kind == Kind::Finalization {
+                    &mut self.terminals
+                } else {
+                    &mut self.quiescences
+                };
+                if table.insert(scope, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn verify(&self) -> Result<(), String> {
+        // Every retained finalization must have the exact actual restoration
+        // transaction and bound material, even when it is for another scope.
+        for (scope, record) in &self.terminals {
+            let parent = self.restorations.get(scope).ok_or_else(unavailable)?;
+            record.validate_restoration(parent)?;
+        }
+        // A durable native marker without its complete immutable terminal is
+        // orphan history, never success or a reason to permit another writer.
+        for (scope, record) in &self.quiescences {
+            let terminal = self.terminals.get(scope).ok_or_else(unavailable)?;
+            if record.canonical_bytes() != terminal.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
+        Ok(())
+    }
+}
+
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
     for kind in [
         Kind::Original,
@@ -270,8 +343,7 @@ fn reserve_kind_at(
         };
         let mut parent_seen = false;
         let mut terminal_seen = false;
-        let mut terminal_digests = BTreeSet::new();
-        let mut quiescence_digests = BTreeSet::new();
+        let mut lineage = TerminalLineage::default();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -288,17 +360,7 @@ fn reserve_kind_at(
             // Inspect type before opening, so a malformed device/FIFO entry
             // cannot turn a history scan into a native device operation.
             let (old_kind, _, previous) = read_named_record(fd, uid, name)?;
-            if matches!(old_kind, Kind::Finalization | Kind::Quiescence) {
-                let digest: [u8; 32] = Sha256::digest(&previous).into();
-                let set = if old_kind == Kind::Finalization {
-                    &mut terminal_digests
-                } else {
-                    &mut quiescence_digests
-                };
-                if !set.insert(digest) {
-                    return Err(unavailable());
-                }
-            }
+            lineage.observe(old_kind, &previous)?;
             if let Some(terminal) = &terminal {
                 let material = terminal.decoded_material()?;
                 if old_kind == Kind::Restoration {
@@ -373,11 +435,8 @@ fn reserve_kind_at(
                 }
             }
         }
-        if !quiescence_digests.is_subset(&terminal_digests)
-            || terminal.is_some() && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen))
-        {
-            // Orphan immutable terminal markers are never repaired, ignored or
-            // treated as unrelated. Every admission uses one global journal.
+        lineage.verify()?;
+        if terminal.is_some() && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen)) {
             return Err(unavailable());
         }
         let name = kind.name(dispatch);
@@ -480,8 +539,7 @@ fn read_finalization_state_at(
         let mut found = None;
         let mut quiescence = None;
         let mut parent_seen = false;
-        let mut terminal_digests = BTreeSet::new();
-        let mut quiescence_digests = BTreeSet::new();
+        let mut lineage = TerminalLineage::default();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -493,17 +551,7 @@ fn read_finalization_state_at(
                 return Err(unavailable());
             }
             let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
-            if matches!(kind, Kind::Finalization | Kind::Quiescence) {
-                let digest: [u8; 32] = Sha256::digest(&bytes).into();
-                let set = if kind == Kind::Finalization {
-                    &mut terminal_digests
-                } else {
-                    &mut quiescence_digests
-                };
-                if !set.insert(digest) {
-                    return Err(unavailable());
-                }
-            }
+            lineage.observe(kind, &bytes)?;
             if kind == Kind::Restoration {
                 let parent = NativeDisplayRestorationReservation::decode(&bytes)?;
                 if parent
@@ -540,7 +588,8 @@ fn read_finalization_state_at(
                 *slot = Some(terminal);
             }
         }
-        if !parent_seen || !quiescence_digests.is_subset(&terminal_digests) {
+        lineage.verify()?;
+        if !parent_seen {
             return Err(unavailable());
         }
         if let Some(ref quiesced) = quiescence
@@ -584,6 +633,7 @@ fn read_restoration_at(
     fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
     let result = (|| {
         let mut found = None;
+        let mut lineage = TerminalLineage::default();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -598,6 +648,7 @@ fn read_restoration_at(
             // Validate every retained/unknown entry, including unrelated ones.
             // This query never repairs history or makes room for another write.
             let (kind, _, payload) = read_named_record(fd, uid, name)?;
+            lineage.observe(kind, &payload)?;
             if kind != Kind::Restoration {
                 continue;
             }
@@ -614,6 +665,7 @@ fn read_restoration_at(
                 found = Some(record);
             }
         }
+        lineage.verify()?;
         found.ok_or_else(unavailable)
     })();
     let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
