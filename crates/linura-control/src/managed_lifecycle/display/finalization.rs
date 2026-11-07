@@ -847,12 +847,46 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         actor: Actor,
         terminal_request: &RequestId,
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
-        self.inspect_terminal_phase(
-            principal,
+        // Root's durable phase-3 marker is only one side of the two-phase
+        // protocol. Demand this *original* Control one-use reservation and
+        // its exact signed request/transaction/intent correlation before
+        // visiting providers. An expired historical observation is NOT renewed.
+        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
+        let before = crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+            self.display_journal()?,
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            dispatch,
+            terminal.intent.material(),
+        )?;
+        let proof = self.inspect_terminal_phase(
+            principal.clone(),
             actor,
             terminal_request,
             DisplayFinalizationPhase::Retired,
-        )
+        )?;
+        // A lost reply is reconciled by fresh physical facts and the exact
+        // old immutable record, never another Root/native write or approval.
+        if self.terminal_inspection_context(&principal, terminal_request)? != terminal
+            || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                self.display_journal()?,
+                &principal_id,
+                &terminal.request,
+                &terminal.snapshot,
+                dispatch,
+                terminal.intent.material(),
+            )? != before
+        {
+            return Err(invalid());
+        }
+        Ok(proof)
     }
 
     fn inspect_terminal_phase(

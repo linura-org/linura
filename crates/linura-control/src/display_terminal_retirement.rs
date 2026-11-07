@@ -239,6 +239,42 @@ mod tests {
     }
 
     #[test]
+    fn historical_preparation_parser_refuses_noncanonical_and_partial_frames() {
+        let domain = b"linura.display.original-terminal-retirement-prepared.v1";
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&(domain.len() as u64).to_be_bytes());
+        frame.extend_from_slice(domain);
+        let mut remaining = frame.as_slice();
+        assert_eq!(
+            retained_field(&mut remaining, DOMAIN.len()).ok(),
+            Some(DOMAIN)
+        );
+        assert!(remaining.is_empty());
+        for cut in 0..frame.len() {
+            let mut invalid_frame = &frame[..cut];
+            assert!(retained_field(&mut invalid_frame, DOMAIN.len()).is_err());
+        }
+        for number in ["", "0", "01", "1.0", "-1", "18446744073709551616"] {
+            assert!(retained_number(number).is_err());
+        }
+        for (text, value) in [("1", 1_u64), ("2000", 2000_u64), ("18446744073709551615", u64::MAX)] {
+            assert_eq!(retained_number(text).ok(), Some(value));
+        }
+        let mut overlong = frame.clone();
+        overlong[..8].copy_from_slice(&u64::MAX.to_be_bytes());
+        let mut malformed = overlong.as_slice();
+        assert!(retained_field(&mut malformed, DOMAIN.len()).is_err());
+        let zero = [0_u8; 8];
+        let mut malformed = zero.as_slice();
+        assert!(retained_field(&mut malformed, DOMAIN.len()).is_err());
+        let mut invalid_utf8 = vec![0_u8; 9];
+        invalid_utf8[7] = 1;
+        invalid_utf8[8] = 0xFF;
+        let mut malformed = invalid_utf8.as_slice();
+        assert!(retained_field(&mut malformed, 1).is_err());
+    }
+
+    #[test]
     fn prepared_history_is_independent_immutable_and_spent_after_lost_ack() {
         let request = valid(RequestId::new("request:v010:display-finalization:one"));
         let principal = valid(PrincipalId::new("unix:uid:1000"));
