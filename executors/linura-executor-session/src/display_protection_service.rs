@@ -587,7 +587,9 @@ impl ProtectionPort for NativeProtection {
             super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
         NativeDisplayRecoveryCheckpoint::validate_restoration_source(&original, &restoration)
             .map_err(|_| unavailable())?;
-        terminal.validate_restoration(&restoration).map_err(|_| unavailable())?;
+        terminal
+            .validate_restoration(&restoration)
+            .map_err(|_| unavailable())?;
         let (retained, durable_quiescence) =
             super::display_checkpoint::read_finalization_state(&restoration)
                 .map_err(|_| unavailable())?;
@@ -621,8 +623,7 @@ impl ProtectionPort for NativeProtection {
         self.original_for_scope(&admission, &scope)?;
         admission.root_retirements.insert(key.clone(), digest);
         // Failed sync, interrupted write and lost reply remain non-repeatable.
-        super::display_checkpoint::reserve_root_retired_held(&record)
-            .map_err(|_| unavailable())?;
+        super::display_checkpoint::reserve_root_retired_held(&record).map_err(|_| unavailable())?;
         let observed = super::display_checkpoint::read_root_retired_held(&restoration)
             .map_err(|_| unavailable())?
             .ok_or_else(unavailable)?;
@@ -637,8 +638,11 @@ impl ProtectionPort for NativeProtection {
             super::display_checkpoint::read_finalization_state(&restoration)
                 .map_err(|_| unavailable())?;
         if !still_quiesced
-            || after.as_ref().is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
-            || finalization_reservation_phase(&admission.finalizations, &scope, after.as_ref())? != 2
+            || after
+                .as_ref()
+                .is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
+            || finalization_reservation_phase(&admission.finalizations, &scope, after.as_ref())?
+                != 2
         {
             return Err(unavailable());
         }

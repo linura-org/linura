@@ -67,10 +67,12 @@ impl Kind {
                     .binding()
                     .dispatch_digest)
             }
-            Self::RetirementPreparation | Self::RootRetiredHeld => Ok(NativeDisplayRetirementPreparation::decode(payload)?
-                .terminal()
-                .binding()
-                .dispatch_digest),
+            Self::RetirementPreparation | Self::RootRetiredHeld => {
+                Ok(NativeDisplayRetirementPreparation::decode(payload)?
+                    .terminal()
+                    .binding()
+                    .dispatch_digest)
+            }
         }
     }
     fn name(self, dispatch: &ComponentDigest) -> String {
@@ -448,8 +450,10 @@ fn reserve_kind_at(
                     let old = old.decoded_material()?;
                     let new_scope = material.restoration().replacement().topology();
                     let old_scope = old.restoration().replacement().topology();
-                    if matches!(kind, Kind::Quiescence | Kind::RetirementPreparation | Kind::RootRetiredHeld)
-                        && previous == terminal.canonical_bytes()
+                    if matches!(
+                        kind,
+                        Kind::Quiescence | Kind::RetirementPreparation | Kind::RootRetiredHeld
+                    ) && previous == terminal.canonical_bytes()
                     {
                         if terminal_seen {
                             return Err(unavailable());
@@ -473,7 +477,8 @@ fn reserve_kind_at(
                 }
                 quiescence_seen = true;
             }
-            if kind == Kind::RootRetiredHeld && old_kind == Kind::RetirementPreparation
+            if kind == Kind::RootRetiredHeld
+                && old_kind == Kind::RetirementPreparation
                 && previous == payload
             {
                 if preparation_seen {
@@ -520,8 +525,12 @@ fn reserve_kind_at(
         lineage.verify()?;
         if terminal.is_some()
             && (!parent_seen
-                || matches!(kind, Kind::Quiescence | Kind::RetirementPreparation | Kind::RootRetiredHeld) && !terminal_seen
-                || matches!(kind, Kind::RetirementPreparation | Kind::RootRetiredHeld) && !quiescence_seen
+                || matches!(
+                    kind,
+                    Kind::Quiescence | Kind::RetirementPreparation | Kind::RootRetiredHeld
+                ) && !terminal_seen
+                || matches!(kind, Kind::RetirementPreparation | Kind::RootRetiredHeld)
+                    && !quiescence_seen
                 || kind == Kind::RootRetiredHeld && !preparation_seen)
         {
             return Err(unavailable());

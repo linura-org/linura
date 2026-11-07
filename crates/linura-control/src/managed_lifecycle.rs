@@ -7,16 +7,17 @@ mod display;
 pub use display::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation,
     AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRestoration,
-    DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
-    DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
-    DisplayVerificationTarget, IndependentDisplayVerifier, OrdinaryDisplayReleaseInspection,
+    AuthorizedOriginalDisplayRetirementPreparation, DISPLAY_CONFIRMATION_WINDOW_MS,
+    DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
+    DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
+    IndependentDisplayVerifier, OrdinaryDisplayReleaseInspection,
     OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
     OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
-    OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
-    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayRestorationPort,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
-    OriginalDisplayRestorationTerminalReceipt, TrustedDisplayDecision,
+    OriginalDisplayRestorationTerminalReceipt, OriginalDisplayRetirementPreparationPort,
+    TrustedDisplayDecision,
 };
 
 use linura_core::{
