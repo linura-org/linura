@@ -2037,6 +2037,54 @@ mod tests {
         );
     }
     #[test]
+    fn native_release_reservation_rejects_anonymous_malformed_and_untrusted_requests() {
+        let (_, terminal) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
+        let preparation = NativeDisplayRetirementPreparation::new(
+            &terminal,
+            7,
+            ComponentDigest::from_bytes([3; 32]),
+            ComponentDigest::from_bytes([4; 32]),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let bytes = preparation.canonical_bytes();
+        let service = ProtectionService::new(DenyProtection);
+        let anonymous = zbus::Message::method_call(PATH, "ReserveNativeRelease")
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .build(&())
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(matches!(
+            async_io::block_on(service.reserve_native_release(&bytes, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let sender = zbus::Message::method_call(PATH, "ReserveNativeRelease")
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .sender(":1.7")
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .build(&())
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(
+            async_io::block_on(service.reserve_native_release(&bytes, sender.header())).is_err()
+        );
+        assert!(
+            async_io::block_on(service.reserve_native_release(
+                b"LNRN:1\n",
+                sender.header(),
+            ))
+            .is_err()
+        );
+        assert!(
+            async_io::block_on(service.reserve_native_release(
+                &vec![0; linura_linux_session::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION + 1],
+                sender.header(),
+            ))
+            .is_err()
+        );
+        // The Root method accepts canonical preparation bytes, never the
+        // private envelope magic, physical-release grant or a client boolean.
+        assert!(NativeDisplayRetirementPreparation::decode(&bytes).is_ok());
+    }
+
+    #[test]
     fn terminal_reservation_memory_prevents_missing_file_retry_and_files_alone_admission() {
         let (_, record) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
         let scope = record
