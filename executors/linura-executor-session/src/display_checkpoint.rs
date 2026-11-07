@@ -492,8 +492,7 @@ fn reserve_kind_at(
             if matches!(
                 kind,
                 Kind::RetirementPreparation | Kind::RootRetiredHeld | Kind::NativeReleaseReserved
-            )
-                && old_kind == Kind::Quiescence
+            ) && old_kind == Kind::Quiescence
                 && previous == terminal.as_ref().ok_or_else(unavailable)?.canonical_bytes()
             {
                 if quiescence_seen {
@@ -561,9 +560,9 @@ fn reserve_kind_at(
                 || matches!(
                     kind,
                     Kind::Quiescence
-                            | Kind::RetirementPreparation
-                            | Kind::RootRetiredHeld
-                            | Kind::NativeReleaseReserved
+                        | Kind::RetirementPreparation
+                        | Kind::RootRetiredHeld
+                        | Kind::NativeReleaseReserved
                 ) && !terminal_seen
                 || matches!(
                     kind,
@@ -683,7 +682,6 @@ pub(super) fn reserve_root_retired_held(
     )
 }
 
-    
 /// Root-only, immutable, single-use reservation for a future authenticated
 /// native release attempt. This checkpoint makes no native call and cannot
 /// retire the compositor, S17, power or ordinary startup fences.

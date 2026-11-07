@@ -971,7 +971,9 @@ fn native_release_reservation_is_write_once_after_exact_root_held_parent() {
     let bytes = std::fs::read(&path).unwrap_or_else(|error| unreachable!("{error}"));
     assert!(bytes.starts_with(NATIVE_RELEASE_RESERVED_MAGIC));
     assert_eq!(&bytes[HEADER..], preparation.canonical_bytes());
-    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|error| unreachable!("{error}")));
+    assert!(
+        !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|error| unreachable!("{error}"))
+    );
 }
 
 #[test]
@@ -1033,7 +1035,10 @@ fn corrupted_or_orphan_native_release_reservation_fences_other_scopes() {
         assert!(read_root_retired_held_at(&fixture.fd, fixture.uid, &other).is_err());
         let (fresh, _) = terminal(21, 22, 23, "seat22");
         assert!(reserve_recovery(&fixture, &fresh).is_err());
-        assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|error| unreachable!("{error}")));
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid)
+                .unwrap_or_else(|error| unreachable!("{error}"))
+        );
     }
 }
 

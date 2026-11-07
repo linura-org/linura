@@ -604,11 +604,8 @@ impl ProtectionPort for NativeProtection {
             || retained
                 .as_ref()
                 .is_none_or(|active| active.canonical_bytes() != terminal.canonical_bytes())
-            || finalization_reservation_phase(
-                &admission.finalizations,
-                &scope,
-                retained.as_ref(),
-            )? != 2
+            || finalization_reservation_phase(&admission.finalizations, &scope, retained.as_ref())?
+                != 2
         {
             return Err(unavailable());
         }
@@ -655,11 +652,8 @@ impl ProtectionPort for NativeProtection {
             || current
                 .as_ref()
                 .is_none_or(|active| active.canonical_bytes() != terminal.canonical_bytes())
-            || finalization_reservation_phase(
-                &admission.finalizations,
-                &scope,
-                current.as_ref(),
-            )? != 2
+            || finalization_reservation_phase(&admission.finalizations, &scope, current.as_ref())?
+                != 2
         {
             return Err(unavailable());
         }
@@ -1172,9 +1166,8 @@ impl ProtectionPort for NativeProtection {
             // in-memory attempt without synced readback, is not current proof.
             _ => return Err(unavailable()),
         };
-        let native_reserved =
-            super::display_checkpoint::read_native_release_reserved(&record)
-                .map_err(|_| unavailable())?;
+        let native_reserved = super::display_checkpoint::read_native_release_reserved(&record)
+            .map_err(|_| unavailable())?;
         match (
             admission.native_release_reservations.get(key.as_str()),
             native_reserved.as_ref(),
