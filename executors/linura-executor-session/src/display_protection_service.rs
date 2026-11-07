@@ -676,12 +676,48 @@ impl ProtectionPort for NativeProtection {
                             .require_message_sender(sender)
                             .map_err(|_| unavailable())
                     };
+                    let persist_quiescence = || {
+                        let admission = super::protection_lock::acquire(
+                            &service.admission,
+                            super::protection_lock::BUDGET,
+                        )
+                        .map_err(|_| unavailable())?;
+                        service.original_for_scope(&admission, &scope)?;
+                        let actual = super::display_checkpoint::read_finalization(&restoration)
+                            .map_err(|_| unavailable())?
+                            .ok_or_else(unavailable)?;
+                        if actual.canonical_bytes() != encoded
+                            || finalization_reservation_phase(
+                                &admission.finalizations,
+                                &scope,
+                                Some(&actual),
+                            )? != 1
+                        {
+                            return Err(unavailable());
+                        }
+                        super::display_checkpoint::reserve_quiescence(&actual)
+                            .map_err(|_| unavailable())?;
+                        let (observed, durable) =
+                            super::display_checkpoint::read_finalization_state(&restoration)
+                                .map_err(|_| unavailable())?;
+                        if !durable
+                            || observed
+                                .as_ref()
+                                .is_none_or(|value| value.canonical_bytes() != encoded)
+                        {
+                            return Err(unavailable());
+                        }
+                        service.original_for_scope(&admission, &scope)?;
+                        valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+                        Ok(())
+                    };
                     let _result = super::display_finalization_grant::serve(
                         &mut writer,
                         &digest,
                         lifetime,
                         authenticate,
                         verify,
+                        persist_quiescence,
                     );
                 }
             })
@@ -824,19 +860,23 @@ impl ProtectionPort for NativeProtection {
             .map_err(|_| unavailable())?;
         self.admit_control(sender)?;
         self.original_for_scope(&admission, &scope)?;
-        let terminal =
-            super::display_checkpoint::read_finalization(&record).map_err(|_| unavailable())?;
+        let (terminal, durable_quiescence) =
+            super::display_checkpoint::read_finalization_state(&record)
+                .map_err(|_| unavailable())?;
         self.admit_control(sender)?;
         self.original_for_scope(&admission, &scope)?;
-        // Reserved needs exact disk/memory and live protection; Quiesced also
-        // needs the original actual-native channel transition. Files alone
-        // never produce either lifetime, retirement or release.
+        let phase =
+            finalization_reservation_phase(&admission.finalizations, &scope, terminal.as_ref())?;
+        if durable_quiescence != (phase == 2) {
+            // A synced quiescence marker without the live original-native
+            // channel or a native Quiesced phase without synced history is
+            // ambiguous. Neither may be promoted to Root retirement/release.
+            return Err(unavailable());
+        }
         Ok((
             record.canonical_bytes(),
-            finalization_reservation_phase(&admission.finalizations, &scope, terminal.as_ref())?,
-            terminal
-                .map(|record| record.canonical_bytes())
-                .unwrap_or_default(),
+            phase,
+            terminal.map(|record| record.canonical_bytes()).unwrap_or_default(),
         ))
     }
     fn startup(

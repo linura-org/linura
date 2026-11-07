@@ -63,6 +63,7 @@ pub(super) fn serve(
     lifetime: Lifetime,
     mut authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     mut verify: impl FnMut(bool) -> zbus::fdo::Result<()>,
+    mut persist_quiescence: impl FnMut() -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     stream.set_nonblocking(false).map_err(|_| unavailable())?;
     let mut sequence = 1_u64;
@@ -125,6 +126,13 @@ pub(super) fn serve(
         // Reserve the transition before acknowledging. A failed write cannot
         // repeat quiescence; Lifetime then makes continuing reports unavailable.
         if sequence == 1 {
+            // Sync and verify the separate immutable marker before advertising
+            // native quiescence or acknowledging the original sender. A lost
+            // marker or ACK is indeterminate and never grants a retry.
+            persist_quiescence()?;
+            if Instant::now() >= deadline {
+                return Err(unavailable());
+            }
             lifetime.0.quiesce()?;
         } else if lifetime.0.phase()? != u32::from(QUIESCED) {
             return Err(unavailable());
@@ -197,7 +205,7 @@ mod tests {
                     } else {
                         Ok(())
                     }
-                });
+                }, || Ok(()));
                 assert!(result.is_err());
                 checks
             });
@@ -224,6 +232,30 @@ mod tests {
         }
     }
     #[test]
+    fn persistence_failure_does_not_acknowledge_or_freshen_the_native_channel() {
+        let (mut root, mut native) = pair();
+        let state = ChannelState::reserved();
+        let lifetime = Lifetime::new(state.clone());
+        let worker = std::thread::spawn(move || {
+            assert!(
+                serve(
+                    &mut root,
+                    &[7; 32],
+                    lifetime,
+                    same_process,
+                    |_| Ok(()),
+                    || Err(unavailable()),
+                )
+                .is_err()
+            );
+        });
+        value(native.write_all(&frame(1, true, [7; 32])));
+        assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+        value(worker.join());
+        assert!(state.phase().is_err());
+    }
+
+    #[test]
     fn another_purpose_sequence_or_reservation_cannot_quiesce_or_reset_the_channel() {
         for request in [
             frame(1, false, [7; 32]),
@@ -238,7 +270,7 @@ mod tests {
                 assert!(
                     serve(&mut root, &[7; 32], lifetime, same_process, |_| {
                         unreachable!("invalid message must not reach witness verification")
-                    })
+                    }, || unreachable!("invalid native purpose cannot persist"))
                     .is_err()
                 );
             });
@@ -271,6 +303,7 @@ mod tests {
                     }
                 },
                 |_| unreachable!("foreign later fragment must refuse before verification"),
+                || unreachable!("foreign fragment cannot persist"),
             );
             assert!(result.is_err());
         });
@@ -305,7 +338,8 @@ mod tests {
                             assert!(!slow_authentication);
                             std::thread::sleep(Duration::from_millis(1100));
                             Ok(())
-                        }
+                        },
+                        || unreachable!("expired fragment cannot persist"),
                     )
                     .is_err()
                 );

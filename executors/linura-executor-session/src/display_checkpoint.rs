@@ -18,6 +18,7 @@ const DIRECTORY: &str = "/var/lib/linura/display-recovery";
 const MAGIC: &[u8] = b"LNRJ:1\n";
 const RESTORATION_MAGIC: &[u8] = b"LNRR:1\n";
 const FINALIZATION_MAGIC: &[u8] = b"LNRT:1\n";
+const QUIESCENCE_MAGIC: &[u8] = b"LNRQ:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
@@ -27,6 +28,7 @@ enum Kind {
     Original,
     Restoration,
     Finalization,
+    Quiescence,
 }
 impl Kind {
     fn prefix(self) -> &'static str {
@@ -34,6 +36,7 @@ impl Kind {
             Self::Original => "attempt-",
             Self::Restoration => "restoration-",
             Self::Finalization => "finalization-",
+            Self::Quiescence => "quiescence-",
         }
     }
     fn magic(self) -> &'static [u8] {
@@ -41,6 +44,7 @@ impl Kind {
             Self::Original => MAGIC,
             Self::Restoration => RESTORATION_MAGIC,
             Self::Finalization => FINALIZATION_MAGIC,
+            Self::Quiescence => QUIESCENCE_MAGIC,
         }
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
@@ -49,9 +53,11 @@ impl Kind {
             Self::Restoration => Ok(NativeDisplayRestorationReservation::decode(payload)?
                 .binding()
                 .dispatch_digest),
-            Self::Finalization => Ok(NativeDisplayFinalizationReservation::decode(payload)?
-                .binding()
-                .dispatch_digest),
+            Self::Finalization | Self::Quiescence => Ok(
+                NativeDisplayFinalizationReservation::decode(payload)?
+                    .binding()
+                    .dispatch_digest,
+            ),
         }
     }
     fn name(self, dispatch: &ComponentDigest) -> String {
@@ -59,7 +65,12 @@ impl Kind {
     }
 }
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
-    for kind in [Kind::Original, Kind::Restoration, Kind::Finalization] {
+    for kind in [
+        Kind::Original,
+        Kind::Restoration,
+        Kind::Finalization,
+        Kind::Quiescence,
+    ] {
         let prefix = kind.prefix().as_bytes();
         if name.len() == prefix.len() + 64 + 11
             && name.starts_with(prefix)
@@ -251,12 +262,13 @@ fn reserve_kind_at(
     // publication across threads/processes. It stays held through both fsyncs.
     fs::flock(fd, FlockOperation::NonBlockingLockExclusive).map_err(|_| unavailable())?;
     let result = (|| {
-        let terminal = if kind == Kind::Finalization {
+        let terminal = if matches!(kind, Kind::Finalization | Kind::Quiescence) {
             Some(NativeDisplayFinalizationReservation::decode(payload)?)
         } else {
             None
         };
         let mut parent_seen = false;
+        let mut terminal_seen = false;
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -297,13 +309,32 @@ fn reserve_kind_at(
                     let old = old.decoded_material()?;
                     let new_scope = material.restoration().replacement().topology();
                     let old_scope = old.restoration().replacement().topology();
-                    if material.restoration_dispatch() == old.restoration_dispatch()
+                    if kind == Kind::Quiescence && previous == payload {
+                        if terminal_seen {
+                            return Err(unavailable());
+                        }
+                        terminal_seen = true; // Only the same immutable LNRT parent.
+                    } else if material.restoration_dispatch() == old.restoration_dispatch()
                         || (new_scope.session().boot() == old_scope.session().boot()
                             && new_scope.session().uid() == old_scope.session().uid()
                             && new_scope.seat() == old_scope.seat())
                     {
                         return Err(unavailable()); // Explicit qualified supersession only.
                     }
+                }
+            }
+            if kind == Kind::Finalization && old_kind == Kind::Quiescence {
+                let old = NativeDisplayFinalizationReservation::decode(&previous)?;
+                let old = old.decoded_material()?;
+                let current = terminal.as_ref().ok_or_else(unavailable)?.decoded_material()?;
+                let a = old.restoration().replacement().topology();
+                let b = current.restoration().replacement().topology();
+                if old.restoration_dispatch() == current.restoration_dispatch()
+                    || (a.session().boot() == b.session().boot()
+                        && a.session().uid() == b.session().uid()
+                        && a.seat() == b.seat())
+                {
+                    return Err(unavailable()); // Orphan marker cannot be superseded.
                 }
             }
             if kind == Kind::Restoration && old_kind == Kind::Restoration {
@@ -325,7 +356,9 @@ fn reserve_kind_at(
                 }
             }
         }
-        if terminal.is_some() && !parent_seen {
+        if terminal.is_some()
+            && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen))
+        {
             return Err(unavailable());
         }
         let name = kind.name(dispatch);
@@ -389,11 +422,35 @@ pub(super) fn reserve_finalization(
     )
 }
 
+/// A durable one-use quiescence marker, not Root retirement or release.
+/// It requires an exact synced terminal plus restoration parent. Interrupted
+/// writes leave the reservation fenced and never authorize a retry.
+pub(super) fn reserve_quiescence(
+    record: &NativeDisplayFinalizationReservation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::Quiescence,
+    )
+}
+
 fn read_finalization_at(
     fd: &OwnedFd,
     uid: u32,
     retained: &NativeDisplayRestorationReservation,
 ) -> Result<Option<NativeDisplayFinalizationReservation>, String> {
+    read_finalization_state_at(fd, uid, retained).map(|(terminal, _)| terminal)
+}
+
+/// Read Root's exact immutable terminal and quiescence record under one lock.
+fn read_finalization_state_at(
+    fd: &OwnedFd,
+    uid: u32,
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<(Option<NativeDisplayFinalizationReservation>, bool), String> {
     directory(fd, uid, true)?;
     fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
     let result = (|| {
@@ -402,6 +459,7 @@ fn read_finalization_at(
             .recovery_scope()
             .map_err(|error| error.to_string())?;
         let mut found = None;
+        let mut quiescence = None;
         let mut parent_seen = false;
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
@@ -428,7 +486,7 @@ fn read_finalization_at(
                     parent_seen = true;
                 }
             }
-            if kind != Kind::Finalization {
+            if !matches!(kind, Kind::Finalization | Kind::Quiescence) {
                 continue;
             }
             let terminal = NativeDisplayFinalizationReservation::decode(&bytes)?;
@@ -438,17 +496,30 @@ fn read_finalization_at(
                 .map_err(|error| error.to_string())?
                 == scope
             {
-                if found.is_some() {
+                terminal.validate_restoration(retained)?;
+                let slot = if kind == Kind::Quiescence {
+                    &mut quiescence
+                } else {
+                    &mut found
+                };
+                if slot.is_some() {
                     return Err(unavailable());
                 }
-                terminal.validate_restoration(retained)?;
-                found = Some(terminal);
+                *slot = Some(terminal);
             }
         }
         if !parent_seen {
             return Err(unavailable());
         }
-        Ok(found)
+        if let Some(ref quiesced) = quiescence
+            && found
+                .as_ref()
+                .is_none_or(|terminal| terminal.canonical_bytes() != quiesced.canonical_bytes())
+        {
+            return Err(unavailable()); // Orphan or substituted quiescence marker.
+        }
+        let durable_quiescence = quiescence.is_some();
+        Ok((found, durable_quiescence))
     })();
     let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
     match (result, unlocked) {
@@ -463,6 +534,13 @@ pub(super) fn read_finalization(
     retained: &NativeDisplayRestorationReservation,
 ) -> Result<Option<NativeDisplayFinalizationReservation>, String> {
     read_finalization_at(&open()?, 0, retained)
+}
+
+/// A disk marker is historical comparison evidence, not live native proof.
+pub(super) fn read_finalization_state(
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<(Option<NativeDisplayFinalizationReservation>, bool), String> {
+    read_finalization_state_at(&open()?, 0, retained)
 }
 
 fn read_restoration_at(

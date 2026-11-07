@@ -741,6 +741,91 @@ fn terminal_reservation_needs_actual_parent_and_is_immutable_exclusive_and_reope
     assert!(original.starts_with(FINALIZATION_MAGIC));
     assert_eq!(&original[HEADER..], record.canonical_bytes());
 }
+
+#[test]
+fn quiescence_is_write_once_and_requires_exact_terminal_and_restoration_parents() {
+    let fixture = Fixture::new();
+    let (parent, record) = terminal(1, 2, 3, "seat0");
+    let reserve = || {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            Kind::Quiescence,
+        )
+    };
+    assert!(reserve().is_err());
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve().is_err());
+    assert!(reserve_terminal(&fixture, &record).is_ok());
+    assert!(
+        !read_finalization_state_at(&fixture.fd, fixture.uid, &parent)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .1
+    );
+    assert!(reserve().is_ok());
+    let (readback, durable) = read_finalization_state_at(&fixture.fd, fixture.uid, &parent)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(durable);
+    assert_eq!(
+        readback.map(|value| value.canonical_bytes()),
+        Some(record.canonical_bytes())
+    );
+    assert!(reserve().is_err());
+    assert!(
+        !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    let marker = fixture
+        .path
+        .join(Kind::Quiescence.name(&record.binding().dispatch_digest));
+    let bytes = std::fs::read(&marker).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(bytes.starts_with(QUIESCENCE_MAGIC));
+    assert_eq!(&bytes[HEADER..], record.canonical_bytes());
+}
+
+#[test]
+fn missing_or_corrupt_quiescence_parent_cannot_repair_or_admit() {
+    for fault in 0..3 {
+        let fixture = Fixture::new();
+        let (parent, record) = terminal(1, 2, 3, "seat0");
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_terminal(&fixture, &record).is_ok());
+        assert!(
+            reserve_kind_at(
+                &fixture.fd,
+                fixture.uid,
+                &record.binding().dispatch_digest,
+                &record.canonical_bytes(),
+                Kind::Quiescence,
+            )
+            .is_ok()
+        );
+        let terminal_path = fixture
+            .path
+            .join(Kind::Finalization.name(&record.binding().dispatch_digest));
+        let marker_path = fixture
+            .path
+            .join(Kind::Quiescence.name(&record.binding().dispatch_digest));
+        match fault {
+            0 => std::fs::remove_file(&terminal_path)
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            1 => std::fs::write(&marker_path, b"torn quiescence marker")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::set_permissions(
+                &marker_path,
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        }
+        assert!(read_finalization_state_at(&fixture.fd, fixture.uid, &parent).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+        );
+        assert!(reserve_terminal(&fixture, &record).is_err());
+    }
+}
+
 #[test]
 fn corrupted_or_substituted_terminal_history_blocks_all_reads_and_reservations_without_repair() {
     for fault in 0..7 {
