@@ -57,10 +57,19 @@ class NativeFirstFrameGate final
         std::size_t completedCount = 0;
     };
 
-    [[nodiscard]] static std::optional<NativeFirstFrameGate> arm(
-        const Snapshot &held, std::uint64_t postWriteEpoch, ClockSample sampled,
-        const std::vector<Output> &before)
+    struct ArmRequest final
     {
+        const Snapshot &held;
+        std::uint64_t postWriteEpoch;
+        ClockSample sampled;
+        const std::vector<Output> &before;
+    };
+    [[nodiscard]] static std::optional<NativeFirstFrameGate> arm(const ArmRequest &request)
+    {
+        const auto &held = request.held;
+        const auto postWriteEpoch = request.postWriteEpoch;
+        const auto sampled = request.sampled;
+        const auto &before = request.before;
         if (!postWriteEpoch || !sampled.unixMs || !sampled.bootMs ||
             sampled.unixMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||
             sampled.bootMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||

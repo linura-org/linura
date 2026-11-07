@@ -62,26 +62,26 @@ int main()
 
     // The exact native output inventory, source ownership and a surviving
     // powered root are mandatory even to construct comparison state.
-    assert(!NativeFirstFrameGate::arm(held, 0, start, before));
-    assert(!NativeFirstFrameGate::arm(held, 1, {}, before));
-    assert(!NativeFirstFrameGate::arm(held, 1, start, {}));
+    assert(!NativeFirstFrameGate::arm({held, 0, start, before}));
+    assert(!NativeFirstFrameGate::arm({held, 1, {}, before}));
+    assert(!NativeFirstFrameGate::arm({held, 1, start, {}}));
     auto invalid = held;
     invalid.coverage = Coverage::Unknown;
-    assert(!NativeFirstFrameGate::arm(invalid, 1, start, before));
+    assert(!NativeFirstFrameGate::arm({invalid, 1, start, before}));
     invalid = held;
     invalid.heads[0].outputIdentityWitness.clear();
-    assert(!NativeFirstFrameGate::arm(invalid, 1, start, before));
+    assert(!NativeFirstFrameGate::arm({invalid, 1, start, before}));
     invalid = held;
     invalid.heads[0].powered = false;
-    assert(!NativeFirstFrameGate::arm(invalid, 1, start, before));
+    assert(!NativeFirstFrameGate::arm({invalid, 1, start, before}));
     invalid = held;
     invalid.heads[1].key = invalid.heads[0].key;
-    assert(!NativeFirstFrameGate::arm(invalid, 1, start, before));
+    assert(!NativeFirstFrameGate::arm({invalid, 1, start, before}));
     auto mismatched = before;
     mismatched[0].key.generation++;
-    assert(!NativeFirstFrameGate::arm(held, 1, start, mismatched));
+    assert(!NativeFirstFrameGate::arm({held, 1, start, mismatched}));
 
-    auto gate = NativeFirstFrameGate::arm(held, 13, start, before);
+    auto gate = NativeFirstFrameGate::arm({held, 13, start, before});
     assert(gate && gate->phase() == Phase::Held);
     assert(!gate->observe(held, later, {}));
     assert(!gate->spend(held, {9'999, 4'999}));
@@ -93,7 +93,7 @@ int main()
     for (int scenario = 0; scenario < 4; ++scenario) {
         ProtectedFrame a;
         ProtectedFrame b;
-        auto proof = NativeFirstFrameGate::arm(held, 13, start, before);
+        auto proof = NativeFirstFrameGate::arm({held, 13, start, before});
         assert(proof && proof->spend(held, later));
         if (scenario == 0)
             completed(a, &first, 8, Kind::Safety);
@@ -113,7 +113,7 @@ int main()
     // No first frame remains pending, without extending the original clocks.
     ProtectedFrame a;
     ProtectedFrame b;
-    auto proof = NativeFirstFrameGate::arm(held, 13, start, before);
+    auto proof = NativeFirstFrameGate::arm({held, 13, start, before});
     assert(proof && proof->spend(held, later));
     std::vector<NativeFirstFrameGate::NativeFrame> frames{
         {held.heads[0].key, &a, &first, 0, false},
@@ -138,7 +138,7 @@ int main()
 
     for (int scenario = 0; scenario < 5; ++scenario) {
         auto current = held;
-        auto candidate = NativeFirstFrameGate::arm(held, 13, start, before);
+        auto candidate = NativeFirstFrameGate::arm({held, 13, start, before});
         assert(candidate && candidate->spend(held, later));
         if (scenario == 0)
             current.generation++;
@@ -156,7 +156,8 @@ int main()
     // Disabled output requires its own newly submitted disabled commit. It
     // cannot borrow the powered root's content frame or a stale disable.
     const auto partlyDisabled = inventory(true);
-    auto disabled = NativeFirstFrameGate::arm(partlyDisabled, 24, start, baseline(partlyDisabled));
+    const auto disabledBefore = baseline(partlyDisabled);
+    auto disabled = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
     assert(disabled && disabled->spend(partlyDisabled, later));
     std::vector<NativeFirstFrameGate::NativeFrame> disabledFrames{
         {partlyDisabled.heads[0].key, &a, &first, 0, false},
@@ -164,15 +165,14 @@ int main()
     };
     assert(!disabled->observe(partlyDisabled, later, disabledFrames));
     assert(disabled->phase() == Phase::Faulted);
-    auto disabledFresh =
-        NativeFirstFrameGate::arm(partlyDisabled, 24, start, baseline(partlyDisabled));
+    auto disabledFresh = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
     assert(disabledFresh && disabledFresh->spend(partlyDisabled, later));
     disabledFrames[1].disableCommit = 10;
     assert(disabledFresh->observe(partlyDisabled, later, disabledFrames));
     assert(!disabledFresh->observe(partlyDisabled, later, disabledFrames));
 
-    auto exhaustion = NativeFirstFrameGate::arm(
-        held, 13, {std::numeric_limits<std::uint64_t>::max(), 5'000}, before);
+    const ClockSample exhaustedClock{std::numeric_limits<std::uint64_t>::max(), 5'000};
+    auto exhaustion = NativeFirstFrameGate::arm({held, 13, exhaustedClock, before});
     assert(!exhaustion);
     return 0;
 }
