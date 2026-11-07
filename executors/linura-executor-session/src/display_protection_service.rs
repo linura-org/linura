@@ -2066,11 +2066,8 @@ mod tests {
             async_io::block_on(service.reserve_native_release(&bytes, sender.header())).is_err()
         );
         assert!(
-            async_io::block_on(service.reserve_native_release(
-                b"LNRN:1\n",
-                sender.header(),
-            ))
-            .is_err()
+            async_io::block_on(service.reserve_native_release(b"LNRN:1\n", sender.header(),))
+                .is_err()
         );
         assert!(
             async_io::block_on(service.reserve_native_release(
