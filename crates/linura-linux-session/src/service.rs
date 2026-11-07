@@ -379,7 +379,10 @@ impl NativeSessionChannel {
         }
         let started = Instant::now();
         let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
-        let read = |expected: u32| {
+        let read = |expected: u32| -> Result<
+            (Vec<u8>, Vec<u8>, crate::NativeDisplayFinalizationReservation),
+            String,
+        > {
             let reply = self.call(
                 &root.sender,
                 "/org/linura/DisplayProtection1",
@@ -425,7 +428,7 @@ impl NativeSessionChannel {
             observation,
         )?;
         let bytes = preparation.canonical_bytes();
-        let admit = |method| {
+        let admit = |method: &str| -> Result<(), String> {
             if crate::owner::unix_ms()? >= expires_at_unix_ms {
                 return Err("Root retirement original Control evidence expired".into());
             }
