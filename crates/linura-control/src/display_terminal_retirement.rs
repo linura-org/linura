@@ -1,0 +1,261 @@
+//! Immutable, one-use Control release-preparation provenance. This is retained
+//! *before* invoking Root and survives ambiguous replies; it is not a native
+//! release grant, a Control terminal commit or a physical first-frame proof.
+use linura_core::{DisplayFinalizationMaterial, PrincipalId, RequestId};
+use linura_observation::ObservationEnvelope;
+use linura_protocol::PlanDesiredStateRequest;
+use linura_transaction::{
+    ApprovedRequestJournal, ContentDigest, RetainedRequest, TransactionSnapshot, TransactionState,
+    TransactionStoreError, digest_bytes,
+};
+
+use crate::ManagedLifecycleError;
+
+const DOMAIN: &str = "linura.display.original-terminal-retirement-prepared.v1";
+const KEY_DOMAIN: &str = "linura.display.original-terminal-retirement-prepared-key.v1";
+const MAX_BYTES: usize = 2 * 1024;
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct TerminalRetirementPrepared {
+    canonical: Vec<u8>,
+    expiry: u64,
+    observation: ContentDigest,
+}
+
+fn invalid() -> ManagedLifecycleError {
+    ManagedLifecycleError::Authority(
+        "original display terminal retirement preparation is unavailable or conflicting".into(),
+    )
+}
+
+impl TerminalRetirementPrepared {
+    pub(crate) fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
+        let id = digest_bytes(KEY_DOMAIN, request.as_str().as_bytes());
+        RequestId::new(format!("request:v010:display-terminal-retirement:{}", id.hex()))
+            .map_err(|_| invalid())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn capture(
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+        snapshot: &TransactionSnapshot,
+        dispatch: &str,
+        material: &str,
+        observation: &ObservationEnvelope,
+        now: u64,
+    ) -> Result<Self, ManagedLifecycleError> {
+        if snapshot.principal != *principal
+            || snapshot.request_id != request.request_id
+            || snapshot.transaction_id
+                != linura_transaction::TransactionId::for_namespace(principal, &request.request_id)
+            || snapshot.state != TransactionState::Indeterminate
+            || snapshot.state_version == 0
+            || snapshot.binding_digest == ContentDigest::zero()
+            || !linura_provider_sdk::ComponentDigest::parse_hex(dispatch)
+                .is_ok_and(|parsed| parsed.to_hex() == dispatch)
+            || !request.request_id.as_str().starts_with("request:v010:display-finalization:")
+            || observation.observed_at_unix_ms == 0
+            || observation.valid_for_ms == 0
+            || now < observation.observed_at_unix_ms
+        {
+            return Err(invalid());
+        }
+        let finalization = DisplayFinalizationMaterial::decode(material).map_err(|_| invalid())?;
+        if principal.as_str()
+            != format!("unix:uid:{}", finalization.current_lock().epoch().uid())
+            || request.provider.as_str() != linura_observation::DISPLAY_RECOVERY_PROVIDER
+            || request.observation_capability.as_str()
+                != linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+            || request.resource
+                != finalization
+                    .recovery_scope()
+                    .map_err(|_| invalid())?
+                    .resource_id()
+                    .map_err(|_| invalid())?
+            || request.desired_state.len() != 1
+            || request
+                .desired_state
+                .get("finalize_original")
+                .map(String::as_bytes)
+                != Some(
+                    linura_provider_sdk::display_finalization_effect(material)
+                        .map_err(|_| invalid())?
+                        .canonical_payload
+                        .as_slice(),
+                )
+        {
+            return Err(invalid());
+        }
+        // Do not grant the caller a newly computed period. The actual original
+        // evidence timestamp controls the entire later Root preparation.
+        let expiry = observation
+            .observed_at_unix_ms
+            .checked_add(observation.valid_for_ms.min(2_000))
+            .ok_or_else(invalid)?;
+        if now >= expiry {
+            return Err(invalid());
+        }
+        observation.require_current(now).map_err(|_| invalid())?;
+        let obs = crate::durable_authority::digest_observation(observation)?;
+        let intent = digest_bytes(
+            "linura.display.original-terminal-retirement-intent.v1",
+            material.as_bytes(),
+        );
+        let request_digest = crate::durable_authority::digest_request(request)?;
+        let version = snapshot.state_version.to_string();
+        let at = observation.observed_at_unix_ms.to_string();
+        let until = expiry.to_string();
+        let mut canonical = Vec::new();
+        for field in [
+            DOMAIN,
+            principal.as_str(),
+            request.request_id.as_str(),
+            snapshot.transaction_id.as_str(),
+            request_digest.as_str(),
+            version.as_str(),
+            snapshot.binding_digest.as_str(),
+            dispatch,
+            intent.as_str(),
+            obs.as_str(),
+            at.as_str(),
+            until.as_str(),
+        ] {
+            if canonical
+                .len()
+                .checked_add(8)
+                .and_then(|length| length.checked_add(field.len()))
+                .is_none_or(|length| length > MAX_BYTES)
+            {
+                return Err(invalid());
+            }
+            canonical.extend_from_slice(&(field.len() as u64).to_be_bytes());
+            canonical.extend_from_slice(field.as_bytes());
+        }
+        Ok(Self {
+            canonical,
+            expiry,
+            observation: obs,
+        })
+    }
+
+    pub(crate) fn require_absent(
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        terminal_request: &RequestId,
+    ) -> Result<(), ManagedLifecycleError> {
+        journal.integrity_check().map_err(|_| invalid())?;
+        match journal.load(principal, &Self::key(terminal_request)?) {
+            Err(TransactionStoreError::NotFound) => Ok(()),
+            // An already retained preparation is spent even if its ACK was
+            // lost; conflicting or corrupt history also cannot be repaired.
+            _ => Err(invalid()),
+        }
+    }
+
+    pub(crate) fn append(
+        &self,
+        journal: &mut dyn ApprovedRequestJournal,
+        principal: PrincipalId,
+        terminal_request: &RequestId,
+    ) -> Result<(), ManagedLifecycleError> {
+        journal
+            .retain(
+                &RetainedRequest::new(
+                    principal,
+                    Self::key(terminal_request)?,
+                    self.canonical.clone(),
+                )
+                .map_err(|_| invalid())?,
+            )
+            .map_err(|_| invalid())
+    }
+
+    pub(crate) fn require_readback(
+        &self,
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        terminal_request: &RequestId,
+    ) -> Result<(), ManagedLifecycleError> {
+        journal.integrity_check().map_err(|_| invalid())?;
+        let key = Self::key(terminal_request)?;
+        let record = journal.load(principal, &key).map_err(|_| invalid())?;
+        if record.principal() != principal
+            || record.request_id() != &key
+            || record.canonical() != self.canonical
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn expiry(&self) -> u64 {
+        self.expiry
+    }
+    pub(crate) const fn observation(&self) -> &ContentDigest {
+        &self.observation
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linura_transaction::ContentDigest;
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Journal(BTreeMap<(PrincipalId, RequestId), RetainedRequest>);
+    impl ApprovedRequestJournal for Journal {
+        fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+            let key = (record.principal().clone(), record.request_id().clone());
+            if self.0.get(&key).is_some_and(|current| current != record) {
+                return Err(TransactionStoreError::AuthorityRejected);
+            }
+            self.0.insert(key, record.clone());
+            Ok(())
+        }
+        fn load(
+            &self,
+            principal: &PrincipalId,
+            request: &RequestId,
+        ) -> Result<RetainedRequest, TransactionStoreError> {
+            self.0
+                .get(&(principal.clone(), request.clone()))
+                .cloned()
+                .ok_or(TransactionStoreError::NotFound)
+        }
+        fn integrity_check(&self) -> Result<(), TransactionStoreError> {
+            Ok(())
+        }
+    }
+
+    fn valid<T, E: std::fmt::Debug>(value: Result<T, E>) -> T {
+        value.unwrap_or_else(|error| unreachable!("{error:?}"))
+    }
+
+    #[test]
+    fn prepared_history_is_independent_immutable_and_spent_after_lost_ack() {
+        let request = valid(RequestId::new("request:v010:display-finalization:one"));
+        let principal = valid(PrincipalId::new("unix:uid:1000"));
+        let record = TerminalRetirementPrepared {
+            canonical: vec![1, 2, 3, 4],
+            expiry: 200,
+            observation: ContentDigest::zero(),
+        };
+        let mut journal = Journal::default();
+        valid(TerminalRetirementPrepared::require_absent(&journal, &principal, &request));
+        valid(record.append(&mut journal, principal.clone(), &request));
+        valid(record.require_readback(&journal, &principal, &request));
+        assert!(TerminalRetirementPrepared::require_absent(&journal, &principal, &request).is_err());
+        assert!(TerminalRetirementPrepared::require_absent(&journal, &valid(PrincipalId::new("unix:uid:999")), &request).is_ok());
+        let mut changed = TerminalRetirementPrepared {
+            canonical: vec![1, 2, 3, 5],
+            expiry: 200,
+            observation: ContentDigest::zero(),
+        };
+        assert!(changed.require_readback(&journal, &principal, &request).is_err());
+        assert!(changed.append(&mut journal, principal.clone(), &request).is_err());
+        changed.canonical = vec![1, 2, 3, 4];
+        valid(changed.require_readback(&journal, &principal, &request));
+    }
+}

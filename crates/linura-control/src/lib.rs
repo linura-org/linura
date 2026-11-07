@@ -23,6 +23,7 @@ mod display_finalization_plan;
 mod display_plan;
 mod display_recovery_journal;
 mod display_restoration_link;
+mod display_terminal_retirement;
 mod display_restoration_plan;
 mod display_safety;
 mod durable_authority;
@@ -83,7 +84,8 @@ pub use durable_authority::{
 pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
     AuthorizedEffectExecutor, AuthorizedOriginalDisplayFinalization,
-    AuthorizedOriginalDisplayRestoration, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
+    AuthorizedOriginalDisplayRestoration, AuthorizedOriginalDisplayRetirementPreparation,
+    OriginalDisplayRetirementPreparationPort, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
     DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
     DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
     IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN,

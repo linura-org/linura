@@ -124,6 +124,57 @@ impl OriginalDisplayFinalizationInspection {
     }
 }
 
+/// One private Control-to-Root preparation, created only after durable
+/// authenticated terminal dispatch and fresh independent held-quiescence
+/// verification. This is not a release, new approval, or execution permit.
+pub struct AuthorizedOriginalDisplayRetirementPreparation {
+    material: String,
+    terminal: TransactionSnapshot,
+    dispatch_digest: String,
+    observation_digest: linura_transaction::ContentDigest,
+    expires_at_unix_ms: u64,
+}
+impl Debug for AuthorizedOriginalDisplayRetirementPreparation {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("AuthorizedOriginalDisplayRetirementPreparation")
+            .field("terminal_transaction", &self.terminal.transaction_id)
+            .field("expires_at_unix_ms", &self.expires_at_unix_ms)
+            .finish_non_exhaustive()
+    }
+}
+impl AuthorizedOriginalDisplayRetirementPreparation {
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+    #[must_use]
+    pub fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+    #[must_use]
+    pub fn dispatch_digest(&self) -> &str {
+        &self.dispatch_digest
+    }
+    #[must_use]
+    pub fn observation_digest(&self) -> &linura_transaction::ContentDigest {
+        &self.observation_digest
+    }
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
+}
+
+/// Control's narrow Root preparation adapter. Implementation must authenticate
+/// the exact Root peer and immutable native terminal reservation; comparison
+/// values are not authority to retire anything, including S17 protection.
+pub trait OriginalDisplayRetirementPreparationPort: Debug + Send {
+    fn prepare_retirement(
+        &mut self,
+        preparation: AuthorizedOriginalDisplayRetirementPreparation,
+    ) -> Result<(), String>;
+}
+
 /// Read-only independent proof of held quiescence for one actual dispatched
 /// terminal transaction. It cannot retire witnesses, release fences or commit.
 #[derive(Debug)]
@@ -798,6 +849,113 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             restoration,
             terminal: terminal.snapshot,
         })
+    }
+
+
+    /// Journal a one-use Control retirement-preparation decision before asking
+    /// Root to reserve its independent immutable preparation. This method
+    /// NEVER commits terminal completion, retires original witnesses, or
+    /// releases native frame/input/power/startup fences. Ambiguous calls are
+    /// non-retryable, including after a caller or service restart.
+    pub fn prepare_original_display_terminal_retirement<
+        P: OriginalDisplayRetirementPreparationPort,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        port: &mut P,
+    ) -> Result<(), ManagedLifecycleError> {
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal retirement preparation requires authenticated interactive ownership"
+                    .into(),
+            ));
+        }
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        crate::display_terminal_retirement::TerminalRetirementPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let receipt_dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_ref()
+            .ok_or_else(invalid)?
+            .clone();
+        let complete = self.inspect_quiesced_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            terminal_request,
+        )?;
+        if complete.terminal != terminal.snapshot
+            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
+        {
+            return Err(invalid());
+        }
+        let observation = complete.restoration.observation();
+        let now = now_ms()?;
+        let record = crate::display_terminal_retirement::TerminalRetirementPrepared::capture(
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            &receipt_dispatch,
+            terminal.intent.material(),
+            observation,
+            now,
+        )?;
+        let prepared = AuthorizedOriginalDisplayRetirementPreparation {
+            material: terminal.intent.material().to_owned(),
+            terminal: terminal.snapshot.clone(),
+            dispatch_digest: receipt_dispatch,
+            observation_digest: record.observation().clone(),
+            expires_at_unix_ms: record.expiry(),
+        };
+        // A durable intent is reserved BEFORE an external Root write; a failed
+        // append/readback/validation cannot invoke the Root adapter.
+        crate::display_terminal_retirement::TerminalRetirementPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        record.append(
+            self.request_journal.as_deref_mut().ok_or_else(invalid)?,
+            principal_id.clone(),
+            terminal_request,
+        )?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry()
+            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
+        {
+            return Err(invalid());
+        }
+        observation.require_current(now_ms()?).map_err(|_| invalid())?;
+        // The port receives a non-cloneable private correlation, not a renewed
+        // permit. Reconciliation may inspect only the already-spent history.
+        port.prepare_retirement(prepared).map_err(|_| {
+            ManagedLifecycleError::Indeterminate(
+                "terminal Root retirement preparation reply is uncertain; no retry".into(),
+            )
+        })?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if self.terminal_inspection_context(&principal, terminal_request)? != terminal
+            || now_ms()? >= record.expiry()
+        {
+            return Err(invalid());
+        }
+        // Re-check Root and all independent current sources after the native
+        // mechanism, even though this operation has no release side effect.
+        let after = self.inspect_quiesced_original_display_finalization(
+            principal,
+            actor,
+            terminal_request,
+        )?;
+        if after.terminal != terminal.snapshot {
+            return Err(invalid());
+        }
+        Ok(())
     }
 
     fn terminal_inspection_context(

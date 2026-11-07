@@ -24,7 +24,8 @@ mod release;
 mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
-    AuthorizedOriginalDisplayFinalization, OriginalDisplayFinalizationAuthorizer,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRetirementPreparation,
+    OriginalDisplayRetirementPreparationPort, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
