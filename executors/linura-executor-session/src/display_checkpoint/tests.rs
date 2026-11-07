@@ -821,6 +821,40 @@ fn missing_or_corrupt_quiescence_parent_cannot_repair_or_admit() {
 }
 
 #[test]
+fn unrelated_orphan_quiescence_fences_all_scope_reads_and_writes() {
+    let fixture = Fixture::new();
+    let (first_parent, first_terminal) = terminal(1, 2, 3, "seat0");
+    let (other_parent, other_terminal) = terminal(11, 12, 13, "seat12");
+    assert!(reserve_recovery(&fixture, &first_parent).is_ok());
+    assert!(reserve_terminal(&fixture, &first_terminal).is_ok());
+    assert!(
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &first_terminal.binding().dispatch_digest,
+            &first_terminal.canonical_bytes(),
+            Kind::Quiescence,
+        )
+        .is_ok()
+    );
+    assert!(reserve_recovery(&fixture, &other_parent).is_ok());
+    assert!(reserve_terminal(&fixture, &other_terminal).is_ok());
+    // Deleting an unrelated synced terminal is adversarial corruption, not a
+    // qualifying retire. Its surviving marker must poison all other scopes.
+    std::fs::remove_file(
+        fixture
+            .path
+            .join(Kind::Finalization.name(&first_terminal.binding().dispatch_digest)),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_finalization_state_at(&fixture.fd, fixture.uid, &other_parent).is_err());
+    assert!(read_finalization_at(&fixture.fd, fixture.uid, &other_parent).is_err());
+    let (new_parent, _) = terminal(21, 22, 23, "seat22");
+    assert!(reserve_recovery(&fixture, &new_parent).is_err());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+}
+
+#[test]
 fn corrupted_or_substituted_terminal_history_blocks_all_reads_and_reservations_without_repair() {
     for fault in 0..7 {
         let fixture = Fixture::new();

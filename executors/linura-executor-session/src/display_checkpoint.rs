@@ -1,6 +1,7 @@
 //! Immutable private mechanism preimages, not Control authority state. Reserve
 //! and fsync before a native write; any uncertainty preserves the record and
 //! refuses redelivery. Nothing in this module dispatches or authorizes effects.
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::OwnedFd;
@@ -269,6 +270,8 @@ fn reserve_kind_at(
         };
         let mut parent_seen = false;
         let mut terminal_seen = false;
+        let mut terminal_digests = BTreeSet::new();
+        let mut quiescence_digests = BTreeSet::new();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -285,6 +288,17 @@ fn reserve_kind_at(
             // Inspect type before opening, so a malformed device/FIFO entry
             // cannot turn a history scan into a native device operation.
             let (old_kind, _, previous) = read_named_record(fd, uid, name)?;
+            if matches!(old_kind, Kind::Finalization | Kind::Quiescence) {
+                let digest: [u8; 32] = Sha256::digest(&previous).into();
+                let set = if old_kind == Kind::Finalization {
+                    &mut terminal_digests
+                } else {
+                    &mut quiescence_digests
+                };
+                if !set.insert(digest) {
+                    return Err(unavailable());
+                }
+            }
             if let Some(terminal) = &terminal {
                 let material = terminal.decoded_material()?;
                 if old_kind == Kind::Restoration {
@@ -359,7 +373,11 @@ fn reserve_kind_at(
                 }
             }
         }
-        if terminal.is_some() && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen)) {
+        if !quiescence_digests.is_subset(&terminal_digests)
+            || terminal.is_some() && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen))
+        {
+            // Orphan immutable terminal markers are never repaired, ignored or
+            // treated as unrelated. Every admission uses one global journal.
             return Err(unavailable());
         }
         let name = kind.name(dispatch);
@@ -462,6 +480,8 @@ fn read_finalization_state_at(
         let mut found = None;
         let mut quiescence = None;
         let mut parent_seen = false;
+        let mut terminal_digests = BTreeSet::new();
+        let mut quiescence_digests = BTreeSet::new();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -473,6 +493,17 @@ fn read_finalization_state_at(
                 return Err(unavailable());
             }
             let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
+            if matches!(kind, Kind::Finalization | Kind::Quiescence) {
+                let digest: [u8; 32] = Sha256::digest(&bytes).into();
+                let set = if kind == Kind::Finalization {
+                    &mut terminal_digests
+                } else {
+                    &mut quiescence_digests
+                };
+                if !set.insert(digest) {
+                    return Err(unavailable());
+                }
+            }
             if kind == Kind::Restoration {
                 let parent = NativeDisplayRestorationReservation::decode(&bytes)?;
                 if parent
@@ -509,7 +540,7 @@ fn read_finalization_state_at(
                 *slot = Some(terminal);
             }
         }
-        if !parent_seen {
+        if !parent_seen || !quiescence_digests.is_subset(&terminal_digests) {
             return Err(unavailable());
         }
         if let Some(ref quiesced) = quiescence
