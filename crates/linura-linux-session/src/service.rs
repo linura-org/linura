@@ -380,7 +380,11 @@ impl NativeSessionChannel {
         let started = Instant::now();
         let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
         let read = |expected: u32| -> Result<
-            (Vec<u8>, Vec<u8>, crate::NativeDisplayFinalizationReservation),
+            (
+                Vec<u8>,
+                Vec<u8>,
+                crate::NativeDisplayFinalizationReservation,
+            ),
             String,
         > {
             let reply = self.call(
