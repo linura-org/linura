@@ -876,7 +876,9 @@ impl ProtectionPort for NativeProtection {
         Ok((
             record.canonical_bytes(),
             phase,
-            terminal.map(|record| record.canonical_bytes()).unwrap_or_default(),
+            terminal
+                .map(|record| record.canonical_bytes())
+                .unwrap_or_default(),
         ))
     }
     fn startup(

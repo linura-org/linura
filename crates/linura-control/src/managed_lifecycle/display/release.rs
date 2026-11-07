@@ -241,11 +241,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "ordinary display release durable provenance changed".into(),
             ));
         }
-        let expires_at_unix_ms = terminal_release_expires_at(
-            after.observed_at_unix_ms,
-            after.valid_for_ms,
-            now_ms()?,
-        )?;
+        let expires_at_unix_ms =
+            terminal_release_expires_at(after.observed_at_unix_ms, after.valid_for_ms, now_ms()?)?;
         Ok(OrdinaryDisplayReleaseInspection {
             request_id: request.request_id,
             transaction_id: transaction,
@@ -319,8 +316,14 @@ mod tests {
 
     #[test]
     fn release_report_expiry_is_strict_and_cannot_be_renewed_by_durable_readback() {
-        assert_eq!(terminal_release_expires_at(10_000, 2_000, 10_000).ok(), Some(12_000));
-        assert_eq!(terminal_release_expires_at(10_000, 2_000, 11_999).ok(), Some(12_000));
+        assert_eq!(
+            terminal_release_expires_at(10_000, 2_000, 10_000).ok(),
+            Some(12_000)
+        );
+        assert_eq!(
+            terminal_release_expires_at(10_000, 2_000, 11_999).ok(),
+            Some(12_000)
+        );
         for (observed, validity, now) in [
             (10_000, 2_000, 12_000),
             (10_000, 2_000, 12_001),

@@ -53,11 +53,11 @@ impl Kind {
             Self::Restoration => Ok(NativeDisplayRestorationReservation::decode(payload)?
                 .binding()
                 .dispatch_digest),
-            Self::Finalization | Self::Quiescence => Ok(
-                NativeDisplayFinalizationReservation::decode(payload)?
+            Self::Finalization | Self::Quiescence => {
+                Ok(NativeDisplayFinalizationReservation::decode(payload)?
                     .binding()
-                    .dispatch_digest,
-            ),
+                    .dispatch_digest)
+            }
         }
     }
     fn name(self, dispatch: &ComponentDigest) -> String {
@@ -326,7 +326,10 @@ fn reserve_kind_at(
             if kind == Kind::Finalization && old_kind == Kind::Quiescence {
                 let old = NativeDisplayFinalizationReservation::decode(&previous)?;
                 let old = old.decoded_material()?;
-                let current = terminal.as_ref().ok_or_else(unavailable)?.decoded_material()?;
+                let current = terminal
+                    .as_ref()
+                    .ok_or_else(unavailable)?
+                    .decoded_material()?;
                 let a = old.restoration().replacement().topology();
                 let b = current.restoration().replacement().topology();
                 if old.restoration_dispatch() == current.restoration_dispatch()
@@ -356,9 +359,7 @@ fn reserve_kind_at(
                 }
             }
         }
-        if terminal.is_some()
-            && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen))
-        {
+        if terminal.is_some() && (!parent_seen || (kind == Kind::Quiescence && !terminal_seen)) {
             return Err(unavailable());
         }
         let name = kind.name(dispatch);

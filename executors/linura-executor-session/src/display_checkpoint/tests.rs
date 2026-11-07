@@ -773,9 +773,7 @@ fn quiescence_is_write_once_and_requires_exact_terminal_and_restoration_parents(
         Some(record.canonical_bytes())
     );
     assert!(reserve().is_err());
-    assert!(
-        !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
-    );
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
     let marker = fixture
         .path
         .join(Kind::Quiescence.name(&record.binding().dispatch_digest));
@@ -808,15 +806,11 @@ fn missing_or_corrupt_quiescence_parent_cannot_repair_or_admit() {
             .path
             .join(Kind::Quiescence.name(&record.binding().dispatch_digest));
         match fault {
-            0 => std::fs::remove_file(&terminal_path)
-                .unwrap_or_else(|e| unreachable!("{e}")),
+            0 => std::fs::remove_file(&terminal_path).unwrap_or_else(|e| unreachable!("{e}")),
             1 => std::fs::write(&marker_path, b"torn quiescence marker")
                 .unwrap_or_else(|e| unreachable!("{e}")),
-            _ => std::fs::set_permissions(
-                &marker_path,
-                std::fs::Permissions::from_mode(0o644),
-            )
-            .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::set_permissions(&marker_path, std::fs::Permissions::from_mode(0o644))
+                .unwrap_or_else(|e| unreachable!("{e}")),
         }
         assert!(read_finalization_state_at(&fixture.fd, fixture.uid, &parent).is_err());
         assert!(

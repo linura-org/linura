@@ -197,15 +197,22 @@ mod tests {
             let lifetime = Lifetime::new(state.clone());
             let worker = std::thread::spawn(move || {
                 let mut checks = 0;
-                let result = serve(&mut root, &[7; 32], lifetime, same_process, |initial| {
-                    checks += 1;
-                    assert_eq!(initial, checks == 1);
-                    if lost && checks == 2 {
-                        Err(unavailable())
-                    } else {
-                        Ok(())
-                    }
-                }, || Ok(()));
+                let result = serve(
+                    &mut root,
+                    &[7; 32],
+                    lifetime,
+                    same_process,
+                    |initial| {
+                        checks += 1;
+                        assert_eq!(initial, checks == 1);
+                        if lost && checks == 2 {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    || Ok(()),
+                );
                 assert!(result.is_err());
                 checks
             });
@@ -268,9 +275,14 @@ mod tests {
             let lifetime = Lifetime::new(state.clone());
             let worker = std::thread::spawn(move || {
                 assert!(
-                    serve(&mut root, &[7; 32], lifetime, same_process, |_| {
-                        unreachable!("invalid message must not reach witness verification")
-                    }, || unreachable!("invalid native purpose cannot persist"))
+                    serve(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        same_process,
+                        |_| { unreachable!("invalid message must not reach witness verification") },
+                        || unreachable!("invalid native purpose cannot persist")
+                    )
                     .is_err()
                 );
             });
