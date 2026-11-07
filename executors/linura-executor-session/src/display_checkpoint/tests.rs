@@ -958,7 +958,21 @@ fn terminal_readback_requires_the_same_actual_parent_during_its_locked_scan() {
         if substitute {
             let (other, _) = terminal(1, 4, 5, "seat0");
             assert_ne!(other.canonical_bytes(), parent.canonical_bytes());
-            assert!(reserve_recovery(&fixture, &other).is_ok());
+            // A missing parent now globally quarantines every new admission.
+            // Exercise an actual on-disk substitution from a separately valid
+            // fixture instead of asking the protected writer to repair history.
+            assert!(reserve_recovery(&fixture, &other).is_err());
+            let foreign = Fixture::new();
+            assert!(reserve_recovery(&foreign, &other).is_ok());
+            std::fs::copy(
+                foreign
+                    .path
+                    .join(Kind::Restoration.name(&other.binding().dispatch_digest)),
+                fixture
+                    .path
+                    .join(Kind::Restoration.name(&other.binding().dispatch_digest)),
+            )
+            .unwrap_or_else(|e| unreachable!("{e}"));
         }
         assert!(read_finalization_at(&fixture.fd, fixture.uid, &parent).is_err());
         assert!(reserve_terminal(&fixture, &record).is_err());
