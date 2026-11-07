@@ -202,3 +202,104 @@ lost proof, partial effect/lost replies, deadline/storage failure, current lock,
 power/suspend/hotplug/focus/protected input and zero/one/multiple administrators.
 Portable fixtures, compilation and historical green gates do not supply that
 evidence. The PR remains draft until all remaining required work is complete.
+
+## Stage 3 retirement/release state and crash-ordering contract
+
+**Implementation status: not yet implemented.** This is the acceptance contract
+for the remaining Root retirement, ordinary post-commit release and crash-safe
+repair; it does not activate an effect, extend a deadline or change public
+support. The original-restoration terminal and ordinary Keep/Revert paths must
+remain distinct even where they share low-level mechanisms.
+
+### Two independent safety barriers
+
+1. **Durable Root/admission barrier.** Under the same serialized admission and
+   checkpoint boundary as native startup, re-authenticate the supervised Control
+   principal and actual Root-held original/replacement lineage. Persist an
+   immutable, bounded, separately versioned one-use retirement reservation
+   with exclusive sync and readback before *any* protection retirement.
+   Retaining Control terminal history is necessary but not a Root capability.
+2. **Physical native barrier.** The actual current, source-pinned supervised
+   compositor consumes a distinct one-use release grant, validates continuously
+   held lock/input/power/KMS protection and independently demonstrates correct
+   output, rules/overlays, surviving root and hardware-completed frames.
+   Temporarily lifting opaque coverage to observe first ordinary frames must
+   *not* simultaneously release Root admission, S17 input or the inhibitor.
+   Final input/power/admission handoff requires separately verified physical
+   state and independently committed durable terminal records.
+
+Root history retirement, native release, inhibitor retirement, input unlock,
+checkpoint garbage collection and ordinary startup are separate, ordered
+operations. A native ACK, historical receipt or comparison digest alone is
+not authority for any of them.
+
+### Required monotonic state ordering
+
+| Design state | Retained evidence | Permitted effect |
+| --- | --- | --- |
+| Held | Original checkpoint, live witnesses and fenced native history | None |
+| ReleasePrepared | Actual committed Control terminal history and exact immutable purpose-bound request | No protection retirement |
+| RootRetirementPrepared | Root reservation serialized against startup, both owners and original history checked | No ordinary admission or unlock |
+| RootRetiredHeld | Root retirement synced and independently read back; fences still held | Only one exact native physical release attempt |
+| NativeReleaseSpent | Original authenticated native release grant spent before attempting effect | No retry, even after lost ACK |
+| PhysicalReleaseVerified | Fresh native + independent KMS/frame/input/S17 evidence joined to unchanged durable anchors | Exact durable finalization only |
+| ReleasedCurrent | Root and Control re-read matching final records while admission remains serialized | Qualified admission and reference-aware cleanup may proceed |
+
+These are proposed **design** states, not currently implemented wire enum
+variants. Existing durable bytes and protocol versions keep their meanings.
+In particular, RootRetiredHeld, native Confirmed/Restored and a physical ACK
+are never aliases for ReleasedCurrent. An unknown, mismatched or unrecognized
+state must remain fenced.
+
+### Distinct authorities
+
+- **Original-restoration terminal:** require the actual linked original
+  retirement and consumed separate terminal review; revalidate the same live
+  original Root finalization/quiescence channel, restored native source, lock,
+  epoch, checkpoint and authenticated Control history. Do not renew the
+  original absolute clocks, recreate its witness or promote the held-quiescence
+  inspection into an execution credential.
+- **Ordinary Keep:** require Control Committed, matching Confirmed journal
+  record, real native confirmed state, retained immutable checkpoint, fresh
+  dual native observations and independent verification of the desired layout.
+- **Ordinary Revert/expiry:** require Control RecoveryBlocked, matching
+  Restored history, real native restored state and independently verified
+  original rule/overlay ownership and baseline.
+- The existing Control read-only inspections can guide refusal but cannot
+  authorize release. A new purpose-specific authenticated authorizer must
+  load actual current Root/native evidence and re-read exact durable anchors
+  before the single effect. A terminal-original-restoration grant cannot be
+  reused for normal Keep/Revert, and vice versa.
+
+### Crash, overlap and repair requirements
+
+Startup, original witness retention, terminal reservation and retirement
+writers must share a checked serialization protocol, not a cached
+empty-directory observation. Source, boot, session, seat, compositor, output
+generation, lock and protected-owner identity must be checked before and
+after publication. A concurrent startup, changed process identity or
+partial checkpoint refuses.
+
+| Failure point | Mandatory behavior |
+| --- | --- |
+| Before durable release preparation | Preserve the original fence; no new authority |
+| Torn/full/unreadable retirement storage | Fail closed for existing and replacement admission |
+| After durable prepare, before native consumption | Keep a single immutable spent/ambiguous operation; no automatic effect |
+| During native release or after a lost acknowledgement | At most one native attempt; read-only reconciliation only |
+| Frame, input, owner, Root or source proof lost | Hold surviving protection and admission; no optimistic completion |
+| Reply lost after independently durable completion | Re-read exact committed lineage and fresh physical state; do not replay native effects |
+| Protection-service or compositor restart | Do not reconstruct an old witness, approval, channel or owner from disk |
+| Original Committed survives compositor death | Adopt only the independently proved desired state and original ownership, never blindly compensate to baseline |
+| Supersession or shared retained checkpoint | Require independently approved successor and owner/reference-aware retirement; never delete-to-retry |
+
+At every boundary, inject native/compositor/Root/executor termination,
+concurrent owner and startup requests, interrupted writes, missing ACK,
+stale or substituted evidence, hotplug, power/suspend, focus and protected
+input. Compare actual per-output completed frames and KMS state, not just
+synthetic receipts. A failed repair may retain an indeterminate record but
+must never reset a spent one-use release grant.
+
+No real display mutation is supported until this exact-source native
+matrix, plus canonical/security/CodeQL and independent full-PR review,
+passes on the final head. Physical Level C/Q11 and cross-domain support
+remain separate release decisions; portable tests do not substitute.
