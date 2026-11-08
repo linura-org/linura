@@ -16,7 +16,8 @@
       <!-- Supervised Control only; immutable restoration correlation plus live
            Root mechanism state, with no mutation or release credential. Only
            protected/reserved/quiesced/RootRetiredHeld comparison phases
-           are produced; release remains unavailable. -->
+           and separately spent-before-effect comparison phases are produced;
+           physical release remains unavailable. -->
       <arg name="recovery_scope" type="s" direction="in"/>
       <arg name="restoration" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>

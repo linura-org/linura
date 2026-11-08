@@ -129,11 +129,18 @@ fn observed_finalization_phase(
     native_phase: u32,
     root_retired: bool,
     native_release_reserved: bool,
+    native_release_spent: bool,
 ) -> zbus::fdo::Result<u32> {
-    match (native_phase, root_retired, native_release_reserved) {
-        (0..=2, false, false) => Ok(native_phase),
-        (2, true, false) => Ok(3),
-        (2, true, true) => Ok(5),
+    match (
+        native_phase,
+        root_retired,
+        native_release_reserved,
+        native_release_spent,
+    ) {
+        (0..=2, false, false, false) => Ok(native_phase),
+        (2, true, false, false) => Ok(3),
+        (2, true, true, false) => Ok(5),
+        (2, true, true, true) => Ok(6),
         _ => Err(unavailable()),
     }
 }
@@ -1447,7 +1454,37 @@ impl ProtectionPort for NativeProtection {
             // memory attempt without synced readback, cannot be adopted.
             _ => return Err(unavailable()),
         };
-        let current_phase = observed_finalization_phase(phase, retired, native_reserved)?;
+        // LNRX is only a one-use grant-spent fact. It must match the
+        // original Root invocation's live memory grant and exact LNRN bytes.
+        // Missing state or mismatched disk/memory is indeterminate, not phase 5
+        // and never qualified ReleasedCurrent (wire 4).
+        let spent = super::display_checkpoint::read_native_release_spent(&record)
+            .map_err(|_| unavailable())?;
+        let native_spent = match (
+            admission.native_release_grants.get(key.as_str()),
+            spent.as_ref(),
+        ) {
+            (None, None) => false,
+            (Some(grant), None) if native_reserved && grant.pending() => false,
+            (Some(grant), Some(spent))
+                if native_reserved
+                    && !grant.pending()
+                    && admission.native_release_reservations.get(key.as_str())
+                        == Some(&ComponentDigest::from_bytes(
+                            sha2::Sha256::digest(spent.canonical_bytes()).into(),
+                        ))
+                    && spent.canonical_bytes()
+                        == super::display_checkpoint::read_native_release_reserved(&record)
+                            .map_err(|_| unavailable())?
+                            .ok_or_else(unavailable)?
+                            .canonical_bytes() =>
+            {
+                true
+            }
+            _ => return Err(unavailable()),
+        };
+        let current_phase =
+            observed_finalization_phase(phase, retired, native_reserved, native_spent)?;
         Ok((
             record.canonical_bytes(),
             current_phase,
@@ -2333,32 +2370,35 @@ mod tests {
     }
     #[test]
     fn root_release_observation_distinguishes_held_spent_and_released_states() {
-        for (native, retired, reserved, expected) in [
-            (0, false, false, 0),
-            (1, false, false, 1),
-            (2, false, false, 2),
-            (2, true, false, 3),
-            (2, true, true, 5),
+        for (native, retired, reserved, spent, expected) in [
+            (0, false, false, false, 0),
+            (1, false, false, false, 1),
+            (2, false, false, false, 2),
+            (2, true, false, false, 3),
+            (2, true, true, false, 5),
+            (2, true, true, true, 6),
         ] {
             assert_eq!(
-                observed_finalization_phase(native, retired, reserved).ok(),
+                observed_finalization_phase(native, retired, reserved, spent).ok(),
                 Some(expected)
             );
         }
         // Unknown, out-of-order or disk-only/memory-only states never produce
         // a release, renewed reservation, or ReleasedCurrent (wire phase 4).
-        for (native, retired, reserved) in [
-            (0, true, false),
-            (1, true, false),
-            (0, false, true),
-            (1, false, true),
-            (2, false, true),
-            (3, true, true),
-            (4, true, true),
-            (5, true, true),
-            (u32::MAX, true, true),
+        for (native, retired, reserved, spent) in [
+            (0, true, false, false),
+            (1, true, false, false),
+            (0, false, true, false),
+            (1, false, true, false),
+            (2, false, true, false),
+            (2, true, false, true),
+            (2, false, true, true),
+            (3, true, true, false),
+            (4, true, true, true),
+            (5, true, true, false),
+            (u32::MAX, true, true, true),
         ] {
-            assert!(observed_finalization_phase(native, retired, reserved).is_err());
+            assert!(observed_finalization_phase(native, retired, reserved, spent).is_err());
         }
     }
 
