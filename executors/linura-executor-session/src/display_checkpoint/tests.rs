@@ -981,7 +981,7 @@ fn corrupted_or_orphan_native_release_reservation_fences_other_scopes() {
     for fault in 0..3 {
         let fixture = Fixture::new();
         let (parent, terminal) = terminal(1, 2, 3, "seat0");
-        let (other, _) = terminal(11, 12, 13, "seat12");
+        let (other, _) = self::terminal(11, 12, 13, "seat12");
         let preparation = NativeDisplayRetirementPreparation::new(
             &terminal,
             7,
@@ -1033,7 +1033,7 @@ fn corrupted_or_orphan_native_release_reservation_fences_other_scopes() {
         }
         assert!(read_native_release_reserved_at(&fixture.fd, fixture.uid, &other).is_err());
         assert!(read_root_retired_held_at(&fixture.fd, fixture.uid, &other).is_err());
-        let (fresh, _) = terminal(21, 22, 23, "seat22");
+        let (fresh, _) = self::terminal(21, 22, 23, "seat22");
         assert!(reserve_recovery(&fixture, &fresh).is_err());
         assert!(
             !startup_clear_at(&fixture.fd, fixture.uid)
