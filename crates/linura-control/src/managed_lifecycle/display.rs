@@ -24,11 +24,11 @@ mod release;
 mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
-    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRetirementPreparation,
-    AuthorizedOriginalDisplayNativeReleaseReservation, OriginalDisplayNativeReleaseReservationPort,
-    OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
-    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
-    OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativeReleaseReservation,
+    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayFinalizationAuthorizer,
+    OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
+    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
+    OriginalDisplayFinalizationRequest, OriginalDisplayNativeReleaseReservationPort,
     OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
 };
 pub use release::OrdinaryDisplayReleaseInspection;

@@ -3,8 +3,8 @@
 //! native/Root finalization and independent completion remain separate requirements.
 use super::*;
 use crate::display_finalization_intent::FinalizationIntent;
-use crate::display_native_release_reservation::NativeReleasePrepared;
 use crate::display_finalization_plan::FinalizationPlanningContext;
+use crate::display_native_release_reservation::NativeReleasePrepared;
 use crate::display_restoration_link::RestorationLink;
 use crate::display_restoration_plan::OriginalDisplayPlanningContext;
 use linura_core::{DisplayFinalizationMaterial, DisplayRestorationMaterial, SemanticReason};
@@ -1145,7 +1145,9 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     /// Commit a distinct one-use Control decision before asking Root to spend
     /// LNRN:1. This transition has NO compositor, input, power, witness or
     /// ordinary-startup effect. Lost replies can only be independently inspected.
-    pub fn prepare_original_display_native_release<P: OriginalDisplayNativeReleaseReservationPort>(
+    pub fn prepare_original_display_native_release<
+        P: OriginalDisplayNativeReleaseReservationPort,
+    >(
         &mut self,
         principal: AuthenticatedPrincipal,
         actor: Actor,
@@ -1159,7 +1161,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        let dispatch = terminal.receipt.dispatch_digest.as_deref().ok_or_else(invalid)?;
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
         let original = crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
             self.display_journal()?,
             &principal_id,

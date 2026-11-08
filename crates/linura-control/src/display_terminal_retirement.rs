@@ -330,7 +330,10 @@ impl TerminalRetirementPrepared {
 
     pub(crate) fn digest(&self) -> ContentDigest {
         // Historical immutable Control parent, never a release credential.
-        digest_bytes("linura.display.original-terminal-retirement-parent.v1", &self.canonical)
+        digest_bytes(
+            "linura.display.original-terminal-retirement-parent.v1",
+            &self.canonical,
+        )
     }
     pub(crate) const fn expiry(&self) -> u64 {
         self.expiry

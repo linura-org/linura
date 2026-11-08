@@ -500,7 +500,9 @@ impl NativeSessionChannel {
         }
         let intended = linura_core::DisplayFinalizationMaterial::decode(material)
             .map_err(|_| "native release terminal intent malformed")?;
-        let scope = intended.recovery_scope().map_err(|error| error.to_string())?;
+        let scope = intended
+            .recovery_scope()
+            .map_err(|error| error.to_string())?;
         let key = scope.resource_id().map_err(|error| error.to_string())?;
         let binding =
             ComponentDigest::parse_hex(control_binding).map_err(|error| error.to_string())?;
@@ -589,8 +591,7 @@ impl NativeSessionChannel {
             .body()
             .deserialize()
             .map_err(|_| "native release reservation reply is malformed; no retry")?;
-        if !accepted
-            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+        if !accepted || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
         {
             return Err("native release reservation lost its Root ownership; no retry".into());
         }

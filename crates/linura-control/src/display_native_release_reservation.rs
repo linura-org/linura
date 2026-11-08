@@ -32,8 +32,10 @@ fn invalid() -> ManagedLifecycleError {
 }
 fn field<'a>(rest: &mut &'a [u8], max: usize) -> Result<&'a str, ManagedLifecycleError> {
     let (length, tail) = rest.split_at_checked(8).ok_or_else(invalid)?;
-    let length = usize::try_from(u64::from_be_bytes(length.try_into().map_err(|_| invalid())?))
-        .map_err(|_| invalid())?;
+    let length = usize::try_from(u64::from_be_bytes(
+        length.try_into().map_err(|_| invalid())?,
+    ))
+    .map_err(|_| invalid())?;
     if length == 0 || length > max {
         return Err(invalid());
     }
@@ -52,8 +54,11 @@ fn number(raw: &str) -> Result<u64, ManagedLifecycleError> {
 impl NativeReleasePrepared {
     fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
         let digest = digest_bytes(KEY_DOMAIN, request.as_str().as_bytes());
-        RequestId::new(format!("request:v010:display-native-release:{}", digest.hex()))
-            .map_err(|_| invalid())
+        RequestId::new(format!(
+            "request:v010:display-native-release:{}",
+            digest.hex()
+        ))
+        .map_err(|_| invalid())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -215,10 +220,7 @@ impl NativeReleasePrepared {
         }
         let observed_at = number(fields[11])?;
         let expiry = number(fields[12])?;
-        if expiry <= observed_at
-            || expiry - observed_at > 2_000
-            || expiry > parent.expiry()
-        {
+        if expiry <= observed_at || expiry - observed_at > 2_000 || expiry > parent.expiry() {
             return Err(invalid());
         }
         Ok(Self {
@@ -326,10 +328,20 @@ mod tests {
             canonical: vec![1, 3, 5, 8],
             expiry: 20_000,
         };
-        assert!(different.append(&mut journal, principal.clone(), &request).is_err());
-        assert!(different.require_readback(&journal, &principal, &request).is_err());
+        assert!(
+            different
+                .append(&mut journal, principal.clone(), &request)
+                .is_err()
+        );
+        assert!(
+            different
+                .require_readback(&journal, &principal, &request)
+                .is_err()
+        );
         let other = valid(PrincipalId::new("unix:uid:1001"));
-        valid(NativeReleasePrepared::require_absent(&journal, &other, &request));
+        valid(NativeReleasePrepared::require_absent(
+            &journal, &other, &request,
+        ));
     }
     #[test]
     fn native_release_retained_parser_refuses_partial_noncanonical_and_extra_fields() {
