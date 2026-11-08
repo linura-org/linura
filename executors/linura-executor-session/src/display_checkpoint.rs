@@ -23,6 +23,9 @@ const QUIESCENCE_MAGIC: &[u8] = b"LNRQ:1\n";
 const RETIREMENT_PREPARATION_MAGIC: &[u8] = b"LNRP:1\n";
 const ROOT_RETIRED_HELD_MAGIC: &[u8] = b"LNRH:1\n";
 const NATIVE_RELEASE_RESERVED_MAGIC: &[u8] = b"LNRN:1\n";
+// Distinct irreversible before-effect marker. It is NEVER a release receipt,
+// a completed framebuffer, a Root admission permit or Control terminal commit.
+const NATIVE_RELEASE_SPENT_MAGIC: &[u8] = b"LNRX:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
@@ -36,6 +39,7 @@ enum Kind {
     RetirementPreparation,
     RootRetiredHeld,
     NativeReleaseReserved,
+    NativeReleaseSpent,
 }
 impl Kind {
     fn prefix(self) -> &'static str {
@@ -47,6 +51,7 @@ impl Kind {
             Self::RetirementPreparation => "retirement-",
             Self::RootRetiredHeld => "root-retired-held-",
             Self::NativeReleaseReserved => "native-release-reserved-",
+            Self::NativeReleaseSpent => "native-release-spent-",
         }
     }
     fn magic(self) -> &'static [u8] {
@@ -58,6 +63,7 @@ impl Kind {
             Self::RetirementPreparation => RETIREMENT_PREPARATION_MAGIC,
             Self::RootRetiredHeld => ROOT_RETIRED_HELD_MAGIC,
             Self::NativeReleaseReserved => NATIVE_RELEASE_RESERVED_MAGIC,
+            Self::NativeReleaseSpent => NATIVE_RELEASE_SPENT_MAGIC,
         }
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
@@ -71,7 +77,10 @@ impl Kind {
                     .binding()
                     .dispatch_digest)
             }
-            Self::RetirementPreparation | Self::RootRetiredHeld | Self::NativeReleaseReserved => {
+            Self::RetirementPreparation
+            | Self::RootRetiredHeld
+            | Self::NativeReleaseReserved
+            | Self::NativeReleaseSpent => {
                 Ok(NativeDisplayRetirementPreparation::decode(payload)?
                     .terminal()
                     .binding()
@@ -96,6 +105,7 @@ struct TerminalLineage {
     preparations: BTreeMap<String, NativeDisplayRetirementPreparation>,
     root_held: BTreeMap<String, NativeDisplayRetirementPreparation>,
     release_reservations: BTreeMap<String, NativeDisplayRetirementPreparation>,
+    release_spent: BTreeMap<String, NativeDisplayRetirementPreparation>,
 }
 
 impl TerminalLineage {
@@ -117,7 +127,11 @@ impl TerminalLineage {
                 }
                 Ok(())
             }
-            Kind::RetirementPreparation | Kind::RootRetiredHeld | Kind::NativeReleaseReserved => {
+            Kind::RetirementPreparation
+            | Kind::RootRetiredHeld
+            | Kind::NativeReleaseReserved
+                            | Kind::NativeReleaseSpent
+            | Kind::NativeReleaseSpent => {
                 let record = NativeDisplayRetirementPreparation::decode(bytes)?;
                 let scope = record
                     .terminal()
@@ -132,6 +146,7 @@ impl TerminalLineage {
                     Kind::RetirementPreparation => &mut self.preparations,
                     Kind::RootRetiredHeld => &mut self.root_held,
                     Kind::NativeReleaseReserved => &mut self.release_reservations,
+                    Kind::NativeReleaseSpent => &mut self.release_spent,
                     _ => return Err(unavailable()),
                 };
                 if table.insert(scope, record).is_some() {
@@ -192,10 +207,18 @@ impl TerminalLineage {
                 return Err(unavailable());
             }
         }
-        // This is a before-effect reservation, not native consumption.
+        // Neither the reservation nor the later spent-before-effect marker
+        // proves a physical release. Missing or substituted ancestry poisons
+        // the entire Root checkpoint set, including unrelated scopes.
         for (scope, record) in &self.release_reservations {
             let held = self.root_held.get(scope).ok_or_else(unavailable)?;
             if record.canonical_bytes() != held.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
+        for (scope, record) in &self.release_spent {
+            let parent = self.release_reservations.get(scope).ok_or_else(unavailable)?;
+            if record.canonical_bytes() != parent.canonical_bytes() {
                 return Err(unavailable());
             }
         }
@@ -212,6 +235,7 @@ fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
         Kind::RetirementPreparation,
         Kind::RootRetiredHeld,
         Kind::NativeReleaseReserved,
+        Kind::NativeReleaseSpent,
     ] {
         let prefix = kind.prefix().as_bytes();
         if name.len() == prefix.len() + 64 + 11
@@ -406,7 +430,11 @@ fn reserve_kind_at(
     let result = (|| {
         let retirement = if matches!(
             kind,
-            Kind::RetirementPreparation | Kind::RootRetiredHeld | Kind::NativeReleaseReserved
+            Kind::RetirementPreparation
+                | Kind::RootRetiredHeld
+                | Kind::NativeReleaseReserved
+                            | Kind::NativeReleaseSpent
+                | Kind::NativeReleaseSpent
         ) {
             Some(NativeDisplayRetirementPreparation::decode(payload)?)
         } else {
@@ -426,6 +454,7 @@ fn reserve_kind_at(
         let mut quiescence_seen = false;
         let mut preparation_seen = false;
         let mut root_held_seen = false;
+        let mut release_reserved_seen = false;
         let mut lineage = TerminalLineage::default();
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
@@ -474,6 +503,7 @@ fn reserve_kind_at(
                             | Kind::RetirementPreparation
                             | Kind::RootRetiredHeld
                             | Kind::NativeReleaseReserved
+                            | Kind::NativeReleaseSpent
                     ) && previous == terminal.canonical_bytes()
                     {
                         if terminal_seen {
@@ -491,7 +521,11 @@ fn reserve_kind_at(
             }
             if matches!(
                 kind,
-                Kind::RetirementPreparation | Kind::RootRetiredHeld | Kind::NativeReleaseReserved
+                Kind::RetirementPreparation
+                | Kind::RootRetiredHeld
+                | Kind::NativeReleaseReserved
+                            | Kind::NativeReleaseSpent
+                | Kind::NativeReleaseSpent
             ) && old_kind == Kind::Quiescence
                 && previous == terminal.as_ref().ok_or_else(unavailable)?.canonical_bytes()
             {
@@ -500,7 +534,7 @@ fn reserve_kind_at(
                 }
                 quiescence_seen = true;
             }
-            if matches!(kind, Kind::RootRetiredHeld | Kind::NativeReleaseReserved)
+            if matches!(kind, Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
                 && old_kind == Kind::RetirementPreparation
                 && previous == payload
             {
@@ -509,7 +543,7 @@ fn reserve_kind_at(
                 }
                 preparation_seen = true;
             }
-            if kind == Kind::NativeReleaseReserved
+            if matches!(kind, Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
                 && old_kind == Kind::RootRetiredHeld
                 && previous == payload
             {
@@ -517,6 +551,15 @@ fn reserve_kind_at(
                     return Err(unavailable());
                 }
                 root_held_seen = true;
+            }
+            if kind == Kind::NativeReleaseSpent
+                && old_kind == Kind::NativeReleaseReserved
+                && previous == payload
+            {
+                if release_reserved_seen {
+                    return Err(unavailable());
+                }
+                release_reserved_seen = true;
             }
             if kind == Kind::Finalization && old_kind == Kind::Quiescence {
                 let old = NativeDisplayFinalizationReservation::decode(&previous)?;
@@ -563,16 +606,20 @@ fn reserve_kind_at(
                         | Kind::RetirementPreparation
                         | Kind::RootRetiredHeld
                         | Kind::NativeReleaseReserved
+                            | Kind::NativeReleaseSpent
                 ) && !terminal_seen
                 || matches!(
                     kind,
                     Kind::RetirementPreparation
                         | Kind::RootRetiredHeld
                         | Kind::NativeReleaseReserved
+                            | Kind::NativeReleaseSpent
                 ) && !quiescence_seen
-                || matches!(kind, Kind::RootRetiredHeld | Kind::NativeReleaseReserved)
+                || matches!(kind, Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
                     && !preparation_seen
-                || kind == Kind::NativeReleaseReserved && !root_held_seen)
+                || matches!(kind, Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
+                    && !root_held_seen
+                || kind == Kind::NativeReleaseSpent && !release_reserved_seen)
         {
             return Err(unavailable());
         }
@@ -697,6 +744,25 @@ pub(super) fn reserve_native_release(
     )
 }
 
+/// A separate irreversible spent-before-effect Root record. Publication
+/// requires the original LNRT/LNRQ/LNRP/LNRH/LNRN ancestry under one exclusive
+/// locked scan, creates an immutable LNRX record with O_EXCL + both fsyncs,
+/// and never admits output, focus, power or ordinary startup. A torn record
+/// is permanently indeterminate; no regrant or delete-to-retry is possible.
+/// Only the original authenticated Root grant worker may call this after
+/// verifying a live original native compositor and Control's exact decision.
+pub(super) fn spend_native_release(
+    record: &NativeDisplayRetirementPreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.terminal().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::NativeReleaseSpent,
+    )
+}
+
 fn read_retirement_phase_at(
     fd: &OwnedFd,
     uid: u32,
@@ -740,6 +806,7 @@ fn read_retirement_phase_at(
             Kind::RetirementPreparation => lineage.preparations.remove(&scope),
             Kind::RootRetiredHeld => lineage.root_held.remove(&scope),
             Kind::NativeReleaseReserved => lineage.release_reservations.remove(&scope),
+            Kind::NativeReleaseSpent => lineage.release_spent.remove(&scope),
             _ => return Err(unavailable()),
         };
         Ok(record)
@@ -774,6 +841,13 @@ fn read_native_release_reserved_at(
 ) -> Result<Option<NativeDisplayRetirementPreparation>, String> {
     read_retirement_phase_at(fd, uid, retained, Kind::NativeReleaseReserved)
 }
+fn read_native_release_spent_at(
+    fd: &OwnedFd,
+    uid: u32,
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayRetirementPreparation>, String> {
+    read_retirement_phase_at(fd, uid, retained, Kind::NativeReleaseSpent)
+}
 
 /// The marker is historical durable Root comparison evidence. An independent
 /// live admission check MUST accompany it before reporting RootRetiredHeld.
@@ -789,6 +863,14 @@ pub(super) fn read_native_release_reserved(
     retained: &NativeDisplayRestorationReservation,
 ) -> Result<Option<NativeDisplayRetirementPreparation>, String> {
     read_native_release_reserved_at(&open()?, 0, retained)
+}
+
+/// Read-only historical spent-before-effect marker. It does not report
+/// physical release, independent kernel/frame proof, or terminal success.
+pub(super) fn read_native_release_spent(
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayRetirementPreparation>, String> {
+    read_native_release_spent_at(&open()?, 0, retained)
 }
 
 /// Read-only byte-for-byte readback of the one original Root preparation.
