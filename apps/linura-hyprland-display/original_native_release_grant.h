@@ -70,14 +70,19 @@ class OriginalNativeReleaseGrant final
             return {};
         std::string reservation(static_cast<std::size_t>(*size), '\0');
         std::string dispatchDeadline(8, '\0'), sample(8, '\0'), end(11, '\0');
-        if (!result->read(reservation, deadline) ||
-            !OriginalNativeReleaseGrantCodec::matches(
-                reservation, terminal, material, anchor) ||
-            !result->read(dispatchDeadline, deadline) ||
-            !OriginalGrantCodec::deadlineBinding(dispatchDeadline, terminal.deadlineUnixMs) ||
-            !result->read(sample, deadline) ||
-            !OriginalGrantCodec::deadlineBinding(sample, sampledBootMs) ||
-            !result->read(end, deadline) || end != "LNRS-END:1\n")
+        if (!result->read(reservation, deadline))
+            return {};
+        if (!OriginalNativeReleaseGrantCodec::matches(reservation, terminal, material, anchor))
+            return {};
+        if (!result->read(dispatchDeadline, deadline))
+            return {};
+        if (!OriginalGrantCodec::deadlineBinding(dispatchDeadline, terminal.deadlineUnixMs))
+            return {};
+        if (!result->read(sample, deadline))
+            return {};
+        if (!OriginalGrantCodec::deadlineBinding(sample, sampledBootMs))
+            return {};
+        if (!result->read(end, deadline) || end != "LNRS-END:1\n")
             return {};
         const auto digest = nativeSha256(reservation);
         const auto finished = result->clock();
@@ -113,10 +118,11 @@ class OriginalNativeReleaseGrant final
             return fail();
         const auto deadline = *now + 1000;
         std::string reply(request.size(), '\0');
-        return transfer(request.data(), request.size(), deadline, true) &&
-                       read(reply, deadline) && reply == request
-                   ? true
-                   : fail();
+        if (!transfer(request.data(), request.size(), deadline, true))
+            return fail();
+        if (!read(reply, deadline))
+            return fail();
+        return reply == request ? true : fail();
     }
 
   private:
@@ -172,9 +178,9 @@ class OriginalNativeReleaseGrant final
             }
         }
         const auto end = clock();
-        return end && *end < deadline && fence_.authenticatesGrantPeer(descriptor_.get())
-                   ? true
-                   : fail();
+        if (!end || *end >= deadline)
+            return fail();
+        return fence_.authenticatesGrantPeer(descriptor_.get()) ? true : fail();
     }
     [[nodiscard]] bool read(std::string &bytes, std::uint64_t deadline)
     {
