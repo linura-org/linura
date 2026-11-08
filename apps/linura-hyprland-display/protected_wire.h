@@ -43,10 +43,11 @@ class ProtectedScene
     // One original supervised Root spend, after terminal quiescence,
     // against the same retained actual native scene. Success is ONLY LNRX
     // and a spent comparison gate, never a release/unlock/terminal commit.
-    [[nodiscard]] virtual bool spendNativeRelease(
-        OwnedNativeFd, const Correlation &, std::uint64_t sampledBootMs,
-        std::uint64_t controlVersion, std::string_view controlBinding,
-        std::string_view controlObservation) = 0;
+    [[nodiscard]] virtual bool spendNativeRelease(OwnedNativeFd, const Correlation &,
+                                                  std::uint64_t sampledBootMs,
+                                                  std::uint64_t controlVersion,
+                                                  std::string_view controlBinding,
+                                                  std::string_view controlObservation) = 0;
     [[nodiscard]] virtual std::shared_ptr<MutationProtection>
     reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
                     const Snapshot &, ClockSample captured) = 0;

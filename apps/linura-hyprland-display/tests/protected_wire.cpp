@@ -111,6 +111,11 @@ class Scene final : public ProtectedScene
         ++counts.quiesce;
         return false; // Transport fixtures cannot establish actual native quiescence.
     }
+    bool spendNativeRelease(OwnedNativeFd, const Correlation &, std::uint64_t, std::uint64_t,
+                            std::string_view, std::string_view) override
+    {
+        return false; // The fixture cannot authenticate or spend a native Root grant.
+    }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
         return false;

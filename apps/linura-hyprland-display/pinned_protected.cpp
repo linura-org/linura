@@ -817,13 +817,19 @@ class PinnedScene final : public ProtectedScene
         // Permanently consume this original scene's chance BEFORE a possible
         // Root/Unix send, even when the FD or independent sample is missing.
         data->nativeReleaseAttempted = true;
-        if (!data->terminalBound || *data->terminalBound != terminal ||
-            !data->originalRestoration || !data->mutation ||
-            !data->terminalActive || !data->terminalConsumed ||
-            !data->terminalQuiescenceAttempted || !data->terminalGrant ||
-            !data->terminalGrant->verify() || data->writing ||
-            data->ownerLost || data->mutationFault || heldInput().any ||
-            !data->refresh() || !originalRestorationPresented(data->bound))
+        if (!data->terminalBound || *data->terminalBound != terminal)
+            return refuse();
+        if (!data->originalRestoration || !data->mutation)
+            return refuse();
+        if (!data->terminalActive || !data->terminalConsumed)
+            return refuse();
+        if (!data->terminalQuiescenceAttempted || !data->terminalGrant)
+            return refuse();
+        if (!data->terminalGrant->verify() || data->writing)
+            return refuse();
+        if (data->ownerLost || data->mutationFault || heldInput().any)
+            return refuse();
+        if (!data->refresh() || !originalRestorationPresented(data->bound))
             return refuse();
         const auto held = data->stableInventory;
         auto gate = nativeFirstFrameArm(data->bound, held);

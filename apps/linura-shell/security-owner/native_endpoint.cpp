@@ -446,9 +446,9 @@ quint32 NativeEndpoint::QuiesceOriginalDisplayFinalization(
 }
 
 quint32 NativeEndpoint::SpendOriginalDisplayNativeRelease(
-    const NativeDisplayAttemptQueryWire &query, const QString &sampleDigest,
-    quint64 sampledBootMs, quint64 controlVersion, const QString &controlBinding,
-    const QString &controlObservation, const QDBusUnixFileDescriptor &nativeGrant)
+    const NativeDisplayAttemptQueryWire &query, const QString &sampleDigest, quint64 sampledBootMs,
+    quint64 controlVersion, const QString &controlBinding, const QString &controlObservation,
+    const QDBusUnixFileDescriptor &nativeGrant)
 {
     if (calledFromDBus() && query.intent.size() <= 14 * 1024 &&
         query.transaction.size() <= 256 && query.effectDigest.size() == 64 &&

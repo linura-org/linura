@@ -977,10 +977,10 @@ receiveOriginalFinalizationGrant(OwnedNativeFd descriptor, const Correlation &bo
     return OriginalFinalizationGrant::receive(startupFence, std::move(descriptor), bound, material,
                                               sampledBootMs);
 }
-bool consumeOriginalNativeReleaseGrant(
-    OwnedNativeFd descriptor, const Correlation &terminal, std::string_view material,
-    std::uint64_t sampledBootMs, std::uint64_t controlVersion,
-    std::string_view binding, std::string_view observation)
+bool consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlation &terminal,
+                                       std::string_view material, std::uint64_t sampledBootMs,
+                                       std::uint64_t controlVersion, std::string_view binding,
+                                       std::string_view observation)
 {
     if (!backend || !backend->originalRecovery || backend->writing ||
         backend->commitFailed || backend->originalRecovery->failed ||

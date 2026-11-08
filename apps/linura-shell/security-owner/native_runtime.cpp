@@ -1194,9 +1194,9 @@ std::optional<quint32> NativeRuntime::quiesceOriginalDisplayFinalization(
 
 std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
     const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
-    const NativeDisplayCorrelation &bound, const QString &sampleDigest,
-    quint64 sampledBootMs, quint64 controlVersion, const QString &controlBinding,
-    const QString &controlObservation, int nativeGrant)
+    const NativeDisplayCorrelation &bound, const QString &sampleDigest, quint64 sampledBootMs,
+    quint64 controlVersion, const QString &controlBinding, const QString &controlObservation,
+    int nativeGrant)
 {
     NativeDeadline deadline(std::chrono::milliseconds(2000),
                             NativeDeadline::Stage::DisplayDispatch);

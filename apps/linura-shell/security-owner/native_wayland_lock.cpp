@@ -1206,8 +1206,8 @@ std::optional<quint32> NativeWaylandLock::quiesceOriginalDisplayFinalization(
 }
 std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     const NativeDisplayFinalizationIntent &intent, const NativeDisplayCorrelation &bound,
-    quint64 sampledBootMs, quint64 controlVersion,
-    const QString &controlBinding, const QString &controlObservation, int nativeGrant)
+    quint64 sampledBootMs, quint64 controlVersion, const QString &controlBinding,
+    const QString &controlObservation, int nativeGrant)
 {
     if (nativeGrant < 0 || !controlVersion || thread() != QThread::currentThread() ||
         !impl_->initialized || impl_->painting || impl_->pumping ||

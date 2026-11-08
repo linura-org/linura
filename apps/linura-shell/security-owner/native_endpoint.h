@@ -271,8 +271,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                                const QDBusUnixFileDescriptor &terminal_grant);
     quint32 SpendOriginalDisplayNativeRelease(
         const NativeDisplayAttemptQueryWire &, const QString &sample_digest, quint64 sampled_boot_ms,
-        quint64 control_version, const QString &control_binding,
-        const QString &control_observation, const QDBusUnixFileDescriptor &native_grant);
+        quint64 control_version, const QString &control_binding, const QString &control_observation,
+        const QDBusUnixFileDescriptor &native_grant);
     quint32 ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &,
                                     const QString &decision_digest,
                                     const QString &protected_decision_digest, bool confirm);

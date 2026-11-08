@@ -463,11 +463,13 @@ class ProtectedWireEndpoint::Impl final
         auto &interaction = object<Interaction>(resource);
         try {
             const auto &state = interaction.state;
-            if (!transaction || strnlen(transaction, 257) > 256 ||
-                !std::string_view(transaction).starts_with("transaction:") ||
-                !digest(effect) || !digest(dispatch) || !digest(binding) ||
-                !digest(observation) || !state || !state->scene || state->closed ||
-                !interaction.owner.current(interaction) ||
+            const bool identityValid = transaction && strnlen(transaction, 257) <= 256 &&
+                                       std::string_view(transaction).starts_with("transaction:");
+            const bool digestsValid = digest(effect) && digest(dispatch) && digest(binding) &&
+                                      digest(observation);
+            const bool sceneValid = state && state->scene && !state->closed &&
+                                    interaction.owner.current(interaction);
+            if (!identityValid || !digestsValid || !sceneValid ||
                 !state->scene->spendNativeRelease(
                     std::move(owned), {transaction, effect, dispatch,
                                        joined(deadlineHi, deadlineLo)},
