@@ -20,6 +20,7 @@ mod authority_clock;
 mod display_checkpoint;
 mod display_finalization_intent;
 mod display_finalization_plan;
+mod display_native_release_reservation;
 mod display_plan;
 mod display_recovery_journal;
 mod display_restoration_link;
@@ -84,22 +85,23 @@ pub use durable_authority::{
 pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
     AuthorizedEffectExecutor, AuthorizedOriginalDisplayFinalization,
-    AuthorizedOriginalDisplayRestoration, AuthorizedOriginalDisplayRetirementPreparation,
-    DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
-    DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
-    DisplayVerificationTarget, IndependentDisplayVerifier, IndependentManagedVerifier,
-    MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
-    MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
+    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayRestoration,
+    AuthorizedOriginalDisplayRetirementPreparation, DISPLAY_CONFIRMATION_WINDOW_MS,
+    DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
+    DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
+    IndependentDisplayVerifier, IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY,
+    MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER,
+    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
     ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
     ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
     OrdinaryDisplayReleaseInspection, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
-    OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
-    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
-    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    OriginalDisplayRetirementPreparationPort, TrustedDisplayDecision, TrustedHumanApproval,
-    managed_request_id,
+    OriginalDisplayFinalizationRequest, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
+    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
+    OriginalDisplayRestorationTerminalReceipt, OriginalDisplayRetirementPreparationPort,
+    TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

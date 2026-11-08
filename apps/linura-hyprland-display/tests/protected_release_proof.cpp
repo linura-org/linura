@@ -88,6 +88,23 @@ int main()
     assert(gate->phase() == Phase::Faulted);
     assert(!gate->spend(held, later));
 
+    // One physical native completion cannot satisfy two independent output
+    // keys by aliasing a tracker. Mirrored content may share bytes, but each
+    // output must have its own native completed-frame witness.
+    {
+        ProtectedFrame shared;
+        completed(shared, &first, 8, Kind::Content);
+        auto alias = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(alias && alias->spend(held, later));
+        std::vector<NativeFirstFrameGate::NativeFrame> reused{
+            {held.heads[0].key, &shared, &first, 0, false},
+            {held.heads[1].key, &shared, &first, 0, false},
+        };
+        assert(!alias->observe({held, later, reused}));
+        assert(alias->phase() == Phase::Faulted);
+        assert(!alias->spend(held, later));
+    }
+
     // A completed opaque frame is NOT a first ordinary frame, and neither is
     // an old hardware completion or a presented frame on the wrong buffer.
     for (int scenario = 0; scenario < 4; ++scenario) {

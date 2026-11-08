@@ -63,6 +63,24 @@ impl linura_control::OriginalDisplayRetirementPreparationPort for SessionExecuto
     }
 }
 
+impl linura_control::OriginalDisplayNativeReleaseReservationPort for SessionExecutorClient {
+    fn reserve_native_release(
+        &mut self,
+        reservation: linura_control::AuthorizedOriginalDisplayNativeReleaseReservation,
+    ) -> Result<(), String> {
+        let terminal = reservation.terminal();
+        self.channel.reserve_root_native_release(
+            reservation.material(),
+            terminal.transaction_id.as_str(),
+            reservation.dispatch_digest(),
+            terminal.state_version,
+            terminal.binding_digest.as_str(),
+            reservation.control_observation().as_str(),
+            reservation.expires_at_unix_ms(),
+        )
+    }
+}
+
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(
         &mut self,

@@ -478,6 +478,134 @@ impl NativeSessionChannel {
         Ok(()) // Durable RootRetiredHeld only. No physical release.
     }
 
+    /// An authenticated Control-only, original-Root release reservation.
+    /// The caller must already own a separate durable Control release
+    /// decision. This call is NOT native consumption or a physical-release
+    /// credential. A lost Root acknowledgement is never retried.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reserve_root_native_release(
+        &self,
+        material: &str,
+        terminal_transaction: &str,
+        terminal_dispatch: &str,
+        control_state_version: u64,
+        control_binding: &str,
+        control_observation: &str,
+        expires_at_unix_ms: u64,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let now = crate::owner::unix_ms()?;
+        if now == 0 || now >= expires_at_unix_ms || expires_at_unix_ms - now > 2_000 {
+            return Err("native release reservation Control evidence expired".into());
+        }
+        let intended = linura_core::DisplayFinalizationMaterial::decode(material)
+            .map_err(|_| "native release terminal intent malformed")?;
+        let scope = intended
+            .recovery_scope()
+            .map_err(|error| error.to_string())?;
+        let key = scope.resource_id().map_err(|error| error.to_string())?;
+        let binding =
+            ComponentDigest::parse_hex(control_binding).map_err(|error| error.to_string())?;
+        let observation =
+            ComponentDigest::parse_hex(control_observation).map_err(|error| error.to_string())?;
+        if binding.to_hex() != control_binding || observation.to_hex() != control_observation {
+            return Err("native release Control anchor is not canonical".into());
+        }
+        let started = Instant::now();
+        let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let read = |expected_phase: u32| -> Result<
+            (
+                Vec<u8>,
+                Vec<u8>,
+                crate::NativeDisplayFinalizationReservation,
+            ),
+            String,
+        > {
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                "ReadFinalization",
+                &(key.as_str(),),
+                started,
+            )?;
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "ayuay"
+            {
+                return Err("native release Root readback peer or format changed".into());
+            }
+            let (restoration, phase, native): (Vec<u8>, u32, Vec<u8>) = reply
+                .body()
+                .deserialize()
+                .map_err(|_| "native release Root readback is malformed")?;
+            let parent = crate::NativeDisplayRestorationReservation::decode(&restoration)?;
+            let terminal = crate::NativeDisplayFinalizationReservation::decode(&native)?;
+            terminal.validate_restoration(&parent)?;
+            if phase != expected_phase
+                || terminal.material() != material
+                || terminal.binding().transaction_id != terminal_transaction
+                || terminal.binding().dispatch_digest.to_hex() != terminal_dispatch
+                || parent
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|error| error.to_string())?
+                    != scope
+            {
+                return Err("native release lacks exact live RootRetiredHeld parent".into());
+            }
+            Ok((restoration, native, terminal))
+        };
+        let (before_parent, before_native, terminal) = read(3)?;
+        let record = crate::NativeDisplayRetirementPreparation::new(
+            &terminal,
+            control_state_version,
+            binding,
+            observation,
+        )?;
+        let bytes = record.canonical_bytes();
+        if crate::owner::unix_ms()? >= expires_at_unix_ms {
+            return Err("native release Root reservation expired before effect".into());
+        }
+        // This Control-only mechanism has no physical release effect. Consume
+        // exactly one Root reservation and independently re-read its new phase.
+        let reply = self.call(
+            &root.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReserveNativeRelease",
+            &(bytes.as_slice(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != root.sender)
+            || reply.body().signature().to_string() != "b"
+        {
+            return Err("native release reservation reply peer or format differs; no retry".into());
+        }
+        let (accepted,): (bool,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "native release reservation reply is malformed; no retry")?;
+        if !accepted || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+        {
+            return Err("native release reservation lost its Root ownership; no retry".into());
+        }
+        let (after_parent, after_native, _) = read(5)?;
+        if before_parent != after_parent
+            || before_native != after_native
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            || crate::owner::unix_ms()? >= expires_at_unix_ms
+        {
+            return Err("native release reservation lost its immutable Root lineage".into());
+        }
+        Ok(()) // No compositor/S17/input/power release or startup admission.
+    }
+
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
         self.display_protection_call("Verify", &(dispatch.to_hex(),))
     }

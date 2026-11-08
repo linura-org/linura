@@ -15,7 +15,8 @@
     <method name="ReadFinalization">
       <!-- Supervised Control only; immutable restoration correlation plus live
            Root mechanism state, with no mutation or release credential. Only
-           protected/reserved/quiesced states are produced; release remains unavailable. -->
+           protected/reserved/quiesced/RootRetiredHeld comparison phases
+           are produced; release remains unavailable. -->
       <arg name="recovery_scope" type="s" direction="in"/>
       <arg name="restoration" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>
@@ -55,6 +56,15 @@
            current Root witnesses, quiescence and exact immutable parents.
            It cannot unlock S17, release the compositor scene, drop inhibitors,
            authorize ordinary startup, or claim physical first-frame evidence. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReserveNativeRelease">
+      <!-- Supervised Control only, after exact durable RootRetiredHeld,
+           matching live original owner and quiescence. Synced write-once
+           before-effect reservation; a missing reply is non-retryable.
+           This endpoint makes no native call and can NEVER unlock native
+           frames/input, S17 locks, power inhibitors or ordinary startup. -->
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
