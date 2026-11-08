@@ -916,14 +916,17 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
         !startupFence.recoveryAvailable() || !backend->originalRecovery->grant ||
         !backend->originalRecovery->protection || backend->originalRecovery->failed ||
-        backend->originalRecovery->bound != original ||
-        expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
+        backend->originalRecovery->bound != original)
+        return std::nullopt;
+    if (expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
         return std::nullopt;
     const auto started = backend->clock();
     const auto budget = [&]() {
         const auto now = backend->clock();
-        return started && now && now->unixMs >= started->unixMs &&
-               now->bootMs >= started->bootMs && now->unixMs - started->unixMs < 2'000 &&
+        if (!started || !now || now->unixMs < started->unixMs ||
+            now->bootMs < started->bootMs)
+            return false;
+        return now->unixMs - started->unixMs < 2'000 &&
                now->bootMs - started->bootMs < 2'000;
     };
     const auto begin = backend->snapshot();
