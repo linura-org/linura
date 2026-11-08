@@ -116,6 +116,7 @@ impl NativeReleasePrepared {
         let request_digest = crate::durable_authority::digest_request(request)?;
         let observation_digest = crate::durable_authority::digest_observation(observation)?;
         let intent_digest = digest_bytes(INTENT_DOMAIN, material.as_bytes());
+        let parent_digest = parent.digest();
         let version = snapshot.state_version.to_string();
         let observed_at = observation.observed_at_unix_ms.to_string();
         let expires_at = expiry.to_string();
@@ -130,7 +131,7 @@ impl NativeReleasePrepared {
             snapshot.binding_digest.as_str(),
             dispatch,
             intent_digest.as_str(),
-            parent.digest().as_str(),
+            parent_digest.as_str(),
             observation_digest.as_str(),
             observed_at.as_str(),
             expires_at.as_str(),
