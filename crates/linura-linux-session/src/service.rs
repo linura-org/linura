@@ -279,6 +279,7 @@ impl NativeSessionChannel {
         sampled_boot_ms: u64,
     ) -> Result<std::os::fd::OwnedFd, String> {
         self.reserve_display_grant(
+            NativeSessionRole::Executor,
             "ReserveRestoration",
             &record.canonical_bytes(),
             dispatch_deadline_unix_ms,
@@ -288,12 +289,13 @@ impl NativeSessionChannel {
 
     fn reserve_display_grant(
         &self,
+        role: NativeSessionRole,
         method: &'static str,
         bytes: &[u8],
         dispatch_deadline_unix_ms: u64,
         sampled_boot_ms: u64,
     ) -> Result<std::os::fd::OwnedFd, String> {
-        self.require_role(NativeSessionRole::Executor)?;
+        self.require_role(role)?;
         let started = Instant::now();
         let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
         let reply = self.call(
@@ -338,7 +340,28 @@ impl NativeSessionChannel {
         sampled_boot_ms: u64,
     ) -> Result<std::os::fd::OwnedFd, String> {
         self.reserve_display_grant(
+            NativeSessionRole::Executor,
             "ReserveFinalization",
+            &record.canonical_bytes(),
+            dispatch_deadline_unix_ms,
+            sampled_boot_ms,
+        )
+    }
+
+    /// Transfer exactly one original Root native release grant only to the
+    /// trusted Control adapter after a separately durable one-use decision.
+    /// Root independently authenticates the actual original compositor peer
+    /// and persists LNRX before acknowledging the native spend. This does not
+    /// release any physical, S17, input, power or startup fence.
+    pub fn reserve_control_native_release_grant(
+        &self,
+        record: &crate::NativeDisplayRetirementPreparation,
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> Result<std::os::fd::OwnedFd, String> {
+        self.reserve_display_grant(
+            NativeSessionRole::Control,
+            "ReserveNativeReleaseGrant",
             &record.canonical_bytes(),
             dispatch_deadline_unix_ms,
             sampled_boot_ms,
