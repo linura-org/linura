@@ -1141,8 +1141,9 @@ NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snaps
         if ((*outputHighWater)[i].previousCommit < protectedSample->before[i].previousCommit)
             return std::nullopt;
     }
-    return NativeFirstFrameGate::arm(
-        {expected, protectedSample->postWriteEpoch, *armed, *outputHighWater});
+    const NativeFirstFrameGate::ArmRequest request{
+        expected, protectedSample->postWriteEpoch, *armed, *outputHighWater, *scanout};
+    return NativeFirstFrameGate::arm(request);
 }
 
 void initialize(wl_display &display, wl_event_loop &loop)

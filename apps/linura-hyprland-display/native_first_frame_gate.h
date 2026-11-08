@@ -89,6 +89,7 @@ class NativeFirstFrameGate final
         std::uint64_t postWriteEpoch;
         ClockSample sampled;
         const std::vector<Output> &before;
+        const std::vector<NativeScanout> &kernel;
     };
     [[nodiscard]] static std::optional<NativeFirstFrameGate> arm(const ArmRequest &request)
     {
@@ -96,13 +97,14 @@ class NativeFirstFrameGate final
         const auto postWriteEpoch = request.postWriteEpoch;
         const auto sampled = request.sampled;
         const auto &before = request.before;
+        const auto &kernel = request.kernel;
         if (!postWriteEpoch || !sampled.unixMs || !sampled.bootMs ||
             sampled.unixMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||
             sampled.bootMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||
             held.generation == 0 || held.securityEpoch == 0 ||
             (held.coverage != Coverage::Secure && held.coverage != Coverage::Unlocked) ||
             held.heads.empty() || held.heads.size() > DisplayTransaction::MaxHeads ||
-            before.size() != held.heads.size())
+            before.size() != held.heads.size() || kernel.size() != held.heads.size())
             return {};
         Layout actual;
         actual.reserve(held.heads.size());
@@ -117,13 +119,26 @@ class NativeFirstFrameGate final
                 (head.current.enabled &&
                  (!head.powered || (held.coverage == Coverage::Secure && !head.covered))))
                 return {};
+            const auto &physical = kernel[i];
+            if (physical.key != head.key || !physical.connector)
+                return {};
+            if (head.current.enabled) {
+                if (!physical.active || !physical.crtc || !physical.plane || !physical.framebuffer)
+                    return {};
+            } else if (physical.active || physical.crtc || physical.plane ||
+                       physical.framebuffer) {
+                return {};
+            }
+            for (std::size_t prior = 0; prior < i; ++prior)
+                if (kernel[prior].connector == physical.connector)
+                    return {};
             actual.push_back(head.current);
             if (head.current.enabled && !head.current.mirror && head.powered)
                 poweredRoot = true;
         }
         if (!poweredRoot || !DisplayTransaction::validLayout(actual, held))
             return {};
-        return NativeFirstFrameGate(held, postWriteEpoch, sampled, before);
+        return NativeFirstFrameGate(held, postWriteEpoch, sampled, before, kernel);
     }
 
     NativeFirstFrameGate(const NativeFirstFrameGate &) = delete;
@@ -187,6 +202,13 @@ class NativeFirstFrameGate final
             const auto &frame = frames[i];
             const auto &scanout = kernel[i];
             if (frame.key != head.key || scanout.key != head.key || !scanout.connector) {
+                phase_ = Phase::Faulted;
+                return {};
+            }
+            const auto &original = baselineKernel_[i];
+            if (original.key != scanout.key || original.connector != scanout.connector ||
+                original.crtc != scanout.crtc || original.plane != scanout.plane ||
+                original.active != scanout.active) {
                 phase_ = Phase::Faulted;
                 return {};
             }
@@ -275,8 +297,9 @@ class NativeFirstFrameGate final
 
   private:
     NativeFirstFrameGate(const Snapshot &held, std::uint64_t epoch, ClockSample sampled,
-                         const std::vector<Output> &before)
-        : held_(held), epoch_(epoch), sampled_(sampled), before_(before)
+                         const std::vector<Output> &before,
+                         const std::vector<NativeScanout> &kernel)
+        : held_(held), epoch_(epoch), sampled_(sampled), before_(before), baselineKernel_(kernel)
     {}
     [[nodiscard]] bool currentSample(const Snapshot &current, ClockSample now) const noexcept
     {
@@ -293,6 +316,7 @@ class NativeFirstFrameGate final
     std::uint64_t epoch_ = 0;
     ClockSample sampled_;
     std::vector<Output> before_;
+    std::vector<NativeScanout> baselineKernel_; // Physical connector and plane ancestry.
     // Fixed-size per-output spend boundary, never a renewed grant/clock.
     std::array<std::uint64_t, DisplayTransaction::MaxHeads> spentCommit_{};
     Phase phase_ = Phase::Held;
