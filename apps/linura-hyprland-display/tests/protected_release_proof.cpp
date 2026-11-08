@@ -200,8 +200,14 @@ int main()
     assert(receipt->securityEpoch == held.securityEpoch);
     assert(receipt->postWriteEpoch == 13);
     assert(receipt->completedCount == 2);
-    assert(receipt->completed[0].second == 8);
-    assert(receipt->completed[1].second == 9);
+    assert(receipt->completed[0].completedCommit == 8);
+    assert(receipt->completed[1].completedCommit == 9);
+    assert(receipt->completed[0].kernel.key == held.heads[0].key);
+    assert(receipt->completed[1].kernel.key == held.heads[1].key);
+    assert(receipt->completed[0].kernel.framebuffer == scanout[0].framebuffer);
+    assert(receipt->completed[1].kernel.framebuffer == scanout[1].framebuffer);
+    assert(receipt->completed[0].kernel.crtc == scanout[0].crtc);
+    assert(receipt->completed[1].kernel.plane == scanout[1].plane);
     assert(proof->phase() == Phase::Verified);
     assert(!proof->observe({held, later, frames, scanout})); // Never redeliver or renew.
     assert(!proof->spend(held, later, before));
@@ -261,7 +267,15 @@ int main()
     auto disabledFresh = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
     assert(disabledFresh && disabledFresh->spend(partlyDisabled, later, disabledBefore));
     disabledFrames[1].disableCommit = 10;
-    assert(disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
+    const auto disabledReceipt =
+        disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel});
+    assert(disabledReceipt);
+    assert(disabledReceipt->completedCount == 2);
+    assert(disabledReceipt->completed[1].completedCommit == 10);
+    assert(!disabledReceipt->completed[1].kernel.active);
+    assert(disabledReceipt->completed[1].kernel.connector == disabledKernel[1].connector);
+    assert(disabledReceipt->completed[1].kernel.crtc == 0);
+    assert(disabledReceipt->completed[1].kernel.framebuffer == 0);
     assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
 
     const ClockSample exhaustedClock{std::numeric_limits<std::uint64_t>::max(), 5'000};
