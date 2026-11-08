@@ -60,6 +60,11 @@ class WireSceneFixture final : public ProtectedScene
     {
         return false; // No actual Root channel or native safety-frame proof.
     }
+    bool spendNativeRelease(OwnedNativeFd, const Correlation &, std::uint64_t, std::uint64_t,
+                            std::string_view, std::string_view) override
+    {
+        return false; // No original Root or Control authority in this fixture.
+    }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
         return false;

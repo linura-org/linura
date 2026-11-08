@@ -323,6 +323,15 @@ class Client final
         roundtrip();
     }
 };
+void spendSyntheticRootGrant(Client &client, int descriptor)
+{
+    const std::string digest(64, 'b');
+    const auto *material = digest.c_str();
+    linura_protected_display_interaction_v1_spend_native_release(
+        client.interaction, descriptor, "transaction:terminal", material, material, 0, 20'000, 0,
+        1, 0, 7, material, material);
+    client.roundtrip();
+}
 void ownerReplacement()
 {
     // Every retained mutation/read step reattests the original supervised
@@ -369,11 +378,7 @@ void ownerReplacement()
         if (operation == 7) {
             int sockets[2]{};
             assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
-            const std::string digest(64, 'b');
-            linura_protected_display_interaction_v1_spend_native_release(
-                c.interaction, sockets[0], "transaction:terminal", digest.c_str(),
-                digest.c_str(), 0, 20'000, 0, 1, 0, 7, digest.c_str(), digest.c_str());
-            c.roundtrip();
+            spendSyntheticRootGrant(c, sockets[0]);
             assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
         }
         c.status();
@@ -416,11 +421,7 @@ int main()
         c.begin();
         int sockets[2]{};
         assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
-        const std::string digest(64, 'b');
-        linura_protected_display_interaction_v1_spend_native_release(
-            c.interaction, sockets[0], "transaction:terminal", digest.c_str(),
-            digest.c_str(), 0, 20'000, 0, 1, 0, 7, digest.c_str(), digest.c_str());
-        c.roundtrip();
+        spendSyntheticRootGrant(c, sockets[0]);
         assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
         assert(h.counts.nativeSpends == 1 && h.counts.close == 1 && c.denied == 1);
     }
