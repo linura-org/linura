@@ -1,0 +1,47 @@
+name: S21 Stage 3 temporary formatting diagnostic
+on:
+  push:
+    branches:
+      - wip/pr259-stage3-completion-20261108
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s21-stage3-format-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  format-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Format changed C++ code with exact repository-pinned version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/s21-format"
+          "$RUNNER_TEMP/s21-format/bin/python" -m pip install --disable-pip-version-check --no-deps --require-hashes -r tools/source-format/clang-requirements.lock
+          files=(
+            apps/linura-hyprland-display/pinned_backend.cpp
+            apps/linura-hyprland-display/pinned_integration.h
+            apps/linura-hyprland-display/pinned_protected.cpp
+            apps/linura-hyprland-display/protected_wire.cpp
+            apps/linura-hyprland-display/protected_wire.h
+            apps/linura-hyprland-display/tests/protected_wire.cpp
+            apps/linura-shell/security-owner/native_endpoint.cpp
+            apps/linura-shell/security-owner/native_endpoint.h
+            apps/linura-shell/security-owner/native_runtime.cpp
+            apps/linura-shell/security-owner/native_runtime.h
+            apps/linura-shell/security-owner/native_wayland_lock.cpp
+            apps/linura-shell/security-owner/native_wayland_lock.h
+          )
+          "$RUNNER_TEMP/s21-format/bin/clang-format" --style=file -i "${files[@]}"
+          git diff -- "${files[@]}" > "$RUNNER_TEMP/s21-format.patch"
+          echo "S21_FORMAT_PATCH_BEGIN"
+          base64 -w0 "$RUNNER_TEMP/s21-format.patch"
+          echo
+          echo "S21_FORMAT_PATCH_END"
