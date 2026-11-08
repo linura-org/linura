@@ -31,8 +31,10 @@ class NativeFirstFrameGate final
     struct Output final
     {
         OutputKey key;
-        // Captured BEFORE native release is spent. All physical completions
-        // must be strictly after this previous output-specific commit.
+        // Actual output-owned monotonic commit high-water mark. The initial
+        // ArmRequest is only an identity/baseline check. At spend, a fresh
+        // high-water must be sampled from each SAME live native output and
+        // all later accepted completions must exceed that spend-time value.
         std::uint64_t previousCommit = 0;
     };
     struct NativeFrame final
@@ -104,14 +106,27 @@ class NativeFirstFrameGate final
     NativeFirstFrameGate &operator=(NativeFirstFrameGate &&) = delete;
 
     // Called only AFTER the separately authenticated, durable Root/native
-    // release grant was spent. Spending is irreversible even on disagreement.
-    [[nodiscard]] bool spend(const Snapshot &current, ClockSample now) noexcept
+    // release grant was spent. A second fresh, output-owned native commit
+    // high-water read closes the arm-to-spend race: a completed frame that
+    // predates the release grant MUST NOT satisfy post-release verification.
+    // The caller must acquire these counters from the actual pinned compositor
+    // immediately at the one-use spend boundary, never from wire/client data.
+    // Spending is irreversible even on malformed or missing evidence.
+    [[nodiscard]] bool spend(const Snapshot &current, ClockSample now,
+                             const std::vector<Output> &atSpend) noexcept
     {
         if (phase_ != Phase::Held)
             return false;
         phase_ = Phase::Faulted;
-        if (!currentSample(current, now))
+        if (!currentSample(current, now) || atSpend.size() != before_.size())
             return false;
+        for (std::size_t i = 0; i < atSpend.size(); ++i) {
+            if (atSpend[i].key != before_[i].key ||
+                atSpend[i].previousCommit < before_[i].previousCommit ||
+                atSpend[i].previousCommit == std::numeric_limits<std::uint64_t>::max())
+                return false;
+            spentCommit_[i] = atSpend[i].previousCommit;
+        }
         phase_ = Phase::Spent;
         return true;
     }
@@ -166,7 +181,7 @@ class NativeFirstFrameGate final
                     pending = true;
                     continue;
                 }
-                if (commit <= before_[i].previousCommit ||
+                if (commit <= spentCommit_[i] ||
                     frame.frame->queuedKind() != ProtectedFrame::Kind::Content ||
                     frame.frame->completedBuffer() != frame.retainedBuffer) {
                     phase_ = Phase::Faulted;
@@ -182,7 +197,7 @@ class NativeFirstFrameGate final
                     pending = true;
                     continue;
                 }
-                if (frame.disableCommit == 0 || frame.disableCommit <= before_[i].previousCommit) {
+                if (frame.disableCommit == 0 || frame.disableCommit <= spentCommit_[i]) {
                     phase_ = Phase::Faulted;
                     return {};
                 }
@@ -224,6 +239,8 @@ class NativeFirstFrameGate final
     std::uint64_t epoch_ = 0;
     ClockSample sampled_;
     std::vector<Output> before_;
+    // Fixed-size per-output spend boundary, never a renewed grant/clock.
+    std::array<std::uint64_t, DisplayTransaction::MaxHeads> spentCommit_{};
     Phase phase_ = Phase::Held;
 };
 

@@ -84,9 +84,9 @@ int main()
     auto gate = NativeFirstFrameGate::arm({held, 13, start, before});
     assert(gate && gate->phase() == Phase::Held);
     assert(!gate->observe({held, later, {}}));
-    assert(!gate->spend(held, {9'999, 4'999}));
+    assert(!gate->spend(held, {9'999, 4'999}, before));
     assert(gate->phase() == Phase::Faulted);
-    assert(!gate->spend(held, later));
+    assert(!gate->spend(held, later, before));
 
     // One physical native completion cannot satisfy two independent output
     // keys by aliasing a tracker. Mirrored content may share bytes, but each
@@ -95,14 +95,52 @@ int main()
         ProtectedFrame shared;
         completed(shared, &first, 8, Kind::Content);
         auto alias = NativeFirstFrameGate::arm({held, 13, start, before});
-        assert(alias && alias->spend(held, later));
+        assert(alias && alias->spend(held, later, before));
         std::vector<NativeFirstFrameGate::NativeFrame> reused{
             {held.heads[0].key, &shared, &first, 0, false},
             {held.heads[1].key, &shared, &first, 0, false},
         };
         assert(!alias->observe({held, later, reused}));
         assert(alias->phase() == Phase::Faulted);
-        assert(!alias->spend(held, later));
+        assert(!alias->spend(held, later, before));
+    }
+
+    // Arm is not the physical release boundary. Between arm and spend an
+    // output may complete a frame. Capture a NEW output-specific high-water at
+    // spend, then require a strictly newer hardware completion. No synthesized
+    // pre-spend frame or disabled-output commit can inherit the old arm mark.
+    {
+        auto moved = before;
+        moved[0].previousCommit = 8;
+        ProtectedFrame stale;
+        ProtectedFrame fresh;
+        completed(stale, &first, 8, Kind::Content);
+        completed(fresh, &second, 9, Kind::Content);
+        auto preSpent = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(preSpent && preSpent->spend(held, later, moved));
+        std::vector<NativeFirstFrameGate::NativeFrame> staleFrames{
+            {held.heads[0].key, &stale, &first, 0, false},
+            {held.heads[1].key, &fresh, &second, 0, false},
+        };
+        assert(!preSpent->observe({held, later, staleFrames}));
+        assert(preSpent->phase() == Phase::Faulted);
+        assert(!preSpent->spend(held, later, moved));
+
+        for (int reason = 0; reason < 4; ++reason) {
+            auto bad = before;
+            if (reason == 0)
+                bad.pop_back();
+            else if (reason == 1)
+                ++bad[0].key.generation;
+            else if (reason == 2)
+                --bad[0].previousCommit;
+            else
+                bad[0].previousCommit = std::numeric_limits<std::uint64_t>::max();
+            auto gated = NativeFirstFrameGate::arm({held, 13, start, before});
+            assert(gated && !gated->spend(held, later, bad));
+            assert(gated->phase() == Phase::Faulted);
+            assert(!gated->spend(held, later, before));
+        }
     }
 
     // A completed opaque frame is NOT a first ordinary frame, and neither is
@@ -111,7 +149,7 @@ int main()
         ProtectedFrame a;
         ProtectedFrame b;
         auto proof = NativeFirstFrameGate::arm({held, 13, start, before});
-        assert(proof && proof->spend(held, later));
+        assert(proof && proof->spend(held, later, before));
         if (scenario == 0)
             completed(a, &first, 8, Kind::Safety);
         else
@@ -126,14 +164,14 @@ int main()
             frames[1].key = held.heads[0].key; // Other native output's completion.
         assert(!proof->observe({held, later, frames}));
         assert(proof->phase() == Phase::Faulted);
-        assert(!proof->spend(held, later));
+        assert(!proof->spend(held, later, before));
     }
 
     // No first frame remains pending, without extending the original clocks.
     ProtectedFrame a;
     ProtectedFrame b;
     auto proof = NativeFirstFrameGate::arm({held, 13, start, before});
-    assert(proof && proof->spend(held, later));
+    assert(proof && proof->spend(held, later, before));
     std::vector<NativeFirstFrameGate::NativeFrame> frames{
         {held.heads[0].key, &a, &first, 0, false},
         {held.heads[1].key, &b, &second, 0, false},
@@ -153,12 +191,12 @@ int main()
     assert(receipt->completed[1].second == 9);
     assert(proof->phase() == Phase::Verified);
     assert(!proof->observe({held, later, frames})); // Never redeliver or renew.
-    assert(!proof->spend(held, later));
+    assert(!proof->spend(held, later, before));
 
     for (int scenario = 0; scenario < 5; ++scenario) {
         auto current = held;
         auto candidate = NativeFirstFrameGate::arm({held, 13, start, before});
-        assert(candidate && candidate->spend(held, later));
+        assert(candidate && candidate->spend(held, later, before));
         if (scenario == 0)
             current.generation++;
         else if (scenario == 1)
@@ -177,7 +215,7 @@ int main()
     const auto partlyDisabled = inventory(true);
     const auto disabledBefore = baseline(partlyDisabled);
     auto disabled = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
-    assert(disabled && disabled->spend(partlyDisabled, later));
+    assert(disabled && disabled->spend(partlyDisabled, later, disabledBefore));
     std::vector<NativeFirstFrameGate::NativeFrame> disabledFrames{
         {partlyDisabled.heads[0].key, &a, &first, 0, false},
         {partlyDisabled.heads[1].key, nullptr, nullptr, 7, true},
@@ -185,7 +223,7 @@ int main()
     assert(!disabled->observe({partlyDisabled, later, disabledFrames}));
     assert(disabled->phase() == Phase::Faulted);
     auto disabledFresh = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
-    assert(disabledFresh && disabledFresh->spend(partlyDisabled, later));
+    assert(disabledFresh && disabledFresh->spend(partlyDisabled, later, disabledBefore));
     disabledFrames[1].disableCommit = 10;
     assert(disabledFresh->observe({partlyDisabled, later, disabledFrames}));
     assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames}));
