@@ -865,7 +865,7 @@ impl ProtectionPort for NativeProtection {
                     &grant,
                     b"LNRS-END:1\n",
                     ORIGINAL_PROBE,
-                    || verify(),
+                    &mut verify,
                 );
                 drop(_slot);
                 if published.is_err() {

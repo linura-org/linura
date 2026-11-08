@@ -979,7 +979,7 @@ fn native_release_reservation_is_write_once_after_exact_root_held_parent() {
 #[test]
 fn native_release_spent_requires_exact_parent_is_synced_and_cannot_replay() {
     let fixture = Fixture::new();
-    let (parent, terminal) = self::terminal(1, 2, 3, "seat0");
+    let (parent, terminal) = terminal(1, 2, 3, "seat0");
     let preparation = NativeDisplayRetirementPreparation::new(
         &terminal,
         7,
@@ -1040,7 +1040,7 @@ fn native_release_spent_requires_exact_parent_is_synced_and_cannot_replay() {
 fn missing_parent_torn_or_repermissioned_spent_marker_quarantines_every_scope() {
     for fault in 0..3 {
         let fixture = Fixture::new();
-        let (parent, terminal) = self::terminal(1, 2, 3, "seat0");
+        let (parent, terminal) = terminal(1, 2, 3, "seat0");
         let (other, _) = self::terminal(11, 12, 13, "seat12");
         let preparation = NativeDisplayRetirementPreparation::new(
             &terminal,
