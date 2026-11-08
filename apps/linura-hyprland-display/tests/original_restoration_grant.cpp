@@ -1,6 +1,7 @@
 #include "original_restoration_grant.h"
 #include "original_finalization_intent.h"
 #include "original_finalization_grant.h"
+#include "original_native_release_grant.h"
 #include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
@@ -156,6 +157,32 @@ void terminalComparison(const std::string &material)
                                                material};
     const auto bytes = framed(reservation);
     assert(OriginalFinalizationGrantCodec::matches(bytes, terminal, material));
+    const std::string controlBinding(64, '7');
+    const std::string controlObservation(64, '8');
+    const std::vector<std::string> retirement{
+        "linura.native-display.retirement-preparation.v1", "7",
+        controlBinding, controlObservation, bytes};
+    const auto releaseBytes = framed(retirement);
+    using ReleaseCodec = OriginalNativeReleaseGrantCodec;
+    assert(ReleaseCodec::matches(releaseBytes, terminal, material, 7,
+                                 controlBinding, controlObservation));
+    assert(!ReleaseCodec::matches(releaseBytes, terminal, material, 8,
+                                  controlBinding, controlObservation));
+    assert(!ReleaseCodec::matches(releaseBytes, terminal, material, 7,
+                                  controlObservation, controlBinding));
+    assert(!ReleaseCodec::matches(releaseBytes + 'x', terminal, material, 7,
+                                  controlBinding, controlObservation));
+    for (std::size_t size = 0; size < releaseBytes.size(); ++size)
+        assert(!ReleaseCodec::matches(std::string_view(releaseBytes).substr(0, size),
+                                      terminal, material, 7,
+                                      controlBinding, controlObservation));
+    for (unsigned fault = 0; fault < 5; ++fault) {
+        auto changed = retirement;
+        changed[fault] = fault == 1 ? "07" : "invalid";
+        assert(!ReleaseCodec::matches(framed(changed), terminal, material, 7,
+                                      controlBinding, controlObservation));
+    }
+
     for (std::size_t size = 0; size < bytes.size(); ++size)
         assert(!OriginalFinalizationGrantCodec::matches(std::string_view(bytes).substr(0, size),
                                                         terminal, material));
@@ -194,6 +221,13 @@ void terminalComparison(const std::string &material)
                                static_cast<std::uint64_t>(now.tv_nsec) / 1'000'000;
     assert(!OriginalFinalizationGrant::receive(fence, OwnedNativeFd{grant[0]}, terminal, material,
                                                sampledBootMs));
+    int releasePair[2]{};
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, releasePair) == 0);
+    assert(close(releasePair[1]) == 0);
+    assert(!OriginalNativeReleaseGrant::receive(
+        fence, OwnedNativeFd{releasePair[0]}, terminal, material, 7,
+        controlBinding, controlObservation, sampledBootMs));
+    assert(fcntl(releasePair[0], F_GETFD) == -1 && errno == EBADF);
     assert(fcntl(grant[0], F_GETFD) == -1 && errno == EBADF);
     assert(fence.recoveryAvailable() && !fence.ordinaryAllowed());
     assert(close(lease[1]) == 0);
