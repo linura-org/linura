@@ -291,8 +291,11 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {
-                    scanout, spentCommit_[i], frame.disableCommit};
+                OutputReceipt completed;
+                completed.kernel = scanout;
+                completed.spendHighWater = spentCommit_[i];
+                completed.completedCommit = frame.disableCommit;
+                receipt.completed[receipt.completedCount++] = completed;
             }
         }
         if (pending)
