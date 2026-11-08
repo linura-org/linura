@@ -35,8 +35,8 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected);
 // Arm the comparison-only gate against the same pinned original Recovery,
 // KMS evidence, Root channel and retained safety frames. Does not spend
 // a grant or establish output-wide spend-time high-water.
-[[nodiscard]] std::optional<NativeFirstFrameGate>
-nativeFirstFrameArm(const Correlation &original, const Snapshot &expected);
+using NativeFirstFrameArm = std::optional<NativeFirstFrameGate>;
+[[nodiscard]] NativeFirstFrameArm nativeFirstFrameArm(const Correlation &, const Snapshot &);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
 inline constexpr char UpstreamVersion[] = "0.56.2";

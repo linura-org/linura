@@ -989,8 +989,7 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     return scanout;
 }
 
-std::optional<NativeFirstFrameGate>
-nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
+NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
 {
     if (!backend || !backend->originalRecovery || !backend->originalRecovery->grant)
         return std::nullopt;
@@ -998,7 +997,7 @@ nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
     const auto initial = backend->snapshot();
     if (!armed || !initial || *initial != expected)
         return std::nullopt;
-    const auto protectedSample = originalProtectedFrameBaseline(original, expected);
+    const auto protectedSample = readProtectedBaseline(original, expected);
     const auto scanout = nativeFirstFrameKernel(original, expected);
     const auto finished = backend->clock();
     const auto final = backend->snapshot();

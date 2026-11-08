@@ -1301,18 +1301,25 @@ std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonit
     return OriginalRestorationFrame{surface->submittedBuffer->buffer,
                                     surface->frame.completedCommit(), data->postWriteEpoch};
 }
-std::optional<NativeProtectedFrameBaseline>
-originalProtectedFrameBaseline(const Correlation &bound, const Snapshot &expected)
+NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Snapshot &expected)
 {
     const auto data = mutationFence;
     auto *backend = nativeBackend();
-    if (!data || !backend || !data->mutation || !data->originalRestoration ||
-        data->closed || data->writing || data->ownerLost || data->mutationFault ||
-        data->bound != bound || !data->terminalActive || !data->terminalConsumed ||
-        !data->terminalQuiescenceAttempted || !data->terminalGrant ||
-        data->postWriteEpoch == 0 || heldInput().any ||
-        expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads ||
-        expected.heads.size() != data->surfaces.size())
+    if (!data || !backend)
+        return std::nullopt;
+    if (!data->mutation || !data->originalRestoration)
+        return std::nullopt;
+    if (data->closed || data->writing || data->ownerLost || data->mutationFault)
+        return std::nullopt;
+    if (data->bound != bound || !data->terminalActive || !data->terminalConsumed)
+        return std::nullopt;
+    if (!data->terminalQuiescenceAttempted || !data->terminalGrant)
+        return std::nullopt;
+    if (data->postWriteEpoch == 0 || heldInput().any)
+        return std::nullopt;
+    if (expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
+        return std::nullopt;
+    if (expected.heads.size() != data->surfaces.size())
         return std::nullopt;
     const auto first = backend->snapshot();
     if (!first || *first != expected || expected != data->stableInventory ||

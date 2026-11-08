@@ -36,8 +36,8 @@ struct NativeProtectedFrameBaseline final
     std::uint64_t postWriteEpoch = 0;
     std::vector<NativeFirstFrameGate::Output> before;
 };
-[[nodiscard]] std::optional<NativeProtectedFrameBaseline>
-originalProtectedFrameBaseline(const Correlation &, const Snapshot &);
+using NativeProtectedBaseline = std::optional<NativeProtectedFrameBaseline>;
+[[nodiscard]] NativeProtectedBaseline readProtectedBaseline(const Correlation &, const Snapshot &);
 void initializeProtectedDisplay(wl_display &);
 void shutdownProtectedDisplay();
 void startupAdmissionChanged();
