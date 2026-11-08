@@ -1063,12 +1063,15 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
 
 NativeOutputCommits nativeOutputHighWater(const Correlation &original, const Snapshot &expected)
 {
-    if (!backend || !backend->originalRecovery || backend->originalRecovery->failed ||
-        backend->writing || backend->commitFailed ||
-        backend->originalRecovery->bound != original ||
-        !backend->originalRecovery->grant ||
-        !backend->originalRecovery->protection ||
-        !backend->powerInhibitor.held() || !startupFence.recoveryAvailable())
+    if (!backend || !backend->originalRecovery)
+        return std::nullopt;
+    if (backend->originalRecovery->failed || backend->writing || backend->commitFailed)
+        return std::nullopt;
+    if (backend->originalRecovery->bound != original)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant || !backend->originalRecovery->protection)
+        return std::nullopt;
+    if (!backend->powerInhibitor.held() || !startupFence.recoveryAvailable())
         return std::nullopt;
     const auto began = backend->clock();
     const auto initial = backend->snapshot();
@@ -1135,8 +1138,7 @@ NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snaps
     for (std::size_t i = 0; i < outputHighWater->size(); ++i) {
         if ((*outputHighWater)[i].key != protectedSample->before[i].key)
             return std::nullopt;
-        if ((*outputHighWater)[i].previousCommit <
-            protectedSample->before[i].previousCommit)
+        if ((*outputHighWater)[i].previousCommit < protectedSample->before[i].previousCommit)
             return std::nullopt;
     }
     return NativeFirstFrameGate::arm(
