@@ -786,6 +786,8 @@ impl ProtectionPort for NativeProtection {
         grant.extend_from_slice(&deadline.to_be_bytes());
         grant.extend_from_slice(&sampled_boot.to_be_bytes());
         let service = self.clone();
+        // Do not permit a new Control owner to adopt a prepared native grant.
+        let control_sender = sender.to_owned();
         let persisted = Arc::new(AtomicBool::new(false));
         let mut last_clock = (unix_ms()?, boot_ms()?);
         drop(admission);
@@ -794,6 +796,7 @@ impl ProtectionPort for NativeProtection {
             .spawn(move || {
                 let _grant_slot = grant_slot;
                 let mut verify = || {
+                    service.admit_control(&control_sender)?;
                     let admission = super::protection_lock::acquire(
                         &service.admission,
                         super::protection_lock::BUDGET,
@@ -854,6 +857,7 @@ impl ProtectionPort for NativeProtection {
                     }
                     last_clock = clock;
                     valid_dispatch_window(deadline, sampled_boot, clock.0, clock.1)?;
+                    service.admit_control(&control_sender)?;
                     Ok(())
                 };
                 let published = write_grant_with_marker(
@@ -889,6 +893,7 @@ impl ProtectionPort for NativeProtection {
                         .map_err(|_| unavailable())
                 };
                 let persist = || {
+                    service.admit_control(&control_sender)?;
                     let admission = super::protection_lock::acquire(
                         &service.admission,
                         super::protection_lock::BUDGET,
@@ -912,6 +917,7 @@ impl ProtectionPort for NativeProtection {
                     }
                     service.original_for_scope(&admission, &scope)?;
                     valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+                    service.admit_control(&control_sender)?;
                     persisted.store(true, Ordering::Release);
                     Ok(())
                 };
