@@ -228,9 +228,40 @@ void scenario(int action, bool missingMode = false, bool missingDone = false)
     wl_display_disconnect(client);
     server.finish();
 }
+void ownerCoverageProjection()
+{
+    NativeDisplayHead enabled;
+    enabled.name = QStringLiteral("DP-1");
+    enabled.enabled = true;
+    enabled.covered = true;
+    NativeDisplayHead disabled;
+    disabled.name = QStringLiteral("DP-2");
+    disabled.enabled = false;
+    disabled.covered = true; // Inherited compositor fence, never owner evidence.
+    NativeDisplaySnapshot sample;
+    sample.generation = 7;
+    sample.heads = {enabled, disabled};
+
+    const auto projected = projectOwnerDisplayCoverage(
+        sample, {{QStringLiteral("DP-1"), true}, {QStringLiteral("DP-2"), false}});
+    assert(projected && projected->heads[0].covered && !projected->heads[1].covered);
+    const auto missing = projectOwnerDisplayCoverage(sample, {});
+    assert(missing && !missing->heads[0].covered && !missing->heads[1].covered);
+    const auto onlyEnabled =
+        projectOwnerDisplayCoverage(sample, {{QStringLiteral("DP-1"), true}});
+    assert(onlyEnabled && onlyEnabled->heads[0].covered && !onlyEnabled->heads[1].covered);
+    // A disabled head cannot claim a positive lock-surface witness, even
+    // when the compositor's safety fence had previously marked it covered.
+    assert(!projectOwnerDisplayCoverage(
+        sample, {{QStringLiteral("DP-1"), true}, {QStringLiteral("DP-2"), true}}));
+    assert(!projectOwnerDisplayCoverage(sample, {{QStringLiteral("unknown"), false}}));
+    assert(!projectOwnerDisplayCoverage(
+        sample, {{QStringLiteral("DP-1"), true}, {QStringLiteral("DP-1"), false}}));
+}
 } // namespace
 int main()
 {
+    ownerCoverageProjection();
     for (int action : {1, 2, 3, 4, 5})
         scenario(action);
     scenario(1, true, false);

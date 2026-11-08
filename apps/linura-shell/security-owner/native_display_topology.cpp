@@ -150,11 +150,14 @@ projectOwnerDisplayCoverage(NativeDisplaySnapshot snapshot,
             return std::nullopt;
         const auto found =
             std::find_if(snapshot.heads.begin(), snapshot.heads.end(), [&](const auto &head) {
-                return head.enabled && head.name == surface.outputName;
+                return head.name == surface.outputName;
             });
-        if (found == snapshot.heads.end())
-            return std::nullopt; // Stale/mismatched owner inventory is not settled.
-        found->covered = surface.covered;
+        if (found == snapshot.heads.end() || (!found->enabled && surface.covered))
+            return std::nullopt; // Unknown or positive disabled-surface proof.
+        // An uncovered, still-advertised disabled wl_output is not a stale
+        // enabled head. It has no owner coverage and cannot lend one.
+        if (found->enabled)
+            found->covered = surface.covered;
     }
     return snapshot;
 }

@@ -151,6 +151,16 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
+                // A tracker is owned by one native output. Sharing a hardware-
+                // completed tracker between two output keys cannot establish
+                // separate first ordinary frames, even for mirrored buffers.
+                for (std::size_t prior = 0; prior < i; ++prior) {
+                    if (current.heads[prior].current.enabled &&
+                        frames[prior].frame == frame.frame) {
+                        phase_ = Phase::Faulted;
+                        return {};
+                    }
+                }
                 const auto commit = frame.frame->completedCommit();
                 if (!commit) {
                     pending = true;
