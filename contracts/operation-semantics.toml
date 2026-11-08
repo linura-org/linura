@@ -181,3 +181,32 @@ plan_bound_authorization = true
 privileged_executor_allowed = true
 canonical_managed_lifecycle = true
 path = "canonical-managed-mutation"
+
+# S18-3 candidate classification is deliberately NOT an entry under
+# [registered_operations]. No capable executor may be reached from these IDs
+# until a later native-qualified S18 PR explicitly installs full managed
+# execution/verification with the original authenticated Control principal.
+[network_candidate_review]
+candidate_source = "contracts/v010-s18-design.toml"
+typed_control_review = "linura_control::network_authority"
+operation_count = 9
+class = "managed-external-effect"
+risk_floor_authority = "trusted-S18-candidate-table"
+risk_floor_scan = "user-state"
+risk_floor_delete = "destructive"
+risk_floor_all_other = "security-sensitive"
+runtime_registration = false
+runtime_grants = false
+transient_class_downgrade_allowed = false
+transient_execution_provider_guard = "networkmanager-and-operation-network-prefix"
+durable_authority_owner = "linura_control::DurableAuthorityControl"
+durable_attempt_storage = "linura_transaction::TransactionStore"
+durable_sqlite_owner = "linura_persistence_sqlite"
+trusted_principal_source = "authenticated-Control-transport"
+exact_owner_epoch_required = true
+fresh_original_observation_required = true
+default_route_and_dns_impact_review = true
+offline_local_recovery_required_for_disruption = true
+indeterminate_replay_allowed = false
+unknown_effect_behavior = "fail-closed"
+native_qualification_required_before_registration = true
