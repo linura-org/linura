@@ -1,12 +1,14 @@
 #pragma once
 
 #include "compositor_display_service.h"
+#include "native_first_frame_gate.h"
 
 #include <string>
 #include <cstddef>
 #include <optional>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 struct wl_display;
 namespace Monitor {
@@ -23,6 +25,13 @@ class OwnedNativeFd;
 receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string_view material,
                                  std::uint64_t sampledBootMs);
 [[nodiscard]] bool originalRestorationPresented(const Correlation &);
+// Read-only actual DRM/KMS connector observations from the SAME pinned
+// compositor, original supervised Root channel and unchanged output inventory.
+// This is NOT a native release attempt, grant, frame-completion receipt, or
+// Control authority. The release consumer must still verify each actual native
+// buffer/commit and match fresh post-spend output high-water marks.
+[[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
+nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
 inline constexpr char UpstreamVersion[] = "0.56.2";
