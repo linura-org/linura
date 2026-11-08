@@ -8,6 +8,7 @@
 #include "native_power_inhibitor.h"
 #include "native_owner_admission.h"
 #include "native_output_identity.h"
+#include "native_output_commit_history.h"
 #include "linura-display-integration-build.h"
 #include "startup_fence.h"
 #include "original_restoration_grant.h"
@@ -87,6 +88,16 @@ class PinnedBackend final : public Backend
         std::vector<Mode> modes;
         NativeOutputIdentity identity;
     };
+    // These subscribers attach to the actual live native IOutput object,
+    // not a client-facing monitor name or a retained display transaction.
+    // They are retired on output replacement/hotplug/generation drift.
+    struct OutputCommitObserver final
+    {
+        WP<Aquamarine::IOutput> output;
+        std::shared_ptr<NativeOutputCommitHistory> history;
+        CHyprSignalListener result;
+    };
+    std::map<OutputKey, std::unique_ptr<OutputCommitObserver>> outputCommitObservers;
     std::uint64_t generation = 1, securityEpoch = 1, nextHandle = 1;
     std::vector<Binding> bindings;
     std::map<Monitor::CMonitor *, Target> overlay;
@@ -869,6 +880,38 @@ class PinnedBackend final : public Backend
         std::sort(next.begin(), next.end(),
                   [](const Binding &a, const Binding &b) { return a.key < b.key; });
         bindings = std::move(next);
+        // A replaced native output, new generation, hotplug or missing native
+        // identity must not borrow a predecessor's commit-result high-water.
+        // Disconnect the retired listener before any new subscription.
+        std::erase_if(outputCommitObservers, [&](const auto &entry) {
+            const auto current =
+                std::find_if(bindings.begin(), bindings.end(), [&](const Binding &binding) {
+                    return entry.first == binding.key;
+                });
+            return current == bindings.end() ||
+                   entry.second->output.lock() != current->output.lock();
+        });
+        for (const auto &binding : bindings) {
+            if (outputCommitObservers.contains(binding.key))
+                continue;
+            const auto native = binding.output.lock();
+            if (!native)
+                return false;
+            auto observer = std::make_unique<OutputCommitObserver>();
+            observer->output = binding.output;
+            observer->history = std::make_shared<NativeOutputCommitHistory>();
+            observer->result = native->events.commitResult.listen(
+                [weak = std::weak_ptr<NativeOutputCommitHistory>(observer->history)](
+                    const Aquamarine::IOutput::SCommitResult &event) {
+                    if (const auto history = weak.lock()) {
+                        const bool submitted =
+                            event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                            event.error == 0;
+                        (void)history->observe(event.id, submitted);
+                    }
+                });
+            outputCommitObservers.emplace(binding.key, std::move(observer));
+        }
         std::erase_if(overlay, [&](const auto &entry) {
             const auto current = monitorFor(entry.second.output);
             return !current || current.get() != entry.first;
