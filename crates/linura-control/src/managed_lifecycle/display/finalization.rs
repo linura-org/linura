@@ -904,12 +904,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             dispatch,
             terminal.intent.material(),
         )?;
-        let proof = self.inspect_terminal_phase(
-            principal.clone(),
-            actor,
-            terminal_request,
-            expected,
-        )?;
+        let proof =
+            self.inspect_terminal_phase(principal.clone(), actor, terminal_request, expected)?;
         // A lost reply is reconciled by fresh physical facts and the exact
         // old immutable record, never another Root/native write or approval.
         if self.terminal_inspection_context(&principal, terminal_request)? != terminal
