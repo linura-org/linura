@@ -1020,6 +1020,11 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             return false; // No actual Root terminal channel or KMS proof in this fixture.
         }
+        bool spendNativeRelease(OwnedNativeFd, const Correlation &, std::uint64_t, std::uint64_t,
+                                std::string_view, std::string_view) override
+        {
+            return false; // Simulated transport has no Root LNRX or physical release authority.
+        }
         bool beginDecision(const ProtectedInteraction::Scope &) override
         {
             return false;
