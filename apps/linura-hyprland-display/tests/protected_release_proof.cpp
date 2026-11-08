@@ -180,6 +180,43 @@ int main()
         assert(!proof->spend(held, later, before));
     }
 
+    // After a real one-use spend, an ordinary output can legitimately have
+    // no frame yet. Absence cannot become a receipt or renew the original
+    // deadline. Substituted/partially populated native evidence must fault.
+    {
+        auto absent = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(absent && absent->spend(held, later, before));
+        std::vector<NativeFirstFrameGate::NativeFrame> noFrames{
+            {held.heads[0].key, nullptr, nullptr, 0, false, 0},
+            {held.heads[1].key, nullptr, nullptr, 0, false, 0},
+        };
+        assert(!absent->observe({held, later, noFrames, scanout}));
+        assert(absent->phase() == Phase::Spent);
+        ProtectedFrame freshFirst;
+        ProtectedFrame freshSecond;
+        completed(freshFirst, &first, 8, Kind::Content);
+        completed(freshSecond, &second, 9, Kind::Content);
+        noFrames[0] = {held.heads[0].key, &freshFirst, &first, 0, false, 301};
+        assert(!absent->observe({held, later, noFrames, scanout}));
+        assert(absent->phase() == Phase::Spent);
+        noFrames[1] = {held.heads[1].key, &freshSecond, &second, 0, false, 302};
+        assert(absent->observe({held, later, noFrames, scanout}));
+        assert(absent->phase() == Phase::Verified);
+
+        auto incomplete = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(incomplete && incomplete->spend(held, later, before));
+        noFrames[0] = {held.heads[0].key, nullptr, &first, 0, false, 301};
+        assert(!incomplete->observe({held, later, noFrames, scanout}));
+        assert(incomplete->phase() == Phase::Faulted);
+
+        auto expired = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(expired && expired->spend(held, later, before));
+        noFrames[0] = {held.heads[0].key, nullptr, nullptr, 0, false, 0};
+        noFrames[1] = {held.heads[1].key, nullptr, nullptr, 0, false, 0};
+        assert(!expired->observe({held, {12'000, 7'000}, noFrames, scanout}));
+        assert(expired->phase() == Phase::Faulted);
+    }
+
     // No first frame remains pending, without extending the original clocks.
     ProtectedFrame a;
     ProtectedFrame b;

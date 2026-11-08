@@ -194,6 +194,15 @@ class NativeFirstFrameGate final
                     return {};
                 }
             if (head.current.enabled) {
+                // The ordinary surface may not have produced its first frame
+                // yet. An entirely absent native frame is pending, NEVER
+                // verified. Any partially populated or disable-typed claim
+                // is contradictory and fails closed under the original clock.
+                if (!frame.frame && !frame.retainedBuffer && !frame.retainedFramebuffer &&
+                    !frame.disableCommit && !frame.disableSubmitted) {
+                    pending = true;
+                    continue;
+                }
                 if (!frame.frame || !frame.retainedBuffer || frame.disableCommit ||
                     frame.disableSubmitted) {
                     phase_ = Phase::Faulted;
