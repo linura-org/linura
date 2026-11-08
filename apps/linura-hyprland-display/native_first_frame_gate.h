@@ -48,6 +48,19 @@ class NativeFirstFrameGate final
         // output. This must come from that output's native commit-result path.
         std::uint64_t disableCommit = 0;
         bool disableSubmitted = false;
+        // Immutable retained Aquamarine DRM buffer's actual FB attachment.
+        // Never a client-supplied or just-planned framebuffer identity.
+        std::uint32_t retainedFramebuffer = 0;
+    };
+    struct NativeScanout final
+    {
+        OutputKey key;
+        // Fresh read-only KMS state of the same actual connector. The caller
+        // MUST obtain this from readNativeKernelScanout on the original
+        // compositor's admitted DRM descriptor, not its requested monitor
+        // state, and bracket the read by current native identity probes.
+        std::uint32_t connector = 0, crtc = 0, framebuffer = 0, plane = 0;
+        bool active = false;
     };
     struct Receipt final
     {
@@ -139,15 +152,18 @@ class NativeFirstFrameGate final
         const Snapshot &current;
         ClockSample now;
         const std::vector<NativeFrame> &frames;
+        const std::vector<NativeScanout> &kernel;
     };
     [[nodiscard]] std::optional<Receipt> observe(const ObservationRequest &sample) noexcept
     {
         const auto &current = sample.current;
         const auto now = sample.now;
         const auto &frames = sample.frames;
+        const auto &kernel = sample.kernel;
         if (phase_ != Phase::Spent)
             return {};
-        if (!currentSample(current, now) || frames.size() != before_.size()) {
+        if (!currentSample(current, now) || frames.size() != before_.size() ||
+            kernel.size() != before_.size()) {
             phase_ = Phase::Faulted;
             return {};
         }
@@ -156,10 +172,19 @@ class NativeFirstFrameGate final
         for (std::size_t i = 0; i < before_.size(); ++i) {
             const auto &head = current.heads[i];
             const auto &frame = frames[i];
-            if (frame.key != head.key) {
+            const auto &scanout = kernel[i];
+            if (frame.key != head.key || scanout.key != head.key || !scanout.connector) {
                 phase_ = Phase::Faulted;
                 return {};
             }
+            // A connector may not be used to certify two physical heads. In
+            // mirror mode buffer bytes can be shared, but the connector
+            // identity and each output-owned frame tracker must be distinct.
+            for (std::size_t prior = 0; prior < i; ++prior)
+                if (kernel[prior].connector == scanout.connector) {
+                    phase_ = Phase::Faulted;
+                    return {};
+                }
             if (head.current.enabled) {
                 if (!frame.frame || !frame.retainedBuffer || frame.disableCommit ||
                     frame.disableSubmitted) {
@@ -183,21 +208,28 @@ class NativeFirstFrameGate final
                 }
                 if (commit <= spentCommit_[i] ||
                     frame.frame->queuedKind() != ProtectedFrame::Kind::Content ||
-                    frame.frame->completedBuffer() != frame.retainedBuffer) {
+                    frame.frame->completedBuffer() != frame.retainedBuffer ||
+                    !frame.retainedFramebuffer || !scanout.active || !scanout.crtc ||
+                    !scanout.plane || !scanout.framebuffer ||
+                    frame.retainedFramebuffer != scanout.framebuffer) {
                     phase_ = Phase::Faulted;
                     return {};
                 }
                 receipt.completed[receipt.completedCount++] = {head.key, commit};
             } else {
-                if (frame.frame || frame.retainedBuffer) {
+                if (frame.frame || frame.retainedBuffer || frame.retainedFramebuffer) {
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                if (!frame.disableSubmitted) {
+                if (!frame.disableSubmitted || scanout.active) {
                     pending = true;
                     continue;
                 }
-                if (frame.disableCommit == 0 || frame.disableCommit <= spentCommit_[i]) {
+                // A submitted disable must really detach the connector at
+                // KMS. A logical disabled head or an old modeset ACK alone
+                // cannot prove a disabled physical output.
+                if (scanout.crtc || scanout.framebuffer || scanout.plane ||
+                    frame.disableCommit == 0 || frame.disableCommit <= spentCommit_[i]) {
                     phase_ = Phase::Faulted;
                     return {};
                 }

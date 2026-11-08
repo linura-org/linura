@@ -42,6 +42,18 @@ std::vector<NativeFirstFrameGate::Output> baseline(const Snapshot &sample)
         result.push_back({head.key, 7});
     return result;
 }
+std::vector<NativeFirstFrameGate::NativeScanout> kernel(const Snapshot &sample)
+{
+    std::vector<NativeFirstFrameGate::NativeScanout> result;
+    for (std::size_t i = 0; i < sample.heads.size(); ++i) {
+        const bool enabled = sample.heads[i].current.enabled;
+        result.push_back({sample.heads[i].key, static_cast<std::uint32_t>(100 + i),
+                          static_cast<std::uint32_t>(enabled ? 200 + i : 0),
+                          static_cast<std::uint32_t>(enabled ? 301 + i : 0),
+                          static_cast<std::uint32_t>(enabled ? 400 + i : 0), enabled});
+    }
+    return result;
+}
 void completed(ProtectedFrame &frame, const void *buffer, std::uint64_t commit, Kind kind)
 {
     assert(frame.rendered(buffer, kind));
@@ -59,6 +71,7 @@ int main()
     int first = 0, second = 0, swapped = 0;
     const Snapshot held = inventory();
     const auto before = baseline(held);
+    const auto scanout = kernel(held);
 
     // The exact native output inventory, source ownership and a surviving
     // powered root are mandatory even to construct comparison state.
@@ -83,7 +96,7 @@ int main()
 
     auto gate = NativeFirstFrameGate::arm({held, 13, start, before});
     assert(gate && gate->phase() == Phase::Held);
-    assert(!gate->observe({held, later, {}}));
+    assert(!gate->observe({held, later, {}, scanout}));
     assert(!gate->spend(held, {9'999, 4'999}, before));
     assert(gate->phase() == Phase::Faulted);
     assert(!gate->spend(held, later, before));
@@ -97,10 +110,10 @@ int main()
         auto alias = NativeFirstFrameGate::arm({held, 13, start, before});
         assert(alias && alias->spend(held, later, before));
         std::vector<NativeFirstFrameGate::NativeFrame> reused{
-            {held.heads[0].key, &shared, &first, 0, false},
-            {held.heads[1].key, &shared, &first, 0, false},
+            {held.heads[0].key, &shared, &first, 0, false, 301},
+            {held.heads[1].key, &shared, &first, 0, false, 301},
         };
-        assert(!alias->observe({held, later, reused}));
+        assert(!alias->observe({held, later, reused, scanout}));
         assert(alias->phase() == Phase::Faulted);
         assert(!alias->spend(held, later, before));
     }
@@ -119,10 +132,10 @@ int main()
         auto preSpent = NativeFirstFrameGate::arm({held, 13, start, before});
         assert(preSpent && preSpent->spend(held, later, moved));
         std::vector<NativeFirstFrameGate::NativeFrame> staleFrames{
-            {held.heads[0].key, &stale, &first, 0, false},
-            {held.heads[1].key, &fresh, &second, 0, false},
+            {held.heads[0].key, &stale, &first, 0, false, 301},
+            {held.heads[1].key, &fresh, &second, 0, false, 302},
         };
-        assert(!preSpent->observe({held, later, staleFrames}));
+        assert(!preSpent->observe({held, later, staleFrames, scanout}));
         assert(preSpent->phase() == Phase::Faulted);
         assert(!preSpent->spend(held, later, moved));
 
@@ -157,12 +170,12 @@ int main()
         completed(b, &second, 9, Kind::Content);
         const auto target = scenario == 3 ? &swapped : &first;
         std::vector<NativeFirstFrameGate::NativeFrame> frames{
-            {held.heads[0].key, &a, target, 0, false},
-            {held.heads[1].key, &b, &second, 0, false},
+            {held.heads[0].key, &a, target, 0, false, 301},
+            {held.heads[1].key, &b, &second, 0, false, 302},
         };
         if (scenario == 2)
             frames[1].key = held.heads[0].key; // Other native output's completion.
-        assert(!proof->observe({held, later, frames}));
+        assert(!proof->observe({held, later, frames, scanout}));
         assert(proof->phase() == Phase::Faulted);
         assert(!proof->spend(held, later, before));
     }
@@ -173,15 +186,15 @@ int main()
     auto proof = NativeFirstFrameGate::arm({held, 13, start, before});
     assert(proof && proof->spend(held, later, before));
     std::vector<NativeFirstFrameGate::NativeFrame> frames{
-        {held.heads[0].key, &a, &first, 0, false},
-        {held.heads[1].key, &b, &second, 0, false},
+        {held.heads[0].key, &a, &first, 0, false, 301},
+        {held.heads[1].key, &b, &second, 0, false, 302},
     };
-    assert(!proof->observe({held, later, frames}));
+    assert(!proof->observe({held, later, frames, scanout}));
     assert(proof->phase() == Phase::Spent);
     completed(a, &first, 8, Kind::Content);
-    assert(!proof->observe({held, later, frames}));
+    assert(!proof->observe({held, later, frames, scanout}));
     completed(b, &second, 9, Kind::Content);
-    const auto receipt = proof->observe({held, later, frames});
+    const auto receipt = proof->observe({held, later, frames, scanout});
     assert(receipt);
     assert(receipt->generation == held.generation);
     assert(receipt->securityEpoch == held.securityEpoch);
@@ -190,7 +203,7 @@ int main()
     assert(receipt->completed[0].second == 8);
     assert(receipt->completed[1].second == 9);
     assert(proof->phase() == Phase::Verified);
-    assert(!proof->observe({held, later, frames})); // Never redeliver or renew.
+    assert(!proof->observe({held, later, frames, scanout})); // Never redeliver or renew.
     assert(!proof->spend(held, later, before));
 
     for (int scenario = 0; scenario < 5; ++scenario) {
@@ -206,27 +219,50 @@ int main()
         else if (scenario == 3)
             current.heads[0].current.x++;
         const auto when = scenario == 4 ? ClockSample{12'000, 7'000} : later;
-        assert(!candidate->observe({current, when, frames}));
+        assert(!candidate->observe({current, when, frames, scanout}));
         assert(candidate->phase() == Phase::Faulted);
+    }
+
+    // KMS scanout is a separate observation from compositor content and
+    // submission counters. A different primary framebuffer, connector
+    // alias or missing kernel evidence is never enough to release protection.
+    {
+        auto badKernel = scanout;
+        badKernel[0].framebuffer++;
+        auto mismatch = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(mismatch && mismatch->spend(held, later, before));
+        assert(!mismatch->observe({held, later, frames, badKernel}));
+        assert(mismatch->phase() == Phase::Faulted);
+        badKernel = scanout;
+        badKernel[1].connector = badKernel[0].connector;
+        auto alias = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(alias && alias->spend(held, later, before));
+        assert(!alias->observe({held, later, frames, badKernel}));
+        assert(alias->phase() == Phase::Faulted);
+        auto absent = NativeFirstFrameGate::arm({held, 13, start, before});
+        assert(absent && absent->spend(held, later, before));
+        assert(!absent->observe({held, later, frames, {}}));
+        assert(absent->phase() == Phase::Faulted);
     }
 
     // Disabled output requires its own newly submitted disabled commit. It
     // cannot borrow the powered root's content frame or a stale disable.
     const auto partlyDisabled = inventory(true);
     const auto disabledBefore = baseline(partlyDisabled);
+    const auto disabledKernel = kernel(partlyDisabled);
     auto disabled = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
     assert(disabled && disabled->spend(partlyDisabled, later, disabledBefore));
     std::vector<NativeFirstFrameGate::NativeFrame> disabledFrames{
-        {partlyDisabled.heads[0].key, &a, &first, 0, false},
-        {partlyDisabled.heads[1].key, nullptr, nullptr, 7, true},
+        {partlyDisabled.heads[0].key, &a, &first, 0, false, 301},
+        {partlyDisabled.heads[1].key, nullptr, nullptr, 7, true, 0},
     };
-    assert(!disabled->observe({partlyDisabled, later, disabledFrames}));
+    assert(!disabled->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
     assert(disabled->phase() == Phase::Faulted);
     auto disabledFresh = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore});
     assert(disabledFresh && disabledFresh->spend(partlyDisabled, later, disabledBefore));
     disabledFrames[1].disableCommit = 10;
-    assert(disabledFresh->observe({partlyDisabled, later, disabledFrames}));
-    assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames}));
+    assert(disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
+    assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
 
     const ClockSample exhaustedClock{std::numeric_limits<std::uint64_t>::max(), 5'000};
     auto exhaustion = NativeFirstFrameGate::arm({held, 13, exhaustedClock, before});
