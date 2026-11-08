@@ -21,6 +21,7 @@ mod display_checkpoint;
 mod display_finalization_intent;
 mod display_finalization_plan;
 mod display_native_release_reservation;
+mod display_native_release_spend;
 mod display_plan;
 mod display_recovery_journal;
 mod display_restoration_link;
