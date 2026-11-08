@@ -910,6 +910,107 @@ bool originalRestorationPresented(const Correlation &bound)
            backend->originalPresentation().has_value();
 }
 
+std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
+nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
+{
+    if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
+        !startupFence.recoveryAvailable() || !backend->originalRecovery->grant ||
+        !backend->originalRecovery->protection || backend->originalRecovery->failed ||
+        backend->originalRecovery->bound != original)
+        return std::nullopt;
+    if (expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
+        return std::nullopt;
+    const auto started = backend->clock();
+    const auto budget = [&]() {
+        const auto now = backend->clock();
+        if (!started || !now)
+            return false;
+        if (now->unixMs < started->unixMs)
+            return false;
+        if (now->bootMs < started->bootMs)
+            return false;
+        if (now->unixMs - started->unixMs >= 2'000)
+            return false;
+        return now->bootMs - started->bootMs < 2'000;
+    };
+    const auto begin = backend->snapshot();
+    if (!budget() || !begin)
+        return std::nullopt;
+    if (*begin != expected)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    if (!budget())
+        return std::nullopt;
+    std::vector<NativeFirstFrameGate::NativeScanout> scanout;
+    scanout.reserve(expected.heads.size());
+    for (const auto &head : expected.heads) {
+        const auto monitor = backend->monitorFor(head.key);
+        if (!monitor || !monitor->m_output || !budget())
+            return std::nullopt;
+        auto *output = dynamic_cast<Aquamarine::CDRMOutput *>(monitor->m_output.get());
+        const auto implementation = output ? output->getBackend() : nullptr;
+        auto *drm = dynamic_cast<Aquamarine::CDRMBackend *>(implementation.get());
+        if (!drm || output->getConnectorID() == 0 ||
+            output->getConnectorID() > std::numeric_limits<std::uint32_t>::max())
+            return std::nullopt;
+        const auto kernel = readNativeKernelScanout(
+            drm->drmFD(), static_cast<std::uint32_t>(output->getConnectorID()), budget);
+        if (!kernel || !budget())
+            return std::nullopt;
+        if (head.current.enabled) {
+            const auto actualMode = monitor->m_currentMode;
+            if (!kernel->active || !kernel->crtc || !kernel->plane || !kernel->framebuffer ||
+                !actualMode || !actualMode->modeInfo ||
+                mode(actualMode) != std::optional{head.current.mode} ||
+                !sameKernelMode(kernel->mode, *actualMode->modeInfo))
+                return std::nullopt;
+        } else if (kernel->active || kernel->crtc || kernel->plane || kernel->framebuffer)
+            return std::nullopt;
+        for (const auto &seen : scanout)
+            if (seen.connector == kernel->connector)
+                return std::nullopt; // No physical connector can certify two heads.
+        scanout.push_back({head.key, kernel->connector, kernel->crtc, kernel->framebuffer,
+                           kernel->plane, kernel->active});
+    }
+    const auto after = backend->snapshot();
+    if (!budget() || !after)
+        return std::nullopt;
+    if (*after != expected)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    if (!budget())
+        return std::nullopt;
+    return scanout;
+}
+
+NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
+{
+    if (!backend || !backend->originalRecovery || !backend->originalRecovery->grant)
+        return std::nullopt;
+    const auto armed = backend->clock();
+    const auto initial = backend->snapshot();
+    if (!armed || !initial || *initial != expected)
+        return std::nullopt;
+    const auto protectedSample = readProtectedBaseline(original, expected);
+    const auto scanout = nativeFirstFrameKernel(original, expected);
+    const auto finished = backend->clock();
+    const auto final = backend->snapshot();
+    if (!protectedSample || !scanout || !finished || !final || *final != expected ||
+        finished->unixMs < armed->unixMs || finished->bootMs < armed->bootMs ||
+        finished->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs ||
+        finished->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs ||
+        scanout->size() != protectedSample->before.size())
+        return std::nullopt;
+    return NativeFirstFrameGate::arm(
+        {expected, protectedSample->postWriteEpoch, *armed, protectedSample->before});
+}
+
 void initialize(wl_display &display, wl_event_loop &loop)
 {
     if (backend || service)

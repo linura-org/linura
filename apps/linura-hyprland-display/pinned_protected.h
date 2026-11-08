@@ -2,6 +2,7 @@
 
 // Private types belong only to the exact-source compositor adapter.
 #include "src/defines.hpp"
+#include "native_first_frame_gate.h"
 #include "src/devices/IKeyboard.hpp"
 #include "src/devices/IPointer.hpp"
 #include "src/helpers/time/Time.hpp"
@@ -27,6 +28,16 @@ struct OriginalRestorationFrame final
 // startup frame, retired commit or owner-content frame cannot satisfy this.
 [[nodiscard]] std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonitor *,
                                                                                const Correlation &);
+// Retained original Recovery scene's own post-write/safety-frame queued
+// high-water. Not output-wide native commit evidence or a release credential.
+// The release consumer must independently capture output-wide counters again.
+struct NativeProtectedFrameBaseline final
+{
+    std::uint64_t postWriteEpoch = 0;
+    std::vector<NativeFirstFrameGate::Output> before;
+};
+using NativeProtectedBaseline = std::optional<NativeProtectedFrameBaseline>;
+[[nodiscard]] NativeProtectedBaseline readProtectedBaseline(const Correlation &, const Snapshot &);
 void initializeProtectedDisplay(wl_display &);
 void shutdownProtectedDisplay();
 void startupAdmissionChanged();

@@ -1301,6 +1301,83 @@ std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonit
     return OriginalRestorationFrame{surface->submittedBuffer->buffer,
                                     surface->frame.completedCommit(), data->postWriteEpoch};
 }
+NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Snapshot &expected)
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    if (!data || !backend)
+        return std::nullopt;
+    if (!data->mutation || !data->originalRestoration)
+        return std::nullopt;
+    if (data->closed || data->writing || data->ownerLost || data->mutationFault)
+        return std::nullopt;
+    if (data->bound != bound || !data->terminalActive || !data->terminalConsumed)
+        return std::nullopt;
+    if (!data->terminalQuiescenceAttempted || !data->terminalGrant)
+        return std::nullopt;
+    if (data->postWriteEpoch == 0 || heldInput().any)
+        return std::nullopt;
+    if (expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
+        return std::nullopt;
+    if (expected.heads.size() != data->surfaces.size())
+        return std::nullopt;
+    const auto first = backend->snapshot();
+    if (!first || *first != expected)
+        return std::nullopt;
+    if (expected != data->stableInventory)
+        return std::nullopt;
+    if (!data->refresh())
+        return std::nullopt;
+    if (!data->terminalGrant->verify())
+        return std::nullopt;
+    if (!originalRestorationPresented(bound))
+        return std::nullopt;
+    NativeProtectedFrameBaseline result;
+    result.postWriteEpoch = data->postWriteEpoch;
+    result.before.reserve(expected.heads.size());
+    for (const auto &head : expected.heads) {
+        const auto surface = data->surfaces.find(head.key);
+        if (surface == data->surfaces.end())
+            return std::nullopt;
+        if (surface->second.output != head.key)
+            return std::nullopt;
+        if (surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return std::nullopt;
+        const auto &held = surface->second;
+        const auto highWater = held.frame.highWater();
+        if (!highWater)
+            return std::nullopt;
+        if (*highWater == std::numeric_limits<std::uint64_t>::max())
+            return std::nullopt;
+        if (held.disableCommit == std::numeric_limits<std::uint64_t>::max())
+            return std::nullopt;
+        if (head.current.enabled) {
+            if (!held.submittedBuffer)
+                return std::nullopt;
+            if (held.frame.queuedKind() != ProtectedFrame::Kind::Safety)
+                return std::nullopt;
+            if (held.frame.completedBuffer() != held.submittedBuffer->buffer.get())
+                return std::nullopt;
+            if (held.frame.completedCommit() != *highWater || !*highWater)
+                return std::nullopt;
+        } else if (!held.disableSubmitted) {
+            return std::nullopt;
+        }
+        result.before.push_back({head.key, std::max(*highWater, held.disableCommit)});
+    }
+    const auto last = backend->snapshot();
+    if (!last || *last != expected)
+        return std::nullopt;
+    if (!data->refresh())
+        return std::nullopt;
+    if (!data->terminalGrant->verify())
+        return std::nullopt;
+    if (data->postWriteEpoch != result.postWriteEpoch)
+        return std::nullopt;
+    if (data->ownerLost || data->mutationFault || heldInput().any)
+        return std::nullopt;
+    return result;
+}
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
 {
     if (startupBlocksProtectedScene())

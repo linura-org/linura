@@ -62,13 +62,21 @@ class NativeFirstFrameGate final
         std::uint32_t connector = 0, crtc = 0, framebuffer = 0, plane = 0;
         bool active = false;
     };
+    struct OutputReceipt final
+    {
+        // The same actual independently sampled KMS identity used to verify
+        // physical scanout. A completed commit number without its connector,
+        // CRTC, primary plane and framebuffer cannot be reconciled by Control.
+        NativeScanout kernel;
+        std::uint64_t completedCommit = 0;
+    };
     struct Receipt final
     {
         std::uint64_t generation = 0, securityEpoch = 0, postWriteEpoch = 0;
         std::uint64_t observedUnixMs = 0, observedBootMs = 0;
-        // Fixed, bounded receipts: no heap allocation or exception while
-        // the physical output/input fence is being verified.
-        std::array<std::pair<OutputKey, std::uint64_t>, DisplayTransaction::MaxHeads> completed{};
+        // Fixed bounded comparison evidence, not a Root/Control authorization,
+        // output-release ACK or ordinary-startup credential.
+        std::array<OutputReceipt, DisplayTransaction::MaxHeads> completed{};
         std::size_t completedCount = 0;
     };
 
@@ -215,7 +223,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {head.key, commit};
+                receipt.completed[receipt.completedCount++] = {scanout, commit};
             } else {
                 if (frame.frame || frame.retainedBuffer || frame.retainedFramebuffer) {
                     phase_ = Phase::Faulted;
@@ -233,7 +241,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {head.key, frame.disableCommit};
+                receipt.completed[receipt.completedCount++] = {scanout, frame.disableCommit};
             }
         }
         if (pending)
