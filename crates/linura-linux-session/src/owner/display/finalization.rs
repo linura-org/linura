@@ -91,17 +91,15 @@ impl NativeSessionChannel {
             wall,
             1,
         )?;
-        if coverage.resource != terminal.current_lock().resource_id().map_err(|e| e.to_string())?
+        if coverage.resource
+            != terminal
+                .current_lock()
+                .resource_id()
+                .map_err(|e| e.to_string())?
         {
             return Err("native release lock incarnation changed".into());
         }
-        let (display, covered) = project(
-            coverage,
-            &sample.1,
-            &sample.2,
-            &sample.4,
-            &sample.5,
-        )?;
+        let (display, covered) = project(coverage, &sample.1, &sample.2, &sample.4, &sample.5)?;
         let active = covered.attributes.get("observed_outputs");
         let locked = covered.attributes.get("covered_outputs");
         if sample.6 && active != locked
@@ -137,11 +135,8 @@ impl NativeSessionChannel {
         }
         // The Root grant is consumed at most once. An owner, bus or kernel
         // failure from here never rebuilds this descriptor or replays LNRX.
-        let grant = self.reserve_control_native_release_grant(
-            record,
-            deadline_unix_ms,
-            sample.3,
-        )?;
+        let grant =
+            self.reserve_control_native_release_grant(record, deadline_unix_ms, sample.3)?;
         self.revalidate_observation(&owner, &boot, started)?;
         let after = boot_ms()?;
         if after < sample.3 || after - sample.3 >= 2_000 {
