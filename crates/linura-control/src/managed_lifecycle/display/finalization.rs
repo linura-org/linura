@@ -975,7 +975,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         )?;
         let native_decision = if matches!(
             expected,
-            DisplayFinalizationPhase::NativeReleaseReserved | DisplayFinalizationPhase::NativeReleaseSpent
+            DisplayFinalizationPhase::NativeReleaseReserved
+                | DisplayFinalizationPhase::NativeReleaseSpent
         ) {
             Some(NativeReleasePrepared::load_spent(
                 self.display_journal()?,
@@ -1004,17 +1005,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             )? != before
             || (matches!(
                 expected,
-                DisplayFinalizationPhase::NativeReleaseReserved | DisplayFinalizationPhase::NativeReleaseSpent
+                DisplayFinalizationPhase::NativeReleaseReserved
+                    | DisplayFinalizationPhase::NativeReleaseSpent
             ) && native_decision
-                    != Some(NativeReleasePrepared::load_spent(
-                        self.display_journal()?,
-                        &principal_id,
-                        &terminal.request,
-                        &terminal.snapshot,
-                        dispatch,
-                        terminal.intent.material(),
-                        &before,
-                    )?))
+                != Some(NativeReleasePrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    &before,
+                )?))
         {
             return Err(invalid());
         }
