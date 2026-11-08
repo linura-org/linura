@@ -167,6 +167,18 @@ if(BUILD_TESTING)
         -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
     add_test(NAME hyprland-protected-frame-boundary COMMAND linura-hyprland-protected-frame-tests)
     set_tests_properties(hyprland-protected-frame-boundary PROPERTIES TIMEOUT 5)
+    # Actual-native, output-wide commit-result observation component. A
+    # synthetic fixture cannot prove that the pinned compositor registered
+    # its real Aquamarine callbacks or qualify a physical release.
+    add_executable(linura-hyprland-output-commit-history-tests
+        tests/native_output_commit_history.cpp)
+    target_include_directories(linura-hyprland-output-commit-history-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(linura-hyprland-output-commit-history-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-output-commit-history-boundary
+        COMMAND linura-hyprland-output-commit-history-tests)
+    set_tests_properties(hyprland-output-commit-history-boundary PROPERTIES TIMEOUT 5)
     # Comparison-only first-ordinary-frame barrier, with no release authority.
     # Native callbacks and independent Root/Control/KMS proof remain required.
     add_executable(linura-hyprland-first-frame-gate-tests tests/protected_release_proof.cpp)

@@ -68,6 +68,9 @@ class NativeFirstFrameGate final
         // physical scanout. A completed commit number without its connector,
         // CRTC, primary plane and framebuffer cannot be reconciled by Control.
         NativeScanout kernel;
+        // Immutable native output-owned counter read at the irreversible
+        // grant spend boundary. Control must compare both counter values.
+        std::uint64_t spendHighWater = 0;
         std::uint64_t completedCommit = 0;
     };
     struct Receipt final
@@ -86,6 +89,7 @@ class NativeFirstFrameGate final
         std::uint64_t postWriteEpoch;
         ClockSample sampled;
         const std::vector<Output> &before;
+        const std::vector<NativeScanout> &kernel;
     };
     [[nodiscard]] static std::optional<NativeFirstFrameGate> arm(const ArmRequest &request)
     {
@@ -93,13 +97,14 @@ class NativeFirstFrameGate final
         const auto postWriteEpoch = request.postWriteEpoch;
         const auto sampled = request.sampled;
         const auto &before = request.before;
+        const auto &kernel = request.kernel;
         if (!postWriteEpoch || !sampled.unixMs || !sampled.bootMs ||
             sampled.unixMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||
             sampled.bootMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||
             held.generation == 0 || held.securityEpoch == 0 ||
             (held.coverage != Coverage::Secure && held.coverage != Coverage::Unlocked) ||
             held.heads.empty() || held.heads.size() > DisplayTransaction::MaxHeads ||
-            before.size() != held.heads.size())
+            before.size() != held.heads.size() || kernel.size() != held.heads.size())
             return {};
         Layout actual;
         actual.reserve(held.heads.size());
@@ -107,18 +112,33 @@ class NativeFirstFrameGate final
         for (std::size_t i = 0; i < held.heads.size(); ++i) {
             const auto &head = held.heads[i];
             if (head.key != before[i].key || head.key.generation == 0 ||
+                before[i].previousCommit == 0 ||
+                before[i].previousCommit == std::numeric_limits<std::uint64_t>::max() ||
                 head.outputIdentityWitness.empty() || head.baseRuleWitness.empty() ||
                 (i && before[i - 1].key.handle >= head.key.handle) ||
                 (head.current.enabled &&
                  (!head.powered || (held.coverage == Coverage::Secure && !head.covered))))
                 return {};
+            const auto &physical = kernel[i];
+            if (physical.key != head.key || !physical.connector)
+                return {};
+            if (head.current.enabled) {
+                if (!physical.active || !physical.crtc || !physical.plane || !physical.framebuffer)
+                    return {};
+            } else if (physical.active || physical.crtc || physical.plane ||
+                       physical.framebuffer) {
+                return {};
+            }
+            for (std::size_t prior = 0; prior < i; ++prior)
+                if (kernel[prior].connector == physical.connector)
+                    return {};
             actual.push_back(head.current);
             if (head.current.enabled && !head.current.mirror && head.powered)
                 poweredRoot = true;
         }
         if (!poweredRoot || !DisplayTransaction::validLayout(actual, held))
             return {};
-        return NativeFirstFrameGate(held, postWriteEpoch, sampled, before);
+        return NativeFirstFrameGate(held, postWriteEpoch, sampled, before, kernel);
     }
 
     NativeFirstFrameGate(const NativeFirstFrameGate &) = delete;
@@ -185,6 +205,13 @@ class NativeFirstFrameGate final
                 phase_ = Phase::Faulted;
                 return {};
             }
+            const auto &original = baselineKernel_[i];
+            if (original.key != scanout.key || original.connector != scanout.connector ||
+                original.crtc != scanout.crtc || original.plane != scanout.plane ||
+                original.active != scanout.active) {
+                phase_ = Phase::Faulted;
+                return {};
+            }
             // A connector may not be used to certify two physical heads. In
             // mirror mode buffer bytes can be shared, but the connector
             // identity and each output-owned frame tracker must be distinct.
@@ -194,6 +221,15 @@ class NativeFirstFrameGate final
                     return {};
                 }
             if (head.current.enabled) {
+                // The ordinary surface may not have produced its first frame
+                // yet. An entirely absent native frame is pending, NEVER
+                // verified. Any partially populated or disable-typed claim
+                // is contradictory and fails closed under the original clock.
+                if (!frame.frame && !frame.retainedBuffer && !frame.retainedFramebuffer &&
+                    !frame.disableCommit && !frame.disableSubmitted) {
+                    pending = true;
+                    continue;
+                }
                 if (!frame.frame || !frame.retainedBuffer || frame.disableCommit ||
                     frame.disableSubmitted) {
                     phase_ = Phase::Faulted;
@@ -223,7 +259,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {scanout, commit};
+                receipt.completed[receipt.completedCount++] = {scanout, spentCommit_[i], commit};
             } else {
                 if (frame.frame || frame.retainedBuffer || frame.retainedFramebuffer) {
                     phase_ = Phase::Faulted;
@@ -241,7 +277,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {scanout, frame.disableCommit};
+                receipt.completed[receipt.completedCount++] = {scanout, spentCommit_[i], frame.disableCommit};
             }
         }
         if (pending)
@@ -261,8 +297,9 @@ class NativeFirstFrameGate final
 
   private:
     NativeFirstFrameGate(const Snapshot &held, std::uint64_t epoch, ClockSample sampled,
-                         const std::vector<Output> &before)
-        : held_(held), epoch_(epoch), sampled_(sampled), before_(before)
+                         const std::vector<Output> &before,
+                         const std::vector<NativeScanout> &kernel)
+        : held_(held), epoch_(epoch), sampled_(sampled), before_(before), baselineKernel_(kernel)
     {}
     [[nodiscard]] bool currentSample(const Snapshot &current, ClockSample now) const noexcept
     {
@@ -279,6 +316,7 @@ class NativeFirstFrameGate final
     std::uint64_t epoch_ = 0;
     ClockSample sampled_;
     std::vector<Output> before_;
+    std::vector<NativeScanout> baselineKernel_; // Physical connector and plane ancestry.
     // Fixed-size per-output spend boundary, never a renewed grant/clock.
     std::array<std::uint64_t, DisplayTransaction::MaxHeads> spentCommit_{};
     Phase phase_ = Phase::Held;

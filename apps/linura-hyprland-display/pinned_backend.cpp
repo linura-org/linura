@@ -8,6 +8,7 @@
 #include "native_power_inhibitor.h"
 #include "native_owner_admission.h"
 #include "native_output_identity.h"
+#include "native_output_commit_history.h"
 #include "linura-display-integration-build.h"
 #include "startup_fence.h"
 #include "original_restoration_grant.h"
@@ -87,6 +88,16 @@ class PinnedBackend final : public Backend
         std::vector<Mode> modes;
         NativeOutputIdentity identity;
     };
+    // These subscribers attach to the actual live native IOutput object,
+    // not a client-facing monitor name or a retained display transaction.
+    // They are retired on output replacement/hotplug/generation drift.
+    struct OutputCommitObserver final
+    {
+        WP<Aquamarine::IOutput> output;
+        std::shared_ptr<NativeOutputCommitHistory> history;
+        CHyprSignalListener result;
+    };
+    std::map<OutputKey, std::unique_ptr<OutputCommitObserver>> outputCommitObservers;
     std::uint64_t generation = 1, securityEpoch = 1, nextHandle = 1;
     std::vector<Binding> bindings;
     std::map<Monitor::CMonitor *, Target> overlay;
@@ -121,6 +132,36 @@ class PinnedBackend final : public Backend
         bool failed = false;
     };
     std::optional<OriginalRecovery> originalRecovery;
+
+    // Read-only actual per-IOutput commit-result history. A newly subscribed,
+    // failed or replaced output can never borrow another output's counter.
+    [[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::Output>>
+    outputCommitHighWater(const Snapshot &expected) const
+    {
+        if (expected.heads.empty() || expected.heads.size() != bindings.size() ||
+            outputCommitObservers.size() != bindings.size())
+            return std::nullopt;
+        std::vector<NativeFirstFrameGate::Output> result;
+        result.reserve(expected.heads.size());
+        for (std::size_t i = 0; i < expected.heads.size(); ++i) {
+            const auto &head = expected.heads[i];
+            const auto &binding = bindings[i];
+            if (head.key != binding.key)
+                return std::nullopt;
+            const auto found = outputCommitObservers.find(head.key);
+            if (found == outputCommitObservers.end())
+                return std::nullopt;
+            const auto liveOutput = binding.output.lock();
+            if (!liveOutput || found->second->output.lock() != liveOutput ||
+                binding.monitor.lock() != monitorFor(head.key))
+                return std::nullopt;
+            const auto high = found->second->history->highWater();
+            if (!high)
+                return std::nullopt;
+            result.push_back({head.key, *high});
+        }
+        return result;
+    }
     struct OriginalPlan final
     {
         std::map<std::size_t, RecoveryRule> rules;
@@ -869,6 +910,37 @@ class PinnedBackend final : public Backend
         std::sort(next.begin(), next.end(),
                   [](const Binding &a, const Binding &b) { return a.key < b.key; });
         bindings = std::move(next);
+        // A replaced native output, new generation, hotplug or missing native
+        // identity must not borrow a predecessor's commit-result high-water.
+        // Disconnect the retired listener before any new subscription.
+        std::erase_if(outputCommitObservers, [&](const auto &entry) {
+            for (const auto &binding : bindings) {
+                if (entry.first == binding.key)
+                    return entry.second->output.lock() != binding.output.lock();
+            }
+            return true;
+        });
+        for (const auto &binding : bindings) {
+            if (outputCommitObservers.contains(binding.key))
+                continue;
+            const auto native = binding.output.lock();
+            if (!native)
+                return false;
+            auto observer = std::make_unique<OutputCommitObserver>();
+            observer->output = binding.output;
+            observer->history = std::make_shared<NativeOutputCommitHistory>();
+            observer->result = native->events.commitResult.listen(
+                [weak = std::weak_ptr<NativeOutputCommitHistory>(observer->history)](
+                    const Aquamarine::IOutput::SCommitResult &event) {
+                    if (const auto history = weak.lock()) {
+                        const bool submitted =
+                            event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                            event.error == 0;
+                        (void)history->observe(event.id, submitted);
+                    }
+                });
+            outputCommitObservers.emplace(binding.key, std::move(observer));
+        }
         std::erase_if(overlay, [&](const auto &entry) {
             const auto current = monitorFor(entry.second.output);
             return !current || current.get() != entry.first;
@@ -989,6 +1061,53 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     return scanout;
 }
 
+NativeOutputCommits nativeOutputHighWater(const Correlation &original, const Snapshot &expected)
+{
+    if (!backend || !backend->originalRecovery)
+        return std::nullopt;
+    if (backend->originalRecovery->failed || backend->writing || backend->commitFailed)
+        return std::nullopt;
+    if (backend->originalRecovery->bound != original)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant || !backend->originalRecovery->protection)
+        return std::nullopt;
+    if (!backend->powerInhibitor.held() || !startupFence.recoveryAvailable())
+        return std::nullopt;
+    const auto began = backend->clock();
+    const auto initial = backend->snapshot();
+    if (!began || !initial || *initial != expected)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    const auto sample = backend->outputCommitHighWater(expected);
+    const auto last = backend->snapshot();
+    const auto ended = backend->clock();
+    if (!sample || !last || *last != expected || !ended)
+        return std::nullopt;
+    if (ended->unixMs < began->unixMs || ended->bootMs < began->bootMs)
+        return std::nullopt;
+    if (ended->unixMs - began->unixMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    if (ended->bootMs - began->bootMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    const auto current = backend->outputCommitHighWater(expected);
+    if (!current || current->size() != sample->size())
+        return std::nullopt;
+    for (std::size_t i = 0; i < sample->size(); ++i) {
+        if ((*sample)[i].key != (*current)[i].key)
+            return std::nullopt;
+        if ((*sample)[i].previousCommit != (*current)[i].previousCommit)
+            return std::nullopt;
+    }
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    return sample;
+}
+
 NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
 {
     if (!backend || !backend->originalRecovery || !backend->originalRecovery->grant)
@@ -999,16 +1118,32 @@ NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snaps
         return std::nullopt;
     const auto protectedSample = readProtectedBaseline(original, expected);
     const auto scanout = nativeFirstFrameKernel(original, expected);
+    const auto outputHighWater = nativeOutputHighWater(original, expected);
     const auto finished = backend->clock();
     const auto final = backend->snapshot();
-    if (!protectedSample || !scanout || !finished || !final || *final != expected ||
-        finished->unixMs < armed->unixMs || finished->bootMs < armed->bootMs ||
-        finished->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs ||
-        finished->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs ||
-        scanout->size() != protectedSample->before.size())
+    if (!protectedSample || !scanout || !outputHighWater || !finished || !final)
         return std::nullopt;
-    return NativeFirstFrameGate::arm(
-        {expected, protectedSample->postWriteEpoch, *armed, protectedSample->before});
+    if (*final != expected)
+        return std::nullopt;
+    if (finished->unixMs < armed->unixMs || finished->bootMs < armed->bootMs)
+        return std::nullopt;
+    if (finished->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    if (finished->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    if (scanout->size() != protectedSample->before.size())
+        return std::nullopt;
+    if (outputHighWater->size() != protectedSample->before.size())
+        return std::nullopt;
+    for (std::size_t i = 0; i < outputHighWater->size(); ++i) {
+        if ((*outputHighWater)[i].key != protectedSample->before[i].key)
+            return std::nullopt;
+        if ((*outputHighWater)[i].previousCommit < protectedSample->before[i].previousCommit)
+            return std::nullopt;
+    }
+    const NativeFirstFrameGate::ArmRequest request{
+        expected, protectedSample->postWriteEpoch, *armed, *outputHighWater, *scanout};
+    return NativeFirstFrameGate::arm(request);
 }
 
 void initialize(wl_display &display, wl_event_loop &loop)
