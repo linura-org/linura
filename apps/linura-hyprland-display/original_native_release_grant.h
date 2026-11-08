@@ -8,12 +8,17 @@ inline constexpr std::size_t MaxReservation = OriginalGrantCodec::MaxReservation
 
 // This is comparison only: original Root socket credentials, current terminal
 // scene, protected hardware and Control durability must be checked separately.
-inline bool matches(std::string_view bytes, const Correlation &terminal,
-                    std::string_view material, std::uint64_t controlVersion,
-                    std::string_view binding, std::string_view observation)
+struct ControlAnchor final
 {
-    if (bytes.empty() || bytes.size() > MaxReservation || !controlVersion ||
-        !OriginalGrantCodec::digest(binding) || !OriginalGrantCodec::digest(observation))
+    std::uint64_t version;
+    std::string_view binding, observation;
+};
+using Text = std::string_view;
+inline bool matches(Text bytes, const Correlation &terminal, Text material, ControlAnchor anchor)
+{
+    if (bytes.empty() || bytes.size() > MaxReservation || !anchor.version ||
+        !OriginalGrantCodec::digest(anchor.binding) ||
+        !OriginalGrantCodec::digest(anchor.observation))
         return false;
     constexpr std::array<std::size_t, 5> bounds{
         64, 20, 64, 64, OriginalGrantCodec::MaxReservation};
@@ -26,8 +31,8 @@ inline bool matches(std::string_view bytes, const Correlation &terminal,
     }
     return bytes.empty() &&
            fields[0] == "linura.native-display.retirement-preparation.v1" &&
-           OriginalGrantCodec::number(fields[1]) == std::optional{controlVersion} &&
-           fields[2] == binding && fields[3] == observation &&
+           OriginalGrantCodec::number(fields[1]) == std::optional{anchor.version} &&
+           fields[2] == anchor.binding && fields[3] == anchor.observation &&
            OriginalFinalizationGrantCodec::matches(fields[4], terminal, material);
 }
 } // namespace OriginalNativeReleaseGrantCodec
@@ -64,7 +69,7 @@ class OriginalNativeReleaseGrant final
         std::string dispatchDeadline(8, '\0'), sample(8, '\0'), end(11, '\0');
         if (!result->read(reservation, deadline) ||
             !OriginalNativeReleaseGrantCodec::matches(
-                reservation, terminal, material, controlVersion, binding, observation) ||
+                reservation, terminal, material, {controlVersion, binding, observation}) ||
             !result->read(dispatchDeadline, deadline) ||
             !OriginalGrantCodec::deadlineBinding(dispatchDeadline, terminal.deadlineUnixMs) ||
             !result->read(sample, deadline) ||
