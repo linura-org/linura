@@ -252,7 +252,9 @@ def validate(plan: dict, design: dict, document: str) -> None:
         assert operation["class"] == "managed-external-effect"
         assert operation["risk_floor"] == RISK_FLOORS[operation["id"]]
         owning_slice = next(
-            item["id"] for item in prs if operation["id"] in item["candidate_operations"]
+            item["id"]
+            for item in prs
+            if operation["id"] in item["candidate_operations"]
         )
         assert operation["source"] == owning_slice, operation["id"]
     assert "architecture-first and nine implementation boundaries" in document
@@ -336,7 +338,10 @@ class S18DecompositionTests(unittest.TestCase):
             next(
                 op for op in mutated["candidate_operation"] if op["id"] == operation_id
             )["source"] = wrong_owner
-            with self.subTest(operation=operation_id), self.assertRaises(AssertionError):
+            with (
+                self.subTest(operation=operation_id),
+                self.assertRaises(AssertionError),
+            ):
                 validate(self.plan, mutated, self.document)
 
     def test_missing_architecture_owned_path_is_rejected(self) -> None:
