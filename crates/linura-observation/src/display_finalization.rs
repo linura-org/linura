@@ -22,6 +22,9 @@ pub enum DisplayFinalizationPhase {
     Reserved,
     Quiesced,
     Retired,
+    /// Original Root admission holds a durably synced, one-use LNRN:1 marker.
+    /// No native grant, physical release, terminal commit or startup permission.
+    NativeReleaseReserved,
     /// Qualified native release plus this Root invocation's still-live exact
     /// ordinary startup admission. A spent file by itself cannot produce it.
     ReleasedCurrent,
@@ -33,6 +36,7 @@ impl DisplayFinalizationPhase {
             Self::Reserved => "reserved",
             Self::Quiesced => "quiesced",
             Self::Retired => "retired",
+            Self::NativeReleaseReserved => "native-release-reserved",
             Self::ReleasedCurrent => "released-current",
         }
     }
@@ -42,6 +46,7 @@ impl DisplayFinalizationPhase {
             "reserved" => Ok(Self::Reserved),
             "quiesced" => Ok(Self::Quiesced),
             "retired" => Ok(Self::Retired),
+            "native-release-reserved" => Ok(Self::NativeReleaseReserved),
             "released-current" => Ok(Self::ReleasedCurrent),
             _ => Err(DisplayEvidenceError::Shape),
         }
@@ -343,6 +348,7 @@ mod tests {
             DisplayFinalizationPhase::Reserved,
             DisplayFinalizationPhase::Quiesced,
             DisplayFinalizationPhase::Retired,
+            DisplayFinalizationPhase::NativeReleaseReserved,
             DisplayFinalizationPhase::ReleasedCurrent,
         ] {
             let facts = facts(phase);

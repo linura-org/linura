@@ -501,7 +501,7 @@ impl NativeSessionChannel {
         let bytes = record.canonical_bytes();
         let started = Instant::now();
         let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
-        let read = || -> Result<(Vec<u8>, Vec<u8>), String> {
+        let read = |expected_phase: u32| -> Result<(Vec<u8>, Vec<u8>), String> {
             let reply = self.call(
                 &root.sender,
                 "/org/linura/DisplayProtection1",
@@ -524,7 +524,7 @@ impl NativeSessionChannel {
                 .map_err(|_| "native release Root readback is malformed")?;
             let parent = crate::NativeDisplayRestorationReservation::decode(&restoration)?;
             terminal.validate_restoration(&parent)?;
-            if phase != 3
+            if phase != expected_phase
                 || native != terminal.canonical_bytes()
                 || parent
                     .decoded_material()?
@@ -536,7 +536,7 @@ impl NativeSessionChannel {
             }
             Ok((restoration, native))
         };
-        let before = read()?;
+        let before = read(3)?;
         if crate::owner::unix_ms()? >= expires_at_unix_ms {
             return Err("native release Root reservation expired before effect".into());
         }
@@ -565,7 +565,7 @@ impl NativeSessionChannel {
             .map_err(|_| "native release reservation reply is malformed; no retry")?;
         if !accepted
             || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
-            || read()? != before
+            || read(5)? != before
             || crate::owner::unix_ms()? >= expires_at_unix_ms
         {
             return Err("native release reservation lost its immutable Root lineage".into());

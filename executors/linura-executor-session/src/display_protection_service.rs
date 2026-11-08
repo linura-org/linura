@@ -1168,26 +1168,33 @@ impl ProtectionPort for NativeProtection {
         };
         let native_reserved = super::display_checkpoint::read_native_release_reserved(&record)
             .map_err(|_| unavailable())?;
-        match (
+        let native_reserved = match (
             admission.native_release_reservations.get(key.as_str()),
             native_reserved.as_ref(),
         ) {
-            (None, None) => {}
+            (None, None) => false,
             (Some(expected), Some(reservation))
                 if retired
                     && *expected
                         == ComponentDigest::from_bytes(
                             sha2::Sha256::digest(reservation.canonical_bytes()).into(),
-                        ) => {}
+                        ) =>
+            {
+                true
+            }
             // A journal reservation without current Root ownership, or a
             // memory attempt without synced readback, cannot be adopted.
             _ => return Err(unavailable()),
-        }
+        };
         let current_phase = if retired {
             if phase != 2 {
                 return Err(unavailable());
             }
-            3 // RootRetiredHeld; any release reservation remains non-effectful.
+            if native_reserved {
+                5 // NativeReleaseReserved: a spent before-effect marker, never release.
+            } else {
+                3 // RootRetiredHeld: the original native release slot is unspent.
+            }
         } else {
             phase
         };

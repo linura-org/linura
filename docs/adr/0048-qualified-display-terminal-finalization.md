@@ -214,7 +214,12 @@ exclusion. Root also has an **unpromoted**, one-use `LNRN:1` native-release
 reservation, with matching live Control/Root ownership, durable ancestry,
 quiescence and readback under the existing admission lock. The supervised
 Control-to-Root transport can reserve it once after a separate committed
-Control release decision exists; **no Control completion, native release
+Control release decision exists. Once reserved, authenticated Root
+`ReadFinalization` reports the distinct before-effect phase
+`native-release-reserved` (wire 5); Control separately joins the exact
+spent journal/Root/native held facts in a read-only lost-ack query.
+This phase is **not** native consumption or release and cannot be confused
+with `released-current` (wire 4). **No Control completion, native release
 grant/consumer, or physical-release effect is connected yet**. Losing a
 reservation acknowledgement cannot authorize a second reservation. Neither
 `LNRN:1` nor `LNRH:1` means `NativeReleaseSpent` or `ReleasedCurrent`.

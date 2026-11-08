@@ -847,6 +847,44 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         actor: Actor,
         terminal_request: &RequestId,
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_original_display_release_reservation_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::Retired,
+        )
+    }
+
+    /// Read-only lost-ack reconciliation after this original Root invocation
+    /// spent its one-use LNRN:1 before-effect native reservation. It is not an
+    /// ACK for native consumption, a physical completion or release authority.
+    pub fn inspect_native_release_reserved_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_original_display_release_reservation_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::NativeReleaseReserved,
+        )
+    }
+
+    fn inspect_original_display_release_reservation_phase(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        if !matches!(
+            expected,
+            DisplayFinalizationPhase::Retired | DisplayFinalizationPhase::NativeReleaseReserved
+        ) {
+            return Err(invalid());
+        }
         // Root's durable phase-3 marker is only one side of the two-phase
         // protocol. Demand this *original* Control one-use reservation and
         // its exact signed request/transaction/intent correlation before
@@ -870,7 +908,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             principal.clone(),
             actor,
             terminal_request,
-            DisplayFinalizationPhase::Retired,
+            expected,
         )?;
         // A lost reply is reconciled by fresh physical facts and the exact
         // old immutable record, never another Root/native write or approval.
@@ -898,7 +936,9 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
         if !matches!(
             expected,
-            DisplayFinalizationPhase::Quiesced | DisplayFinalizationPhase::Retired
+            DisplayFinalizationPhase::Quiesced
+                | DisplayFinalizationPhase::Retired
+                | DisplayFinalizationPhase::NativeReleaseReserved
         ) {
             return Err(invalid());
         }
