@@ -132,6 +132,36 @@ class PinnedBackend final : public Backend
         bool failed = false;
     };
     std::optional<OriginalRecovery> originalRecovery;
+
+    // Read-only actual per-IOutput commit-result history. A newly subscribed,
+    // failed or replaced output can never borrow another output's counter.
+    [[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::Output>>
+    outputCommitHighWater(const Snapshot &expected) const
+    {
+        if (expected.heads.empty() || expected.heads.size() != bindings.size() ||
+            outputCommitObservers.size() != bindings.size())
+            return std::nullopt;
+        std::vector<NativeFirstFrameGate::Output> result;
+        result.reserve(expected.heads.size());
+        for (std::size_t i = 0; i < expected.heads.size(); ++i) {
+            const auto &head = expected.heads[i];
+            const auto &binding = bindings[i];
+            if (head.key != binding.key)
+                return std::nullopt;
+            const auto found = outputCommitObservers.find(head.key);
+            if (found == outputCommitObservers.end())
+                return std::nullopt;
+            const auto liveOutput = binding.output.lock();
+            if (!liveOutput || found->second->output.lock() != liveOutput ||
+                binding.monitor.lock() != monitorFor(head.key))
+                return std::nullopt;
+            const auto high = found->second->history->highWater();
+            if (!high)
+                return std::nullopt;
+            result.push_back({head.key, *high});
+        }
+        return result;
+    }
     struct OriginalPlan final
     {
         std::map<std::size_t, RecoveryRule> rules;
@@ -1032,6 +1062,51 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     return scanout;
 }
 
+NativeFirstFrameOutputCommits
+nativeFirstFrameOutputHighWater(const Correlation &original, const Snapshot &expected)
+{
+    if (!backend || !backend->originalRecovery || backend->originalRecovery->failed ||
+        backend->writing || backend->commitFailed ||
+        backend->originalRecovery->bound != original ||
+        !backend->originalRecovery->grant ||
+        !backend->originalRecovery->protection ||
+        !backend->powerInhibitor.held() || !startupFence.recoveryAvailable())
+        return std::nullopt;
+    const auto began = backend->clock();
+    const auto initial = backend->snapshot();
+    if (!began || !initial || *initial != expected)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    const auto sample = backend->outputCommitHighWater(expected);
+    const auto last = backend->snapshot();
+    const auto ended = backend->clock();
+    if (!sample || !last || *last != expected || !ended)
+        return std::nullopt;
+    if (ended->unixMs < began->unixMs || ended->bootMs < began->bootMs)
+        return std::nullopt;
+    if (ended->unixMs - began->unixMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    if (ended->bootMs - began->bootMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    const auto current = backend->outputCommitHighWater(expected);
+    if (!current || current->size() != sample->size())
+        return std::nullopt;
+    for (std::size_t i = 0; i < sample->size(); ++i) {
+        if ((*sample)[i].key != (*current)[i].key)
+            return std::nullopt;
+        if ((*sample)[i].previousCommit != (*current)[i].previousCommit)
+            return std::nullopt;
+    }
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    return sample;
+}
+
 NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
 {
     if (!backend || !backend->originalRecovery || !backend->originalRecovery->grant)
@@ -1042,16 +1117,32 @@ NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snaps
         return std::nullopt;
     const auto protectedSample = readProtectedBaseline(original, expected);
     const auto scanout = nativeFirstFrameKernel(original, expected);
+    const auto outputHighWater = nativeFirstFrameOutputHighWater(original, expected);
     const auto finished = backend->clock();
     const auto final = backend->snapshot();
-    if (!protectedSample || !scanout || !finished || !final || *final != expected ||
-        finished->unixMs < armed->unixMs || finished->bootMs < armed->bootMs ||
-        finished->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs ||
-        finished->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs ||
-        scanout->size() != protectedSample->before.size())
+    if (!protectedSample || !scanout || !outputHighWater || !finished || !final)
         return std::nullopt;
+    if (*final != expected)
+        return std::nullopt;
+    if (finished->unixMs < armed->unixMs || finished->bootMs < armed->bootMs)
+        return std::nullopt;
+    if (finished->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    if (finished->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs)
+        return std::nullopt;
+    if (scanout->size() != protectedSample->before.size())
+        return std::nullopt;
+    if (outputHighWater->size() != protectedSample->before.size())
+        return std::nullopt;
+    for (std::size_t i = 0; i < outputHighWater->size(); ++i) {
+        if ((*outputHighWater)[i].key != protectedSample->before[i].key)
+            return std::nullopt;
+        if ((*outputHighWater)[i].previousCommit <
+            protectedSample->before[i].previousCommit)
+            return std::nullopt;
+    }
     return NativeFirstFrameGate::arm(
-        {expected, protectedSample->postWriteEpoch, *armed, protectedSample->before});
+        {expected, protectedSample->postWriteEpoch, *armed, *outputHighWater});
 }
 
 void initialize(wl_display &display, wl_event_loop &loop)
