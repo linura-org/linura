@@ -247,8 +247,7 @@ void ownerCoverageProjection()
     assert(projected && projected->heads[0].covered && !projected->heads[1].covered);
     const auto missing = projectOwnerDisplayCoverage(sample, {});
     assert(missing && !missing->heads[0].covered && !missing->heads[1].covered);
-    const auto onlyEnabled =
-        projectOwnerDisplayCoverage(sample, {{QStringLiteral("DP-1"), true}});
+    const auto onlyEnabled = projectOwnerDisplayCoverage(sample, {{QStringLiteral("DP-1"), true}});
     assert(onlyEnabled && onlyEnabled->heads[0].covered && !onlyEnabled->heads[1].covered);
     // A disabled head cannot claim a positive lock-surface witness, even
     // when the compositor's safety fence had previously marked it covered.
