@@ -1322,28 +1322,43 @@ NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Sn
     if (expected.heads.size() != data->surfaces.size())
         return std::nullopt;
     const auto first = backend->snapshot();
-    if (!first || *first != expected || expected != data->stableInventory ||
-        !data->refresh() || !data->terminalGrant->verify() ||
-        !originalRestorationPresented(bound))
+    if (!first || *first != expected)
+        return std::nullopt;
+    if (expected != data->stableInventory)
+        return std::nullopt;
+    if (!data->refresh())
+        return std::nullopt;
+    if (!data->terminalGrant->verify())
+        return std::nullopt;
+    if (!originalRestorationPresented(bound))
         return std::nullopt;
     NativeProtectedFrameBaseline result;
     result.postWriteEpoch = data->postWriteEpoch;
     result.before.reserve(expected.heads.size());
     for (const auto &head : expected.heads) {
         const auto surface = data->surfaces.find(head.key);
-        if (surface == data->surfaces.end() || surface->second.output != head.key ||
-            surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+        if (surface == data->surfaces.end())
+            return std::nullopt;
+        if (surface->second.output != head.key)
+            return std::nullopt;
+        if (surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
             return std::nullopt;
         const auto &held = surface->second;
         const auto highWater = held.frame.highWater();
-        if (!highWater || *highWater == std::numeric_limits<std::uint64_t>::max() ||
-            held.disableCommit == std::numeric_limits<std::uint64_t>::max())
+        if (!highWater)
+            return std::nullopt;
+        if (*highWater == std::numeric_limits<std::uint64_t>::max())
+            return std::nullopt;
+        if (held.disableCommit == std::numeric_limits<std::uint64_t>::max())
             return std::nullopt;
         if (head.current.enabled) {
-            if (!held.submittedBuffer ||
-                held.frame.queuedKind() != ProtectedFrame::Kind::Safety ||
-                held.frame.completedBuffer() != held.submittedBuffer->buffer.get() ||
-                held.frame.completedCommit() != *highWater || !*highWater)
+            if (!held.submittedBuffer)
+                return std::nullopt;
+            if (held.frame.queuedKind() != ProtectedFrame::Kind::Safety)
+                return std::nullopt;
+            if (held.frame.completedBuffer() != held.submittedBuffer->buffer.get())
+                return std::nullopt;
+            if (held.frame.completedCommit() != *highWater || !*highWater)
                 return std::nullopt;
         } else if (!held.disableSubmitted) {
             return std::nullopt;
@@ -1351,9 +1366,15 @@ NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Sn
         result.before.push_back({head.key, std::max(*highWater, held.disableCommit)});
     }
     const auto last = backend->snapshot();
-    if (!last || *last != expected || !data->refresh() ||
-        !data->terminalGrant->verify() || data->postWriteEpoch != result.postWriteEpoch ||
-        data->ownerLost || data->mutationFault || heldInput().any)
+    if (!last || *last != expected)
+        return std::nullopt;
+    if (!data->refresh())
+        return std::nullopt;
+    if (!data->terminalGrant->verify())
+        return std::nullopt;
+    if (data->postWriteEpoch != result.postWriteEpoch)
+        return std::nullopt;
+    if (data->ownerLost || data->mutationFault || heldInput().any)
         return std::nullopt;
     return result;
 }
