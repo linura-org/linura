@@ -451,6 +451,40 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void spendNativeRelease(wl_client *, wl_resource *resource, std::int32_t descriptor,
+                                   const char *transaction, const char *effect,
+                                   const char *dispatch, std::uint32_t deadlineHi,
+                                   std::uint32_t deadlineLo, std::uint32_t bootHi,
+                                   std::uint32_t bootLo, std::uint32_t versionHi,
+                                   std::uint32_t versionLo, const char *binding,
+                                   const char *observation)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!transaction || strnlen(transaction, 257) > 256 ||
+                !std::string_view(transaction).starts_with("transaction:") ||
+                !digest(effect) || !digest(dispatch) || !digest(binding) ||
+                !digest(observation) || !state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) ||
+                !state->scene->spendNativeRelease(
+                    std::move(owned), {transaction, effect, dispatch,
+                                       joined(deadlineHi, deadlineLo)},
+                    joined(bootHi, bootLo), joined(versionHi, versionLo), binding,
+                    observation)) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+                return;
+            }
+            status(nullptr, resource); // One Root spend acknowledgement, never completion.
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static const struct linura_protected_display_manager_v1_interface managerImpl;
     static const struct linura_protected_display_interaction_v1_interface interactionImpl;
     static const struct linura_protected_display_surface_v1_interface surfaceImpl;
@@ -463,7 +497,7 @@ const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
     destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization,
-        quiesceFinalization
+        quiesceFinalization, spendNativeRelease
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {

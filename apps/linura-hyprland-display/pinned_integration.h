@@ -25,6 +25,12 @@ class OwnedNativeFd;
 receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string_view material,
                                  std::uint64_t sampledBootMs);
 [[nodiscard]] bool originalRestorationPresented(const Correlation &);
+// Consume ONE actual supervised Root LNRS/LNRW grant on the compositor thread.
+// This only durably spends LNRX; it does not release or unlock protection.
+[[nodiscard]] bool consumeOriginalNativeReleaseGrant(
+    OwnedNativeFd, const Correlation &terminal, std::string_view material,
+    std::uint64_t sampledBootMs, std::uint64_t controlVersion,
+    std::string_view controlBinding, std::string_view controlObservation);
 // Read-only actual DRM/KMS connector observations from the SAME pinned
 // compositor, original supervised Root channel and unchanged output inventory.
 // This is NOT a native release attempt, grant, frame-completion receipt, or
