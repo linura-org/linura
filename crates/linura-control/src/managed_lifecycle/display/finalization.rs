@@ -919,6 +919,26 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         )
     }
 
+    /// Strict read-only reconciliation of the separately durable original
+    /// Root LNRX:1 spent-before-effect marker. A Root ACK, missing ACK, or this
+    /// historical phase is not a native framebuffer release, terminal Control
+    /// success, S17/input/power retirement, or ordinary startup admission.
+    /// Only the actual one-use Control decision plus the SAME live Root and
+    /// original restoration sources can satisfy this comparison.
+    pub fn inspect_native_release_spent_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_original_display_release_reservation_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::NativeReleaseSpent,
+        )
+    }
+
     fn inspect_original_display_release_reservation_phase(
         &mut self,
         principal: AuthenticatedPrincipal,
@@ -928,7 +948,9 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
         if !matches!(
             expected,
-            DisplayFinalizationPhase::Retired | DisplayFinalizationPhase::NativeReleaseReserved
+            DisplayFinalizationPhase::Retired
+                | DisplayFinalizationPhase::NativeReleaseReserved
+                | DisplayFinalizationPhase::NativeReleaseSpent
         ) {
             return Err(invalid());
         }
@@ -951,7 +973,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             dispatch,
             terminal.intent.material(),
         )?;
-        let native_decision = if expected == DisplayFinalizationPhase::NativeReleaseReserved {
+        let native_decision = if matches!(
+            expected,
+            DisplayFinalizationPhase::NativeReleaseReserved
+                | DisplayFinalizationPhase::NativeReleaseSpent
+        ) {
             Some(NativeReleasePrepared::load_spent(
                 self.display_journal()?,
                 &principal_id,
@@ -977,17 +1003,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 dispatch,
                 terminal.intent.material(),
             )? != before
-            || (expected == DisplayFinalizationPhase::NativeReleaseReserved
-                && native_decision
-                    != Some(NativeReleasePrepared::load_spent(
-                        self.display_journal()?,
-                        &principal_id,
-                        &terminal.request,
-                        &terminal.snapshot,
-                        dispatch,
-                        terminal.intent.material(),
-                        &before,
-                    )?))
+            || (matches!(
+                expected,
+                DisplayFinalizationPhase::NativeReleaseReserved
+                    | DisplayFinalizationPhase::NativeReleaseSpent
+            ) && native_decision
+                != Some(NativeReleasePrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    &before,
+                )?))
         {
             return Err(invalid());
         }
@@ -1006,6 +1035,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             DisplayFinalizationPhase::Quiesced
                 | DisplayFinalizationPhase::Retired
                 | DisplayFinalizationPhase::NativeReleaseReserved
+                | DisplayFinalizationPhase::NativeReleaseSpent
         ) {
             return Err(invalid());
         }

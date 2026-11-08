@@ -1,6 +1,7 @@
 #include "original_restoration_grant.h"
 #include "original_finalization_intent.h"
 #include "original_finalization_grant.h"
+#include "original_native_release_grant.h"
 #include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
@@ -11,6 +12,7 @@
 #include <iterator>
 
 using namespace Linura::HyprlandDisplay;
+namespace ReleaseCodec = OriginalNativeReleaseGrantCodec;
 namespace {
 std::string framed(const std::vector<std::string> &fields)
 {
@@ -156,12 +158,34 @@ void terminalComparison(const std::string &material)
                                                material};
     const auto bytes = framed(reservation);
     assert(OriginalFinalizationGrantCodec::matches(bytes, terminal, material));
-    for (std::size_t size = 0; size < bytes.size(); ++size)
-        assert(!OriginalFinalizationGrantCodec::matches(std::string_view(bytes).substr(0, size),
-                                                        terminal, material));
-    assert(!OriginalFinalizationGrantCodec::matches(bytes + 'x', terminal, material));
-    assert(!OriginalFinalizationGrantCodec::matches(
-        std::string(OriginalGrantCodec::MaxReservation + 1, 'x'), terminal, material));
+    const std::string controlBinding(64, '7');
+    const std::string controlObservation(64, '8');
+    const std::vector<std::string> retirement{
+        "linura.native-display.retirement-preparation.v1",
+        "7",
+        controlBinding,
+        controlObservation,
+        bytes,
+    };
+    const auto releaseBytes = framed(retirement);
+    const auto matchRelease = [&](std::string_view value, std::uint64_t version,
+                                  std::string_view binding, std::string_view observation) {
+        const ReleaseCodec::ControlAnchor anchor{version, binding, observation};
+        return ReleaseCodec::matches(value, terminal, material, anchor);
+    };
+    assert(matchRelease(releaseBytes, 7, controlBinding, controlObservation));
+    assert(!matchRelease(releaseBytes, 8, controlBinding, controlObservation));
+    assert(!matchRelease(releaseBytes, 7, controlObservation, controlBinding));
+    assert(!matchRelease(releaseBytes + 'x', 7, controlBinding, controlObservation));
+    for (std::size_t size = 0; size < releaseBytes.size(); ++size) {
+        const auto partial = std::string_view(releaseBytes).substr(0, size);
+        assert(!matchRelease(partial, 7, controlBinding, controlObservation));
+    }
+    for (unsigned fault = 0; fault < 5; ++fault) {
+        auto changed = retirement;
+        changed[fault] = fault == 1 ? "07" : "invalid";
+        assert(!matchRelease(framed(changed), 7, controlBinding, controlObservation));
+    }
     for (const auto &[index, bad] : std::vector<std::pair<std::size_t, std::string>>{
              {0, "linura.native-display.restoration-reservation.v1"},
              {1, "transaction:other"},
@@ -194,6 +218,14 @@ void terminalComparison(const std::string &material)
                                static_cast<std::uint64_t>(now.tv_nsec) / 1'000'000;
     assert(!OriginalFinalizationGrant::receive(fence, OwnedNativeFd{grant[0]}, terminal, material,
                                                sampledBootMs));
+    int releasePair[2]{};
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, releasePair) == 0);
+    assert(close(releasePair[1]) == 0);
+    const ReleaseCodec::ControlAnchor control{7, controlBinding, controlObservation};
+    const auto denied = OriginalNativeReleaseGrant::receive(
+        fence, OwnedNativeFd{releasePair[0]}, terminal, material, control, sampledBootMs);
+    assert(!denied);
+    assert(fcntl(releasePair[0], F_GETFD) == -1 && errno == EBADF);
     assert(fcntl(grant[0], F_GETFD) == -1 && errno == EBADF);
     assert(fence.recoveryAvailable() && !fence.ordinaryAllowed());
     assert(close(lease[1]) == 0);

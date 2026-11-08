@@ -110,6 +110,9 @@ struct Admission {
     root_retirements: BTreeMap<String, ComponentDigest>,
     // A separate one-use before-effect barrier, never native release proof.
     native_release_reservations: BTreeMap<String, ComponentDigest>,
+    // Exclusively reserved in Root memory before a fallible native grant
+    // transfer; a lost descriptor cannot be recreated from the LNRN file.
+    native_release_grants: BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
 }
 
 struct FinalizationReservation {
@@ -126,11 +129,18 @@ fn observed_finalization_phase(
     native_phase: u32,
     root_retired: bool,
     native_release_reserved: bool,
+    native_release_spent: bool,
 ) -> zbus::fdo::Result<u32> {
-    match (native_phase, root_retired, native_release_reserved) {
-        (0..=2, false, false) => Ok(native_phase),
-        (2, true, false) => Ok(3),
-        (2, true, true) => Ok(5),
+    match (
+        native_phase,
+        root_retired,
+        native_release_reserved,
+        native_release_spent,
+    ) {
+        (0..=2, false, false, false) => Ok(native_phase),
+        (2, true, false, false) => Ok(3),
+        (2, true, true, false) => Ok(5),
+        (2, true, true, true) => Ok(6),
         _ => Err(unavailable()),
     }
 }
@@ -324,6 +334,13 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sender: &str,
         record: NativeDisplayRetirementPreparation,
     ) -> zbus::fdo::Result<bool>;
+    fn reserve_native_release_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayRetirementPreparation,
+        deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+    ) -> zbus::fdo::Result<OwnedFd>;
     fn read_original(
         &self,
         sender: &str,
@@ -675,6 +692,246 @@ impl ProtectionPort for NativeProtection {
             return Err(unavailable());
         }
         Ok(true) // Reservation only; never a native release or a release ACK.
+    }
+    fn reserve_native_release_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayRetirementPreparation,
+        deadline: u64,
+        sampled_boot: u64,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        let _slot = StartupSlot::enter(&self.transfer_pending)?;
+        let grant_slot = GrantSlot::enter(&self.live_grants)?;
+        self.admit_control(sender)?;
+        valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+        let terminal = record.terminal();
+        let scope = terminal
+            .decoded_material()
+            .map_err(|_| unavailable())?
+            .recovery_scope()
+            .map_err(|_| unavailable())?;
+        let mut admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
+        let payload = self.original_for_scope(&admission, &scope)?;
+        let restoration =
+            super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
+        NativeDisplayRecoveryCheckpoint::validate_restoration_source(&payload, &restoration)
+            .map_err(|_| unavailable())?;
+        terminal
+            .validate_restoration(&restoration)
+            .map_err(|_| unavailable())?;
+        let (current, quiesced) = super::display_checkpoint::read_finalization_state(&restoration)
+            .map_err(|_| unavailable())?;
+        if !quiesced
+            || current
+                .as_ref()
+                .is_none_or(|value| value.canonical_bytes() != terminal.canonical_bytes())
+            || finalization_reservation_phase(&admission.finalizations, &scope, current.as_ref())?
+                != 2
+        {
+            return Err(unavailable());
+        }
+        let held = super::display_checkpoint::read_root_retired_held(&restoration)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+        let reserved = super::display_checkpoint::read_native_release_reserved(&restoration)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
+        if held.canonical_bytes() != record.canonical_bytes()
+            || reserved.canonical_bytes() != record.canonical_bytes()
+            || super::display_checkpoint::read_native_release_spent(&restoration)
+                .map_err(|_| unavailable())?
+                .is_some()
+        {
+            return Err(unavailable());
+        }
+        let key = scope
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
+        let encoded = record.canonical_bytes();
+        let digest: [u8; 32] = sha2::Sha256::digest(&encoded).into();
+        let fingerprint = ComponentDigest::from_bytes(digest);
+        if admission.retirements.get(&key) != Some(&fingerprint)
+            || admission.root_retirements.get(&key) != Some(&fingerprint)
+            || admission.native_release_reservations.get(&key) != Some(&fingerprint)
+            || admission.native_release_grants.contains_key(&key)
+            || admission.native_release_grants.len() >= MAX_STARTUPS
+        {
+            return Err(unavailable());
+        }
+        let (_, integration) = NativeDisplayRecoveryCheckpoint::original_startup_scope(
+            &payload,
+            &dispatch(scope.original_dispatch())?,
+        )
+        .map_err(|_| unavailable())?;
+        self.admit_control(sender)?;
+        self.original_for_scope(&admission, &scope)?;
+        valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+        // Root memory is permanently consumed before any fallible socket,
+        // publication, worker, file-system or reply operation.
+        let state = super::display_native_release_grant::ChannelState::reserved();
+        admission
+            .native_release_grants
+            .insert(key.clone(), state.clone());
+        let lifetime = super::display_native_release_grant::Lifetime::new(state.clone());
+        let (mut writer, native) = UnixStream::pair().map_err(|_| unavailable())?;
+        rustix::net::sockopt::set_socket_passcred(&writer, true).map_err(|_| unavailable())?;
+        writer.set_nonblocking(true).map_err(|_| unavailable())?;
+        let mut grant = b"LNRS:1\n".to_vec();
+        grant.extend_from_slice(&(encoded.len() as u64).to_be_bytes());
+        grant.extend_from_slice(&encoded);
+        grant.extend_from_slice(&deadline.to_be_bytes());
+        grant.extend_from_slice(&sampled_boot.to_be_bytes());
+        let service = self.clone();
+        // Do not permit a new Control owner to adopt a prepared native grant.
+        let control_sender = sender.to_owned();
+        let persisted = Arc::new(AtomicBool::new(false));
+        let mut last_clock = (unix_ms()?, boot_ms()?);
+        drop(admission);
+        std::thread::Builder::new()
+            .name("display-native-release-grant".into())
+            .spawn(move || {
+                let _grant_slot = grant_slot;
+                let mut verify = || {
+                    service.admit_control(&control_sender)?;
+                    let admission = super::protection_lock::acquire(
+                        &service.admission,
+                        super::protection_lock::BUDGET,
+                    )
+                    .map_err(|_| unavailable())?;
+                    service.original_for_scope(&admission, &scope)?;
+                    if !state.pending()
+                        || admission
+                            .native_release_grants
+                            .get(&key)
+                            .is_none_or(|live| !Arc::ptr_eq(live, &state))
+                        || admission.native_release_reservations.get(&key) != Some(&fingerprint)
+                        || admission.root_retirements.get(&key) != Some(&fingerprint)
+                        || admission.retirements.get(&key) != Some(&fingerprint)
+                    {
+                        return Err(unavailable());
+                    }
+                    let original =
+                        super::display_checkpoint::read_native_release_reserved(&restoration)
+                            .map_err(|_| unavailable())?
+                            .ok_or_else(unavailable)?;
+                    let root = super::display_checkpoint::read_root_retired_held(&restoration)
+                        .map_err(|_| unavailable())?
+                        .ok_or_else(unavailable)?;
+                    if original.canonical_bytes() != encoded || root.canonical_bytes() != encoded {
+                        return Err(unavailable());
+                    }
+                    let spent = super::display_checkpoint::read_native_release_spent(&restoration)
+                        .map_err(|_| unavailable())?;
+                    if persisted.load(Ordering::Acquire) {
+                        if spent
+                            .as_ref()
+                            .is_none_or(|value| value.canonical_bytes() != encoded)
+                        {
+                            return Err(unavailable());
+                        }
+                    } else if spent.is_some() {
+                        return Err(unavailable());
+                    }
+                    let (terminal, durable) =
+                        super::display_checkpoint::read_finalization_state(&restoration)
+                            .map_err(|_| unavailable())?;
+                    if !durable
+                        || terminal.as_ref().is_none_or(|value| {
+                            value.canonical_bytes() != record.terminal().canonical_bytes()
+                        })
+                        || finalization_reservation_phase(
+                            &admission.finalizations,
+                            &scope,
+                            terminal.as_ref(),
+                        )? != 2
+                    {
+                        return Err(unavailable());
+                    }
+                    let clock = (unix_ms()?, boot_ms()?);
+                    if clock.0 < last_clock.0 || clock.1 < last_clock.1 {
+                        return Err(unavailable());
+                    }
+                    last_clock = clock;
+                    valid_dispatch_window(deadline, sampled_boot, clock.0, clock.1)?;
+                    service.admit_control(&control_sender)?;
+                    Ok(())
+                };
+                let published = write_grant_with_marker(
+                    &mut writer,
+                    &grant,
+                    b"LNRS-END:1\n",
+                    ORIGINAL_PROBE,
+                    &mut verify,
+                );
+                drop(_slot);
+                if published.is_err() {
+                    return;
+                }
+                let authenticate = |sender: &rustix::net::UCred| {
+                    let admission = super::protection_lock::acquire(
+                        &service.admission,
+                        super::protection_lock::BUDGET,
+                    )
+                    .map_err(|_| unavailable())?;
+                    let startup = admission
+                        .startups
+                        .iter()
+                        .find(|startup| {
+                            startup
+                                .peer
+                                .matches_preimage(scope.replacement(), &integration)
+                        })
+                        .ok_or_else(unavailable)?;
+                    startup.live().map_err(|_| unavailable())?;
+                    startup
+                        .peer
+                        .require_message_sender(sender)
+                        .map_err(|_| unavailable())
+                };
+                let persist = || {
+                    service.admit_control(&control_sender)?;
+                    let admission = super::protection_lock::acquire(
+                        &service.admission,
+                        super::protection_lock::BUDGET,
+                    )
+                    .map_err(|_| unavailable())?;
+                    service.original_for_scope(&admission, &scope)?;
+                    if !state.pending()
+                        || admission.native_release_reservations.get(&key) != Some(&fingerprint)
+                    {
+                        return Err(unavailable());
+                    }
+                    // This is the irreversible before-effect boundary: sync
+                    // LNRX and read the exact marker back BEFORE ACK to native.
+                    super::display_checkpoint::spend_native_release(&record)
+                        .map_err(|_| unavailable())?;
+                    let actual = super::display_checkpoint::read_native_release_spent(&restoration)
+                        .map_err(|_| unavailable())?
+                        .ok_or_else(unavailable)?;
+                    if actual.canonical_bytes() != encoded {
+                        return Err(unavailable());
+                    }
+                    service.original_for_scope(&admission, &scope)?;
+                    valid_dispatch_window(deadline, sampled_boot, unix_ms()?, boot_ms()?)?;
+                    service.admit_control(&control_sender)?;
+                    persisted.store(true, Ordering::Release);
+                    Ok(())
+                };
+                let _result = super::display_native_release_grant::serve(
+                    &mut writer,
+                    &digest,
+                    lifetime,
+                    authenticate,
+                    &mut verify,
+                    persist,
+                );
+            })
+            .map_err(|_| unavailable())?;
+        Ok(OwnedFd::from(std::os::fd::OwnedFd::from(native)))
     }
     fn retire_held(
         &self,
@@ -1203,7 +1460,37 @@ impl ProtectionPort for NativeProtection {
             // memory attempt without synced readback, cannot be adopted.
             _ => return Err(unavailable()),
         };
-        let current_phase = observed_finalization_phase(phase, retired, native_reserved)?;
+        // LNRX is only a one-use grant-spent fact. It must match the
+        // original Root invocation's live memory grant and exact LNRN bytes.
+        // Missing state or mismatched disk/memory is indeterminate, not phase 5
+        // and never qualified ReleasedCurrent (wire 4).
+        let spent = super::display_checkpoint::read_native_release_spent(&record)
+            .map_err(|_| unavailable())?;
+        let native_spent = match (
+            admission.native_release_grants.get(key.as_str()),
+            spent.as_ref(),
+        ) {
+            (None, None) => false,
+            (Some(grant), None) if native_reserved && grant.pending() => false,
+            (Some(grant), Some(spent))
+                if native_reserved
+                    && !grant.pending()
+                    && admission.native_release_reservations.get(key.as_str())
+                        == Some(&ComponentDigest::from_bytes(
+                            sha2::Sha256::digest(spent.canonical_bytes()).into(),
+                        ))
+                    && spent.canonical_bytes()
+                        == super::display_checkpoint::read_native_release_reserved(&record)
+                            .map_err(|_| unavailable())?
+                            .ok_or_else(unavailable)?
+                            .canonical_bytes() =>
+            {
+                true
+            }
+            _ => return Err(unavailable()),
+        };
+        let current_phase =
+            observed_finalization_phase(phase, retired, native_reserved, native_spent)?;
         Ok((
             record.canonical_bytes(),
             current_phase,
@@ -1437,6 +1724,34 @@ impl<P: ProtectionPort> ProtectionService<P> {
         .await
     }
 
+    #[zbus(out_args("grant"))]
+    async fn reserve_native_release_grant(
+        &self,
+        reservation: &[u8],
+        dispatch_deadline_unix_ms: u64,
+        sampled_boot_ms: u64,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        let sender = sender(&header)?;
+        if reservation.len() > linura_linux_session::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION {
+            return Err(unavailable());
+        }
+        let record =
+            NativeDisplayRetirementPreparation::decode(reservation).map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_native_release_grant(
+                &sender,
+                record,
+                dispatch_deadline_unix_ms,
+                sampled_boot_ms,
+            )
+        })
+        .await
+    }
+
     #[zbus(out_args("accepted"))]
     async fn retire_held(
         &self,
@@ -1614,6 +1929,15 @@ mod tests {
         ) -> zbus::fdo::Result<bool> {
             Err(unavailable())
         }
+        fn reserve_native_release_grant(
+            &self,
+            _: &str,
+            _: NativeDisplayRetirementPreparation,
+            _: u64,
+            _: u64,
+        ) -> zbus::fdo::Result<OwnedFd> {
+            Err(unavailable())
+        }
         fn retire_held(
             &self,
             _: &str,
@@ -1687,7 +2011,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 11);
+            assert_eq!(text.matches("<method ").count(), 12);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -1719,6 +2043,7 @@ mod tests {
             "ReadFinalization",
             "ReserveRestoration",
             "ReserveFinalization",
+            "ReserveNativeReleaseGrant",
             "PrepareRetirement",
             "RetireHeld",
         ] {
@@ -2051,32 +2376,35 @@ mod tests {
     }
     #[test]
     fn root_release_observation_distinguishes_held_spent_and_released_states() {
-        for (native, retired, reserved, expected) in [
-            (0, false, false, 0),
-            (1, false, false, 1),
-            (2, false, false, 2),
-            (2, true, false, 3),
-            (2, true, true, 5),
+        for (native, retired, reserved, spent, expected) in [
+            (0, false, false, false, 0),
+            (1, false, false, false, 1),
+            (2, false, false, false, 2),
+            (2, true, false, false, 3),
+            (2, true, true, false, 5),
+            (2, true, true, true, 6),
         ] {
             assert_eq!(
-                observed_finalization_phase(native, retired, reserved).ok(),
+                observed_finalization_phase(native, retired, reserved, spent).ok(),
                 Some(expected)
             );
         }
         // Unknown, out-of-order or disk-only/memory-only states never produce
         // a release, renewed reservation, or ReleasedCurrent (wire phase 4).
-        for (native, retired, reserved) in [
-            (0, true, false),
-            (1, true, false),
-            (0, false, true),
-            (1, false, true),
-            (2, false, true),
-            (3, true, true),
-            (4, true, true),
-            (5, true, true),
-            (u32::MAX, true, true),
+        for (native, retired, reserved, spent) in [
+            (0, true, false, false),
+            (1, true, false, false),
+            (0, false, true, false),
+            (1, false, true, false),
+            (2, false, true, false),
+            (2, true, false, true),
+            (2, false, true, true),
+            (3, true, true, false),
+            (4, true, true, true),
+            (5, true, true, false),
+            (u32::MAX, true, true, true),
         ] {
-            assert!(observed_finalization_phase(native, retired, reserved).is_err());
+            assert!(observed_finalization_phase(native, retired, reserved, spent).is_err());
         }
     }
 

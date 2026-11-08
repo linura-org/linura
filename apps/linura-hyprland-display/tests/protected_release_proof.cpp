@@ -349,7 +349,8 @@ int main()
     const auto partlyDisabled = inventory(true);
     const auto disabledBefore = baseline(partlyDisabled);
     const auto disabledKernel = kernel(partlyDisabled);
-    auto disabled = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore, disabledKernel});
+    auto disabled =
+        NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore, disabledKernel});
     assert(disabled && disabled->spend(partlyDisabled, later, disabledBefore, disabledKernel));
     std::vector<NativeFirstFrameGate::NativeFrame> disabledFrames{
         {partlyDisabled.heads[0].key, &a, &first, 0, false, 301},
@@ -357,8 +358,10 @@ int main()
     };
     assert(!disabled->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
     assert(disabled->phase() == Phase::Faulted);
-    auto disabledFresh = NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore, disabledKernel});
-    assert(disabledFresh && disabledFresh->spend(partlyDisabled, later, disabledBefore, disabledKernel));
+    auto disabledFresh =
+        NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore, disabledKernel});
+    assert(disabledFresh);
+    assert(disabledFresh->spend(partlyDisabled, later, disabledBefore, disabledKernel));
     disabledFrames[1].disableCommit = 10;
     const auto disabledReceipt =
         disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel});

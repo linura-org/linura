@@ -16,7 +16,8 @@
       <!-- Supervised Control only; immutable restoration correlation plus live
            Root mechanism state, with no mutation or release credential. Only
            protected/reserved/quiesced/RootRetiredHeld comparison phases
-           are produced; release remains unavailable. -->
+           and separately spent-before-effect comparison phases are produced;
+           physical release remains unavailable. -->
       <arg name="recovery_scope" type="s" direction="in"/>
       <arg name="restoration" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>
@@ -67,6 +68,17 @@
            frames/input, S17 locks, power inhibitors or ordinary startup. -->
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReserveNativeReleaseGrant">
+      <!-- Supervised Control only, after the exact live LNRN reservation.
+           Original compositor credentials are independently authenticated on
+           EVERY grant fragment. Root writes immutable LNRX and fsyncs before
+           acknowledging one spend. This is not physical release, Control
+           completion, input unlock or ordinary startup admission. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
     </method>
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.

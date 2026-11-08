@@ -977,6 +977,133 @@ fn native_release_reservation_is_write_once_after_exact_root_held_parent() {
 }
 
 #[test]
+fn native_release_spent_requires_exact_parent_is_synced_and_cannot_replay() {
+    let fixture = Fixture::new();
+    let (parent, terminal) = terminal(1, 2, 3, "seat0");
+    let preparation = NativeDisplayRetirementPreparation::new(
+        &terminal,
+        7,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([4; 32]),
+    )
+    .unwrap_or_else(|error| unreachable!("{error}"));
+    let publish = |kind| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &terminal.binding().dispatch_digest,
+            &preparation.canonical_bytes(),
+            kind,
+        )
+    };
+    assert!(publish(Kind::NativeReleaseSpent).is_err());
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve_terminal(&fixture, &terminal).is_ok());
+    assert!(publish(Kind::NativeReleaseSpent).is_err());
+    assert!(
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &terminal.binding().dispatch_digest,
+            &terminal.canonical_bytes(),
+            Kind::Quiescence,
+        )
+        .is_ok()
+    );
+    assert!(publish(Kind::RetirementPreparation).is_ok());
+    assert!(publish(Kind::RootRetiredHeld).is_ok());
+    assert!(publish(Kind::NativeReleaseSpent).is_err());
+    assert!(publish(Kind::NativeReleaseReserved).is_ok());
+    assert!(
+        read_native_release_spent_at(&fixture.fd, fixture.uid, &parent)
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .is_none()
+    );
+    assert!(publish(Kind::NativeReleaseSpent).is_ok());
+    let observed = read_native_release_spent_at(&fixture.fd, fixture.uid, &parent)
+        .unwrap_or_else(|error| unreachable!("{error}"))
+        .unwrap_or_else(|| unreachable!("synced native-release-spent missing"));
+    assert_eq!(observed.canonical_bytes(), preparation.canonical_bytes());
+    assert!(publish(Kind::NativeReleaseSpent).is_err());
+    let path = fixture
+        .path
+        .join(Kind::NativeReleaseSpent.name(&terminal.binding().dispatch_digest));
+    let bytes = std::fs::read(path).unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(bytes.starts_with(NATIVE_RELEASE_SPENT_MAGIC));
+    assert_eq!(&bytes[HEADER..], preparation.canonical_bytes());
+    assert!(
+        !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|error| unreachable!("{error}"))
+    );
+}
+
+#[test]
+fn missing_parent_torn_or_repermissioned_spent_marker_quarantines_every_scope() {
+    for fault in 0..3 {
+        let fixture = Fixture::new();
+        let (parent, terminal) = terminal(1, 2, 3, "seat0");
+        let (other, _) = self::terminal(11, 12, 13, "seat12");
+        let preparation = NativeDisplayRetirementPreparation::new(
+            &terminal,
+            7,
+            ComponentDigest::from_bytes([3; 32]),
+            ComponentDigest::from_bytes([4; 32]),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_terminal(&fixture, &terminal).is_ok());
+        assert!(
+            reserve_kind_at(
+                &fixture.fd,
+                fixture.uid,
+                &terminal.binding().dispatch_digest,
+                &terminal.canonical_bytes(),
+                Kind::Quiescence,
+            )
+            .is_ok()
+        );
+        for kind in [
+            Kind::RetirementPreparation,
+            Kind::RootRetiredHeld,
+            Kind::NativeReleaseReserved,
+            Kind::NativeReleaseSpent,
+        ] {
+            assert!(
+                reserve_kind_at(
+                    &fixture.fd,
+                    fixture.uid,
+                    &terminal.binding().dispatch_digest,
+                    &preparation.canonical_bytes(),
+                    kind,
+                )
+                .is_ok()
+            );
+        }
+        assert!(reserve_recovery(&fixture, &other).is_ok());
+        let spent = fixture
+            .path
+            .join(Kind::NativeReleaseSpent.name(&terminal.binding().dispatch_digest));
+        let reserved = fixture
+            .path
+            .join(Kind::NativeReleaseReserved.name(&terminal.binding().dispatch_digest));
+        match fault {
+            0 => std::fs::remove_file(reserved).unwrap_or_else(|error| unreachable!("{error}")),
+            1 => std::fs::write(spent, b"torn release spend")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            _ => std::fs::set_permissions(spent, std::fs::Permissions::from_mode(0o644))
+                .unwrap_or_else(|error| unreachable!("{error}")),
+        }
+        assert!(read_native_release_spent_at(&fixture.fd, fixture.uid, &other).is_err());
+        assert!(read_native_release_reserved_at(&fixture.fd, fixture.uid, &other).is_err());
+        let (fresh, _) = self::terminal(21, 22, 23, "seat22");
+        assert!(reserve_recovery(&fixture, &fresh).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid)
+                .unwrap_or_else(|error| unreachable!("{error}"))
+        );
+    }
+}
+
+#[test]
 fn corrupted_or_orphan_native_release_reservation_fences_other_scopes() {
     for fault in 0..3 {
         let fixture = Fixture::new();

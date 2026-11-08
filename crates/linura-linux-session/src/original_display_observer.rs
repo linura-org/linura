@@ -126,6 +126,7 @@ pub(crate) fn finalization_facts(
         3 => DisplayFinalizationPhase::Retired,
         4 => DisplayFinalizationPhase::ReleasedCurrent,
         5 => DisplayFinalizationPhase::NativeReleaseReserved,
+        6 => DisplayFinalizationPhase::NativeReleaseSpent,
         _ => return Err("original finalization phase is unsupported".into()),
     };
     let terminal = if phase == DisplayFinalizationPhase::Protected {
@@ -250,6 +251,10 @@ mod tests {
             (
                 5,
                 linura_observation::DisplayFinalizationPhase::NativeReleaseReserved,
+            ),
+            (
+                6,
+                linura_observation::DisplayFinalizationPhase::NativeReleaseSpent,
             ),
             (
                 4,
