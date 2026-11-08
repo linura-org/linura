@@ -170,8 +170,8 @@ void terminalComparison(const std::string &material)
     using ReleaseCodec = OriginalNativeReleaseGrantCodec;
     const auto matchRelease = [&](std::string_view value, std::uint64_t version,
                                   std::string_view binding, std::string_view observation) {
-        return ReleaseCodec::matches(value, terminal, material,
-                                     {version, binding, observation});
+        const ReleaseCodec::ControlAnchor anchor{version, binding, observation};
+        return ReleaseCodec::matches(value, terminal, material, anchor);
     };
     assert(matchRelease(releaseBytes, 7, controlBinding, controlObservation));
     assert(!matchRelease(releaseBytes, 8, controlBinding, controlObservation));
@@ -221,9 +221,10 @@ void terminalComparison(const std::string &material)
     int releasePair[2]{};
     assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, releasePair) == 0);
     assert(close(releasePair[1]) == 0);
-    assert(!OriginalNativeReleaseGrant::receive(
-        fence, OwnedNativeFd{releasePair[0]}, terminal, material, 7,
-        controlBinding, controlObservation, sampledBootMs));
+    const ReleaseCodec::ControlAnchor control{7, controlBinding, controlObservation};
+    const auto denied = OriginalNativeReleaseGrant::receive(
+        fence, OwnedNativeFd{releasePair[0]}, terminal, material, control, sampledBootMs);
+    assert(!denied);
     assert(fcntl(releasePair[0], F_GETFD) == -1 && errno == EBADF);
     assert(fcntl(grant[0], F_GETFD) == -1 && errno == EBADF);
     assert(fence.recoveryAvailable() && !fence.ordinaryAllowed());

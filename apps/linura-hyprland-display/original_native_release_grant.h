@@ -20,8 +20,7 @@ inline bool matches(Text bytes, const Correlation &terminal, Text material, Cont
         !OriginalGrantCodec::digest(anchor.binding) ||
         !OriginalGrantCodec::digest(anchor.observation))
         return false;
-    constexpr std::array<std::size_t, 5> bounds{
-        64, 20, 64, 64, OriginalGrantCodec::MaxReservation};
+    constexpr std::array<std::size_t, 5> bounds{64, 20, 64, 64, OriginalGrantCodec::MaxReservation};
     std::array<std::string_view, 5> fields{};
     for (std::size_t i = 0; i < fields.size(); ++i) {
         const auto field = OriginalGrantCodec::field(bytes, bounds[i]);
@@ -29,11 +28,15 @@ inline bool matches(Text bytes, const Correlation &terminal, Text material, Cont
             return false;
         fields[i] = *field;
     }
-    return bytes.empty() &&
-           fields[0] == "linura.native-display.retirement-preparation.v1" &&
-           OriginalGrantCodec::number(fields[1]) == std::optional{anchor.version} &&
-           fields[2] == anchor.binding && fields[3] == anchor.observation &&
-           OriginalFinalizationGrantCodec::matches(fields[4], terminal, material);
+    if (!bytes.empty())
+        return false;
+    if (fields[0] != "linura.native-display.retirement-preparation.v1")
+        return false;
+    if (OriginalGrantCodec::number(fields[1]) != std::optional{anchor.version})
+        return false;
+    if (fields[2] != anchor.binding || fields[3] != anchor.observation)
+        return false;
+    return OriginalFinalizationGrantCodec::matches(fields[4], terminal, material);
 }
 } // namespace OriginalNativeReleaseGrantCodec
 
@@ -47,8 +50,8 @@ class OriginalNativeReleaseGrant final
 
     [[nodiscard]] static std::unique_ptr<OriginalNativeReleaseGrant>
     receive(StartupFence &fence, OwnedNativeFd descriptor, const Correlation &terminal,
-            std::string_view material, std::uint64_t controlVersion,
-            std::string_view binding, std::string_view observation, std::uint64_t sampledBootMs)
+            std::string_view material, OriginalNativeReleaseGrantCodec::ControlAnchor anchor,
+            std::uint64_t sampledBootMs)
     {
         auto result = std::unique_ptr<OriginalNativeReleaseGrant>(
             new OriginalNativeReleaseGrant(fence, std::move(descriptor)));
@@ -69,7 +72,7 @@ class OriginalNativeReleaseGrant final
         std::string dispatchDeadline(8, '\0'), sample(8, '\0'), end(11, '\0');
         if (!result->read(reservation, deadline) ||
             !OriginalNativeReleaseGrantCodec::matches(
-                reservation, terminal, material, {controlVersion, binding, observation}) ||
+                reservation, terminal, material, anchor) ||
             !result->read(dispatchDeadline, deadline) ||
             !OriginalGrantCodec::deadlineBinding(dispatchDeadline, terminal.deadlineUnixMs) ||
             !result->read(sample, deadline) ||
