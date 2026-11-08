@@ -24,7 +24,7 @@ struct Counts final
     std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0}, refresh{0};
     std::atomic<bool> throwAttach{false};
     std::atomic<unsigned> terminal{0};
-    std::atomic<unsigned> quiesce{0};
+    std::atomic<unsigned> quiesce{0}, nativeSpends{0};
     std::atomic<unsigned> purpose{99};
 };
 class Scene final : public ProtectedScene
@@ -110,6 +110,12 @@ class Scene final : public ProtectedScene
     {
         ++counts.quiesce;
         return false; // Transport fixtures cannot establish actual native quiescence.
+    }
+    bool spendNativeRelease(OwnedNativeFd, const Correlation &, std::uint64_t, std::uint64_t,
+                            std::string_view, std::string_view) override
+    {
+        ++counts.nativeSpends;
+        return false; // The fixture cannot authenticate or spend a native Root grant.
     }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
@@ -317,11 +323,20 @@ class Client final
         roundtrip();
     }
 };
+void spendSyntheticRootGrant(Client &client, int descriptor)
+{
+    const std::string digest(64, 'b');
+    const auto *material = digest.c_str();
+    linura_protected_display_interaction_v1_spend_native_release(
+        client.interaction, descriptor, "transaction:terminal", material, material, 0, 20'000, 0, 1,
+        0, 7, material, material);
+    client.roundtrip();
+}
 void ownerReplacement()
 {
     // Every retained mutation/read step reattests the original supervised
     // invocation; same PID/UID cannot migrate a conversation to its successor.
-    for (unsigned operation = 0; operation != 7; ++operation) {
+    for (unsigned operation = 0; operation != 8; ++operation) {
         Harness h;
         Client c(h.descriptor);
         c.begin();
@@ -360,9 +375,16 @@ void ownerReplacement()
             c.roundtrip();
             assert(close(pair[0]) == 0 && close(pair[1]) == 0);
         }
+        if (operation == 7) {
+            int sockets[2]{};
+            assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+            spendSyntheticRootGrant(c, sockets[0]);
+            assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
+        }
         c.status();
         assert(h.counts.terminal == 0);
         assert(h.counts.quiesce == 0);
+        assert(h.counts.nativeSpends == 0);
         assert(c.denied >= 1 && h.counts.close == 1 && h.counts.acknowledge == 0 &&
                h.counts.consume == 0 && h.counts.refresh == 0);
     }
@@ -390,6 +412,18 @@ int main()
         Client c(h.descriptor);
         c.begin(value.c_str());
         assert(c.denied == 1 && h.counts.begin == 0);
+    }
+    {
+        // Even a same-owner private wire call with a syntactically valid
+        // descriptor cannot establish authenticated Root LNRX on a fixture.
+        Harness h;
+        Client c(h.descriptor);
+        c.begin();
+        int sockets[2]{};
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+        spendSyntheticRootGrant(c, sockets[0]);
+        assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
+        assert(h.counts.nativeSpends == 1 && h.counts.close == 1 && c.denied == 1);
     }
     {
         Harness h;

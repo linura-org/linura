@@ -273,6 +273,13 @@ impl NativeReleasePrepared {
     pub(crate) const fn expiry(&self) -> u64 {
         self.expiry
     }
+    pub(crate) fn digest(&self) -> ContentDigest {
+        // A bound historical Control parent. Never a Root credential.
+        digest_bytes(
+            "linura.display.original-native-reservation-parent.v1",
+            &self.canonical,
+        )
+    }
 }
 
 #[cfg(test)]

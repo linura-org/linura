@@ -13,6 +13,7 @@
 #include "startup_fence.h"
 #include "original_restoration_grant.h"
 #include "original_finalization_grant.h"
+#include "original_native_release_grant.h"
 #include "native_baseline_guard.h"
 #include "native_kernel_scanout.h"
 #include "protected_wire.h"
@@ -976,6 +977,31 @@ receiveOriginalFinalizationGrant(OwnedNativeFd descriptor, const Correlation &bo
     return OriginalFinalizationGrant::receive(startupFence, std::move(descriptor), bound, material,
                                               sampledBootMs);
 }
+bool consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlation &terminal,
+                                       std::string_view material, std::uint64_t sampledBootMs,
+                                       std::uint64_t controlVersion, std::string_view binding,
+                                       std::string_view observation)
+{
+    if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
+        backend->originalRecovery->failed || !backend->originalRecovery->grant ||
+        !backend->originalRecovery->protection || !backend->powerInhibitor.held() ||
+        !startupFence.recoveryAvailable())
+        return false;
+    auto grant =
+        OriginalNativeReleaseGrant::receive(startupFence, std::move(descriptor), terminal, material,
+                                            {controlVersion, binding, observation}, sampledBootMs);
+    if (!grant || !backend->originalRecovery->grant->verify() ||
+        !backend->originalRecovery->protection->healthy())
+        return false;
+    if (!grant->spend())
+        return false;
+    // Root LNRX has now irreversibly spent the grant. Keep ALL protection
+    // retained pending the independent physical-first-frame and Control
+    // durable-completion protocol. Never treat this ACK as output release.
+    return backend->originalRecovery->grant->verify() &&
+           backend->originalRecovery->protection->healthy() && backend->powerInhibitor.held();
+}
+
 bool originalRestorationPresented(const Correlation &bound)
 {
     return backend && backend->originalStatus(bound) == std::optional<std::uint32_t>{3} &&

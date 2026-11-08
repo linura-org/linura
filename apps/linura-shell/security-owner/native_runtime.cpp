@@ -1192,6 +1192,36 @@ std::optional<quint32> NativeRuntime::quiesceOriginalDisplayFinalization(
                                                               terminalGrant);
 }
 
+std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &sampleDigest, quint64 sampledBootMs,
+    quint64 controlVersion, const QString &controlBinding, const QString &controlObservation,
+    int nativeGrant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || nativeGrant < 0 || !controlVersion || intent.currentLock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayFinalizationIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto sample = displaySample(received, NativePeerPurpose::ControlApproval);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto finished = NativeDisplayClock::sample();
+    if (!finished || !bound.dispatchWindow(sampledBootMs, finished->bootMs, finished->unixMs) ||
+        !impl_->display || !impl_->backend ||
+        !impl_->backend->heldOriginalDisplayFinalization(bound))
+        return std::nullopt;
+    return impl_->backend->spendOriginalDisplayNativeRelease(intent, bound, sampledBootMs,
+                                                             controlVersion, controlBinding,
+                                                             controlObservation, nativeGrant);
+}
+
 // This narrow effect is reachable only from the current supervised executor.
 // Control separately consumed and durably reserved the protected human choice.
 // Comparison hashes never substitute for either authenticated boundary.

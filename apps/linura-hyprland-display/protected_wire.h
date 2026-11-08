@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <string_view>
 
 struct wl_display;
 struct wl_resource;
@@ -39,6 +40,14 @@ class ProtectedScene
     // Success retains all fences and is never retirement or ordinary admission.
     [[nodiscard]] virtual bool quiesceFinalization(OwnedNativeFd, const Correlation &,
                                                    std::uint64_t sampledBootMs) = 0;
+    // One original supervised Root spend, after terminal quiescence,
+    // against the same retained actual native scene. Success is ONLY LNRX
+    // and a spent comparison gate, never a release/unlock/terminal commit.
+    [[nodiscard]] virtual bool spendNativeRelease(OwnedNativeFd, const Correlation &,
+                                                  std::uint64_t sampledBootMs,
+                                                  std::uint64_t controlVersion,
+                                                  std::string_view controlBinding,
+                                                  std::string_view controlObservation) = 0;
     [[nodiscard]] virtual std::shared_ptr<MutationProtection>
     reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
                     const Snapshot &, ClockSample captured) = 0;

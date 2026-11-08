@@ -629,6 +629,122 @@ impl NativeSessionChannel {
         Ok(()) // No compositor/S17/input/power release or startup admission.
     }
 
+    /// Consume one separately durable Control native-release spend decision.
+    /// A Root LNRX acknowledgement is only the irreversible before-effect
+    /// boundary, NOT physical completion or Root/S17/input/power admission.
+    /// Every before/after Root read uses the same original supervised peer;
+    /// any missing ACK or changed source leaves the operation indeterminate.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spend_root_native_release(
+        &self,
+        material: &str,
+        terminal_transaction: &str,
+        terminal_dispatch: &str,
+        control_state_version: u64,
+        control_binding: &str,
+        control_observation: &str,
+        expires_at_unix_ms: u64,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let now = crate::owner::unix_ms()?;
+        if now == 0 || now >= expires_at_unix_ms || expires_at_unix_ms - now > 2_000 {
+            return Err("native Root release spend Control evidence expired".into());
+        }
+        let intended = linura_core::DisplayFinalizationMaterial::decode(material)
+            .map_err(|_| "native Root release spend terminal intent malformed")?;
+        let scope = intended
+            .recovery_scope()
+            .map_err(|error| error.to_string())?;
+        let key = scope.resource_id().map_err(|error| error.to_string())?;
+        let binding =
+            ComponentDigest::parse_hex(control_binding).map_err(|error| error.to_string())?;
+        let observation =
+            ComponentDigest::parse_hex(control_observation).map_err(|error| error.to_string())?;
+        if control_state_version == 0
+            || binding.to_hex() != control_binding
+            || observation.to_hex() != control_observation
+        {
+            return Err("native Root release spend Control anchor noncanonical".into());
+        }
+        let started = Instant::now();
+        let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let read = |expected_phase: u32| -> Result<
+            (
+                Vec<u8>,
+                Vec<u8>,
+                crate::NativeDisplayFinalizationReservation,
+            ),
+            String,
+        > {
+            let reply = self.call(
+                &root.sender,
+                "/org/linura/DisplayProtection1",
+                "org.linura.DisplayProtection1",
+                "ReadFinalization",
+                &(key.as_str(),),
+                started,
+            )?;
+            if reply
+                .header()
+                .sender()
+                .is_none_or(|sender| sender.as_str() != root.sender)
+                || reply.body().signature().to_string() != "ayuay"
+            {
+                return Err("native release spend Root owner/readback substituted".into());
+            }
+            let (restoration, phase, native): (Vec<u8>, u32, Vec<u8>) = reply
+                .body()
+                .deserialize()
+                .map_err(|_| "native release spend Root response malformed")?;
+            let parent = crate::NativeDisplayRestorationReservation::decode(&restoration)?;
+            let terminal = crate::NativeDisplayFinalizationReservation::decode(&native)?;
+            terminal.validate_restoration(&parent)?;
+            if phase != expected_phase
+                || terminal.material() != material
+                || terminal.binding().transaction_id != terminal_transaction
+                || terminal.binding().dispatch_digest.to_hex() != terminal_dispatch
+                || parent
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|error| error.to_string())?
+                    != scope
+            {
+                return Err("native Root release spend original lineage changed".into());
+            }
+            Ok((restoration, native, terminal))
+        };
+        let (before_parent, before_native, terminal) = read(5)?;
+        let record = crate::NativeDisplayRetirementPreparation::new(
+            &terminal,
+            control_state_version,
+            binding,
+            observation,
+        )?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            || crate::owner::unix_ms()? >= expires_at_unix_ms
+        {
+            return Err("native release spend Root peer or original expiry changed".into());
+        }
+        // From here both Control's before-effect journal and Root's one-use
+        // grant are spent even if the owner reply, Root ACK or process is lost.
+        if self.dispatch_original_display_native_release(&record, expires_at_unix_ms)? != 6 {
+            return Err("native Root release spend outcome indeterminate; no retry".into());
+        }
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root {
+            return Err("native Root release spend lost original service".into());
+        }
+        let (after_parent, after_native, after_terminal) = read(6)?;
+        if before_parent != after_parent
+            || before_native != after_native
+            || after_terminal.canonical_bytes() != terminal.canonical_bytes()
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            || crate::owner::unix_ms()? >= expires_at_unix_ms
+        {
+            return Err("native Root spend lacks fresh exact original ancestry".into());
+        }
+        Ok(()) // LNRX only. Physical and independently committed release remain fenced.
+    }
+
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {
         self.display_protection_call("Verify", &(dispatch.to_hex(),))
     }

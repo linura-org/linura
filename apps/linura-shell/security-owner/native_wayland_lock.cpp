@@ -218,6 +218,7 @@ class NativeWaylandLock::Impl final
     QString heldFinalizationMaterial;
     std::optional<NativeDisplayCorrelation> finalizationDispatched;
     bool finalizationAccepted = false;
+    bool nativeReleaseAttempted = false;
     std::map<quint64, std::unique_ptr<Output>> protectedOutputs;
     QTimer protectedTimer;
 
@@ -261,6 +262,7 @@ class NativeWaylandLock::Impl final
         heldFinalizationMaterial.clear();
         finalizationDispatched.reset();
         finalizationAccepted = false;
+        nativeReleaseAttempted = false;
         protectedPollPending = protectedConsumed = protectedRevisionPending = false;
         protectedOutputs.clear();
         if (protectedInteraction)
@@ -1202,6 +1204,75 @@ std::optional<quint32> NativeWaylandLock::quiesceOriginalDisplayFinalization(
     impl_->finalizationAccepted = true;
     return 2; // Quiescence acknowledgement only. Control must independently observe.
 }
+std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
+    const NativeDisplayFinalizationIntent &intent, const NativeDisplayCorrelation &bound,
+    quint64 sampledBootMs, quint64 controlVersion, const QString &controlBinding,
+    const QString &controlObservation, int nativeGrant)
+{
+    if (nativeGrant < 0 || !controlVersion || thread() != QThread::currentThread() ||
+        !impl_->initialized || impl_->painting || impl_->pumping || impl_->nativeReleaseAttempted ||
+        !impl_->finalizationAccepted || impl_->finalizationDispatched != std::optional(bound) ||
+        !impl_->heldRestoration || !impl_->protectedInteraction || !impl_->protectedConsumed ||
+        !impl_->protectedScope ||
+        impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Finalization ||
+        impl_->heldFinalizationMaterial != intent.encode() ||
+        impl_->heldRestoration->dispatchDigest != intent.restorationDispatch ||
+        requestedSecure() != secureCoverage())
+        return std::nullopt;
+    const auto validDigest = [](const QString &value) {
+        return value.size() == 64 && value != QString(64, QLatin1Char('0')) &&
+               std::all_of(value.begin(), value.end(), [](QChar character) {
+                   return (character >= QLatin1Char('0') && character <= QLatin1Char('9')) ||
+                          (character >= QLatin1Char('a') && character <= QLatin1Char('f'));
+               });
+    };
+    const auto status = protectedDisplayStatus();
+    const auto sample = impl_->displayConnection->sample();
+    const auto clock = NativeDisplayClock::sample();
+    if (!validDigest(controlBinding) || !validDigest(controlObservation) || !status ||
+        status->phase != NativeDisplayPromptStatus::Phase::Consumed || !sample || !clock ||
+        !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) || !sample->fenced ||
+        sample->startupPhase != 2 || sample->compositor != impl_->displayInvocation ||
+        sample->topology.generation != impl_->protectedTopology ||
+        sample->coverage != (secureCoverage() ? 1U : 0U) ||
+        (secureCoverage() && !impl_->inputCovered()) ||
+        !intent.restoration.replacement.desired.matchesGeometry(sample->topology) ||
+        sample->topology.baselineGuard(intent.restoration.replacement.desired.encode()) !=
+            std::optional(intent.restoredSourceGuard) ||
+        impl_->displayConnection->status(*impl_->heldRestoration) != 3 ||
+        !waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) ||
+        !heldOriginalDisplayFinalization(bound))
+        return std::nullopt;
+    // The owner irrevocably consumes its sole original spend opportunity
+    // before touching the FD or invoking the compositor. Lost replies cannot
+    // recreate this event; both Root and compositor additionally enforce once.
+    impl_->nativeReleaseAttempted = true;
+    impl_->protectedStatus.reset();
+    const auto transaction = bound.transaction.toLatin1();
+    const auto effect = bound.effectDigest.toLatin1();
+    const auto dispatch = bound.dispatchDigest.toLatin1();
+    const auto binding = controlBinding.toLatin1();
+    const auto observation = controlObservation.toLatin1();
+    linura_protected_display_interaction_v1_spend_native_release(
+        impl_->protectedInteraction, nativeGrant, transaction.constData(), effect.constData(),
+        dispatch.constData(), static_cast<quint32>(bound.deadlineUnixMs >> 32U),
+        static_cast<quint32>(bound.deadlineUnixMs), static_cast<quint32>(sampledBootMs >> 32U),
+        static_cast<quint32>(sampledBootMs), static_cast<quint32>(controlVersion >> 32U),
+        static_cast<quint32>(controlVersion), binding.constData(), observation.constData());
+    impl_->flush();
+    const auto after = NativeDisplayClock::sample();
+    if (!after || !bound.dispatchWindow(sampledBootMs, after->bootMs, after->unixMs))
+        return std::nullopt;
+    const auto remaining = 2000 - (after->bootMs - sampledBootMs);
+    if (!waitForNativeWaylandReady(impl_->display,
+                                   std::chrono::milliseconds(static_cast<qint64>(remaining))) ||
+        !impl_->protectedInteraction || !impl_->protectedWindow() || !impl_->protectedStatus ||
+        impl_->protectedStatus->phase != NativeDisplayPromptStatus::Phase::Consumed ||
+        impl_->protectedStatus->epoch != status->epoch)
+        return std::nullopt;
+    return 6; // One Root LNRX spend. Not first-frame or Control terminal completion.
+}
+
 bool NativeWaylandLock::beginProtectedDisplayDecision(const NativeDisplayPromptScope &scope,
                                                       const NativeDisplayIntent &intent,
                                                       const NativeDisplayCorrelation &bound)

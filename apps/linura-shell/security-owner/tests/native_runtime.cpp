@@ -592,7 +592,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 30 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 31 && signals == 1 && annotations == 3);
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
           "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",
@@ -601,6 +601,7 @@ int main(int argc, char **argv)
     assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RestoreOriginalDisplay")));
     assert(introspection.contains(QStringLiteral("QuiesceOriginalDisplayFinalization")));
+    assert(introspection.contains(QStringLiteral("SpendOriginalDisplayNativeRelease")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));

@@ -227,6 +227,9 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     bool terminalQuiescenceAttempted = false;
     std::string terminalMaterial;
     std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
+    std::optional<Correlation> terminalBound;
+    bool nativeReleaseAttempted = false, nativeReleaseSpent = false;
+    std::optional<NativeFirstFrameGate> nativeReleaseGate;
     bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
     std::uint64_t postWriteEpoch = 0, terminalEpoch = 0;
     bool decisionActive = false, decisionStarted = false, decisionUsed = false;
@@ -796,8 +799,69 @@ class PinnedScene final : public ProtectedScene
             !grant->quiesce() || !originalRestorationPresented(data->bound) || !data->refresh() ||
             !grant->verify())
             return refuse();
+        data->terminalBound = bound;
         data->terminalGrant = std::move(grant);
         return true; // No witness, power, lock, input or startup fence is released.
+    }
+    bool spendNativeRelease(OwnedNativeFd descriptor, const Correlation &terminal,
+                            std::uint64_t sampledBootMs, std::uint64_t controlVersion,
+                            std::string_view controlBinding,
+                            std::string_view controlObservation) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            return false;
+        };
+        if (data->nativeReleaseAttempted)
+            return refuse();
+        // Permanently consume this original scene's chance BEFORE a possible
+        // Root/Unix send, even when the FD or independent sample is missing.
+        data->nativeReleaseAttempted = true;
+        if (!data->terminalBound || *data->terminalBound != terminal)
+            return refuse();
+        if (!data->originalRestoration || !data->mutation)
+            return refuse();
+        if (!data->terminalActive || !data->terminalConsumed)
+            return refuse();
+        if (!data->terminalQuiescenceAttempted || !data->terminalGrant)
+            return refuse();
+        if (!data->terminalGrant->verify() || data->writing)
+            return refuse();
+        if (data->ownerLost || data->mutationFault || heldInput().any)
+            return refuse();
+        // A refresh can latch mutationFault while returning a sampled result;
+        // never let that sampled result authorize an irreversible grant spend.
+        if (!data->refresh() || data->ownerLost || data->mutationFault ||
+            !originalRestorationPresented(data->bound))
+            return refuse();
+        const auto held = data->stableInventory;
+        auto gate = nativeFirstFrameArm(data->bound, held);
+        if (!gate || !data->refresh() || data->ownerLost || data->mutationFault ||
+            !data->terminalGrant->verify() || heldInput().any)
+            return refuse();
+        // Root authenticates the current original compositor peer and writes
+        // LNRX:1 durably BEFORE returning this one-use ACK. There is no
+        // recovery-by-retrying after a missing or refused ACK.
+        if (!consumeOriginalNativeReleaseGrant(std::move(descriptor), terminal,
+                                               data->terminalMaterial, sampledBootMs,
+                                               controlVersion, controlBinding, controlObservation))
+            return refuse();
+        const auto current = nativeBackend()->snapshot();
+        const auto clock = compositorClock();
+        const auto history = nativeOutputHighWater(data->bound, held);
+        const auto kernel = nativeFirstFrameKernel(data->bound, held);
+        if (!current || !clock || !history || !kernel ||
+            !gate->spend(*current, *clock, *history, *kernel) || !data->refresh() ||
+            data->ownerLost || data->mutationFault || heldInput().any ||
+            !data->terminalGrant->verify())
+            return refuse();
+        data->nativeReleaseGate.emplace(std::move(*gate));
+        data->nativeReleaseSpent = true;
+        // The initial physical-release effect is deliberately separate. This
+        // records ONLY native Root consumption and a bounded spent gate.
+        // Opaque first-frame coverage, input, S17, power and Root admission
+        // remain held. The later Control completion cannot be inferred here.
+        return true;
     }
     bool reconfigureReview()
     {

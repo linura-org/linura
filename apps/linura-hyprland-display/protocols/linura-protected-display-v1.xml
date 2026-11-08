@@ -114,6 +114,29 @@
       <arg name="sampled_boot_hi" type="uint"/>
       <arg name="sampled_boot_lo" type="uint"/>
     </request>
+    <request name="spend_native_release">
+      <description summary="spend the original Root release grant without retiring protection">
+        This private original-owner request uses a distinct authenticated
+        LNRS/LNRW Root channel and the exact Control version/digests in its
+        immutable LNRN ancestry. On a successful spend the original Root
+        records LNRX before acknowledgement. The compositor remains covered:
+        no ordinary frame, S17/input unlock, power release, Root admission or
+        Control completion is authorized by this request or its status event.
+        It is single-use even on a failed or missing acknowledgement.
+      </description>
+      <arg name="grant" type="fd"/>
+      <arg name="transaction" type="string"/>
+      <arg name="effect_digest" type="string"/>
+      <arg name="dispatch_digest" type="string"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+      <arg name="sampled_boot_hi" type="uint"/>
+      <arg name="sampled_boot_lo" type="uint"/>
+      <arg name="control_version_hi" type="uint"/>
+      <arg name="control_version_lo" type="uint"/>
+      <arg name="control_binding" type="string"/>
+      <arg name="control_observation" type="string"/>
+    </request>
     <event name="status">
       <arg name="compositor_instance" type="string"/>
       <arg name="topology_hi" type="uint"/>

@@ -178,6 +178,14 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
         "<arg name=\"terminal_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
+        "<method name=\"SpendOriginalDisplayNativeRelease\"><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"sample_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"control_version\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"control_binding\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"control_observation\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"native_grant\" type=\"h\" direction=\"in\"/>"
+        "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"ContinuePreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" direction=\"in\"/>"
         "<arg name=\"protected_decision_digest\" type=\"s\" direction=\"in\"/>"
@@ -261,6 +269,12 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                                const QString &sample_digest,
                                                quint64 sampled_boot_ms,
                                                const QDBusUnixFileDescriptor &terminal_grant);
+    quint32 SpendOriginalDisplayNativeRelease(const NativeDisplayAttemptQueryWire &,
+                                              const QString &sample_digest, quint64 sampled_boot_ms,
+                                              quint64 control_version,
+                                              const QString &control_binding,
+                                              const QString &control_observation,
+                                              const QDBusUnixFileDescriptor &native_grant);
     quint32 ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &,
                                     const QString &decision_digest,
                                     const QString &protected_decision_digest, bool confirm);

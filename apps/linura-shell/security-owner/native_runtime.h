@@ -88,6 +88,14 @@ class NativeRuntime final : public QObject
         const QDBusMessage &, const NativeDisplayFinalizationIntent &,
         const NativeDisplayCorrelation &, const QString &sampleDigest, quint64 sampledBootMs,
         int terminalGrant);
+    // One actual Control-owned original Root spend attempt. This only reports
+    // LNRX (phase 6); never physical completion or lock/input/power release.
+    [[nodiscard]] std::optional<quint32>
+    spendOriginalDisplayNativeRelease(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                                      const NativeDisplayCorrelation &, const QString &sampleDigest,
+                                      quint64 sampledBootMs, quint64 controlVersion,
+                                      const QString &controlBinding,
+                                      const QString &controlObservation, int nativeGrant);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const QDBusMessage &,
                                                                  const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &);

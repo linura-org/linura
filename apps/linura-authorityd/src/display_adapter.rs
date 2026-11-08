@@ -81,6 +81,24 @@ impl linura_control::OriginalDisplayNativeReleaseReservationPort for SessionExec
     }
 }
 
+impl linura_control::OriginalDisplayNativeReleaseSpendPort for SessionExecutorClient {
+    fn spend_native_release(
+        &mut self,
+        attempt: linura_control::AuthorizedOriginalDisplayNativeReleaseSpend,
+    ) -> Result<(), String> {
+        let terminal = attempt.terminal();
+        self.channel.spend_root_native_release(
+            attempt.material(),
+            terminal.transaction_id.as_str(),
+            attempt.dispatch_digest(),
+            terminal.state_version,
+            terminal.binding_digest.as_str(),
+            attempt.control_observation().as_str(),
+            attempt.expires_at_unix_ms(),
+        )
+    }
+}
+
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(
         &mut self,

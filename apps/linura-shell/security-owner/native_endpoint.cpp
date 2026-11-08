@@ -445,6 +445,32 @@ quint32 NativeEndpoint::QuiesceOriginalDisplayFinalization(
     return 7; // Neither rejection nor lost acknowledgement permits another attempt.
 }
 
+quint32 NativeEndpoint::SpendOriginalDisplayNativeRelease(
+    const NativeDisplayAttemptQueryWire &query, const QString &sampleDigest, quint64 sampledBootMs,
+    quint64 controlVersion, const QString &controlBinding, const QString &controlObservation,
+    const QDBusUnixFileDescriptor &nativeGrant)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        sampleDigest.size() == 64 && controlVersion != 0 && controlBinding.size() == 64 &&
+        controlObservation.size() == 64 && nativeGrant.isValid()) {
+        const auto intent = NativeDisplayFinalizationIntent::parse(query.intent);
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto result =
+            intent ? runtime_.spendOriginalDisplayNativeRelease(
+                         message(), *intent, bound, sampleDigest, sampledBootMs, controlVersion,
+                         controlBinding, controlObservation, nativeGrant.fileDescriptor())
+                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Original native Root release-spend unavailable"));
+    return 7; // No retry or physical release on missing Root ACK.
+}
+
 quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &query,
                                                 const QString &decisionDigest,
                                                 const QString &protectedDecisionDigest,
