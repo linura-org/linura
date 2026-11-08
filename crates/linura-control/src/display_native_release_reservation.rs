@@ -16,7 +16,6 @@ use crate::display_terminal_retirement::TerminalRetirementPrepared;
 const DOMAIN: &str = "linura.display.original-native-release-prepared.v1";
 const KEY_DOMAIN: &str = "linura.display.original-native-release-prepared-key.v1";
 const INTENT_DOMAIN: &str = "linura.display.original-native-release-intent.v1";
-const PARENT_DOMAIN: &str = "linura.display.original-native-release-parent.v1";
 const MAX_BYTES: usize = 2 * 1024;
 
 #[derive(Debug, Eq, PartialEq)]
