@@ -76,9 +76,8 @@ pub(super) fn serve(
             .set_read_timeout(Some(remaining))
             .map_err(|_| unavailable())?;
         let end = (read + 16).min(FRAME_BYTES);
-        let (size, credentials) =
-            super::native_message::read_chunk(stream, &mut bytes[read..end])
-                .map_err(|_| unavailable())?;
+        let (size, credentials) = super::native_message::read_chunk(stream, &mut bytes[read..end])
+            .map_err(|_| unavailable())?;
         authenticate(&credentials)?;
         if size == 0 {
             return Err(unavailable());
@@ -155,21 +154,23 @@ mod tests {
         let (persisted_tx, persisted_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             let mut checks = 0;
-            assert!(serve(
-                &mut root,
-                &[7; 32],
-                lifetime,
-                same_sender,
-                || {
-                    checks += 1;
-                    Ok(())
-                },
-                || {
-                    value(persisted_tx.send(()));
-                    Ok(())
-                },
-            )
-            .is_ok());
+            assert!(
+                serve(
+                    &mut root,
+                    &[7; 32],
+                    lifetime,
+                    same_sender,
+                    || {
+                        checks += 1;
+                        Ok(())
+                    },
+                    || {
+                        value(persisted_tx.send(()));
+                        Ok(())
+                    },
+                )
+                .is_ok()
+            );
             checks
         });
         let sent = frame([7; 32]);
@@ -190,22 +191,24 @@ mod tests {
             let state = ChannelState::reserved();
             let lifetime = Lifetime::new(state.clone());
             let worker = std::thread::spawn(move || {
-                assert!(serve(
-                    &mut root,
-                    &[7; 32],
-                    lifetime,
-                    |sender| {
-                        same_sender(sender)?;
-                        if fault == 3 {
-                            Err(unavailable())
-                        } else {
-                            Ok(())
-                        }
-                    },
-                    || Ok(()),
-                    || unreachable!("malformed or unauthenticated spend cannot persist"),
-                )
-                .is_err());
+                assert!(
+                    serve(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        |sender| {
+                            same_sender(sender)?;
+                            if fault == 3 {
+                                Err(unavailable())
+                            } else {
+                                Ok(())
+                            }
+                        },
+                        || Ok(()),
+                        || unreachable!("malformed or unauthenticated spend cannot persist"),
+                    )
+                    .is_err()
+                );
             });
             let mut request = frame([7; 32]);
             if fault == 0 {
@@ -227,15 +230,17 @@ mod tests {
         let state = ChannelState::reserved();
         let lifetime = Lifetime::new(state.clone());
         let worker = std::thread::spawn(move || {
-            assert!(serve(
-                &mut root,
-                &[7; 32],
-                lifetime,
-                same_sender,
-                || Ok(()),
-                || Err(unavailable()),
-            )
-            .is_err());
+            assert!(
+                serve(
+                    &mut root,
+                    &[7; 32],
+                    lifetime,
+                    same_sender,
+                    || Ok(()),
+                    || Err(unavailable()),
+                )
+                .is_err()
+            );
         });
         value(native.write_all(&frame([7; 32])));
         assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
@@ -250,24 +255,26 @@ mod tests {
         let (first_tx, first_rx) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             let mut fragments = 0;
-            assert!(serve(
-                &mut root,
-                &[7; 32],
-                lifetime,
-                |sender| {
-                    same_sender(sender)?;
-                    fragments += 1;
-                    if fragments == 1 {
-                        value(first_tx.send(()));
-                        Ok(())
-                    } else {
-                        Err(unavailable())
-                    }
-                },
-                || Ok(()),
-                || unreachable!("later fragment cannot persist"),
-            )
-            .is_err());
+            assert!(
+                serve(
+                    &mut root,
+                    &[7; 32],
+                    lifetime,
+                    |sender| {
+                        same_sender(sender)?;
+                        fragments += 1;
+                        if fragments == 1 {
+                            value(first_tx.send(()));
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        }
+                    },
+                    || Ok(()),
+                    || unreachable!("later fragment cannot persist"),
+                )
+                .is_err()
+            );
         });
         let bytes = frame([7; 32]);
         value(native.write_all(&bytes[..16]));

@@ -112,8 +112,7 @@ struct Admission {
     native_release_reservations: BTreeMap<String, ComponentDigest>,
     // Exclusively reserved in Root memory before a fallible native grant
     // transfer; a lost descriptor cannot be recreated from the LNRN file.
-    native_release_grants:
-        BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
+    native_release_grants: BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
 }
 
 struct FinalizationReservation {
@@ -712,10 +711,11 @@ impl ProtectionPort for NativeProtection {
             super::display_checkpoint::read_restoration(&scope).map_err(|_| unavailable())?;
         NativeDisplayRecoveryCheckpoint::validate_restoration_source(&payload, &restoration)
             .map_err(|_| unavailable())?;
-        terminal.validate_restoration(&restoration).map_err(|_| unavailable())?;
-        let (current, quiesced) =
-            super::display_checkpoint::read_finalization_state(&restoration)
-                .map_err(|_| unavailable())?;
+        terminal
+            .validate_restoration(&restoration)
+            .map_err(|_| unavailable())?;
+        let (current, quiesced) = super::display_checkpoint::read_finalization_state(&restoration)
+            .map_err(|_| unavailable())?;
         if !quiesced
             || current
                 .as_ref()
@@ -739,7 +739,11 @@ impl ProtectionPort for NativeProtection {
         {
             return Err(unavailable());
         }
-        let key = scope.resource_id().map_err(|_| unavailable())?.as_str().to_owned();
+        let key = scope
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
         let encoded = record.canonical_bytes();
         let digest: [u8; 32] = sha2::Sha256::digest(&encoded).into();
         let fingerprint = ComponentDigest::from_bytes(digest);
@@ -762,7 +766,9 @@ impl ProtectionPort for NativeProtection {
         // Root memory is permanently consumed before any fallible socket,
         // publication, worker, file-system or reply operation.
         let state = super::display_native_release_grant::ChannelState::reserved();
-        admission.native_release_grants.insert(key.clone(), state.clone());
+        admission
+            .native_release_grants
+            .insert(key.clone(), state.clone());
         let lifetime = super::display_native_release_grant::Lifetime::new(state.clone());
         let (mut writer, native) = UnixStream::pair().map_err(|_| unavailable())?;
         rustix::net::sockopt::set_socket_passcred(&writer, true).map_err(|_| unavailable())?;
@@ -788,7 +794,9 @@ impl ProtectionPort for NativeProtection {
                     .map_err(|_| unavailable())?;
                     service.original_for_scope(&admission, &scope)?;
                     if !state.pending()
-                        || admission.native_release_grants.get(&key)
+                        || admission
+                            .native_release_grants
+                            .get(&key)
                             .is_none_or(|live| !Arc::ptr_eq(live, &state))
                         || admission.native_release_reservations.get(&key) != Some(&fingerprint)
                         || admission.root_retirements.get(&key) != Some(&fingerprint)
@@ -822,9 +830,9 @@ impl ProtectionPort for NativeProtection {
                         super::display_checkpoint::read_finalization_state(&restoration)
                             .map_err(|_| unavailable())?;
                     if !durable
-                        || terminal
-                            .as_ref()
-                            .is_none_or(|value| value.canonical_bytes() != record.terminal().canonical_bytes())
+                        || terminal.as_ref().is_none_or(|value| {
+                            value.canonical_bytes() != record.terminal().canonical_bytes()
+                        })
                         || finalization_reservation_phase(
                             &admission.finalizations,
                             &scope,
@@ -862,11 +870,16 @@ impl ProtectionPort for NativeProtection {
                         .startups
                         .iter()
                         .find(|startup| {
-                            startup.peer.matches_preimage(scope.replacement(), &integration)
+                            startup
+                                .peer
+                                .matches_preimage(scope.replacement(), &integration)
                         })
                         .ok_or_else(unavailable)?;
                     startup.live().map_err(|_| unavailable())?;
-                    startup.peer.require_message_sender(sender).map_err(|_| unavailable())
+                    startup
+                        .peer
+                        .require_message_sender(sender)
+                        .map_err(|_| unavailable())
                 };
                 let persist = || {
                     let admission = super::protection_lock::acquire(
@@ -875,8 +888,8 @@ impl ProtectionPort for NativeProtection {
                     )
                     .map_err(|_| unavailable())?;
                     service.original_for_scope(&admission, &scope)?;
-                    if !state.pending() ||
-                        admission.native_release_reservations.get(&key) != Some(&fingerprint)
+                    if !state.pending()
+                        || admission.native_release_reservations.get(&key) != Some(&fingerprint)
                     {
                         return Err(unavailable());
                     }
@@ -896,7 +909,12 @@ impl ProtectionPort for NativeProtection {
                     Ok(())
                 };
                 let _result = super::display_native_release_grant::serve(
-                    &mut writer, &digest, lifetime, authenticate, &mut verify, persist,
+                    &mut writer,
+                    &digest,
+                    lifetime,
+                    authenticate,
+                    &mut verify,
+                    persist,
                 );
             })
             .map_err(|_| unavailable())?;
@@ -1682,7 +1700,10 @@ impl<P: ProtectionPort> ProtectionService<P> {
         blocking::unblock(move || {
             let _slot = slot;
             service.port.reserve_native_release_grant(
-                &sender, record, dispatch_deadline_unix_ms, sampled_boot_ms,
+                &sender,
+                record,
+                dispatch_deadline_unix_ms,
+                sampled_boot_ms,
             )
         })
         .await
