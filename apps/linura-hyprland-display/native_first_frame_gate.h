@@ -150,21 +150,35 @@ class NativeFirstFrameGate final
     // release grant was spent. A second fresh, output-owned native commit
     // high-water read closes the arm-to-spend race: a completed frame that
     // predates the release grant MUST NOT satisfy post-release verification.
-    // The caller must acquire these counters from the actual pinned compositor
-    // immediately at the one-use spend boundary, never from wire/client data.
+    // The caller must acquire these counters and a fresh physical KMS sample
+    // from the actual pinned compositor immediately at the one-use spend
+    // boundary, never from wire/client data. An arm-time physical identity
+    // cannot be substituted between the Root grant and the first frame.
     // Spending is irreversible even on malformed or missing evidence.
     [[nodiscard]] bool spend(const Snapshot &current, ClockSample now,
-                             const std::vector<Output> &atSpend) noexcept
+                             const std::vector<Output> &atSpend,
+                             const std::vector<NativeScanout> &atSpendKernel) noexcept
     {
         if (phase_ != Phase::Held)
             return false;
         phase_ = Phase::Faulted;
-        if (!currentSample(current, now) || atSpend.size() != before_.size())
+        if (!currentSample(current, now) || atSpend.size() != before_.size() ||
+            atSpendKernel.size() != baselineKernel_.size())
             return false;
         for (std::size_t i = 0; i < atSpend.size(); ++i) {
             if (atSpend[i].key != before_[i].key ||
                 atSpend[i].previousCommit < before_[i].previousCommit ||
                 atSpend[i].previousCommit == std::numeric_limits<std::uint64_t>::max())
+                return false;
+            const auto &previous = baselineKernel_[i];
+            const auto &physical = atSpendKernel[i];
+            if (physical.key != previous.key || physical.connector != previous.connector ||
+                physical.crtc != previous.crtc || physical.plane != previous.plane ||
+                physical.active != previous.active)
+                return false;
+            if (physical.active && !physical.framebuffer)
+                return false;
+            if (!physical.active && physical.framebuffer)
                 return false;
             spentCommit_[i] = atSpend[i].previousCommit;
         }
