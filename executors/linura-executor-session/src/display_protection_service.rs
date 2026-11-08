@@ -118,6 +118,23 @@ struct FinalizationReservation {
     channel: Arc<super::display_finalization_grant::ChannelState>,
 }
 
+/// Only the original live Root can report these mechanism states. A durable
+/// before-effect marker is not a native release or permission for a new
+/// compositor to render ordinary output. In particular code 4 is reserved for
+/// separately qualified ReleasedCurrent and MUST NOT be inferred here.
+fn observed_finalization_phase(
+    native_phase: u32,
+    root_retired: bool,
+    native_release_reserved: bool,
+) -> zbus::fdo::Result<u32> {
+    match (native_phase, root_retired, native_release_reserved) {
+        (0..=2, false, false) => Ok(native_phase),
+        (2, true, false) => Ok(3),
+        (2, true, true) => Ok(5),
+        _ => Err(unavailable()),
+    }
+}
+
 fn reserve_finalization_memory(
     memory: &mut BTreeMap<String, FinalizationReservation>,
     scope: &linura_core::DisplayRecoveryScope,
@@ -1186,18 +1203,7 @@ impl ProtectionPort for NativeProtection {
             // memory attempt without synced readback, cannot be adopted.
             _ => return Err(unavailable()),
         };
-        let current_phase = if retired {
-            if phase != 2 {
-                return Err(unavailable());
-            }
-            if native_reserved {
-                5 // NativeReleaseReserved: a spent before-effect marker, never release.
-            } else {
-                3 // RootRetiredHeld: the original native release slot is unspent.
-            }
-        } else {
-            phase
-        };
+        let current_phase = observed_finalization_phase(phase, retired, native_reserved)?;
         Ok((
             record.canonical_bytes(),
             current_phase,
@@ -2043,6 +2049,37 @@ mod tests {
             .is_err()
         );
     }
+    #[test]
+    fn root_release_observation_distinguishes_held_spent_and_released_states() {
+        for (native, retired, reserved, expected) in [
+            (0, false, false, 0),
+            (1, false, false, 1),
+            (2, false, false, 2),
+            (2, true, false, 3),
+            (2, true, true, 5),
+        ] {
+            assert_eq!(
+                observed_finalization_phase(native, retired, reserved).ok(),
+                Some(expected)
+            );
+        }
+        // Unknown, out-of-order or disk-only/memory-only states never produce
+        // a release, renewed reservation, or ReleasedCurrent (wire phase 4).
+        for (native, retired, reserved) in [
+            (0, true, false),
+            (1, true, false),
+            (0, false, true),
+            (1, false, true),
+            (2, false, true),
+            (3, true, true),
+            (4, true, true),
+            (5, true, true),
+            (u32::MAX, true, true),
+        ] {
+            assert!(observed_finalization_phase(native, retired, reserved).is_err());
+        }
+    }
+
     #[test]
     fn native_release_reservation_rejects_anonymous_malformed_and_untrusted_requests() {
         let (_, terminal) = super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
