@@ -125,9 +125,9 @@ class NativeFirstFrameGate final
             if (head.current.enabled) {
                 if (!physical.active || !physical.crtc || !physical.plane || !physical.framebuffer)
                     return {};
-            } else if (physical.active || physical.crtc || physical.plane ||
-                       physical.framebuffer) {
-                return {};
+            } else {
+                if (physical.active || physical.crtc || physical.plane || physical.framebuffer)
+                    return {};
             }
             for (std::size_t prior = 0; prior < i; ++prior)
                 if (kernel[prior].connector == physical.connector)
@@ -291,7 +291,8 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {scanout, spentCommit_[i], frame.disableCommit};
+                receipt.completed[receipt.completedCount++] = {
+                    scanout, spentCommit_[i], frame.disableCommit};
             }
         }
         if (pending)
