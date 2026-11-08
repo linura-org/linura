@@ -973,6 +973,29 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     return scanout;
 }
 
+std::optional<NativeFirstFrameGate>
+nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
+{
+    if (!backend || !backend->originalRecovery || !backend->originalRecovery->grant)
+        return std::nullopt;
+    const auto armed = backend->clock();
+    const auto initial = backend->snapshot();
+    if (!armed || !initial || *initial != expected)
+        return std::nullopt;
+    const auto protectedSample = originalProtectedFrameBaseline(original, expected);
+    const auto scanout = nativeFirstFrameKernel(original, expected);
+    const auto finished = backend->clock();
+    const auto final = backend->snapshot();
+    if (!protectedSample || !scanout || !finished || !final || *final != expected ||
+        finished->unixMs < armed->unixMs || finished->bootMs < armed->bootMs ||
+        finished->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs ||
+        finished->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs ||
+        scanout->size() != protectedSample->before.size())
+        return std::nullopt;
+    return NativeFirstFrameGate::arm(
+        {expected, protectedSample->postWriteEpoch, *armed, protectedSample->before});
+}
+
 void initialize(wl_display &display, wl_event_loop &loop)
 {
     if (backend || service)

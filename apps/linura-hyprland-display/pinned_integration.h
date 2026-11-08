@@ -32,6 +32,11 @@ receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string
 // buffer/commit and match fresh post-spend output high-water marks.
 [[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
 nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected);
+// Arm the comparison-only gate against the same pinned original Recovery,
+// KMS evidence, Root channel and retained safety frames. Does not spend
+// a grant or establish output-wide spend-time high-water.
+[[nodiscard]] std::optional<NativeFirstFrameGate>
+nativeFirstFrameArm(const Correlation &original, const Snapshot &expected);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
 inline constexpr char UpstreamVersion[] = "0.56.2";

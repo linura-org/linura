@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace Linura::HyprlandDisplay {
 
@@ -86,6 +87,12 @@ class ProtectedFrame final
     [[nodiscard]] Kind pendingKind() const noexcept
     {
         return pendingKind_;
+    }
+    // Scene-owned queued commit high-water survives invalidation. A failed
+    // tracker is ineligible. Not output-wide authority or a release grant.
+    [[nodiscard]] std::optional<std::uint64_t> highWater() const noexcept
+    {
+        return failed_ ? std::nullopt : std::optional{highWater_};
     }
     void invalidate() noexcept
     {

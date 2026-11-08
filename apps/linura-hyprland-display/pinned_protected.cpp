@@ -1301,6 +1301,55 @@ std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonit
     return OriginalRestorationFrame{surface->submittedBuffer->buffer,
                                     surface->frame.completedCommit(), data->postWriteEpoch};
 }
+std::optional<NativeProtectedFrameBaseline>
+originalProtectedFrameBaseline(const Correlation &bound, const Snapshot &expected)
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    if (!data || !backend || !data->mutation || !data->originalRestoration ||
+        data->closed || data->writing || data->ownerLost || data->mutationFault ||
+        data->bound != bound || !data->terminalActive || !data->terminalConsumed ||
+        !data->terminalQuiescenceAttempted || !data->terminalGrant ||
+        data->postWriteEpoch == 0 || heldInput().any ||
+        expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads ||
+        expected.heads.size() != data->surfaces.size())
+        return std::nullopt;
+    const auto first = backend->snapshot();
+    if (!first || *first != expected || expected != data->stableInventory ||
+        !data->refresh() || !data->terminalGrant->verify() ||
+        !originalRestorationPresented(bound))
+        return std::nullopt;
+    NativeProtectedFrameBaseline result;
+    result.postWriteEpoch = data->postWriteEpoch;
+    result.before.reserve(expected.heads.size());
+    for (const auto &head : expected.heads) {
+        const auto surface = data->surfaces.find(head.key);
+        if (surface == data->surfaces.end() || surface->second.output != head.key ||
+            surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return std::nullopt;
+        const auto &held = surface->second;
+        const auto highWater = held.frame.highWater();
+        if (!highWater || *highWater == std::numeric_limits<std::uint64_t>::max() ||
+            held.disableCommit == std::numeric_limits<std::uint64_t>::max())
+            return std::nullopt;
+        if (head.current.enabled) {
+            if (!held.submittedBuffer ||
+                held.frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+                held.frame.completedBuffer() != held.submittedBuffer->buffer.get() ||
+                held.frame.completedCommit() != *highWater || !*highWater)
+                return std::nullopt;
+        } else if (!held.disableSubmitted) {
+            return std::nullopt;
+        }
+        result.before.push_back({head.key, std::max(*highWater, held.disableCommit)});
+    }
+    const auto last = backend->snapshot();
+    if (!last || *last != expected || !data->refresh() ||
+        !data->terminalGrant->verify() || data->postWriteEpoch != result.postWriteEpoch ||
+        data->ownerLost || data->mutationFault || heldInput().any)
+        return std::nullopt;
+    return result;
+}
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
 {
     if (startupBlocksProtectedScene())
