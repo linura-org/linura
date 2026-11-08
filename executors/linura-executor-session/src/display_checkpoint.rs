@@ -130,7 +130,6 @@ impl TerminalLineage {
             Kind::RetirementPreparation
             | Kind::RootRetiredHeld
             | Kind::NativeReleaseReserved
-                            | Kind::NativeReleaseSpent
             | Kind::NativeReleaseSpent => {
                 let record = NativeDisplayRetirementPreparation::decode(bytes)?;
                 let scope = record
@@ -433,7 +432,6 @@ fn reserve_kind_at(
             Kind::RetirementPreparation
                 | Kind::RootRetiredHeld
                 | Kind::NativeReleaseReserved
-                            | Kind::NativeReleaseSpent
                 | Kind::NativeReleaseSpent
         ) {
             Some(NativeDisplayRetirementPreparation::decode(payload)?)
@@ -524,7 +522,6 @@ fn reserve_kind_at(
                 Kind::RetirementPreparation
                 | Kind::RootRetiredHeld
                 | Kind::NativeReleaseReserved
-                            | Kind::NativeReleaseSpent
                 | Kind::NativeReleaseSpent
             ) && old_kind == Kind::Quiescence
                 && previous == terminal.as_ref().ok_or_else(unavailable)?.canonical_bytes()
@@ -534,7 +531,10 @@ fn reserve_kind_at(
                 }
                 quiescence_seen = true;
             }
-            if matches!(kind, Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
+            if matches!(
+                kind,
+                Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent
+            )
                 && old_kind == Kind::RetirementPreparation
                 && previous == payload
             {
@@ -615,7 +615,10 @@ fn reserve_kind_at(
                         | Kind::NativeReleaseReserved
                             | Kind::NativeReleaseSpent
                 ) && !quiescence_seen
-                || matches!(kind, Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
+                || matches!(
+                    kind,
+                    Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent
+                )
                     && !preparation_seen
                 || matches!(kind, Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
                     && !root_held_seen
