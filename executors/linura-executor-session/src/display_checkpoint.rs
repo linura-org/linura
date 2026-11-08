@@ -80,12 +80,10 @@ impl Kind {
             Self::RetirementPreparation
             | Self::RootRetiredHeld
             | Self::NativeReleaseReserved
-            | Self::NativeReleaseSpent => {
-                Ok(NativeDisplayRetirementPreparation::decode(payload)?
-                    .terminal()
-                    .binding()
-                    .dispatch_digest)
-            }
+            | Self::NativeReleaseSpent => Ok(NativeDisplayRetirementPreparation::decode(payload)?
+                .terminal()
+                .binding()
+                .dispatch_digest),
         }
     }
     fn name(self, dispatch: &ComponentDigest) -> String {
@@ -216,7 +214,10 @@ impl TerminalLineage {
             }
         }
         for (scope, record) in &self.release_spent {
-            let parent = self.release_reservations.get(scope).ok_or_else(unavailable)?;
+            let parent = self
+                .release_reservations
+                .get(scope)
+                .ok_or_else(unavailable)?;
             if record.canonical_bytes() != parent.canonical_bytes() {
                 return Err(unavailable());
             }
@@ -520,9 +521,9 @@ fn reserve_kind_at(
             if matches!(
                 kind,
                 Kind::RetirementPreparation
-                | Kind::RootRetiredHeld
-                | Kind::NativeReleaseReserved
-                | Kind::NativeReleaseSpent
+                    | Kind::RootRetiredHeld
+                    | Kind::NativeReleaseReserved
+                    | Kind::NativeReleaseSpent
             ) && old_kind == Kind::Quiescence
                 && previous == terminal.as_ref().ok_or_else(unavailable)?.canonical_bytes()
             {
@@ -534,8 +535,7 @@ fn reserve_kind_at(
             if matches!(
                 kind,
                 Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent
-            )
-                && old_kind == Kind::RetirementPreparation
+            ) && old_kind == Kind::RetirementPreparation
                 && previous == payload
             {
                 if preparation_seen {
@@ -606,20 +606,19 @@ fn reserve_kind_at(
                         | Kind::RetirementPreparation
                         | Kind::RootRetiredHeld
                         | Kind::NativeReleaseReserved
-                            | Kind::NativeReleaseSpent
+                        | Kind::NativeReleaseSpent
                 ) && !terminal_seen
                 || matches!(
                     kind,
                     Kind::RetirementPreparation
                         | Kind::RootRetiredHeld
                         | Kind::NativeReleaseReserved
-                            | Kind::NativeReleaseSpent
+                        | Kind::NativeReleaseSpent
                 ) && !quiescence_seen
                 || matches!(
                     kind,
                     Kind::RootRetiredHeld | Kind::NativeReleaseReserved | Kind::NativeReleaseSpent
-                )
-                    && !preparation_seen
+                ) && !preparation_seen
                 || matches!(kind, Kind::NativeReleaseReserved | Kind::NativeReleaseSpent)
                     && !root_held_seen
                 || kind == Kind::NativeReleaseSpent && !release_reserved_seen)
