@@ -195,6 +195,10 @@ class NativeFirstFrameGate final
         ClockSample now;
         const std::vector<NativeFrame> &frames;
         const std::vector<NativeScanout> &kernel;
+        // Separately observed output-wide native commit-result high-water.
+        // A protected frame tracker by itself cannot prove that a later
+        // unrelated native output write did not replace the first frame.
+        const std::vector<Output> &outputCommits;
     };
     [[nodiscard]] std::optional<Receipt> observe(const ObservationRequest &sample) noexcept
     {
@@ -202,10 +206,11 @@ class NativeFirstFrameGate final
         const auto now = sample.now;
         const auto &frames = sample.frames;
         const auto &kernel = sample.kernel;
+        const auto &outputCommits = sample.outputCommits;
         if (phase_ != Phase::Spent)
             return {};
         if (!currentSample(current, now) || frames.size() != before_.size() ||
-            kernel.size() != before_.size()) {
+            kernel.size() != before_.size() || outputCommits.size() != before_.size()) {
             phase_ = Phase::Faulted;
             return {};
         }
@@ -215,7 +220,11 @@ class NativeFirstFrameGate final
             const auto &head = current.heads[i];
             const auto &frame = frames[i];
             const auto &scanout = kernel[i];
-            if (frame.key != head.key || scanout.key != head.key || !scanout.connector) {
+            const auto &nativeCommit = outputCommits[i];
+            if (frame.key != head.key || scanout.key != head.key ||
+                nativeCommit.key != head.key || !scanout.connector ||
+                nativeCommit.previousCommit < spentCommit_[i] ||
+                nativeCommit.previousCommit == std::numeric_limits<std::uint64_t>::max()) {
                 phase_ = Phase::Faulted;
                 return {};
             }
@@ -241,6 +250,10 @@ class NativeFirstFrameGate final
                 // is contradictory and fails closed under the original clock.
                 if (!frame.frame && !frame.retainedBuffer && !frame.retainedFramebuffer &&
                     !frame.disableCommit && !frame.disableSubmitted) {
+                    if (nativeCommit.previousCommit != spentCommit_[i]) {
+                        phase_ = Phase::Faulted;
+                        return {};
+                    }
                     pending = true;
                     continue;
                 }
@@ -259,12 +272,23 @@ class NativeFirstFrameGate final
                         return {};
                     }
                 }
+                const auto queued = frame.frame->queuedCommit();
+                // A commit can be queued before its native commit-result
+                // event reaches the independent observer. Only the original
+                // spend mark or that exact queued commit is admissible while
+                // pending. Any third output write is permanently fatal.
+                if ((queued && nativeCommit.previousCommit != queued &&
+                     nativeCommit.previousCommit != spentCommit_[i]) ||
+                    (!queued && nativeCommit.previousCommit != spentCommit_[i])) {
+                    phase_ = Phase::Faulted;
+                    return {};
+                }
                 const auto commit = frame.frame->completedCommit();
                 if (!commit) {
                     pending = true;
                     continue;
                 }
-                if (commit <= spentCommit_[i] ||
+                if (commit != nativeCommit.previousCommit || commit <= spentCommit_[i] ||
                     frame.frame->queuedKind() != ProtectedFrame::Kind::Content ||
                     frame.frame->completedBuffer() != frame.retainedBuffer ||
                     !frame.retainedFramebuffer || !scanout.active || !scanout.crtc ||
@@ -279,9 +303,20 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
+                // Disabled heads need a distinct post-spend commit too. A
+                // later unrelated commit cannot masquerade as that disable.
+                if (nativeCommit.previousCommit != spentCommit_[i] &&
+                    nativeCommit.previousCommit != frame.disableCommit) {
+                    phase_ = Phase::Faulted;
+                    return {};
+                }
                 if (!frame.disableSubmitted || scanout.active) {
                     pending = true;
                     continue;
+                }
+                if (nativeCommit.previousCommit != frame.disableCommit) {
+                    phase_ = Phase::Faulted;
+                    return {};
                 }
                 // A submitted disable must really detach the connector at
                 // KMS. A logical disabled head or an old modeset ACK alone
@@ -302,6 +337,20 @@ class NativeFirstFrameGate final
             return {};
         phase_ = Phase::Verified; // Still no authority to unlock or release.
         return receipt;
+    }
+
+    // The compositor's retained scene calls this on its existing watchdog
+    // even if no readout is requested. A spent one-use grant cannot silently
+    // gain a fresh proof window after the original absolute window expires.
+    [[nodiscard]] bool retain(const Snapshot &current, ClockSample now) noexcept
+    {
+        if (phase_ != Phase::Spent && phase_ != Phase::Verified)
+            return false;
+        if (!currentSample(current, now)) {
+            phase_ = Phase::Faulted;
+            return false;
+        }
+        return true;
     }
 
     [[nodiscard]] Phase phase() const noexcept

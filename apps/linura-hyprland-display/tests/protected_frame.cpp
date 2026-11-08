@@ -15,8 +15,10 @@ int main()
     assert(!frame.completed());
     assert(frame.highWater() == std::optional<std::uint64_t>{0});
     assert(!frame.completedBuffer() && frame.completedCommit() == 0);
+    assert(frame.queuedCommit() == 0);
     assert(frame.rendered(&first, Kind::Safety));
     assert(frame.queued(&first, 1));
+    assert(frame.queuedCommit() == 1);
     assert(frame.highWater() == std::optional<std::uint64_t>{1});
     assert(frame.submitted(1, true));
     assert(!frame.completed());
@@ -39,6 +41,7 @@ int main()
     assert(!frame.completed());
     assert(frame.highWater() == std::optional<std::uint64_t>{2});
     assert(!frame.completedBuffer() && frame.completedCommit() == 0);
+    assert(frame.queuedCommit() == 0);
 
     for (unsigned fault = 0; fault != 7; ++fault) {
         ProtectedFrame candidate;
@@ -66,6 +69,7 @@ int main()
         }
         assert(!candidate.rendered(&first, Kind::Content));
         assert(!candidate.highWater());
+        assert(candidate.queuedCommit() == 0);
         assert(candidate.presented(10, true) == Presentation::Failed);
     }
     // Resetting a configure cannot adopt any old buffer/result/presentation.

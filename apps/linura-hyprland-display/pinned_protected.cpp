@@ -312,6 +312,16 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             if ((decisionActive || (terminalActive && !terminalConsumed)) &&
                 !interaction.refresh(*facts, *clock))
                 mutationFault = true;
+            // LNRX is irreversible: an unobserved frame cannot silently
+            // remain eligible indefinitely or gain a new release window.
+            // The existing compositor watchdog rechecks the original window,
+            // retaining every Root/S17/input/power/startup fence on failure.
+            if (nativeReleaseSpent &&
+                (!nativeReleaseGate || !nativeReleaseGate->retain(*facts, *clock))) {
+                mutationFault = true;
+                interaction.cancel();
+                return false;
+            }
             return true;
         }
         if (!devices || !facts || !clock || !interaction.refresh(*facts, *clock)) {

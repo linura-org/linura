@@ -223,15 +223,22 @@ original clock. Once reserved, authenticated Root
 `native-release-reserved` (wire 5); Control separately joins the exact
 spent journal/Root/native held facts in a read-only lost-ack query.
 This phase is **not** native consumption or release and cannot be confused
-with `released-current` (wire 4). **No Control completion, native release
-grant/consumer, or physical-release effect is connected yet**. Losing a
-reservation acknowledgement cannot authorize a second reservation. Neither
-`LNRN:1` nor `LNRH:1` means `NativeReleaseSpent` or `ReleasedCurrent`.
-A separate pinned-native `NativeFirstFrameGate` is currently a
-comparison-only state machine: it enforces one spent attempt, absolute
-freshness, exact topology/source continuity and fresh hardware-completed
-ordinary frames or per-output disable commits. Its receipts do not prove an
-independent DRM/KMS read, authenticate a release grant or release any fence.
+with `released-current` (wire 4). The original Control one-use spend decision,
+authenticated Root `LNRX:1` native grant consumption, and pinned compositor
+comparison-gate spending are now connected. These before-effect steps still
+retain all fences and are **not a physical-release effect or Control/Root
+completion**. A lost reservation/spend acknowledgement cannot authorize a
+second grant. Neither `LNRN:1` nor `LNRX:1` means `ReleasedCurrent`.
+The pinned-native `NativeFirstFrameGate` remains comparison-only: it requires
+one spent attempt, original-clock freshness, exact topology/source continuity,
+per-output hardware-completed ordinary frames or fresh disabled commits, and
+**independent output-wide commit-result high-water**. Its accepted frame must
+be the current output's latest native commit, not merely a frame-track event;
+a substituted key, unrelated intervening native write or absent output history
+fails closed. The actual compositor watchdog faults a spent gate after the
+original window expires, even without an observer requesting the receipt.
+No comparison result itself authenticates a later Root completion, retires
+S17/input/power protection, or releases the startup fence.
 
 The remaining requirements below are an acceptance contract, not currently
 implemented effect authority. The original-restoration terminal and ordinary

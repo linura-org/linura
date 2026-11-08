@@ -54,6 +54,22 @@ std::vector<NativeFirstFrameGate::NativeScanout> kernel(const Snapshot &sample)
     }
     return result;
 }
+// Native output commit-result history is independent of the retained
+// presentation tracker. These fixtures synthesize both channels separately.
+std::vector<NativeFirstFrameGate::Output> outputCommits(
+    const Snapshot &sample, const std::vector<NativeFirstFrameGate::NativeFrame> &frames)
+{
+    auto result = baseline(sample);
+    if (frames.size() != result.size())
+        return result;
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        if (frames[i].frame && frames[i].frame->queuedCommit())
+            result[i].previousCommit = frames[i].frame->queuedCommit();
+        else if (frames[i].disableSubmitted && frames[i].disableCommit)
+            result[i].previousCommit = frames[i].disableCommit;
+    }
+    return result;
+}
 void completed(ProtectedFrame &frame, const void *buffer, std::uint64_t commit, Kind kind)
 {
     assert(frame.rendered(buffer, kind));
@@ -111,7 +127,7 @@ int main()
 
     auto gate = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
     assert(gate && gate->phase() == Phase::Held);
-    assert(!gate->observe({held, later, {}, scanout}));
+    assert(!gate->observe({held, later, {}, scanout, baseline(held)}));
     assert(!gate->spend(held, {9'999, 4'999}, before, scanout));
     assert(gate->phase() == Phase::Faulted);
     assert(!gate->spend(held, later, before, scanout));
@@ -128,7 +144,7 @@ int main()
             {held.heads[0].key, &shared, &first, 0, false, 301},
             {held.heads[1].key, &shared, &first, 0, false, 301},
         };
-        assert(!alias->observe({held, later, reused, scanout}));
+        assert(!alias->observe({held, later, reused, scanout, outputCommits(held, reused)}));
         assert(alias->phase() == Phase::Faulted);
         assert(!alias->spend(held, later, before, scanout));
     }
@@ -150,7 +166,8 @@ int main()
             {held.heads[0].key, &stale, &first, 0, false, 301},
             {held.heads[1].key, &fresh, &second, 0, false, 302},
         };
-        assert(!preSpent->observe({held, later, staleFrames, scanout}));
+        assert(!preSpent->observe({held, later, staleFrames, scanout,
+                                   outputCommits(held, staleFrames)}));
         assert(preSpent->phase() == Phase::Faulted);
         assert(!preSpent->spend(held, later, moved, scanout));
 
@@ -211,7 +228,7 @@ int main()
         };
         if (scenario == 2)
             frames[1].key = held.heads[0].key; // Other native output's completion.
-        assert(!proof->observe({held, later, frames, scanout}));
+        assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
         assert(proof->phase() == Phase::Faulted);
         assert(!proof->spend(held, later, before, scanout));
     }
@@ -226,31 +243,58 @@ int main()
             {held.heads[0].key, nullptr, nullptr, 0, false, 0},
             {held.heads[1].key, nullptr, nullptr, 0, false, 0},
         };
-        assert(!absent->observe({held, later, noFrames, scanout}));
+        assert(!absent->observe({held, later, noFrames, scanout, outputCommits(held, noFrames)}));
         assert(absent->phase() == Phase::Spent);
         ProtectedFrame freshFirst;
         ProtectedFrame freshSecond;
         completed(freshFirst, &first, 8, Kind::Content);
         completed(freshSecond, &second, 9, Kind::Content);
         noFrames[0] = {held.heads[0].key, &freshFirst, &first, 0, false, 301};
-        assert(!absent->observe({held, later, noFrames, scanout}));
+        assert(!absent->observe({held, later, noFrames, scanout, outputCommits(held, noFrames)}));
         assert(absent->phase() == Phase::Spent);
         noFrames[1] = {held.heads[1].key, &freshSecond, &second, 0, false, 302};
-        assert(absent->observe({held, later, noFrames, scanout}));
+        assert(absent->observe({held, later, noFrames, scanout, outputCommits(held, noFrames)}));
         assert(absent->phase() == Phase::Verified);
 
         auto incomplete = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(incomplete && incomplete->spend(held, later, before, scanout));
         noFrames[0] = {held.heads[0].key, nullptr, &first, 0, false, 301};
-        assert(!incomplete->observe({held, later, noFrames, scanout}));
+        assert(!incomplete->observe({held, later, noFrames, scanout,
+                                     outputCommits(held, noFrames)}));
         assert(incomplete->phase() == Phase::Faulted);
 
         auto expired = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(expired && expired->spend(held, later, before, scanout));
         noFrames[0] = {held.heads[0].key, nullptr, nullptr, 0, false, 0};
         noFrames[1] = {held.heads[1].key, nullptr, nullptr, 0, false, 0};
-        assert(!expired->observe({held, {12'000, 7'000}, noFrames, scanout}));
+        assert(!expired->observe({held, {12'000, 7'000}, noFrames, scanout,
+                                  outputCommits(held, noFrames)}));
         assert(expired->phase() == Phase::Faulted);
+    }
+
+    // A native commit can be queued before its independent IOutput result
+    // is observed. That scheduling gap remains pending, never an immediate
+    // physical receipt. An unrelated third commit faults the original window.
+    {
+        ProtectedFrame queued;
+        assert(queued.rendered(&first, Kind::Content));
+        assert(queued.queued(&first, 8));
+        std::vector<NativeFirstFrameGate::NativeFrame> pendingFrames{
+            {held.heads[0].key, &queued, &first, 0, false, 301},
+            {held.heads[1].key, nullptr, nullptr, 0, false, 0},
+        };
+        auto pending = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(pending && pending->spend(held, later, before, scanout));
+        auto commits = baseline(held);
+        assert(!pending->observe({held, later, pendingFrames, scanout, commits}));
+        assert(pending->phase() == Phase::Spent);
+        assert(queued.submitted(8, true));
+        commits[0].previousCommit = 8;
+        assert(!pending->observe({held, later, pendingFrames, scanout, commits}));
+        assert(pending->phase() == Phase::Spent);
+        commits[0].previousCommit = 9; // Some other native output write.
+        assert(!pending->observe({held, later, pendingFrames, scanout, commits}));
+        assert(pending->phase() == Phase::Faulted);
     }
 
     // No first frame remains pending, without extending the original clocks.
@@ -262,12 +306,13 @@ int main()
         {held.heads[0].key, &a, &first, 0, false, 301},
         {held.heads[1].key, &b, &second, 0, false, 302},
     };
-    assert(!proof->observe({held, later, frames, scanout}));
+    assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
     assert(proof->phase() == Phase::Spent);
     completed(a, &first, 8, Kind::Content);
-    assert(!proof->observe({held, later, frames, scanout}));
+    assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
     completed(b, &second, 9, Kind::Content);
-    const auto receipt = proof->observe({held, later, frames, scanout});
+    const auto receipt = proof->observe({held, later, frames, scanout,
+                                         outputCommits(held, frames)});
     assert(receipt);
     assert(receipt->generation == held.generation);
     assert(receipt->securityEpoch == held.securityEpoch);
@@ -286,8 +331,43 @@ int main()
     assert(receipt->completed[0].kernel.crtc == scanout[0].crtc);
     assert(receipt->completed[1].kernel.plane == scanout[1].plane);
     assert(proof->phase() == Phase::Verified);
-    assert(!proof->observe({held, later, frames, scanout})); // Never redeliver or renew.
+    // Never redeliver or renew.
+    assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
     assert(!proof->spend(held, later, before, scanout));
+
+    // An independently subscribed IOutput counter cannot be replaced by
+    // the frame tracker's own counter. Concurrent or substituted output
+    // commits after LNRX are not valid physical-release evidence.
+    for (int mismatch = 0; mismatch < 6; ++mismatch) {
+        auto independent = outputCommits(held, frames);
+        if (mismatch == 0)
+            independent[0].previousCommit = 0;
+        else if (mismatch == 1)
+            independent[0].previousCommit = 7;
+        else if (mismatch == 2)
+            independent[0].previousCommit = 9;
+        else if (mismatch == 3)
+            independent[0].key.generation++;
+        else if (mismatch == 4)
+            independent[0].previousCommit = std::numeric_limits<std::uint64_t>::max();
+        else
+            independent[1].key = independent[0].key;
+        auto guarded = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(guarded && guarded->spend(held, later, before, scanout));
+        assert(!guarded->observe({held, later, frames, scanout, independent}));
+        assert(guarded->phase() == Phase::Faulted);
+    }
+
+    // A spent grant has one original clock window, even when nobody asks
+    // for a frame receipt. The caller's periodic watchdog must latch expiry.
+    {
+        auto watchdog = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(watchdog && watchdog->spend(held, later, before, scanout));
+        assert(watchdog->retain(held, later));
+        assert(!watchdog->retain(held, ClockSample{12'000, 7'000}));
+        assert(watchdog->phase() == Phase::Faulted);
+        assert(!watchdog->retain(held, later));
+    }
 
     for (int scenario = 0; scenario < 5; ++scenario) {
         auto current = held;
@@ -302,7 +382,8 @@ int main()
         else if (scenario == 3)
             current.heads[0].current.x++;
         const auto when = scenario == 4 ? ClockSample{12'000, 7'000} : later;
-        assert(!candidate->observe({current, when, frames, scanout}));
+        assert(!candidate->observe({current, when, frames, scanout,
+                                    outputCommits(current, frames)}));
         assert(candidate->phase() == Phase::Faulted);
     }
 
@@ -318,7 +399,7 @@ int main()
             drift[0].plane += 20;
         auto heldGate = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(heldGate && heldGate->spend(held, later, before, scanout));
-        assert(!heldGate->observe({held, later, frames, drift}));
+        assert(!heldGate->observe({held, later, frames, drift, outputCommits(held, frames)}));
         assert(heldGate->phase() == Phase::Faulted);
     }
 
@@ -330,17 +411,17 @@ int main()
         badKernel[0].framebuffer++;
         auto mismatch = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(mismatch && mismatch->spend(held, later, before, scanout));
-        assert(!mismatch->observe({held, later, frames, badKernel}));
+        assert(!mismatch->observe({held, later, frames, badKernel, outputCommits(held, frames)}));
         assert(mismatch->phase() == Phase::Faulted);
         badKernel = scanout;
         badKernel[1].connector = badKernel[0].connector;
         auto alias = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(alias && alias->spend(held, later, before, scanout));
-        assert(!alias->observe({held, later, frames, badKernel}));
+        assert(!alias->observe({held, later, frames, badKernel, outputCommits(held, frames)}));
         assert(alias->phase() == Phase::Faulted);
         auto absent = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(absent && absent->spend(held, later, before, scanout));
-        assert(!absent->observe({held, later, frames, {}}));
+        assert(!absent->observe({held, later, frames, {}, outputCommits(held, frames)}));
         assert(absent->phase() == Phase::Faulted);
     }
 
@@ -356,15 +437,24 @@ int main()
         {partlyDisabled.heads[0].key, &a, &first, 0, false, 301},
         {partlyDisabled.heads[1].key, nullptr, nullptr, 7, true, 0},
     };
-    assert(!disabled->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
+    assert(!disabled->observe({partlyDisabled, later, disabledFrames, disabledKernel,
+                               outputCommits(partlyDisabled, disabledFrames)}));
     assert(disabled->phase() == Phase::Faulted);
     auto disabledFresh =
         NativeFirstFrameGate::arm({partlyDisabled, 24, start, disabledBefore, disabledKernel});
     assert(disabledFresh);
     assert(disabledFresh->spend(partlyDisabled, later, disabledBefore, disabledKernel));
     disabledFrames[1].disableCommit = 10;
+    disabledFrames[1].disableSubmitted = false;
+    // The disabled-output commit result may not have arrived yet. It may
+    // remain pending under the old high-water, but cannot verify early.
+    assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel,
+                                    outputCommits(partlyDisabled, disabledFrames)}));
+    assert(disabledFresh->phase() == Phase::Spent);
+    disabledFrames[1].disableSubmitted = true;
     const auto disabledReceipt =
-        disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel});
+        disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel,
+                                outputCommits(partlyDisabled, disabledFrames)});
     assert(disabledReceipt);
     assert(disabledReceipt->completedCount == 2);
     assert(disabledReceipt->completed[1].spendHighWater == 7);
@@ -375,7 +465,8 @@ int main()
     assert(disabledReceipt->completed[1].kernel.connector == disabledKernel[1].connector);
     assert(disabledReceipt->completed[1].kernel.crtc == 0);
     assert(disabledReceipt->completed[1].kernel.framebuffer == 0);
-    assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel}));
+    assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel,
+                                    outputCommits(partlyDisabled, disabledFrames)}));
 
     const ClockSample exhaustedClock{std::numeric_limits<std::uint64_t>::max(), 5'000};
     auto exhaustion = NativeFirstFrameGate::arm({held, 13, exhaustedClock, before, scanout});

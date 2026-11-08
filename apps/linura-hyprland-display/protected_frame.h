@@ -84,6 +84,12 @@ class ProtectedFrame final
     {
         return completed() ? id_ : 0;
     }
+    // Output-local queued commit, not physical completion and never a
+    // substitute for the separately subscribed IOutput commit history.
+    [[nodiscard]] std::uint64_t queuedCommit() const noexcept
+    {
+        return failed_ ? 0 : id_;
+    }
     [[nodiscard]] Kind pendingKind() const noexcept
     {
         return pendingKind_;
