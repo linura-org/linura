@@ -25,6 +25,7 @@ mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
     AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayRetirementPreparation,
+    AuthorizedOriginalDisplayNativeReleaseReservation, OriginalDisplayNativeReleaseReservationPort,
     OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
     OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,

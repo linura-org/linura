@@ -20,6 +20,7 @@ mod authority_clock;
 mod display_checkpoint;
 mod display_finalization_intent;
 mod display_finalization_plan;
+mod display_native_release_reservation;
 mod display_plan;
 mod display_recovery_journal;
 mod display_restoration_link;
@@ -85,7 +86,7 @@ pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
     AuthorizedEffectExecutor, AuthorizedOriginalDisplayFinalization,
     AuthorizedOriginalDisplayRestoration, AuthorizedOriginalDisplayRetirementPreparation,
-    DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
+    AuthorizedOriginalDisplayNativeReleaseReservation, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
     DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
     DisplayVerificationTarget, IndependentDisplayVerifier, IndependentManagedVerifier,
     MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
@@ -98,7 +99,8 @@ pub use managed_lifecycle::{
     OriginalDisplayFinalizationRequest, OriginalDisplayQuiescenceInspection,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
-    OriginalDisplayRetirementPreparationPort, TrustedDisplayDecision, TrustedHumanApproval,
+    OriginalDisplayRetirementPreparationPort, OriginalDisplayNativeReleaseReservationPort,
+    TrustedDisplayDecision, TrustedHumanApproval,
     managed_request_id,
 };
 pub use operation_registry::{

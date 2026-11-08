@@ -213,8 +213,12 @@ witness, native scene, S17/input and power protection and ordinary startup
 exclusion. Root also has an **unpromoted**, one-use `LNRN:1` native-release
 reservation, with matching live Control/Root ownership, durable ancestry,
 quiescence and readback under the existing admission lock. The supervised
-Control-to-Root transport can reserve it once after a separate committed
-Control release decision exists. Once reserved, authenticated Root
+Control-to-Root transport now accepts a separately committed, write-once
+Control native-reservation decision after fresh RootRetiredHeld proof, captures
+the exact original Control observation and immutable history, and reserves the
+single Root LNRN:1 marker with authenticated pre/post readback. This decision
+does NOT commit terminal completion, release physical protection or renew an
+original clock. Once reserved, authenticated Root
 `ReadFinalization` reports the distinct before-effect phase
 `native-release-reserved` (wire 5); Control separately joins the exact
 spent journal/Root/native held facts in a read-only lost-ack query.
