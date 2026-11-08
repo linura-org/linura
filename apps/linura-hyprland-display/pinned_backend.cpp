@@ -923,16 +923,26 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     const auto started = backend->clock();
     const auto budget = [&]() {
         const auto now = backend->clock();
-        if (!started || !now || now->unixMs < started->unixMs ||
-            now->bootMs < started->bootMs)
+        if (!started || !now)
             return false;
-        return now->unixMs - started->unixMs < 2'000 &&
-               now->bootMs - started->bootMs < 2'000;
+        if (now->unixMs < started->unixMs)
+            return false;
+        if (now->bootMs < started->bootMs)
+            return false;
+        if (now->unixMs - started->unixMs >= 2'000)
+            return false;
+        return now->bootMs - started->bootMs < 2'000;
     };
     const auto begin = backend->snapshot();
-    if (!budget() || !begin || *begin != expected ||
-        !backend->originalRecovery->grant->verify() ||
-        !backend->originalRecovery->protection->healthy() || !budget())
+    if (!budget() || !begin)
+        return std::nullopt;
+    if (*begin != expected)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    if (!budget())
         return std::nullopt;
     std::vector<NativeFirstFrameGate::NativeScanout> scanout;
     scanout.reserve(expected.heads.size());
@@ -966,9 +976,15 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
                            kernel->plane, kernel->active});
     }
     const auto after = backend->snapshot();
-    if (!budget() || !after || *after != expected ||
-        !backend->originalRecovery->grant->verify() ||
-        !backend->originalRecovery->protection->healthy() || !budget())
+    if (!budget() || !after)
+        return std::nullopt;
+    if (*after != expected)
+        return std::nullopt;
+    if (!backend->originalRecovery->grant->verify())
+        return std::nullopt;
+    if (!backend->originalRecovery->protection->healthy())
+        return std::nullopt;
+    if (!budget())
         return std::nullopt;
     return scanout;
 }
