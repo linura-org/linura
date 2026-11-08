@@ -914,12 +914,11 @@ class PinnedBackend final : public Backend
         // identity must not borrow a predecessor's commit-result high-water.
         // Disconnect the retired listener before any new subscription.
         std::erase_if(outputCommitObservers, [&](const auto &entry) {
-            const auto current =
-                std::find_if(bindings.begin(), bindings.end(), [&](const Binding &binding) {
-                    return entry.first == binding.key;
-                });
-            return current == bindings.end() ||
-                   entry.second->output.lock() != current->output.lock();
+            for (const auto &binding : bindings) {
+                if (entry.first == binding.key)
+                    return entry.second->output.lock() != binding.output.lock();
+            }
+            return true;
         });
         for (const auto &binding : bindings) {
             if (outputCommitObservers.contains(binding.key))
@@ -1062,8 +1061,7 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
     return scanout;
 }
 
-NativeFirstFrameOutputCommits
-nativeFirstFrameOutputHighWater(const Correlation &original, const Snapshot &expected)
+NativeOutputCommits nativeOutputHighWater(const Correlation &original, const Snapshot &expected)
 {
     if (!backend || !backend->originalRecovery || backend->originalRecovery->failed ||
         backend->writing || backend->commitFailed ||
@@ -1117,7 +1115,7 @@ NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snaps
         return std::nullopt;
     const auto protectedSample = readProtectedBaseline(original, expected);
     const auto scanout = nativeFirstFrameKernel(original, expected);
-    const auto outputHighWater = nativeFirstFrameOutputHighWater(original, expected);
+    const auto outputHighWater = nativeOutputHighWater(original, expected);
     const auto finished = backend->clock();
     const auto final = backend->snapshot();
     if (!protectedSample || !scanout || !outputHighWater || !finished || !final)

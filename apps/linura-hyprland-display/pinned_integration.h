@@ -36,9 +36,8 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected);
 // KMS evidence, Root channel and retained safety frames. Does not spend
 // a grant or establish output-wide spend-time high-water.
 using NativeFirstFrameArm = std::optional<NativeFirstFrameGate>;
-using NativeFirstFrameOutputCommits = std::optional<std::vector<NativeFirstFrameGate::Output>>;
-[[nodiscard]] NativeFirstFrameOutputCommits
-nativeFirstFrameOutputHighWater(const Correlation &, const Snapshot &);
+using NativeOutputCommits = std::optional<std::vector<NativeFirstFrameGate::Output>>;
+[[nodiscard]] NativeOutputCommits nativeOutputHighWater(const Correlation &, const Snapshot &);
 [[nodiscard]] NativeFirstFrameArm nativeFirstFrameArm(const Correlation &, const Snapshot &);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
