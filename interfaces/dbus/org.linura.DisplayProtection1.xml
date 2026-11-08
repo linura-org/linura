@@ -68,6 +68,17 @@
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
+    <method name="ReserveNativeReleaseGrant">
+      <!-- Supervised Control only, after the exact live LNRN reservation.
+           Original compositor credentials are independently authenticated on
+           EVERY grant fragment. Root writes immutable LNRX and fsyncs before
+           acknowledging one spend. This is not physical release, Control
+           completion, input unlock or ordinary startup admission. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
     <method name="NativeStartup">
       <!-- Only the freshly attested, independently supervised native owner.
            Tuple: original lock/login, native PID, seat, compositor invocation,
