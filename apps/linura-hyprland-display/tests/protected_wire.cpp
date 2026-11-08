@@ -328,8 +328,8 @@ void spendSyntheticRootGrant(Client &client, int descriptor)
     const std::string digest(64, 'b');
     const auto *material = digest.c_str();
     linura_protected_display_interaction_v1_spend_native_release(
-        client.interaction, descriptor, "transaction:terminal", material, material, 0, 20'000, 0,
-        1, 0, 7, material, material);
+        client.interaction, descriptor, "transaction:terminal", material, material, 0, 20'000, 0, 1,
+        0, 7, material, material);
     client.roundtrip();
 }
 void ownerReplacement()

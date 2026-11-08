@@ -79,7 +79,10 @@ impl NativeReleaseSpendPrepared {
             || snapshot.state != TransactionState::Indeterminate
             || snapshot.state_version == 0
             || snapshot.binding_digest == ContentDigest::zero()
-            || !request.request_id.as_str().starts_with("request:v010:display-finalization:")
+            || !request
+                .request_id
+                .as_str()
+                .starts_with("request:v010:display-finalization:")
             || !linura_provider_sdk::ComponentDigest::parse_hex(dispatch)
                 .is_ok_and(|digest| digest.to_hex() == dispatch)
             || now == 0
@@ -102,12 +105,15 @@ impl NativeReleaseSpendPrepared {
         if now >= expiry {
             return Err(invalid());
         }
-        let effect = linura_provider_sdk::display_finalization_effect(material)
-            .map_err(|_| invalid())?;
+        let effect =
+            linura_provider_sdk::display_finalization_effect(material).map_err(|_| invalid())?;
         if request.provider != effect.provider
             || request.resource != effect.resource
             || request.desired_state.len() != 1
-            || request.desired_state.get("finalize_original").map(String::as_bytes)
+            || request
+                .desired_state
+                .get("finalize_original")
+                .map(String::as_bytes)
                 != Some(effect.canonical_payload.as_slice())
         {
             return Err(invalid());
@@ -171,15 +177,29 @@ impl NativeReleaseSpendPrepared {
         let key = Self::key(&request.request_id)?;
         let retained = journal.load(principal, &key).map_err(|_| invalid())?;
         let bytes = retained.canonical();
-        if retained.principal() != principal || retained.request_id() != &key
-            || bytes.is_empty() || bytes.len() > MAX_BYTES
+        if retained.principal() != principal
+            || retained.request_id() != &key
+            || bytes.is_empty()
+            || bytes.len() > MAX_BYTES
         {
             return Err(invalid());
         }
         let mut rest = bytes;
         let mut fields = Vec::with_capacity(13);
         for max in [
-            DOMAIN.len(), 128, 256, 256, 128, 20, 128, 64, 128, 128, 128, 20, 20,
+            DOMAIN.len(),
+            128,
+            256,
+            256,
+            128,
+            20,
+            128,
+            64,
+            128,
+            128,
+            128,
+            20,
+            20,
         ] {
             fields.push(field(&mut rest, max)?);
         }
@@ -200,12 +220,13 @@ impl NativeReleaseSpendPrepared {
         }
         let observed_at = number(fields[11])?;
         let expiry = number(fields[12])?;
-        if expiry <= observed_at || expiry - observed_at > 2_000
-            || expiry > parent.expiry()
-        {
+        if expiry <= observed_at || expiry - observed_at > 2_000 || expiry > parent.expiry() {
             return Err(invalid());
         }
-        Ok(Self { canonical: bytes.to_vec(), expiry })
+        Ok(Self {
+            canonical: bytes.to_vec(),
+            expiry,
+        })
     }
 
     pub(crate) fn require_absent(
@@ -226,10 +247,12 @@ impl NativeReleaseSpendPrepared {
         principal: PrincipalId,
         request: &RequestId,
     ) -> Result<(), ManagedLifecycleError> {
-        journal.retain(
-            &RetainedRequest::new(principal, Self::key(request)?, self.canonical.clone())
-                .map_err(|_| invalid())?,
-        ).map_err(|_| invalid())
+        journal
+            .retain(
+                &RetainedRequest::new(principal, Self::key(request)?, self.canonical.clone())
+                    .map_err(|_| invalid())?,
+            )
+            .map_err(|_| invalid())
     }
     pub(crate) fn require_readback(
         &self,
@@ -240,7 +263,8 @@ impl NativeReleaseSpendPrepared {
         journal.integrity_check().map_err(|_| invalid())?;
         let key = Self::key(request)?;
         let retained = journal.load(principal, &key).map_err(|_| invalid())?;
-        if retained.principal() != principal || retained.request_id() != &key
+        if retained.principal() != principal
+            || retained.request_id() != &key
             || retained.canonical() != self.canonical
         {
             return Err(invalid());
@@ -269,7 +293,9 @@ mod tests {
             Ok(())
         }
         fn load(
-            &self, principal: &PrincipalId, request: &RequestId,
+            &self,
+            principal: &PrincipalId,
+            request: &RequestId,
         ) -> Result<RetainedRequest, TransactionStoreError> {
             self.0
                 .get(&(principal.clone(), request.clone()))
@@ -292,18 +318,35 @@ mod tests {
             expiry: 10_000,
         };
         let mut journal = Journal::default();
-        valid(NativeReleaseSpendPrepared::require_absent(&journal, &principal, &request));
+        valid(NativeReleaseSpendPrepared::require_absent(
+            &journal, &principal, &request,
+        ));
         valid(once.append(&mut journal, principal.clone(), &request));
         valid(once.require_readback(&journal, &principal, &request));
-        assert!(NativeReleaseSpendPrepared::require_absent(&journal, &principal, &request).is_err());
-        assert!(once.append(&mut journal, principal.clone(), &request).is_err());
+        assert!(
+            NativeReleaseSpendPrepared::require_absent(&journal, &principal, &request).is_err()
+        );
+        assert!(
+            once.append(&mut journal, principal.clone(), &request)
+                .is_err()
+        );
         let altered = NativeReleaseSpendPrepared {
             canonical: vec![1, 3, 5, 8],
             expiry: 10_000,
         };
-        assert!(altered.require_readback(&journal, &principal, &request).is_err());
-        assert!(altered.append(&mut journal, principal.clone(), &request).is_err());
+        assert!(
+            altered
+                .require_readback(&journal, &principal, &request)
+                .is_err()
+        );
+        assert!(
+            altered
+                .append(&mut journal, principal.clone(), &request)
+                .is_err()
+        );
         let other = valid(PrincipalId::new("unix:uid:1001"));
-        valid(NativeReleaseSpendPrepared::require_absent(&journal, &other, &request));
+        valid(NativeReleaseSpendPrepared::require_absent(
+            &journal, &other, &request,
+        ));
     }
 }

@@ -652,7 +652,9 @@ impl NativeSessionChannel {
         }
         let intended = linura_core::DisplayFinalizationMaterial::decode(material)
             .map_err(|_| "native Root release spend terminal intent malformed")?;
-        let scope = intended.recovery_scope().map_err(|error| error.to_string())?;
+        let scope = intended
+            .recovery_scope()
+            .map_err(|error| error.to_string())?;
         let key = scope.resource_id().map_err(|error| error.to_string())?;
         let binding =
             ComponentDigest::parse_hex(control_binding).map_err(|error| error.to_string())?;
@@ -667,7 +669,12 @@ impl NativeSessionChannel {
         let started = Instant::now();
         let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
         let read = |expected_phase: u32| -> Result<
-            (Vec<u8>, Vec<u8>, crate::NativeDisplayFinalizationReservation), String
+            (
+                Vec<u8>,
+                Vec<u8>,
+                crate::NativeDisplayFinalizationReservation,
+            ),
+            String,
         > {
             let reply = self.call(
                 &root.sender,
