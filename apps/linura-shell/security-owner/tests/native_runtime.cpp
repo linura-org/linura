@@ -601,6 +601,7 @@ int main(int argc, char **argv)
     assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RestoreOriginalDisplay")));
     assert(introspection.contains(QStringLiteral("QuiesceOriginalDisplayFinalization")));
+    assert(introspection.contains(QStringLiteral("SpendOriginalDisplayNativeRelease")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
