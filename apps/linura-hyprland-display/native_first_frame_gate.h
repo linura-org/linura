@@ -68,6 +68,9 @@ class NativeFirstFrameGate final
         // physical scanout. A completed commit number without its connector,
         // CRTC, primary plane and framebuffer cannot be reconciled by Control.
         NativeScanout kernel;
+        // Immutable native output-owned counter read at the irreversible
+        // grant spend boundary. Control must compare both counter values.
+        std::uint64_t spendHighWater = 0;
         std::uint64_t completedCommit = 0;
     };
     struct Receipt final
@@ -107,6 +110,8 @@ class NativeFirstFrameGate final
         for (std::size_t i = 0; i < held.heads.size(); ++i) {
             const auto &head = held.heads[i];
             if (head.key != before[i].key || head.key.generation == 0 ||
+                before[i].previousCommit == 0 ||
+                before[i].previousCommit == std::numeric_limits<std::uint64_t>::max() ||
                 head.outputIdentityWitness.empty() || head.baseRuleWitness.empty() ||
                 (i && before[i - 1].key.handle >= head.key.handle) ||
                 (head.current.enabled &&
@@ -232,7 +237,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {scanout, commit};
+                receipt.completed[receipt.completedCount++] = {scanout, spentCommit_[i], commit};
             } else {
                 if (frame.frame || frame.retainedBuffer || frame.retainedFramebuffer) {
                     phase_ = Phase::Faulted;
@@ -250,7 +255,7 @@ class NativeFirstFrameGate final
                     phase_ = Phase::Faulted;
                     return {};
                 }
-                receipt.completed[receipt.completedCount++] = {scanout, frame.disableCommit};
+                receipt.completed[receipt.completedCount++] = {scanout, spentCommit_[i], frame.disableCommit};
             }
         }
         if (pending)

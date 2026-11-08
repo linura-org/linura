@@ -90,6 +90,11 @@ int main()
     invalid = held;
     invalid.heads[1].key = invalid.heads[0].key;
     assert(!NativeFirstFrameGate::arm({invalid, 1, start, before}));
+    auto uninitialized = before;
+    uninitialized[0].previousCommit = 0;
+    assert(!NativeFirstFrameGate::arm({held, 1, start, uninitialized}));
+    uninitialized[0].previousCommit = std::numeric_limits<std::uint64_t>::max();
+    assert(!NativeFirstFrameGate::arm({held, 1, start, uninitialized}));
     auto mismatched = before;
     mismatched[0].key.generation++;
     assert(!NativeFirstFrameGate::arm({held, 1, start, mismatched}));
@@ -237,8 +242,12 @@ int main()
     assert(receipt->securityEpoch == held.securityEpoch);
     assert(receipt->postWriteEpoch == 13);
     assert(receipt->completedCount == 2);
+    assert(receipt->completed[0].spendHighWater == 7);
+    assert(receipt->completed[1].spendHighWater == 7);
     assert(receipt->completed[0].completedCommit == 8);
     assert(receipt->completed[1].completedCommit == 9);
+    assert(receipt->completed[0].completedCommit > receipt->completed[0].spendHighWater);
+    assert(receipt->completed[1].completedCommit > receipt->completed[1].spendHighWater);
     assert(receipt->completed[0].kernel.key == held.heads[0].key);
     assert(receipt->completed[1].kernel.key == held.heads[1].key);
     assert(receipt->completed[0].kernel.framebuffer == scanout[0].framebuffer);
@@ -308,7 +317,10 @@ int main()
         disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel});
     assert(disabledReceipt);
     assert(disabledReceipt->completedCount == 2);
+    assert(disabledReceipt->completed[1].spendHighWater == 7);
     assert(disabledReceipt->completed[1].completedCommit == 10);
+    assert(disabledReceipt->completed[1].completedCommit >
+           disabledReceipt->completed[1].spendHighWater);
     assert(!disabledReceipt->completed[1].kernel.active);
     assert(disabledReceipt->completed[1].kernel.connector == disabledKernel[1].connector);
     assert(disabledReceipt->completed[1].kernel.crtc == 0);
