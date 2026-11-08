@@ -25,10 +25,12 @@ mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
     AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativeReleaseReservation,
+    AuthorizedOriginalDisplayNativeReleaseSpend,
     AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort,
     OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
 };
 pub use release::OrdinaryDisplayReleaseInspection;

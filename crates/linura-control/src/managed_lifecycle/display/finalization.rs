@@ -5,6 +5,7 @@ use super::*;
 use crate::display_finalization_intent::FinalizationIntent;
 use crate::display_finalization_plan::FinalizationPlanningContext;
 use crate::display_native_release_reservation::NativeReleasePrepared;
+use crate::display_native_release_spend::NativeReleaseSpendPrepared;
 use crate::display_restoration_link::RestorationLink;
 use crate::display_restoration_plan::OriginalDisplayPlanningContext;
 use linura_core::{DisplayFinalizationMaterial, DisplayRestorationMaterial, SemanticReason};
@@ -219,6 +220,56 @@ pub trait OriginalDisplayNativeReleaseReservationPort: Debug + Send {
     fn reserve_native_release(
         &mut self,
         reservation: AuthorizedOriginalDisplayNativeReleaseReservation,
+    ) -> Result<(), String>;
+}
+
+/// A separately durably spent Control intent for the one-use ORIGINAL Root
+/// LNRS/LNRW channel. Its exact terminal ancestry was reloaded from Control
+/// before this object was minted. Not a physical output permit or a terminal
+/// completion, and cannot be reused after an uncertain reply.
+pub struct AuthorizedOriginalDisplayNativeReleaseSpend {
+    material: String,
+    terminal: TransactionSnapshot,
+    dispatch_digest: String,
+    control_observation: linura_transaction::ContentDigest,
+    expires_at_unix_ms: u64,
+}
+impl Debug for AuthorizedOriginalDisplayNativeReleaseSpend {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("AuthorizedOriginalDisplayNativeReleaseSpend")
+            .field("terminal_transaction", &self.terminal.transaction_id)
+            .field("expires_at_unix_ms", &self.expires_at_unix_ms)
+            .finish_non_exhaustive()
+    }
+}
+impl AuthorizedOriginalDisplayNativeReleaseSpend {
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+    #[must_use]
+    pub fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+    #[must_use]
+    pub fn dispatch_digest(&self) -> &str {
+        &self.dispatch_digest
+    }
+    #[must_use]
+    pub fn control_observation(&self) -> &linura_transaction::ContentDigest {
+        &self.control_observation
+    }
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
+}
+/// Private typed effect port; only Control may mint this after durable
+/// before-effect spend. A successful response means LNRX, not physical release.
+pub trait OriginalDisplayNativeReleaseSpendPort: Debug + Send {
+    fn spend_native_release(
+        &mut self,
+        attempt: AuthorizedOriginalDisplayNativeReleaseSpend,
     ) -> Result<(), String>;
 }
 
@@ -990,6 +1041,19 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else {
             None
         };
+        let spend_decision = if expected == DisplayFinalizationPhase::NativeReleaseSpent {
+            Some(NativeReleaseSpendPrepared::load_spent(
+                self.display_journal()?,
+                &principal_id,
+                &terminal.request,
+                &terminal.snapshot,
+                dispatch,
+                terminal.intent.material(),
+                native_decision.as_ref().ok_or_else(invalid)?,
+            )?)
+        } else {
+            None
+        };
         let proof =
             self.inspect_terminal_phase(principal.clone(), actor, terminal_request, expected)?;
         // A lost reply is reconciled by fresh physical facts and the exact
@@ -1017,6 +1081,17 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                     terminal.intent.material(),
                     &before,
                 )?))
+            || (expected == DisplayFinalizationPhase::NativeReleaseSpent
+                && spend_decision
+                    != Some(NativeReleaseSpendPrepared::load_spent(
+                        self.display_journal()?,
+                        &principal_id,
+                        &terminal.request,
+                        &terminal.snapshot,
+                        dispatch,
+                        terminal.intent.material(),
+                        native_decision.as_ref().ok_or_else(invalid)?,
+                    )?))
         {
             return Err(invalid());
         }
@@ -1281,6 +1356,128 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(invalid());
         }
         Ok(()) // The native physical-release grant/consumer remains unsupported.
+    }
+
+    /// Privately dispatch one Root/native spent-before-effect protocol only
+    /// after another immutable Control journal entry, distinct from the prior
+    /// LNRN reservation. The exact original terminal, independent sources,
+    /// Root identity and earlier Control reservation must remain unchanged.
+    /// This stage never authorizes first ordinary output or fence retirement.
+    pub fn spend_original_display_native_release<P: OriginalDisplayNativeReleaseSpendPort>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        port: &mut P,
+    ) -> Result<(), ManagedLifecycleError> {
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "native Root release spend requires authenticated interactive ownership".into(),
+            ));
+        }
+        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
+        let original = crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+            self.display_journal()?,
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            dispatch,
+            terminal.intent.material(),
+        )?;
+        let reserved = NativeReleasePrepared::load_spent(
+            self.display_journal()?,
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            dispatch,
+            terminal.intent.material(),
+            &original,
+        )?;
+        NativeReleaseSpendPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        let held = self.inspect_native_release_reserved_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            terminal_request,
+        )?;
+        if held.terminal != terminal.snapshot
+            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
+        {
+            return Err(invalid());
+        }
+        let now = now_ms()?;
+        let record = NativeReleaseSpendPrepared::capture(
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            dispatch,
+            terminal.intent.material(),
+            &reserved,
+            held.restoration.observation(),
+            now,
+        )?;
+        NativeReleaseSpendPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        record.append(
+            self.request_journal.as_deref_mut().ok_or_else(invalid)?,
+            principal_id.clone(),
+            terminal_request,
+        )?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry()
+            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
+            || NativeReleasePrepared::load_spent(
+                self.display_journal()?,
+                &principal_id,
+                &terminal.request,
+                &terminal.snapshot,
+                dispatch,
+                terminal.intent.material(),
+                &original,
+            )? != reserved
+        {
+            return Err(invalid());
+        }
+        // Root's LNRN material contains the Control retirement observation,
+        // NOT a newly sampled observation digest; using the new one here would
+        // silently substitute the original Root/terminal grant ancestry.
+        let attempt = AuthorizedOriginalDisplayNativeReleaseSpend {
+            material: terminal.intent.material().to_owned(),
+            terminal: terminal.snapshot.clone(),
+            dispatch_digest: dispatch.to_owned(),
+            control_observation: original.observation().clone(),
+            expires_at_unix_ms: record.expiry(),
+        };
+        port.spend_native_release(attempt).map_err(|_| {
+            ManagedLifecycleError::Indeterminate(
+                "native Root release grant spend outcome uncertain; no retry".into(),
+            )
+        })?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        let after = self.inspect_native_release_spent_original_display_finalization(
+            principal.clone(),
+            actor,
+            terminal_request,
+        )?;
+        if after.terminal != terminal.snapshot
+            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
+            || now_ms()? >= record.expiry()
+        {
+            return Err(invalid());
+        }
+        Ok(()) // Root LNRX spent, not an independently committed physical release.
     }
 
     fn terminal_inspection_context(

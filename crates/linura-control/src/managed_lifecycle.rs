@@ -7,6 +7,7 @@ mod display;
 pub use display::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation,
     AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativeReleaseReservation,
+    AuthorizedOriginalDisplayNativeReleaseSpend,
     AuthorizedOriginalDisplayRestoration, AuthorizedOriginalDisplayRetirementPreparation,
     DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
     DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
@@ -14,7 +15,8 @@ pub use display::{
     OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
     OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
-    OriginalDisplayNativeReleaseReservationPort, OriginalDisplayQuiescenceInspection,
+    OriginalDisplayNativeReleaseReservationPort, OriginalDisplayNativeReleaseSpendPort,
+    OriginalDisplayQuiescenceInspection,
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
     OriginalDisplayRetirementPreparationPort, TrustedDisplayDecision,

@@ -86,7 +86,8 @@ pub use durable_authority::{
 pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
     AuthorizedEffectExecutor, AuthorizedOriginalDisplayFinalization,
-    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayRestoration,
+    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
+    AuthorizedOriginalDisplayRestoration,
     AuthorizedOriginalDisplayRetirementPreparation, DISPLAY_CONFIRMATION_WINDOW_MS,
     DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
     DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
@@ -99,6 +100,7 @@ pub use managed_lifecycle::{
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort,
     OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
     OriginalDisplayRestorationTerminalReceipt, OriginalDisplayRetirementPreparationPort,
