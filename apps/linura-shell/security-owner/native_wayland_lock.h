@@ -82,6 +82,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     quiesceOriginalDisplayFinalization(const NativeDisplayFinalizationIntent &,
                                        const NativeDisplayCorrelation &,
                                        quint64 validatedSampledBootMs, int terminalGrant);
+    [[nodiscard]] std::optional<quint32> spendOriginalDisplayNativeRelease(
+        const NativeDisplayFinalizationIntent &, const NativeDisplayCorrelation &,
+        quint64 sampledBootMs, quint64 controlVersion,
+        const QString &controlBinding, const QString &controlObservation, int nativeGrant);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &,
                                                                  quint64 originalSampledBootMs);
