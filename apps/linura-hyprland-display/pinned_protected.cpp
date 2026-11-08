@@ -833,23 +833,22 @@ class PinnedScene final : public ProtectedScene
             return refuse();
         const auto held = data->stableInventory;
         auto gate = nativeFirstFrameArm(data->bound, held);
-        if (!gate || !data->refresh() ||
-            !data->terminalGrant->verify() || heldInput().any)
+        if (!gate || !data->refresh() || !data->terminalGrant->verify() || heldInput().any)
             return refuse();
         // Root authenticates the current original compositor peer and writes
         // LNRX:1 durably BEFORE returning this one-use ACK. There is no
         // recovery-by-retrying after a missing or refused ACK.
-        if (!consumeOriginalNativeReleaseGrant(
-                std::move(descriptor), terminal, data->terminalMaterial,
-                sampledBootMs, controlVersion, controlBinding, controlObservation))
+        if (!consumeOriginalNativeReleaseGrant(std::move(descriptor), terminal,
+                                               data->terminalMaterial, sampledBootMs,
+                                               controlVersion, controlBinding, controlObservation))
             return refuse();
         const auto current = nativeBackend()->snapshot();
         const auto clock = compositorClock();
         const auto history = nativeOutputHighWater(data->bound, held);
         const auto kernel = nativeFirstFrameKernel(data->bound, held);
         if (!current || !clock || !history || !kernel ||
-            !gate->spend(*current, *clock, *history, *kernel) ||
-            !data->refresh() || !data->terminalGrant->verify())
+            !gate->spend(*current, *clock, *history, *kernel) || !data->refresh() ||
+            !data->terminalGrant->verify())
             return refuse();
         data->nativeReleaseGate.emplace(std::move(*gate));
         data->nativeReleaseSpent = true;

@@ -982,15 +982,14 @@ bool consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlati
                                        std::uint64_t controlVersion, std::string_view binding,
                                        std::string_view observation)
 {
-    if (!backend || !backend->originalRecovery || backend->writing ||
-        backend->commitFailed || backend->originalRecovery->failed ||
-        !backend->originalRecovery->grant ||
-        !backend->originalRecovery->protection ||
-        !backend->powerInhibitor.held() || !startupFence.recoveryAvailable())
+    if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
+        backend->originalRecovery->failed || !backend->originalRecovery->grant ||
+        !backend->originalRecovery->protection || !backend->powerInhibitor.held() ||
+        !startupFence.recoveryAvailable())
         return false;
-    auto grant = OriginalNativeReleaseGrant::receive(
-        startupFence, std::move(descriptor), terminal, material,
-        {controlVersion, binding, observation}, sampledBootMs);
+    auto grant =
+        OriginalNativeReleaseGrant::receive(startupFence, std::move(descriptor), terminal, material,
+                                            {controlVersion, binding, observation}, sampledBootMs);
     if (!grant || !backend->originalRecovery->grant->verify() ||
         !backend->originalRecovery->protection->healthy())
         return false;
@@ -1000,8 +999,7 @@ bool consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlati
     // retained pending the independent physical-first-frame and Control
     // durable-completion protocol. Never treat this ACK as output release.
     return backend->originalRecovery->grant->verify() &&
-           backend->originalRecovery->protection->healthy() &&
-           backend->powerInhibitor.held();
+           backend->originalRecovery->protection->healthy() && backend->powerInhibitor.held();
 }
 
 bool originalRestorationPresented(const Correlation &bound)

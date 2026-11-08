@@ -450,19 +450,18 @@ quint32 NativeEndpoint::SpendOriginalDisplayNativeRelease(
     quint64 controlVersion, const QString &controlBinding, const QString &controlObservation,
     const QDBusUnixFileDescriptor &nativeGrant)
 {
-    if (calledFromDBus() && query.intent.size() <= 14 * 1024 &&
-        query.transaction.size() <= 256 && query.effectDigest.size() == 64 &&
-        query.dispatchDigest.size() == 64 && sampleDigest.size() == 64 &&
-        controlVersion != 0 && controlBinding.size() == 64 &&
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        sampleDigest.size() == 64 && controlVersion != 0 && controlBinding.size() == 64 &&
         controlObservation.size() == 64 && nativeGrant.isValid()) {
         const auto intent = NativeDisplayFinalizationIntent::parse(query.intent);
         const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
                                              query.dispatchDigest, query.deadlineUnixMs};
-        const auto result = intent ? runtime_.spendOriginalDisplayNativeRelease(
-                                         message(), *intent, bound, sampleDigest,
-                                         sampledBootMs, controlVersion, controlBinding,
-                                         controlObservation, nativeGrant.fileDescriptor())
-                                   : std::nullopt;
+        const auto result =
+            intent ? runtime_.spendOriginalDisplayNativeRelease(
+                         message(), *intent, bound, sampleDigest, sampledBootMs, controlVersion,
+                         controlBinding, controlObservation, nativeGrant.fileDescriptor())
+                   : std::nullopt;
         if (result)
             return *result;
     }

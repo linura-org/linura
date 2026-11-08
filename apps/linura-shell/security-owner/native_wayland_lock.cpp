@@ -1210,11 +1210,10 @@ std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     const QString &controlObservation, int nativeGrant)
 {
     if (nativeGrant < 0 || !controlVersion || thread() != QThread::currentThread() ||
-        !impl_->initialized || impl_->painting || impl_->pumping ||
-        impl_->nativeReleaseAttempted || !impl_->finalizationAccepted ||
-        impl_->finalizationDispatched != std::optional(bound) ||
-        !impl_->heldRestoration || !impl_->protectedInteraction ||
-        !impl_->protectedConsumed || !impl_->protectedScope ||
+        !impl_->initialized || impl_->painting || impl_->pumping || impl_->nativeReleaseAttempted ||
+        !impl_->finalizationAccepted || impl_->finalizationDispatched != std::optional(bound) ||
+        !impl_->heldRestoration || !impl_->protectedInteraction || !impl_->protectedConsumed ||
+        !impl_->protectedScope ||
         impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Finalization ||
         impl_->heldFinalizationMaterial != intent.encode() ||
         impl_->heldRestoration->dispatchDigest != intent.restorationDispatch ||
@@ -1223,20 +1222,17 @@ std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     const auto validDigest = [](const QString &value) {
         return value.size() == 64 && value != QString(64, QLatin1Char('0')) &&
                std::all_of(value.begin(), value.end(), [](QChar character) {
-                   return (character >= QLatin1Char('0') &&
-                           character <= QLatin1Char('9')) ||
-                          (character >= QLatin1Char('a') &&
-                           character <= QLatin1Char('f'));
+                   return (character >= QLatin1Char('0') && character <= QLatin1Char('9')) ||
+                          (character >= QLatin1Char('a') && character <= QLatin1Char('f'));
                });
     };
     const auto status = protectedDisplayStatus();
     const auto sample = impl_->displayConnection->sample();
     const auto clock = NativeDisplayClock::sample();
-    if (!validDigest(controlBinding) || !validDigest(controlObservation) ||
-        !status || status->phase != NativeDisplayPromptStatus::Phase::Consumed ||
-        !sample || !clock || !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
-        !sample->fenced || sample->startupPhase != 2 ||
-        sample->compositor != impl_->displayInvocation ||
+    if (!validDigest(controlBinding) || !validDigest(controlObservation) || !status ||
+        status->phase != NativeDisplayPromptStatus::Phase::Consumed || !sample || !clock ||
+        !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) || !sample->fenced ||
+        sample->startupPhase != 2 || sample->compositor != impl_->displayInvocation ||
         sample->topology.generation != impl_->protectedTopology ||
         sample->coverage != (secureCoverage() ? 1U : 0U) ||
         (secureCoverage() && !impl_->inputCovered()) ||
@@ -1258,15 +1254,11 @@ std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     const auto binding = controlBinding.toLatin1();
     const auto observation = controlObservation.toLatin1();
     linura_protected_display_interaction_v1_spend_native_release(
-        impl_->protectedInteraction, nativeGrant,
-        transaction.constData(), effect.constData(), dispatch.constData(),
-        static_cast<quint32>(bound.deadlineUnixMs >> 32U),
-        static_cast<quint32>(bound.deadlineUnixMs),
-        static_cast<quint32>(sampledBootMs >> 32U),
-        static_cast<quint32>(sampledBootMs),
-        static_cast<quint32>(controlVersion >> 32U),
-        static_cast<quint32>(controlVersion),
-        binding.constData(), observation.constData());
+        impl_->protectedInteraction, nativeGrant, transaction.constData(), effect.constData(),
+        dispatch.constData(), static_cast<quint32>(bound.deadlineUnixMs >> 32U),
+        static_cast<quint32>(bound.deadlineUnixMs), static_cast<quint32>(sampledBootMs >> 32U),
+        static_cast<quint32>(sampledBootMs), static_cast<quint32>(controlVersion >> 32U),
+        static_cast<quint32>(controlVersion), binding.constData(), observation.constData());
     impl_->flush();
     const auto after = NativeDisplayClock::sample();
     if (!after || !bound.dispatchWindow(sampledBootMs, after->bootMs, after->unixMs))
@@ -1274,8 +1266,7 @@ std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     const auto remaining = 2000 - (after->bootMs - sampledBootMs);
     if (!waitForNativeWaylandReady(impl_->display,
                                    std::chrono::milliseconds(static_cast<qint64>(remaining))) ||
-        !impl_->protectedInteraction || !impl_->protectedWindow() ||
-        !impl_->protectedStatus ||
+        !impl_->protectedInteraction || !impl_->protectedWindow() || !impl_->protectedStatus ||
         impl_->protectedStatus->phase != NativeDisplayPromptStatus::Phase::Consumed ||
         impl_->protectedStatus->epoch != status->epoch)
         return std::nullopt;

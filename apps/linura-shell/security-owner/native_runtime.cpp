@@ -1202,16 +1202,14 @@ std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
                             NativeDeadline::Stage::DisplayDispatch);
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
     const auto clock = NativeDisplayClock::sample();
-    if (!peer || !clock || nativeGrant < 0 || !controlVersion ||
-        intent.currentLock != identity() || impl_->approvalScope ||
-        impl_->transitionFence.active() || impl_->sleepFence.active() ||
+    if (!peer || !clock || nativeGrant < 0 || !controlVersion || intent.currentLock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
         impl_->unlockRequestLock || impl_->transitionRequest ||
         !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
         !NativeDisplayFinalizationIntent::parse(intent.encode()))
         return std::nullopt;
     const auto sample = displaySample(received, NativePeerPurpose::ControlApproval);
-    if (!sample || sampleDigest != sample->correlationDigest() ||
-        !impl_->currentSession() ||
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
     const auto finished = NativeDisplayClock::sample();
@@ -1219,9 +1217,9 @@ std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
         !impl_->display || !impl_->backend ||
         !impl_->backend->heldOriginalDisplayFinalization(bound))
         return std::nullopt;
-    return impl_->backend->spendOriginalDisplayNativeRelease(
-        intent, bound, sampledBootMs, controlVersion, controlBinding,
-        controlObservation, nativeGrant);
+    return impl_->backend->spendOriginalDisplayNativeRelease(intent, bound, sampledBootMs,
+                                                             controlVersion, controlBinding,
+                                                             controlObservation, nativeGrant);
 }
 
 // This narrow effect is reachable only from the current supervised executor.

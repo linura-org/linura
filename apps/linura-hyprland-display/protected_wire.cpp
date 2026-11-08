@@ -465,16 +465,15 @@ class ProtectedWireEndpoint::Impl final
             const auto &state = interaction.state;
             const bool identityValid = transaction && strnlen(transaction, 257) <= 256 &&
                                        std::string_view(transaction).starts_with("transaction:");
-            const bool digestsValid = digest(effect) && digest(dispatch) && digest(binding) &&
-                                      digest(observation);
-            const bool sceneValid = state && state->scene && !state->closed &&
-                                    interaction.owner.current(interaction);
+            const bool digestsValid =
+                digest(effect) && digest(dispatch) && digest(binding) && digest(observation);
+            const bool sceneValid =
+                state && state->scene && !state->closed && interaction.owner.current(interaction);
             if (!identityValid || !digestsValid || !sceneValid ||
                 !state->scene->spendNativeRelease(
-                    std::move(owned), {transaction, effect, dispatch,
-                                       joined(deadlineHi, deadlineLo)},
-                    joined(bootHi, bootLo), joined(versionHi, versionLo), binding,
-                    observation)) {
+                    std::move(owned),
+                    {transaction, effect, dispatch, joined(deadlineHi, deadlineLo)},
+                    joined(bootHi, bootLo), joined(versionHi, versionLo), binding, observation)) {
                 if (state)
                     state->close();
                 linura_protected_display_interaction_v1_send_denied(resource);
