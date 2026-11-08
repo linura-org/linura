@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -22,6 +23,10 @@ from pathlib import Path
 
 SOURCE_ROOT = Path("/opt/linura-source")
 BINARY_ROOT = Path("/tmp/linura-s17-binaries")
+CANDIDATE_ROOT = Path("/opt/linura-s21-candidate")
+SOURCE_SHA_FILE = Path("/etc/linura-qualification/s21-source-sha")
+OWNER_BUILD_HEADER = Path("/etc/linura-qualification/s21-owner-build.h")
+COMPOSITOR = Path("/usr/bin/Hyprland")
 
 
 def command(*args: str) -> str:
@@ -108,8 +113,123 @@ def load_image_module():
     return image
 
 
+def require_root_file(path: Path) -> None:
+    for parent in path.parents:
+        metadata = parent.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_mode & 0o022
+        ):
+            raise RuntimeError("candidate installation parent is not root immutable")
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or metadata.st_mode & 0o022
+    ):
+        raise RuntimeError("candidate installation asset is not root immutable")
+
+
+def display_candidate(owner_header: Path | None = None):
+    # Called only after the disposable-guest/root-immutable-source guard. Import
+    # the checked repository helper; no caller-selected module or installer.
+    sys.path.insert(0, str(SOURCE_ROOT))
+    from tools import hyprland_display_candidate as candidate
+
+    for name in (*candidate.FILES, candidate.MANIFEST):
+        require_root_file(CANDIDATE_ROOT / name)
+    require_root_file(SOURCE_SHA_FILE)
+    sha = candidate.read_bounded(SOURCE_SHA_FILE, 41).decode("ascii").removesuffix("\n")
+    metadata = candidate.verify(SOURCE_ROOT, CANDIDATE_ROOT, sha, owner_header)
+    candidate.verify_runtime_packages(
+        SOURCE_ROOT, CANDIDATE_ROOT, command("/usr/bin/pacman", "-Q")
+    )
+    return candidate, metadata
+
+
+def install_display_candidate(owner_header: Path) -> None:
+    require_disposable_guest()
+    candidate, metadata = display_candidate(owner_header)
+    require_root_file(COMPOSITOR)
+    processes = list(Path("/proc").glob("[0-9]*/exe"))
+    if len(processes) > 4096:
+        raise RuntimeError("cannot bound compositor process enumeration")
+    for process in processes:
+        try:
+            executable = process.readlink()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if str(executable).removesuffix(" (deleted)") == str(COMPOSITOR):
+            raise RuntimeError(
+                "reference compositor must exit before candidate installation"
+            )
+    staged = COMPOSITOR.with_name(".linura-s21-Hyprland")
+    copied = candidate.artifacts._bind_file(
+        CANDIDATE_ROOT / "Hyprland", staged, max_size=candidate.FILES["Hyprland"]
+    )
+    expected = metadata["files"]["Hyprland"]
+    if copied != (expected["sha256"], expected["size"]):
+        staged.unlink()
+        raise RuntimeError("compositor candidate changed during installation")
+    # Retain the actual freshly configured owner identity across guest reboots.
+    candidate.artifacts._bind_file(
+        owner_header,
+        OWNER_BUILD_HEADER,
+        max_size=candidate.FILES["integration-build.h"],
+    )
+    OWNER_BUILD_HEADER.chmod(0o644)
+    staged.chmod(0o755)
+    os.replace(staged, COMPOSITOR)
+    # Use the product's fixed package-time secure-entry operation; the guest
+    # fixture must not invent a different loader or privilege configuration.
+    secure_entry = Path("/usr/lib/linura/linura-hyprland-install-secure-entry")
+    require_root_file(secure_entry)
+    command(str(secure_entry))
+    descriptor = os.open(COMPOSITOR.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def inspect_display_candidate(compositor_pid: int) -> dict:
+    require_disposable_guest()
+    require_root_file(OWNER_BUILD_HEADER)
+    require_root_file(COMPOSITOR)
+    candidate, metadata = display_candidate(OWNER_BUILD_HEADER)
+    process_image = Path(f"/proc/{compositor_pid}/exe")
+    before = COMPOSITOR.stat()
+    running = process_image.stat()
+    if (running.st_dev, running.st_ino) != (before.st_dev, before.st_ino):
+        raise RuntimeError(
+            "native session is not executing the installed compositor candidate"
+        )
+    observed = candidate.artifacts._bind_file(
+        COMPOSITOR, max_size=candidate.FILES["Hyprland"]
+    )
+    expected = metadata["files"]["Hyprland"]
+    after = process_image.stat()
+    if observed != (expected["sha256"], expected["size"]) or (
+        after.st_dev,
+        after.st_ino,
+    ) != (before.st_dev, before.st_ino):
+        raise RuntimeError(
+            "executing native compositor differs from the built candidate"
+        )
+    return {
+        "claim": "executing-exact-source-compositor-candidate",
+        "source_sha": metadata["source_sha"],
+        "binary_sha256": observed[0],
+        "integration_source_digest": metadata["integration_source_digest"],
+        "native_display_execution_qualified": False,
+    }
+
+
 def provision() -> None:
     require_disposable_guest()
+    display_candidate()
     # Reuse the actual image asset graph instead of a looser qualification-only
     # runtime. Build outputs are installed afresh; never cached as substrate.
     image = load_image_module()
@@ -155,6 +275,7 @@ def provision() -> None:
             native_owner_build_command(build_root),
             timeout=900,
         )
+        install_display_candidate(build_root / "linura-display-integration-build.h")
         subprocess.run(
             ["cmake", "--install", str(build_root), "--prefix", "/usr"],
             check=True,
@@ -174,6 +295,7 @@ def provision() -> None:
                 "Ninja",
                 "-DCMAKE_BUILD_TYPE=Release",
                 "-DBUILD_TESTING=ON",
+                "-DLINURA_DISPLAY_OWNER_ADMISSION_PROBE=ON",
             ],
             check=True,
             timeout=60,
@@ -192,6 +314,29 @@ def provision() -> None:
         probe_destination.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         shutil.copyfile(probe_build / "linura-s17-assistive-probe", probe_destination)
         probe_destination.chmod(0o755)
+        loader_canary = probe_destination.parent / "liblinura-s21-loader-canary.so"
+        shutil.copyfile(probe_build / loader_canary.name, loader_canary)
+        loader_canary.chmod(0o644)
+        egl_probe = probe_destination.parent / "linura-s21-egl-loader-probe"
+        shutil.copyfile(probe_build / egl_probe.name, egl_probe)
+        egl_probe.chmod(0o755)
+        egl_vendor = probe_destination.parent / "linura-s21-egl-vendor.json"
+        egl_vendor.write_text(
+            json.dumps(
+                {
+                    "file_format_version": "1.0.0",
+                    "ICD": {"library_path": str(loader_canary)},
+                }
+            )
+            + "\n",
+            encoding="ascii",
+        )
+        egl_vendor.chmod(0o644)
+        admission_destination = (
+            probe_destination.parent / "linura-s21-owner-admission-probe"
+        )
+        shutil.copyfile(probe_build / admission_destination.name, admission_destination)
+        admission_destination.chmod(0o755)
     finally:
         shutil.rmtree(build_root)
     # Deliberate guest package-install boundary, AFTER final root ownership.
@@ -214,7 +359,23 @@ def provision() -> None:
         shutil.copyfile(fixtures / name, destination)
         destination.chmod(0o644)
     subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=15)
-    subprocess.run(["systemctl", "reload", "dbus.service"], check=True, timeout=15)
+    # Wait for the bus's policy reload acknowledgement before any native
+    # startup RPC. An asynchronous service reload can race the new allow rule.
+    subprocess.run(
+        [
+            "/usr/bin/dbus-send",
+            "--system",
+            "--print-reply",
+            "--reply-timeout=5000",
+            "--type=method_call",
+            "--dest=org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus.ReloadConfig",
+        ],
+        check=True,
+        timeout=10,
+        stdout=subprocess.DEVNULL,
+    )
     subprocess.run(["systemctl", "restart", "polkit.service"], check=True, timeout=15)
     subprocess.run(
         ["systemctl", "start", "linura-authorityd.service"], check=True, timeout=30

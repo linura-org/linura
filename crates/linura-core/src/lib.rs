@@ -1,5 +1,26 @@
 #![forbid(unsafe_code)]
 
+mod display_intent;
+mod display_layout;
+mod display_recovery;
+pub use display_intent::{DisplayLayoutIntent, DisplayLayoutMaterial, MAX_DISPLAY_INTENT_BYTES};
+pub use display_layout::{
+    DisplayLayout, DisplayLayoutError, DisplayMode, DisplayOutputLayout, DisplayScale,
+    DisplayTransform, NativeOutputCapabilities,
+};
+pub use display_recovery::DisplayRecoveryMapping;
+mod display_restoration;
+pub use display_restoration::{DisplayRestorationMaterial, MAX_DISPLAY_RESTORATION_BYTES};
+mod display_finalization;
+pub use display_finalization::{DisplayFinalizationMaterial, MAX_DISPLAY_FINALIZATION_BYTES};
+mod display_recovery_scope;
+pub use display_recovery_scope::DisplayRecoveryScope;
+mod display_topology;
+pub use display_topology::{
+    CompositorInvocationId, DisplayIdentityError, DisplayOutputId, DisplayOutputSet,
+    DisplayTopologyId,
+};
+
 mod session_epoch;
 pub use session_epoch::{
     BootId, SecurityOwnerInvocationId, SessionEpoch, SessionEpochError, SessionLockId,

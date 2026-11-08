@@ -2,7 +2,10 @@
 // The executor also freshly attests the exact supervised Control bus owner.
 polkit.addRule(function(action, subject) {
     if ((action.id === "org.linura.executor.session.set-secure" ||
-         action.id === "org.linura.executor.session.execute-transition") &&
+         action.id === "org.linura.executor.session.execute-transition" ||
+         action.id === "org.linura.executor.session.apply-display-layout" ||
+         action.id === "org.linura.executor.session.restore-original-display-layout" ||
+         action.id === "org.linura.executor.session.quiesce-original-display-finalization") &&
         subject.user === "linura-authority") {
         return polkit.Result.YES;
     }

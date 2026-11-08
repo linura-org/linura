@@ -91,6 +91,10 @@ BINARIES = {
 
 RUNTIME_ASSETS = {
     ROOT
+    / "packaging/hyprland-display/install-secure-entry.sh": "usr/lib/linura/linura-hyprland-install-secure-entry",
+    ROOT
+    / "packaging/sysusers.d/linura-display-entry.conf": "usr/lib/sysusers.d/linura-display-entry.conf",
+    ROOT
     / "packaging/security-owner/install-capability.sh": "usr/lib/linura/linura-security-owner-install-capability",
     ROOT
     / "packaging/arch/hooks/90-linura-security-owner-capability.hook": "etc/pacman.d/hooks/90-linura-security-owner-capability.hook",
@@ -103,6 +107,8 @@ RUNTIME_ASSETS = {
     ROOT
     / "packaging/systemd/system/linura-executor-session.service": "usr/lib/systemd/system/linura-executor-session.service",
     ROOT
+    / "packaging/systemd/system/linura-display-protection.service": "usr/lib/systemd/system/linura-display-protection.service",
+    ROOT
     / "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "usr/lib/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
     ROOT
     / "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "usr/lib/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
@@ -112,6 +118,8 @@ RUNTIME_ASSETS = {
     / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "usr/share/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
     ROOT
     / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "usr/share/dbus-1/system.d/org.linura.Executor.Session1.conf",
+    ROOT
+    / "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf": "usr/share/dbus-1/system.d/org.linura.DisplayProtection1.conf",
     ROOT
     / "packaging/polkit-1/actions/org.linura.authority.policy": "usr/share/polkit-1/actions/org.linura.authority.policy",
     ROOT
@@ -130,6 +138,8 @@ RUNTIME_ASSETS = {
     / "interfaces/dbus/org.linura.Executor.Systemd1.xml": "usr/share/dbus-1/interfaces/org.linura.Executor.Systemd1.xml",
     ROOT
     / "interfaces/dbus/org.linura.Executor.Session1.xml": "usr/share/dbus-1/interfaces/org.linura.Executor.Session1.xml",
+    ROOT
+    / "interfaces/dbus/org.linura.DisplayProtection1.xml": "usr/share/dbus-1/interfaces/org.linura.DisplayProtection1.xml",
     ROOT
     / "packaging/wireplumber/linura-session-audio.lua": "usr/lib/linura/linura-session-audio.lua",
     ROOT
@@ -349,7 +359,11 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         shutil.copy2(source, destination)
         destination.chmod(
             0o755
-            if relative == "usr/lib/linura/linura-security-owner-install-capability"
+            if relative
+            in {
+                "usr/lib/linura/linura-security-owner-install-capability",
+                "usr/lib/linura/linura-hyprland-install-secure-entry",
+            }
             else 0o644
         )
 
@@ -360,6 +374,8 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         / "graphical-session.target.wants/linura-shell.service": "../linura-shell.service",
         profile
         / "airootfs/usr/lib/systemd/system/multi-user.target.wants/linura-authorityd.service": "../linura-authorityd.service",
+        profile
+        / "airootfs/usr/lib/systemd/system/multi-user.target.wants/linura-display-protection.service": "../linura-display-protection.service",
     }
     for link, target in service_links.items():
         link.parent.mkdir(parents=True, exist_ok=True)

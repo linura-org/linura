@@ -899,7 +899,10 @@ pub(crate) fn validate_generation_history(
             record.graph_digest.as_deref(),
             record.provenance_digest.as_deref(),
         ];
-        if matches!(state, TransactionState::Verified | TransactionState::Committed) {
+        let compensated = state == TransactionState::RecoveryBlocked
+            && load_last_audit_event(connection, key, transaction_id)?.is_some_and(|tail|
+                tail.generation == expected && tail.event_kind == "verified-compensated-v1");
+        if matches!(state, TransactionState::Verified | TransactionState::Committed) || compensated {
             if commit_material.iter().any(|value| value.is_none()) {
                 return Err(TransactionStoreError::Corruption(
                     "verified/committed generation is missing durable commit material".into(),
@@ -937,11 +940,22 @@ pub(crate) fn validate_audit_chain(
     let events = load_all_audit_events(connection, key, transaction_id)?;
     let mut expected_sequence = 0_u64;
     let mut previous = ContentDigest::zero();
-    let mut last = None;
+    let mut last: Option<(u64, u64, String, ContentDigest)> = None;
     for event in events {
         if event.event_sequence != expected_sequence {
             return Err(TransactionStoreError::Corruption(
                 "audit sequence is not contiguous".into(),
+            ));
+        }
+        if event.event_kind == "verified-compensated-v1"
+            && !last.as_ref().is_some_and(|(generation, version, kind, _)| {
+                *generation == event.generation
+                    && version.checked_add(1) == Some(event.state_version)
+                    && kind == "recovery-verified"
+            })
+        {
+            return Err(TransactionStoreError::Corruption(
+                "verified compensation does not follow exact verified history".into(),
             ));
         }
         let payload = ContentDigest::new(event.payload_digest.clone())
@@ -1152,7 +1166,7 @@ pub(crate) fn state_for_event_kind(
         "recovery-verified" => Ok(TransactionState::Verified),
         "committed" => Ok(TransactionState::Committed),
         "aborted-prepared" | "recovery-retired-no-effect" => Ok(TransactionState::Aborted),
-        "recovery-blocked" => Ok(TransactionState::RecoveryBlocked),
+        "recovery-blocked" | "verified-compensated-v1" => Ok(TransactionState::RecoveryBlocked),
         _ => Err(TransactionStoreError::Corruption(format!(
             "unknown audit event kind {kind:?}"
         ))),

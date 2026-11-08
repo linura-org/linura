@@ -13,6 +13,8 @@ linura-core = { path = "../linura-core" }
 linura-observation = { path = "../linura-observation" }
 linura-provider-sdk = { path = "../linura-provider-sdk" }
 rustix = { version = "1.1", features = ["event", "fs", "net", "system"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "=1.0.145"
 zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 
 [lints]

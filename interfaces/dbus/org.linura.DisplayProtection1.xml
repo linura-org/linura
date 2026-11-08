@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<node name="/org/linura/DisplayProtection1">
+  <interface name="org.linura.DisplayProtection1">
+    <annotation name="org.linura.ContractId" value="dbus.org.linura.DisplayProtection1"/>
+    <annotation name="org.linura.ContractVersion" value="1"/>
+    <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Private bounded original-witness and prepared handoff mechanisms.
+         Control owns authority/orchestration; this process never writes outputs. -->
+    <method name="ReadOriginal">
+      <!-- Supervised Control only; exact historical bytes plus live retained
+           witness checks. No credential, restoration grant or output write. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="out"/>
+    </method>
+    <method name="ReadFinalization">
+      <!-- Supervised Control only; immutable restoration correlation plus live
+           Root mechanism state, with no mutation or release credential. Only
+           protected/reserved/quiesced states are produced; release remains unavailable. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="restoration" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+      <arg name="terminal" type="ay" direction="out"/>
+    </method>
+    <method name="ReserveRestoration">
+      <!-- Exact supervised executor only, following a fresh Control prepare.
+           Synced one-use reservation precedes the original-root-created
+           endpoint. No root output write, policy or orchestration. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="ReserveFinalization">
+      <!-- Exact supervised executor only, after fresh Control terminal prepare.
+           Exclusive synced reservation binds actual retained restoration. Shared
+           worker/transfer limits and original sample/dispatch windows apply.
+           The endpoint admits only the actual native process for one held-scene
+           quiescence message and fresh continuity. No retirement or release. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="PrepareRetirement">
+      <!-- Supervised Control only; retains a synced, immutable preparation
+           anchored to the actual live Root quiescence and terminal records.
+           Caller-supplied Control digests are comparison data, not proof
+           of release. No input, S17, power or ordinary-admission release. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="RetireHeld">
+      <!-- Supervised Control only. Advances the original Root lifetime from
+           durably Prepared to durably RootRetiredHeld, after re-authenticating
+           current Root witnesses, quiescence and exact immutable parents.
+           It cannot unlock S17, release the compositor scene, drop inhibitors,
+           authorize ordinary startup, or claim physical first-frame evidence. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="NativeStartup">
+      <!-- Only the freshly attested, independently supervised native owner.
+           Tuple: original lock/login, native PID, seat, compositor invocation,
+           integration digest, installed native image digest. No principal input.
+           Root independently verifies the admitted leader's actual executable;
+           the installed digest is comparison data, never image authority. -->
+      <arg name="request" type="(sussss)" direction="in"/>
+      <arg name="lease" type="h" direction="out"/>
+      <arg name="ordinary_allowed" type="b" direction="out"/>
+    </method>
+    <method name="Begin">
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Reserve">
+      <arg name="checkpoint" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Verify">
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+  </interface>
+</node>

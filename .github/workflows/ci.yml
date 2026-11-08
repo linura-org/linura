@@ -343,6 +343,14 @@ jobs:
           QT_QML_IMPORT_PATH="$install_dir/lib/qt6/qml" \
           QML_IMPORT_PATH="$install_dir/lib/qt6/qml" \
           ctest --test-dir "$build_dir" --output-on-failure
+      - name: Build and test native display mechanism
+        run: |
+          set -euo pipefail
+          build_dir="$RUNNER_TEMP/linura-native-display-mechanism-build"
+          cmake -S apps/linura-hyprland-display -B "$build_dir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$build_dir" --parallel 2
+          ctest --test-dir "$build_dir" --output-on-failure
       - name: Build and test native security-owner foundation
         run: |
           set -euo pipefail

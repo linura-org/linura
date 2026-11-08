@@ -111,13 +111,13 @@ impl From<ObservationControlError> for PlanPreviewControlError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct NormalizedPlanInput {
+pub(super) struct NormalizedPlanInput {
     principal: AuthenticatedPrincipal,
     request: PlanDesiredStateRequest,
 }
 
 impl NormalizedPlanInput {
-    fn new(
+    pub(super) fn new(
         principal: AuthenticatedPrincipal,
         request: PlanDesiredStateRequest,
     ) -> Result<Self, PlanPreviewControlError> {
@@ -332,14 +332,34 @@ impl PreviewStore {
 pub struct PlanPreviewControl {
     coordinator: ObservationCoordinator,
     previews: PreviewStore,
+    pub(super) restoration_context: crate::display_restoration_plan::OriginalContextSlot,
+    pub(super) finalization_context: crate::display_finalization_plan::FinalizationContextSlot,
 }
 
 impl PlanPreviewControl {
+    pub(super) fn replay_display_preview(
+        &self,
+        input: &NormalizedPlanInput,
+    ) -> Result<Option<ReconciliationPlan>, PlanPreviewControlError> {
+        self.previews.replay(input)
+    }
+
+    pub(super) fn retain_display_preview(
+        &mut self,
+        input: NormalizedPlanInput,
+        plan: ReconciliationPlan,
+    ) -> Result<(), PlanPreviewControlError> {
+        self.previews.insert(input, plan)
+    }
+
     #[must_use]
     pub fn new(coordinator: ObservationCoordinator) -> Self {
         Self {
             coordinator,
             previews: PreviewStore::default(),
+            restoration_context: crate::display_restoration_plan::OriginalContextSlot::default(),
+            finalization_context:
+                crate::display_finalization_plan::FinalizationContextSlot::default(),
         }
     }
 
@@ -409,6 +429,25 @@ impl PlanPreviewControl {
         protective: Option<&crate::protective_lock_execution::ProtectiveLockContext>,
         observe_only_protective: bool,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        if input.request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            if input.request.observation_capability.as_str()
+                == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+            {
+                return self.build_fresh_original_display_finalization_plan(
+                    &input.principal,
+                    actor,
+                    &input.request,
+                );
+            }
+            return self.build_fresh_original_display_restoration_plan(
+                &input.principal,
+                actor,
+                &input.request,
+            );
+        }
+        if input.request.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
+            return self.build_fresh_display_plan(&input.principal, actor, &input.request);
+        }
         let observation_request = ObservationRequest {
             provider: input.request.provider.clone(),
             resource: input.request.resource.clone(),
@@ -858,7 +897,7 @@ fn estimate_input_bytes(input: &NormalizedPlanInput) -> usize {
         )
 }
 
-fn estimate_plan_bytes(plan: &ReconciliationPlan) -> usize {
+pub(crate) fn estimate_plan_bytes(plan: &ReconciliationPlan) -> usize {
     plan.id
         .as_str()
         .len()

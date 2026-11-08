@@ -34,7 +34,9 @@ class NamespaceContractTests(unittest.TestCase):
             "crates/linura-dbus/src/sleep_gate.rs",
             "crates/linura-linux-session/src/bus.rs",
             "crates/linura-linux-session/src/owner.rs",
+            "crates/linura-linux-session/src/owner/display/approval.rs",
             "executors/linura-executor-session/src/lib.rs",
+            "executors/linura-executor-session/src/display_protection_service.rs",
             "executors/linura-executor-systemd/src/lib.rs",
             "apps/linura-shell/org.linura.ControlCenter.desktop",
             "apps/linura-shell/org.linura.CommandPalette.desktop",
@@ -56,6 +58,24 @@ class NamespaceContractTests(unittest.TestCase):
     def test_repository_namespace_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_display_protection_registration_cannot_move_to_another_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = (
+                root
+                / "executors/linura-executor-session/src/display_protection_service.rs"
+            )
+            original = source.read_text(encoding="utf-8")
+            changed = original.replace(
+                ".at(PATH, service)", '.at("/org/linura/Other", service)', 1
+            )
+            self.assertNotEqual(original, changed)
+            source.write_text(changed, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("registration", result.stderr)
 
     def test_private_sleep_gate_cannot_lose_its_registered_object_or_interface(self):
         for old, new in (
@@ -139,6 +159,61 @@ class NamespaceContractTests(unittest.TestCase):
                         self.assertNotEqual(result.returncode, 0)
                         self.assertIn(f"unregistered-{action}", result.stderr)
                         self.assertIn("runtime binding", result.stderr)
+
+    def test_original_display_executor_cannot_substitute_apply_service_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = root / "executors/linura-executor-session/src/lib.rs"
+            original = source.read_text(encoding="utf-8")
+            old = 'const ORIGINAL_DISPLAY_ACTION: &str = "org.linura.executor.session.restore-original-display-layout";'
+            # rustfmt may wrap the fixed constant after its equals sign.
+            pattern = r'const ORIGINAL_DISPLAY_ACTION: &str =\s*"org\.linura\.executor\.session\.restore-original-display-layout";'
+            changed, count = re.subn(
+                pattern,
+                old.replace("restore-original-display-layout", "apply-display-layout"),
+                original,
+            )
+            self.assertEqual(count, 1)
+            source.write_text(changed, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Polkit", result.stderr)
+
+    def test_native_display_action_cannot_substitute_another_authority_purpose(self):
+        for purpose, action in (
+            ("Apply", "org.linura.authority.apply-display-layout"),
+            ("RestoreOriginal", "org.linura.authority.restore-original-display-layout"),
+            (
+                "FinalizeOriginal",
+                "org.linura.authority.finalize-original-display-restoration",
+            ),
+        ):
+            with (
+                self.subTest(purpose=purpose),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                source = (
+                    root / "crates/linura-linux-session/src/owner/display/approval.rs"
+                )
+                original = source.read_text(encoding="utf-8")
+                pattern = rf'NativeDisplayApprovalPurpose::{purpose}\s*=>\s*(?:\{{\s*)?"{re.escape(action)}"'
+                changed, count = re.subn(
+                    pattern,
+                    lambda match: match.group().replace(
+                        action, "org.linura.authority.reboot-session"
+                    ),
+                    original,
+                )
+                self.assertEqual(count, 1)
+                self.assertNotEqual(original, changed)
+                source.write_text(changed, encoding="utf-8")
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(action, result.stderr)
+                self.assertIn("runtime binding", result.stderr)
 
     def test_undeclared_dbus_interface_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -894,7 +969,7 @@ class NamespaceContractTests(unittest.TestCase):
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: .name(CONTROL_SERVICE)",
+                "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: CONTROL_SERVICE",
                 result.stderr,
             )
 
@@ -956,7 +1031,48 @@ class NamespaceContractTests(unittest.TestCase):
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: .name(EXTRA_SERVICE_NAME)",
+                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: EXTRA_SERVICE_NAME",
+                result.stderr,
+            )
+
+    def test_delayed_name_publication_is_required_and_comments_do_not_count(self):
+        for replacement in ("", "// .request_name(DISPLAY_PROTECTION_SERVICE)\n"):
+            with (
+                self.subTest(replacement=replacement),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                source = root / "crates/linura-linux-session/src/bus.rs"
+                original = source.read_text(encoding="utf-8")
+                marker = ".request_name(DISPLAY_PROTECTION_SERVICE)"
+                self.assertIn(marker, original)
+                source.write_text(
+                    original.replace(marker, replacement, 1), encoding="utf-8"
+                )
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: DISPLAY_PROTECTION_SERVICE",
+                    result.stderr,
+                )
+
+    def test_undeclared_delayed_name_publication_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = root / "crates/linura-dbus/src/name_binding_fixture.rs"
+            source.write_text(
+                'pub const EXTRA_SERVICE_NAME: &str = "org.linura.Control1";\n'
+                "fn acquire(connection: zbus::blocking::Connection) {\n"
+                "    let _ = connection.request_name(EXTRA_SERVICE_NAME);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: EXTRA_SERVICE_NAME",
                 result.stderr,
             )
 

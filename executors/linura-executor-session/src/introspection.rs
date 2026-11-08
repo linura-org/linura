@@ -88,8 +88,9 @@ impl<T: Interface + 'static> Interface for SessionContract<T> {
         if writer.write_str(&generated[..closing]).is_err() {
             return;
         }
+        let contract = format!("dbus.{}", T::name());
         for (name, value) in [
-            ("org.linura.ContractId", "dbus.org.linura.Executor.Session1"),
+            ("org.linura.ContractId", contract.as_str()),
             ("org.linura.ContractVersion", "1"),
             ("org.linura.Stability", "experimental"),
         ] {

@@ -171,7 +171,7 @@ fn validate_component_token(
     Ok(())
 }
 
-fn hash_parts(domain: &[u8], parts: &[&[u8]]) -> ComponentDigest {
+pub(super) fn hash_parts(domain: &[u8], parts: &[&[u8]]) -> ComponentDigest {
     let mut hasher = Sha256::new();
     hasher.update((domain.len() as u64).to_be_bytes());
     hasher.update(domain);
@@ -192,6 +192,100 @@ pub struct EffectDescriptor {
     pub resource: ResourceId,
     pub operation: String,
     pub canonical_payload: Vec<u8>,
+}
+
+/// A content-bound description, never a permit or a native validity assertion.
+/// The complete bounded intent travels as typed private adapter material; the
+/// receiver must validate it against fresh native facts and recompute this exact
+/// descriptor before accepting the separately prepared ExecutionBinding.
+/// This preserves the established component payload bound for complete layouts.
+pub fn display_layout_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let decoded =
+        linura_core::DisplayLayoutMaterial::decode(material).map_err(|e| e.to_string())?;
+    let resource = decoded
+        .topology()
+        .resource_id()
+        .map_err(|e| e.to_string())?;
+    let digest = hash_parts(b"linura.display.layout-intent.v1", &[material.as_bytes()]);
+    EffectDescriptor::new(
+        ProviderId::new("hyprland").map_err(|e| e.to_string())?,
+        resource,
+        "apply-display-layout",
+        format!("LNDI-SHA256:1:{}", digest.to_hex()).into_bytes(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Correlate a fresh original-restoration effect, distinct from Apply and old
+/// confirmation. Candidate bytes, checkpoint hashes and an ExecutionBinding
+/// remain insufficient authority: Control must validate history/continuity,
+/// derive the canonical plan and durably prepare a fresh one-use handoff.
+pub fn display_restoration_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let decoded = linura_core::DisplayRestorationMaterial::decode(material)
+        .map_err(|error| error.to_string())?;
+    let resource = decoded
+        .recovery_scope()
+        .map_err(|error| error.to_string())?
+        .resource_id()
+        .map_err(|error| error.to_string())?;
+    let digest = hash_parts(
+        b"linura.display.original-restoration-intent.v1",
+        &[material.as_bytes()],
+    );
+    EffectDescriptor::new(
+        ProviderId::new("hyprland-recovery").map_err(|error| error.to_string())?,
+        resource,
+        "restore-original-display-layout",
+        format!("LNRI-SHA256:1:{}", digest.to_hex()).into_bytes(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Correlation for a separately authorized terminal operation, never a release
+/// credential. The canonical managed path must freshly review linked history
+/// and current proof, durably prepare and consume its own sealed one-use port.
+/// Neither the restoration effect nor its old ExecutionBinding can substitute.
+pub fn display_finalization_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let decoded = linura_core::DisplayFinalizationMaterial::decode(material)
+        .map_err(|error| error.to_string())?;
+    let resource = decoded
+        .recovery_scope()
+        .map_err(|error| error.to_string())?
+        .resource_id()
+        .map_err(|error| error.to_string())?;
+    let digest = hash_parts(
+        b"linura.display.original-finalization-intent.v1",
+        &[material.as_bytes()],
+    );
+    display_finalization_effect_for_payload(
+        &resource,
+        &format!("LNRF-SHA256:1:{}", digest.to_hex()),
+    )
+}
+
+/// Reconstruct the same non-executable comparison descriptor from a canonical
+/// plan's bounded digest value. This does not prove possession, provenance or
+/// validity of complete terminal material. Control's private planning context
+/// and the prepared receiver must independently recompute it from that material.
+pub fn display_finalization_effect_for_payload(
+    resource: &ResourceId,
+    payload: &str,
+) -> Result<EffectDescriptor, String> {
+    linura_core::DisplayRecoveryScope::from_resource(resource).map_err(|e| e.to_string())?;
+    let text = payload
+        .strip_prefix("LNRF-SHA256:1:")
+        .ok_or("terminal intent digest domain differs")?;
+    let digest = ComponentDigest::parse_hex(text).map_err(|e| e.to_string())?;
+    if digest.to_hex() != text || text == "0".repeat(64) {
+        return Err("terminal intent digest is not canonical and nonzero".into());
+    }
+    EffectDescriptor::new(
+        ProviderId::new("hyprland-recovery").map_err(|error| error.to_string())?,
+        resource.clone(),
+        "finalize-original-display-restoration",
+        payload.as_bytes().to_vec(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 impl EffectDescriptor {
@@ -448,6 +542,153 @@ mod tests {
         );
         assert!(ComponentDigest::parse_hex("00").is_err());
         assert!(ComponentDigest::parse_hex(&"g".repeat(64)).is_err());
+    }
+
+    #[test]
+    fn original_restoration_has_distinct_effect_identity_and_cannot_reuse_apply_binding() {
+        // Candidate comparison fixture, not a live/native authority grant.
+        let boot = "11111111-1111-4111-8111-111111111111";
+        let owner = "22222222-2222-4222-8222-222222222222";
+        let old = format!(
+            "display:topology:{boot}:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:8"
+        );
+        let new = format!(
+            "display:topology:{boot}:1000:c3:99:seat0:44444444-4444-4444-8444-444444444444:1"
+        );
+        let layout = |scope: &str, key: &str, x| {
+            format!("LNDL:1;{scope};{key}:enabled:1920:1080:60000:1000:0:{x}:0:-;")
+        };
+        let original = format!(
+            "LNDI:1;session:lock:{boot}:1000:c2:42:{owner}:1;{}{}",
+            layout(&old, "1:2", 0),
+            layout(&old, "1:2", 100)
+        );
+        let replacement = format!(
+            "LNDI:1;session:lock:{boot}:1000:c3:99:{owner}:1;{}{}",
+            layout(&new, "9:10", 100),
+            layout(&new, "9:10", 0)
+        );
+        let material = |checkpoint: &str| {
+            let mut out = "LNRI:1;".to_owned();
+            for field in [
+                "request:original",
+                &"a".repeat(64),
+                checkpoint,
+                &"c".repeat(64),
+                &original,
+                &replacement,
+                "1:2:9:10;",
+            ] {
+                out.push_str(&format!("{}:{field};", field.len()));
+            }
+            out
+        };
+        let encoded = material(&"b".repeat(64));
+        let restored = id(display_restoration_effect(&encoded));
+        let apply = id(display_layout_effect(&replacement));
+        assert_eq!(restored.operation, "restore-original-display-layout");
+        assert_eq!(restored.provider.as_str(), "hyprland-recovery");
+        let scope = id(linura_core::DisplayRecoveryScope::from_resource(
+            &restored.resource,
+        ));
+        assert_eq!(
+            scope
+                .replacement()
+                .resource_id()
+                .map(|id| id.as_str().to_owned()),
+            Ok(new)
+        );
+        assert_eq!(scope.original_dispatch(), "a".repeat(64));
+        assert!(restored.canonical_payload.starts_with(b"LNRI-SHA256:1:"));
+        assert!(restored.canonical_payload.len() < MAX_EFFECT_PAYLOAD_BYTES);
+        assert_ne!(restored.digest(), apply.digest());
+        assert_ne!(
+            restored.digest(),
+            id(display_restoration_effect(&material(&"c".repeat(64)))).digest()
+        );
+        let binding = id(ExecutionBinding::new(
+            "transaction:restoration",
+            0,
+            1,
+            digest(1),
+            digest(2),
+            &restored,
+        ));
+        assert!(binding.validate_for(&restored).is_ok());
+        assert!(binding.validate_for(&apply).is_err());
+        assert!(display_restoration_effect(&replacement).is_err());
+        let lock = id(linura_core::DisplayLayoutMaterial::decode(&replacement))
+            .lock()
+            .clone();
+        let finalization = |guard: &str, epoch| {
+            id(linura_core::DisplayFinalizationMaterial::encode(
+                &id(linura_core::RequestId::new(
+                    "request:restoration-for-terminal",
+                )),
+                &binding.dispatch_digest.to_hex(),
+                &"d".repeat(64),
+                guard,
+                epoch,
+                &lock,
+                &encoded,
+            ))
+        };
+        let terminal_text = finalization(&"e".repeat(64), 2);
+        let terminal = id(display_finalization_effect(&terminal_text));
+        assert_eq!(terminal.resource, restored.resource);
+        assert_eq!(terminal.operation, "finalize-original-display-restoration");
+        assert!(terminal.canonical_payload.starts_with(b"LNRF-SHA256:1:"));
+        let payload = std::str::from_utf8(&terminal.canonical_payload)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            id(display_finalization_effect_for_payload(
+                &terminal.resource,
+                payload
+            )),
+            terminal
+        );
+        for bad in [
+            payload.replace("LNRF", "LNRI"),
+            payload.replace(":1:", ":2:"),
+            payload.to_uppercase(),
+            format!("{payload};"),
+            "LNRF-SHA256:1:".into(),
+            format!("LNRF-SHA256:1:{}", "0".repeat(64)),
+        ] {
+            assert!(display_finalization_effect_for_payload(&terminal.resource, &bad).is_err());
+        }
+        assert!(
+            display_finalization_effect_for_payload(
+                &id(ResourceId::new("display:topology:foreign")),
+                payload
+            )
+            .is_err()
+        );
+        assert_ne!(terminal.digest(), restored.digest());
+        assert_ne!(terminal.digest(), apply.digest());
+        assert!(binding.validate_for(&terminal).is_err());
+        let terminal_binding = id(ExecutionBinding::new(
+            "transaction:finalization",
+            0,
+            1,
+            digest(3),
+            digest(4),
+            &terminal,
+        ));
+        assert!(terminal_binding.validate_for(&terminal).is_ok());
+        assert!(terminal_binding.validate_for(&restored).is_err());
+        for changed in [
+            finalization(&"f".repeat(64), 2),
+            finalization(&"e".repeat(64), 3),
+        ] {
+            assert_ne!(
+                terminal.digest(),
+                id(display_finalization_effect(&changed)).digest()
+            );
+        }
+        assert!(display_finalization_effect(&encoded).is_err());
+        assert!(display_restoration_effect(&terminal_text).is_err());
+        assert!(display_layout_effect(&encoded).is_err());
     }
 
     #[test]

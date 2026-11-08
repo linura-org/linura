@@ -23,13 +23,22 @@ pub(crate) fn validate_native_lock(
     observation: &ObservationEnvelope,
     now_unix_ms: u64,
 ) -> Result<bool, SessionSafetyError> {
+    validate_native_lock_capability(lock, observation, LOCKER_CAPABILITY, now_unix_ms)
+}
+
+pub(crate) fn validate_native_lock_capability(
+    lock: &SessionLockId,
+    observation: &ObservationEnvelope,
+    capability: &str,
+    now_unix_ms: u64,
+) -> Result<bool, SessionSafetyError> {
     let resource = lock
         .resource_id()
         .map_err(|_| SessionSafetyError::IdentityMismatch)?;
     validate_envelope(
         observation,
         LOCKER_PROVIDER,
-        LOCKER_CAPABILITY,
+        capability,
         &resource,
         now_unix_ms,
     )?;
@@ -129,37 +138,7 @@ impl SessionSafetyReview {
         now_unix_ms: u64,
         capability: &str,
     ) -> Result<Self, SessionSafetyError> {
-        if principal.as_str() != format!("unix:uid:{}", epoch.uid()) {
-            return Err(SessionSafetyError::PrincipalMismatch);
-        }
-        // Root's implicit native Polkit authorization is not fresh owner
-        // authentication. Root graphical login is outside this qualification.
-        if epoch.uid() == 0 {
-            return Err(SessionSafetyError::UnsupportedSession);
-        }
-        let resource = epoch
-            .resource_id()
-            .map_err(|_| SessionSafetyError::IdentityMismatch)?;
-        validate_envelope(logind, LOGIND_PROVIDER, capability, &resource, now_unix_ms)?;
-        require_text(logind, "boot_id", epoch.boot().as_str())?;
-        require_text(logind, "session_id", epoch.session_id())?;
-        require_u64(logind, "uid", u64::from(epoch.uid()))?;
-        require_u64(logind, "created_monotonic_us", epoch.created_monotonic_us())?;
-        require_text(logind, "session_type", "wayland")?;
-        require_text(logind, "session_class", "user")?;
-        require_text(logind, "state", "active")?;
-        require_bool(logind, "active", true)?;
-        require_bool(logind, "remote", false)?;
-        match logind.attributes.get("seat") {
-            Some(ObservedValue::Text(seat))
-                if !seat.is_empty()
-                    && seat.len() <= 64
-                    && seat.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
-                    }) => {}
-            _ => return Err(SessionSafetyError::UnsupportedSession),
-        }
-        require_bool(logind, "leader_present", true)?;
+        validate_active_session(principal, epoch, logind, capability, now_unix_ms)?;
         Ok(Self {
             epoch: epoch.clone(),
             action,
@@ -443,6 +422,49 @@ impl SessionPowerSafetyReview {
         }
         self.session.require_secure_coverage(locker, now_unix_ms)
     }
+}
+
+/// Shared exact-owner/active-seat checks for session and display safety. Native
+/// facts remain independently sampled; this function grants no authority.
+pub(crate) fn validate_active_session(
+    principal: &AuthenticatedPrincipal,
+    epoch: &SessionEpoch,
+    logind: &ObservationEnvelope,
+    capability: &str,
+    now_unix_ms: u64,
+) -> Result<(), SessionSafetyError> {
+    if principal.as_str() != format!("unix:uid:{}", epoch.uid()) {
+        return Err(SessionSafetyError::PrincipalMismatch);
+    }
+    // Root's implicit native Polkit authorization is not fresh owner
+    // authentication. Root graphical login is outside this qualification.
+    if epoch.uid() == 0 {
+        return Err(SessionSafetyError::UnsupportedSession);
+    }
+    let resource = epoch
+        .resource_id()
+        .map_err(|_| SessionSafetyError::IdentityMismatch)?;
+    validate_envelope(logind, LOGIND_PROVIDER, capability, &resource, now_unix_ms)?;
+    require_text(logind, "boot_id", epoch.boot().as_str())?;
+    require_text(logind, "session_id", epoch.session_id())?;
+    require_u64(logind, "uid", u64::from(epoch.uid()))?;
+    require_u64(logind, "created_monotonic_us", epoch.created_monotonic_us())?;
+    require_text(logind, "session_type", "wayland")?;
+    require_text(logind, "session_class", "user")?;
+    require_text(logind, "state", "active")?;
+    require_bool(logind, "active", true)?;
+    require_bool(logind, "remote", false)?;
+    match logind.attributes.get("seat") {
+        Some(ObservedValue::Text(seat))
+            if !seat.is_empty()
+                && seat.len() <= 64
+                && seat
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') => {}
+        _ => return Err(SessionSafetyError::UnsupportedSession),
+    }
+    require_bool(logind, "leader_present", true)?;
+    Ok(())
 }
 
 pub(crate) fn validate_envelope(

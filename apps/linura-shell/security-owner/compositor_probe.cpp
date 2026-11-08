@@ -53,10 +53,10 @@ bool peerMatches(int descriptor, const NativeSessionBinding &binding)
            static_cast<quint32>(peer.pid) == binding.compositorPid;
 }
 
-bool waitReady(int descriptor, short event, QElapsedTimer &budget)
+bool waitReady(int descriptor, short event, QElapsedTimer &budget, qint64 limit = ProbeBudgetMs)
 {
     while (true) {
-        const qint64 remaining = ProbeBudgetMs - budget.elapsed();
+        const qint64 remaining = limit - budget.elapsed();
         if (remaining <= 0)
             return false;
         pollfd pending{descriptor, event, 0};
@@ -114,18 +114,22 @@ std::optional<NativeCompositorLockState> decodeNativeHyprlandLock(QByteArrayView
     return state;
 }
 
-std::optional<NativeCompositorLockState>
-observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBinding &binding,
-                          NativeCompositorProbeFailure *failure)
+namespace {
+std::optional<QByteArray> nativeExchange(const QString &nativeSocketPath,
+                                         const NativeSessionBinding &binding,
+                                         QByteArrayView command, qsizetype maximum, qint64 limit,
+                                         NativeCompositorProbeFailure *failure)
 {
     if (failure)
         *failure = NativeCompositorProbeFailure::None;
-    const auto deny =
-        [failure](NativeCompositorProbeFailure reason) -> std::optional<NativeCompositorLockState> {
+    const auto deny = [failure](NativeCompositorProbeFailure reason) -> std::optional<QByteArray> {
         if (failure)
             *failure = reason;
         return std::nullopt;
     };
+    if (command.isEmpty() || command.size() > 512 || maximum <= 0 || maximum > 256 * 1024 ||
+        limit <= 0 || limit > ProbeBudgetMs)
+        return deny(NativeCompositorProbeFailure::Binding);
     const auto parsed = NativeLockIdentity::parse(binding.lock.resource);
     if (!parsed || *parsed != binding.lock || binding.compositorPid == 0 ||
         binding.compositorPid > static_cast<quint32>(std::numeric_limits<pid_t>::max()) ||
@@ -151,11 +155,11 @@ observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBi
     QElapsedTimer budget;
     budget.start();
     const auto unavailable = [&](NativeCompositorProbeFailure reason) {
-        return deny(budget.elapsed() >= ProbeBudgetMs ? NativeCompositorProbeFailure::Deadline
-                                                      : reason);
+        return deny(budget.elapsed() >= limit ? NativeCompositorProbeFailure::Deadline : reason);
     };
     if (::connect(descriptor, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
-        if ((errno != EINPROGRESS && errno != EAGAIN) || !waitReady(descriptor, POLLOUT, budget))
+        if ((errno != EINPROGRESS && errno != EAGAIN) ||
+            !waitReady(descriptor, POLLOUT, budget, limit))
             return unavailable(NativeCompositorProbeFailure::Connect);
         int error = 0;
         socklen_t bytes = sizeof(error);
@@ -163,45 +167,63 @@ observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBi
             bytes != sizeof(error) || error != 0)
             return unavailable(NativeCompositorProbeFailure::Connect);
     }
-    if (!peerMatches(descriptor, binding) || budget.elapsed() >= ProbeBudgetMs)
+    if (!peerMatches(descriptor, binding) || budget.elapsed() >= limit)
         return unavailable(NativeCompositorProbeFailure::Peer);
-    constexpr char command[] = "j/locked";
     std::size_t sent = 0;
-    while (sent < sizeof(command) - 1) {
-        if (budget.elapsed() >= ProbeBudgetMs)
+    while (sent < static_cast<std::size_t>(command.size())) {
+        if (budget.elapsed() >= limit)
             return deny(NativeCompositorProbeFailure::Deadline);
-        const ssize_t count =
-            send(descriptor, command + sent, sizeof(command) - 1 - sent, MSG_NOSIGNAL);
+        const ssize_t count = send(descriptor, command.data() + sent,
+                                   static_cast<std::size_t>(command.size()) - sent, MSG_NOSIGNAL);
         if (count > 0)
             sent += static_cast<std::size_t>(count);
         else if (count < 0 && errno == EINTR)
             continue;
         else if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (!waitReady(descriptor, POLLOUT, budget))
+            if (!waitReady(descriptor, POLLOUT, budget, limit))
                 return unavailable(NativeCompositorProbeFailure::Send);
         } else {
             return unavailable(NativeCompositorProbeFailure::Send);
         }
     }
-    std::array<char, static_cast<std::size_t>(MaximumReplyBytes + 1)> reply{};
-    std::size_t used = 0;
-    while (used < reply.size()) {
-        if (!waitReady(descriptor, POLLIN, budget))
+    QByteArray reply;
+    std::array<char, 4096> chunk{};
+    while (true) {
+        if (!waitReady(descriptor, POLLIN, budget, limit))
             return unavailable(NativeCompositorProbeFailure::Receive);
-        const ssize_t count = recv(descriptor, reply.data() + used, reply.size() - used, 0);
+        const ssize_t count = recv(descriptor, chunk.data(), chunk.size(), 0);
         if (count > 0) {
-            used += static_cast<std::size_t>(count);
+            if (count > maximum - reply.size())
+                return deny(NativeCompositorProbeFailure::ReplyLimit);
+            reply.append(chunk.data(), static_cast<qsizetype>(count));
         } else if (count == 0) {
-            if (!peerMatches(descriptor, binding) || budget.elapsed() >= ProbeBudgetMs)
+            if (!peerMatches(descriptor, binding) || budget.elapsed() >= limit)
                 return unavailable(NativeCompositorProbeFailure::Peer);
-            const auto state = decodeNativeHyprlandLock(
-                QByteArrayView(reply.data(), static_cast<qsizetype>(used)));
-            return state ? state : deny(NativeCompositorProbeFailure::Reply);
+            return reply;
         } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
             return unavailable(NativeCompositorProbeFailure::Receive);
         }
     }
-    return deny(NativeCompositorProbeFailure::ReplyLimit); // Never a prefix success.
+}
+} // namespace
+
+std::optional<NativeCompositorLockState>
+observeNativeHyprlandLock(const QString &path, const NativeSessionBinding &binding,
+                          NativeCompositorProbeFailure *failure)
+{
+    const auto reply =
+        nativeExchange(path, binding, "j/locked", MaximumReplyBytes, ProbeBudgetMs, failure);
+    if (!reply)
+        return std::nullopt;
+    const auto decoded = decodeNativeHyprlandLock(*reply);
+    if (!decoded && failure)
+        *failure = NativeCompositorProbeFailure::Reply;
+    return decoded;
+}
+std::optional<QByteArray> observeNativeHyprlandOutputs(const QString &path,
+                                                       const NativeSessionBinding &binding)
+{
+    return nativeExchange(path, binding, "j/monitors all", 256 * 1024, ProbeBudgetMs, nullptr);
 }
 
 } // namespace Linura::SecurityOwner

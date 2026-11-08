@@ -46,6 +46,16 @@ class SecretEntry final : public QQuickPaintedItem
     [[nodiscard]] bool beginNativePrompt(NativePromptKind kind = NativePromptKind::Response,
                                          quint32 step = 1,
                                          std::optional<quint32> uid = std::nullopt);
+    // Display-only first-frame staging. Preparation exposes only fixed metadata,
+    // accepts no input and starts the ORIGINAL prompt timeout. The native owner
+    // activates the exact token after its matching protected hardware frame.
+    // Tokens are comparison data, never authentication or an execution grant.
+    [[nodiscard]] std::optional<quint64> prepareNativePrompt(NativePromptKind kind, quint32 step,
+                                                             std::optional<quint32> uid);
+    [[nodiscard]] std::optional<quint64>
+    prepareNativeIdentitySelection(const QVector<quint32> &uids);
+    [[nodiscard]] bool activatePreparedNativePrompt(quint64 token);
+    [[nodiscard]] bool preparedNativePromptMatches(quint64 token) const;
     [[nodiscard]] bool respondToNativePrompt(const std::function<void(const char *)> &response);
     void cancelNativePrompt();
     // Official Polkit provides the identities; selection is native-keyboard-only.
@@ -57,6 +67,7 @@ class SecretEntry final : public QQuickPaintedItem
     void submissionRequested();
     void cancellationRequested();
     void identitySelected(quint32 uid);
+    void identityPresentationRequested(quint64 token);
 
   protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -70,8 +81,13 @@ class SecretEntry final : public QQuickPaintedItem
     void nativeKey(int key, Qt::KeyboardModifiers modifiers, std::string_view text);
     [[nodiscard]] bool handleCommand(int key);
     void setNativeKeyboardFocus(bool focused);
+    void suspendForExpectedPresentation();
+    [[nodiscard]] bool activatePrepared(quint64 token, bool requireNativeFocus);
+    [[nodiscard]] std::optional<quint64> preparePrompt(NativePromptKind, quint32 step,
+                                                       std::optional<quint32> uid, bool publish);
+    [[nodiscard]] std::optional<quint64> prepareIdentity(const QVector<quint32> &, bool publish);
     void cancelFromInteraction();
-    void showIdentityChoice();
+    void showIdentityChoice(bool publish = true);
     SecretBuffer buffer_;
     QTimer promptTimer_;
     bool accepting_ = false;
@@ -79,6 +95,10 @@ class SecretEntry final : public QQuickPaintedItem
     bool cancelAfterResponse_ = false;
     bool nativeFocused_ = false;
     bool nativeInputBound_ = false;
+    bool prepared_ = false;
+    bool identityPresentationGated_ = false;
+    quint64 preparationToken_ = 0;
+    quint64 preparedBootStart_ = 0, preparedBootDeadline_ = 0;
     QColor foreground_;
     QColor surface_;
     QColor focusColor_;
