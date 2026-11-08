@@ -12,6 +12,7 @@
 #include <iterator>
 
 using namespace Linura::HyprlandDisplay;
+namespace ReleaseCodec = OriginalNativeReleaseGrantCodec;
 namespace {
 std::string framed(const std::vector<std::string> &fields)
 {
@@ -167,7 +168,6 @@ void terminalComparison(const std::string &material)
         bytes,
     };
     const auto releaseBytes = framed(retirement);
-    using ReleaseCodec = OriginalNativeReleaseGrantCodec;
     const auto matchRelease = [&](std::string_view value, std::uint64_t version,
                                   std::string_view binding, std::string_view observation) {
         const ReleaseCodec::ControlAnchor anchor{version, binding, observation};
