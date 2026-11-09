@@ -69,3 +69,5 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0044 — Explicit native development preparation across Ubuntu and Arch](0044-explicit-native-development-preparation.md)
 - [0045 — S21 device effects share trusted Control authority and verified recovery](0045-s21-workstation-device-authority.md)
 - [0048 — S18 NetworkManager authority and network recovery](0048-s18-networkmanager-authority.md)
+
+**S18-1 architecture review:** ADR 0048 remains proposed; its [contract-first acceptance boundary](../development/v010-s18-1-network-architecture-contracts.md) and [inactive NetworkManager design](../../contracts/v010-s18-design.toml) govern the architecture review in PR #267. Native identity implementation and passive observation belong to S18-2 / PR #268. Neither an ADR index entry nor a passing contract test activates network changes, supersedes Control, or establishes Q11 physical evidence.
