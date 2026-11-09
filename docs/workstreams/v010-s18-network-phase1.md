@@ -56,6 +56,20 @@ The following are concrete source observations or gaps, **not assertions of a cu
 - **F08 — Security and availability:** Network changes can terminate the user's only working network route or disrupt a managed installation. Treat remote lockout, secret-agent impersonation and ambiguous dispatch as review-critical before enabling effects.
 - **F09 — Stability and consumers:** NM query surfaces exist in CLI, daemon and First Boot. Read `contracts/stability.toml` / `docs/api-versioning.md` and update all existing contracts, tests and consumers coherently, rather than creating compatibility shims or breaking tested observational routes accidentally.
 
+## S18-1 contract-first evidence and extraction map
+
+The [S18-1 architecture review](../development/v010-s18-1-network-architecture-contracts.md) is a contract-first checkpoint, not an implementation or Q11 hardware milestone. PR #267 must carry traceable ADR 0048, inactive operation-design, security/qualification dossiers, validation routing, the Phase-1 audited baseline, milestone/ADR/qualification indexes, and threat-model references. The earlier placement of Rust identity code in #267 was incorrect; only **S18-2 / PR #268** owns core identity types and bounded passive NetworkManager observation.
+
+| Acceptance boundary | Required source or proof | Must not be inferred from S18-1 |
+| --- | --- | --- |
+| Trusted observation model | Existing `ObservationEnvelope`/Control coordination and boot/bus-instance/unique NM owner design | Cached alias or a typed ID is native authority |
+| Safe proposed effects | Nine disabled NetworkManager operation candidates; trusted Control/Polkit, route/DNS impact, durable recovery | A reviewed operation name or class authorizes dispatch |
+| Credential safety | Original authenticated caller, purpose-bound secret-agent scope and retained evidence redaction | A saved Wi-Fi profile or shell prompt is protected authentication |
+| Source and qualification routing | Canonical v0.10 contract/negative tests, real native A/B lineage and independently maintained physical C/Q11 | A successful unit test, mock, screenshot or VM proves physical Wi-Fi support |
+| Development separation | S18-1 proposed architecture; S18-2 identity/observation; S18-3–8 authority/effects; S18-9 user experience; S18-10 integrated qualification | WIP ancestry makes any draft PR completed or independently qualified |
+
+Do not copy the entire WIP history into #267 to manufacture a large diff. When extracting this PR onto accepted `main`, explicitly include all architecture documents and their exact traceability, independently rerun required gates, and retain S18's `planned` ledger state and inactive effects until qualified implementation is accepted.
+
 ## 3. Capability inventory and bounded v0.10 claim
 
 States below represent the **audited S18 baseline**, not completed capabilities. "Partial" means the cited limited function exists, not that the full row passes S18 qualification.

@@ -10,6 +10,32 @@ Linura already offers experimental read-only NetworkManager manager/device obser
 
 **One model, one trusted Control authority architecture.** The companion [S18 proposed design](../../contracts/v010-s18-design.toml) is inert specification data, **not** operation registration, policy, a native adapter or runtime support evidence. Client/provider/agent input cannot choose operation class, trusted risk, policy outcome, executable plan or effect grant.
 
+## S18-1 architecture-first acceptance boundary
+
+S18-1 (reserved PR #267) is a **contract, security and qualification-only**
+review gate, corresponding to the contract-first S21-1 pattern. Its scope is
+this ADR, the inactive nine-operation design, qualified evidence criteria,
+the Phase-1 source/ownership inventory, exact v0.10 routing and executable
+negative architecture tests. It must **not** add `linura-core` types,
+NetworkManager native adapters, D-Bus operation handlers, native secrets,
+privileged executors or runtime capabilities.
+
+S18-2 (reserved PR #268) separately owns typed network boot/bus/owner,
+device/AP, profile revision and active-connection identities, then the
+bounded passive native observation. No typed correlation supplied by an
+untrusted actor can independently attest live kernel state, authorize an
+effect or replace a fresh native security check. Preserve the exact existing
+read-only observer and First Boot APIs as that implementation evolves.
+
+Formal architecture acceptance requires negative design/operation tests,
+review of threat model, safe recovery, actual Polkit subject, secret handling,
+route/DNS impact and real source-pinned qualification routing. A green
+contract test does not establish actual NM or physical hardware behavior.
+The source of truth for assignment is
+[`contracts/v010-s18-pr-decomposition.toml`](../../contracts/v010-s18-pr-decomposition.toml).
+Development continues in `wip/v010-s18-network`; code in another PR or
+inherited from WIP is not a deliverable of the contract-only PR.
+
 ## Authoritative network observations
 
 Bind the actual system-bus `org.freedesktop.NetworkManager` **unique owner**, boot and coherent read generation, then the exact device, saved settings/profile revision, active connection instance, AP and IP configuration identities. Interface names, MAC/BSSID, SSID, profile UUID, ifindex and native D-Bus paths are useful correlation but do **not** independently confer mutation identity. Detect duplicates and replacement rather than first-match selection. A multi-object `GetAll` sequence is not atomic; inconsistent provider epochs, changed device paths, profile revisions or contradictory routes fail closed.
