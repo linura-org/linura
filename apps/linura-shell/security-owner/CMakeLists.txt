@@ -55,6 +55,7 @@ target_compile_options(linura-security-owner-mechanisms PRIVATE
 add_library(linura-security-owner-input STATIC
     secret_entry.cpp secret_entry.h
     native_accessibility.cpp native_accessibility.h
+    native_network_credentials.cpp native_network_credentials.h
 )
 target_link_libraries(linura-security-owner-input PUBLIC
     linura-security-owner-mechanisms Qt6::Gui Qt6::Quick
@@ -235,6 +236,21 @@ if(BUILD_TESTING)
     )
     add_test(NAME security-owner-protected-input COMMAND linura-security-owner-input-tests)
     set_tests_properties(security-owner-protected-input PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
+    )
+
+    # S18-4 native-only, one-use credential boundary. This is deliberately
+    # component qualification, NOT a registered NM SecretAgent/Polkit mutation.
+    add_executable(linura-security-owner-network-credentials-tests
+        tests/native_network_credentials.cpp)
+    target_link_libraries(linura-security-owner-network-credentials-tests PRIVATE
+        linura-security-owner-input)
+    target_compile_options(linura-security-owner-network-credentials-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    )
+    add_test(NAME security-owner-native-network-credentials
+        COMMAND linura-security-owner-network-credentials-tests)
+    set_tests_properties(security-owner-native-network-credentials PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
     )
 
