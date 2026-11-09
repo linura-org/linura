@@ -345,9 +345,11 @@ mod tests {
         let o = observation(&e, 4);
         let reviewed = checked(review_broadcast_scan(preview(&d, &o, &e)));
         let later = observation(&e, 5);
-        assert!(reviewed
-            .check_fresh_observation(&d, &later, &e, 101_005, 102_000_000)
-            .is_ok());
+        assert!(
+            reviewed
+                .check_fresh_observation(&d, &later, &e, 101_005, 102_000_000)
+                .is_ok()
+        );
         assert!(matches!(
             reviewed.check_fresh_observation(&d, &o, &e, 101_005, 102_000_000),
             Err(WifiScanPreflightError::StaleObservation)
