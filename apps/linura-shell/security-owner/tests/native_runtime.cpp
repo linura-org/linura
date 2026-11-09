@@ -575,7 +575,10 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 15 && signals == 1 && annotations == 3);
+    assert(introspection.contains(QStringLiteral("ArmNetworkCredential")) &&
+           introspection.contains(QStringLiteral("CancelNetworkCredential")) &&
+           introspection.contains(QStringLiteral("((ssssssss)(sssssssuttb))")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
@@ -613,6 +616,21 @@ int main(int argc, char **argv)
     substituted = scope;
     substituted.resource += QStringLiteral(":1");
     assert(!substituted.scope());
+
+    auto network = scope;
+    network.purpose = 8;
+    network.request = network.plan = QStringLiteral("request:v010:network-credential:runtime");
+    assert(network.scope());
+    auto wrongNetwork = network;
+    wrongNetwork.purpose = 1;
+    assert(!wrongNetwork.scope());
+    wrongNetwork = network;
+    wrongNetwork.purpose = 9;
+    assert(!wrongNetwork.scope());
+    wrongNetwork = network;
+    wrongNetwork.request = wrongNetwork.plan =
+        QStringLiteral("request:v010:network-credential:runtime--alias");
+    assert(!wrongNetwork.scope());
 
     QTemporaryDir directory;
     assert(directory.isValid());

@@ -56,6 +56,9 @@ Route route(NativePeerPurpose purpose)
     case NativePeerPurpose::NativeAuthenticationDaemon:
         return {"org.freedesktop.PolicyKit1", "polkit.service",
                 "/usr/lib/systemd/system/polkit.service", "/usr/lib/polkit-1/polkitd"};
+    case NativePeerPurpose::NetworkManagerDaemon:
+        return {"org.freedesktop.NetworkManager", "NetworkManager.service",
+                "/usr/lib/systemd/system/NetworkManager.service", "/usr/bin/NetworkManager"};
     }
     return {};
 }
@@ -111,16 +114,18 @@ bool exactExecStart(NativePeerPurpose purpose, quint32 expectedPid, const QVaria
     const auto selected = route(purpose);
     if (!selected.image)
         return false;
-    const auto expectedArgv =
-        purpose == NativePeerPurpose::NativeAuthenticationDaemon
-            ? QStringList{QLatin1String(selected.image), QStringLiteral("--no-debug"),
-                          QStringLiteral("--log-level=notice")}
-            : QStringList{QLatin1String(selected.image)};
+    QStringList expectedArgv{QLatin1String(selected.image)};
+    if (purpose == NativePeerPurpose::NativeAuthenticationDaemon)
+        expectedArgv << QStringLiteral("--no-debug") << QStringLiteral("--log-level=notice");
+    else if (purpose == NativePeerPurpose::NetworkManagerDaemon)
+        expectedArgv << QStringLiteral("--no-daemon");
     return exactNativeExecStart(value, QLatin1String(selected.image), expectedArgv, expectedPid);
 }
 
 std::optional<quint32> localServiceUid(NativePeerPurpose purpose)
 {
+    if (purpose == NativePeerPurpose::NetworkManagerDaemon)
+        return quint32(0); // Supervised immutable root NM, not an ambient user agent.
     // The packaged sysusers account is local. Bounded local lookup avoids an
     // NSS/network backend selecting identity or stalling a native authority call.
     struct stat metadata
@@ -224,10 +229,10 @@ std::optional<NativePeerIdentity> bindNativeService(NativePeerPurpose purpose,
     const QUuid invocation(facts.invocation);
     if (invocation.isNull() || invocation.toString(QUuid::WithoutBraces) != facts.invocation)
         return std::nullopt;
-    const quint32 expected =
-        purpose == NativePeerPurpose::PreparedSessionDispatch ? 0 : expectedServiceUid;
-    if ((purpose != NativePeerPurpose::PreparedSessionDispatch && expectedServiceUid == 0) ||
-        facts.nativeUid != expected)
+    const bool rootService = purpose == NativePeerPurpose::PreparedSessionDispatch ||
+                             purpose == NativePeerPurpose::NetworkManagerDaemon;
+    const quint32 expected = rootService ? 0 : expectedServiceUid;
+    if ((!rootService && expectedServiceUid == 0) || facts.nativeUid != expected)
         return std::nullopt;
     return NativePeerIdentity{facts.sender, facts.nativeUid, facts.nativePid, facts.invocation};
 }

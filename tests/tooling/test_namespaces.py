@@ -111,10 +111,13 @@ class NamespaceContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("org.linura.authority.other-session", result.stderr)
 
-    def test_protective_actions_are_detected_in_block_and_scalar_arms(self) -> None:
+    def test_native_owner_auth_actions_are_detected_in_block_and_scalar_arms(
+        self,
+    ) -> None:
         for purpose, action in (
             ("EnableProtectiveLock", "enable-protective-lock"),
             ("RevokeProtectiveLock", "revoke-protective-lock"),
+            ("NetworkCredential", "use-network-credential"),
         ):
             for block in (False, True):
                 with self.subTest(purpose=purpose, block=block):
@@ -124,7 +127,10 @@ class NamespaceContractTests(unittest.TestCase):
                         source = root / "crates/linura-linux-session/src/owner.rs"
                         original = source.read_text(encoding="utf-8")
                         expression = f'"org.linura.authority.{action}"'
-                        old = rf"NativeApprovalPurpose::{purpose}\s*=>\s*\{{\s*{re.escape(expression)}\s*\}}"
+                        old = (
+                            rf"NativeApprovalPurpose::{purpose}\s*=>\s*"
+                            rf"(?:\{{\s*{re.escape(expression)}\s*\}}|{re.escape(expression)})"
+                        )
                         replacement = f'"org.linura.authority.unregistered-{action}"'
                         if block:
                             replacement = "{\n" + replacement + "\n}"

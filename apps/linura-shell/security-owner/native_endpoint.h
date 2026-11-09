@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_scope.h"
+#include "native_network_credentials.h"
 #include <QDBusArgument>
 #include <QDBusContext>
 #include <QObject>
@@ -17,6 +18,24 @@ struct NativeApprovalWire final
 };
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeApprovalWire &scope);
 const QDBusArgument &operator>>(const QDBusArgument &wire, NativeApprovalWire &scope);
+
+// Exact nested D-Bus scope: 8 original-request fields and 7 native target
+// strings plus kernel generation, settings generation and persistence refusal.
+// The received transport sender remains independent of these encoded fields.
+struct NativeNetworkCredentialWire final
+{
+    QString resource, principal, operation, request, originalSender, systemBusId;
+    QString networkManagerOwner, seat;
+    QString deviceObject, deviceInterface, profileObject, profileUuid, profileFingerprint;
+    QString requestDigest, reviewDigest;
+    quint32 deviceIfindex = 0;
+    quint64 networkNamespace = 0;
+    quint64 settingsVersion = 0;
+    bool persistRequested = false;
+    [[nodiscard]] std::optional<NativeNetworkCredentialScope> scope() const;
+};
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeNetworkCredentialWire &scope);
+const QDBusArgument &operator>>(const QDBusArgument &wire, NativeNetworkCredentialWire &scope);
 
 struct NativeLockObservationWire final
 {
@@ -59,6 +78,10 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"in\"/>"
         "<arg name=\"consumed\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"CancelApproval\"/>"
+        "<method name=\"ArmNetworkCredential\">"
+        "<arg name=\"scope\" type=\"((ssssssss)(sssssssuttb))\" direction=\"in\"/>"
+        "<arg name=\"armed\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"CancelNetworkCredential\"/>"
         "<method name=\"ObserveLock\"><arg name=\"observation\" type=\"(sbt)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObservePowerPermission\"><arg name=\"resource\" type=\"s\" "
@@ -98,6 +121,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     bool ArmApproval(const NativeApprovalWire &scope);
     bool ConsumeApproval(const NativeApprovalWire &scope);
     void CancelApproval();
+    bool ArmNetworkCredential(const NativeNetworkCredentialWire &scope);
+    void CancelNetworkCredential();
     NativeLockObservationWire ObserveLock();
     NativePowerPermissionWire ObservePowerPermission(const QString &resource);
     bool FencePreparedTransition(const QString &resource);
@@ -119,5 +144,6 @@ class NativeEndpoint final : public QObject, protected QDBusContext
 } // namespace Linura::SecurityOwner
 
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeApprovalWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeNetworkCredentialWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeLockObservationWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePowerPermissionWire)

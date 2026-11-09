@@ -159,6 +159,11 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.authority.use-network-credential"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "org.linura.authority.suspend-session"
 kind = "polkit-action"
 status = "active"
@@ -338,6 +343,13 @@ source = "crates/linura-linux-session/src/owner.rs"
 usage = "native-approval-action"
 token = '"org.linura.authority.revoke-protective-lock"'
 action = "org.linura.authority.revoke-protective-lock"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.use-network-credential"'
+action = "org.linura.authority.use-network-credential"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]
