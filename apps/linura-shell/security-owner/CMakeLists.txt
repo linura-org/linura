@@ -55,6 +55,7 @@ target_compile_options(linura-security-owner-mechanisms PRIVATE
 add_library(linura-security-owner-input STATIC
     secret_entry.cpp secret_entry.h
     native_accessibility.cpp native_accessibility.h
+    native_network_credentials.cpp native_network_credentials.h
 )
 target_link_libraries(linura-security-owner-input PUBLIC
     linura-security-owner-mechanisms Qt6::Gui Qt6::Quick
@@ -150,6 +151,7 @@ if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
         native_runtime.cpp native_runtime.h
         native_unlock_status.cpp native_unlock_status.h
         native_endpoint.cpp native_endpoint.h
+        native_network_agent.cpp native_network_agent.h
     )
     target_link_libraries(linura-security-owner-runtime PUBLIC
         linura-security-owner-auth linura-security-owner-wayland
@@ -237,6 +239,37 @@ if(BUILD_TESTING)
     set_tests_properties(security-owner-protected-input PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
     )
+
+    # S18-4 protected input component remains independently testable. The
+    # native SecretAgent has a separate on-wire contract and scope suite.
+    add_executable(linura-security-owner-network-credentials-tests
+        tests/native_network_credentials.cpp)
+    target_link_libraries(linura-security-owner-network-credentials-tests PRIVATE
+        linura-security-owner-input)
+    target_compile_options(linura-security-owner-network-credentials-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    )
+    add_test(NAME security-owner-native-network-credentials
+        COMMAND linura-security-owner-network-credentials-tests)
+    set_tests_properties(security-owner-native-network-credentials PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
+    )
+
+    if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
+        add_executable(linura-security-owner-network-agent-tests
+            tests/native_network_agent.cpp)
+        target_link_libraries(linura-security-owner-network-agent-tests PRIVATE
+            linura-security-owner-runtime
+        )
+        target_compile_options(linura-security-owner-network-agent-tests PRIVATE
+            -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+        )
+        add_test(NAME security-owner-network-agent-boundary
+            COMMAND linura-security-owner-network-agent-tests)
+        set_tests_properties(security-owner-network-agent-boundary PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
+        )
+    endif()
 
     add_executable(linura-security-owner-compose-tests tests/native_compose.cpp)
     target_link_libraries(linura-security-owner-compose-tests PRIVATE

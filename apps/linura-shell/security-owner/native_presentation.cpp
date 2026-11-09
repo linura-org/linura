@@ -166,6 +166,11 @@ class NativePresentation::Impl final
                                              "this login. Never unlocks or authorizes sleep. "
                                              "Escape cancels.");
                 break;
+            case ApprovalPurpose::AuthenticateNetworkCredential:
+                title = QStringLiteral("Wi-Fi credential");
+                explanation = QStringLiteral(
+                    "Authenticate once for this reviewed Wi-Fi password. Escape cancels.");
+                break;
             case ApprovalPurpose::ConfirmLock:
             default:
                 faulted = true;

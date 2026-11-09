@@ -145,7 +145,8 @@ int main(int argc, char **argv)
          std::array{ApprovalPurpose::AuthenticateUnlock, ApprovalPurpose::AuthenticateSuspend,
                     ApprovalPurpose::AuthenticateLogout, ApprovalPurpose::AuthenticateReboot,
                     ApprovalPurpose::AuthenticatePowerOff, ApprovalPurpose::EnableProtectiveLock,
-                    ApprovalPurpose::RevokeProtectiveLock}) {
+                    ApprovalPurpose::RevokeProtectiveLock,
+                    ApprovalPurpose::AuthenticateNetworkCredential}) {
         presentation.presentAuthentication(purpose);
         assert(presentation.ready() && presentation.paint(frame));
         assert(previous.isNull() || previous != frame);
