@@ -7,7 +7,6 @@
 //! transaction route and actual native qualification are approved.
 
 use super::*;
-use linura_control::AuthorizedEffect;
 use linura_core::{NetworkDeviceId, NetworkManagerEpoch, NetworkObjectKind, NetworkObservationId};
 use linura_provider_sdk::{
     EffectDescriptor, ExecutionBinding, ExecutionDisposition, ExecutionOutcome,
@@ -324,17 +323,18 @@ impl NativeSessionChannel {
         })
     }
 
-    /// Consume exactly one canonical Control handoff and attempt only an empty
-    /// RequestScan options map. This method cannot manufacture an approval or
-    /// durable journal. Calling it from an unqualified production route is
-    /// rejected earlier by Control's S18 network-effect gate.
-    pub fn dispatch_authorized_wifi_scan(
+    /// Native transport, never an authorization. Only Authority1's trusted
+    /// composition root may call this after consuming a non-cloneable
+    /// Control AuthorizedEffect and durably spending an event attempt.
+    /// ExecutionBinding alone cannot grant permission. No D-Bus method
+    /// forwards this API, and S18's production Control route remains denied.
+    pub fn dispatch_sealed_wifi_scan(
         &self,
-        authorization: AuthorizedEffect,
+        effect: EffectDescriptor,
+        binding: ExecutionBinding,
         scope: &NativeWifiScanScope,
     ) -> Result<ExecutionOutcome, String> {
         self.require_role(NativeSessionRole::Control)?;
-        let (effect, binding) = authorization.into_executor_request();
         let now = boot_ms()?
             .checked_mul(1000)
             .ok_or("native clock overflow")?;

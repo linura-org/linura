@@ -18,6 +18,7 @@ mod schema;
 #[rustfmt::skip]
 #[allow(clippy::too_many_arguments)]
 mod store;
+mod network_scan_attempts;
 mod protective_lock_settings;
 mod request_journal;
 mod storage_error;
@@ -29,6 +30,9 @@ mod validation;
 mod validation_base;
 
 pub use integrity::SqliteIntegrityKey;
+pub use network_scan_attempts::{
+    SqliteWifiScanAttemptJournal, WifiScanAttempt, WifiScanAttemptState, WifiScanAttemptStatus,
+};
 pub use protective_lock_settings::SqliteProtectiveLockSettingStore;
 pub use request_journal::SqliteApprovedRequestJournal;
 pub use storage_error::is_physical_storage_exhaustion;
