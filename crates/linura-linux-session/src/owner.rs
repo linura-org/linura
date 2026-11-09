@@ -1,7 +1,10 @@
 //! Root-supervised native owner discovery and bounded private transport only.
 //! Neither these identities nor successful calls mint policy/dispatch authority.
+mod network_credential;
 mod polkit;
 mod sleep_fence;
+
+pub use network_credential::{NativeNetworkSubjectCorrelation, NativeNetworkSubjectRequest};
 
 use std::collections::HashMap;
 use std::fs;
@@ -158,6 +161,8 @@ pub enum NativeApprovalPurpose {
     PowerOff,
     EnableProtectiveLock,
     RevokeProtectiveLock,
+    /// S18 protected first-party authentication only; never network effect authority.
+    NetworkCredential,
 }
 
 /// Correlation with a canonical Control challenge, not an approval credential.
@@ -186,6 +191,11 @@ impl NativeApprovalRequest {
                 "request:v010:session-lock:",
                 self.lock.resource_id().map_err(|e| e.to_string())?,
                 1,
+            ),
+            (NativeApprovalPurpose::NetworkCredential, None) => (
+                "request:v010:network-credential:",
+                self.lock.resource_id().map_err(|e| e.to_string())?,
+                8,
             ),
             (
                 purpose @ (NativeApprovalPurpose::EnableProtectiveLock
@@ -914,6 +924,7 @@ fn authentication_action(purpose: NativeApprovalPurpose) -> Result<&'static str,
         NativeApprovalPurpose::RevokeProtectiveLock => {
             "org.linura.authority.revoke-protective-lock"
         }
+        NativeApprovalPurpose::NetworkCredential => "org.linura.authority.use-network-credential",
         NativeApprovalPurpose::Lock => return Err("lock confirmation is not a PAM action".into()),
     })
 }

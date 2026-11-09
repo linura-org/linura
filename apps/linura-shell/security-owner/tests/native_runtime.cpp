@@ -614,6 +614,21 @@ int main(int argc, char **argv)
     substituted.resource += QStringLiteral(":1");
     assert(!substituted.scope());
 
+    auto network = scope;
+    network.purpose = 8;
+    network.request = network.plan = QStringLiteral("request:v010:network-credential:runtime");
+    assert(network.scope());
+    auto wrongNetwork = network;
+    wrongNetwork.purpose = 1;
+    assert(!wrongNetwork.scope());
+    wrongNetwork = network;
+    wrongNetwork.purpose = 9;
+    assert(!wrongNetwork.scope());
+    wrongNetwork = network;
+    wrongNetwork.request = wrongNetwork.plan =
+        QStringLiteral("request:v010:network-credential:runtime--alias");
+    assert(!wrongNetwork.scope());
+
     QTemporaryDir directory;
     assert(directory.isValid());
     QDBusServer server(QStringLiteral("unix:path=") + directory.path() +

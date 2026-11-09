@@ -194,7 +194,10 @@ void wrongNativeIdentityAndCancellationNeverUnlock(ApprovalPurpose purpose)
     quint64 time = 100;
     auto reviewed = scope();
     reviewed.purpose = purpose;
-    if (purpose != ApprovalPurpose::AuthenticateUnlock)
+    if (purpose == ApprovalPurpose::AuthenticateNetworkCredential)
+        reviewed.request = reviewed.plan =
+            QStringLiteral("request:v010:network-credential:auth-component");
+    else if (purpose != ApprovalPurpose::AuthenticateUnlock)
         reviewed.request = reviewed.plan =
             QStringLiteral("request:v010:protective-lock-setting:auth-component");
     check(reviewed.valid() && reviewed.requiresSessionOwnerAuthentication());
@@ -236,7 +239,8 @@ int main(int argc, char **argv)
         multipleNativeAdministratorsRequireExplicitProtectedSelection();
         for (auto purpose :
              {ApprovalPurpose::AuthenticateUnlock, ApprovalPurpose::EnableProtectiveLock,
-              ApprovalPurpose::RevokeProtectiveLock})
+              ApprovalPurpose::RevokeProtectiveLock,
+              ApprovalPurpose::AuthenticateNetworkCredential})
             wrongNativeIdentityAndCancellationNeverUnlock(purpose);
         std::cout << "official native authentication boundary: " << checks
                   << " component checks passed\n";

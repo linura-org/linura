@@ -96,7 +96,10 @@ def validate(plan: dict, design: dict, document: str) -> None:
         "proposed",
     )
     assert plan["declared_slice_predecessor"] == "S16"
-    assert plan["base_branch"] == "wip/v010-s18-network"
+    assert plan["base_branch"] == "base/v010-s18-review"
+    assert plan["integration_reference_branch"] == "wip/v010-s18-network"
+    assert plan["base_branch"] != plan["integration_reference_branch"]
+    assert plan["extraction_topology"] == "stable-base-plus-reviewed-ordered-pr-commits"
     assert plan["final_integration_base"] == "main"
     assert plan["phase1_reference_branch"] == "wip/v010-s18-network"
     assert plan["implementation_pr_count"] == len(EXPECTED_PRS)
@@ -258,6 +261,8 @@ def validate(plan: dict, design: dict, document: str) -> None:
         )
         assert operation["source"] == owning_slice, operation["id"]
     assert "architecture-first and nine implementation boundaries" in document
+    assert "Stable review baseline:" in document
+    assert "Integrated development reference:" in document
     assert "Current read-only WIP provider tests" in document
     assert "Do not merge this branch directly" in document
 

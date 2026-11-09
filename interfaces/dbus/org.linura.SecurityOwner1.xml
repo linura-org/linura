@@ -8,8 +8,10 @@
     <!-- Approval scope: exact resource, authenticated principal, request, plan,
          request/evidence/review digests, and purpose (0 lock, 1 unlock,
          2 suspend, 3 logout, 4 reboot, 5 power-off, 6 enable protective locking,
-         7 revoke protective locking). Lock/unlock/settings require a
-         SessionLockId; only purposes 2..5 require the matching SessionTransitionId.
+         7 revoke protective locking, 8 protected network-credential
+         session-owner authentication). Lock/unlock/settings/network input
+         require a SessionLockId; only purposes 2..5 require the matching
+         SessionTransitionId. Purpose 8 is not a network effect permit.
          Each authentication proves only this scope; it never dispatches an
          effect or releases a lock. Power authentication requires secure coverage. -->
     <method name="ArmApproval">

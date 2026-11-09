@@ -306,10 +306,56 @@ fn each_authentication_purpose_has_its_own_fixed_non_lock_action() {
             NativeApprovalPurpose::RevokeProtectiveLock,
             "org.linura.authority.revoke-protective-lock",
         ),
+        (
+            NativeApprovalPurpose::NetworkCredential,
+            "org.linura.authority.use-network-credential",
+        ),
     ] {
         assert_eq!(authentication_action(purpose), Ok(action));
     }
     assert!(authentication_action(NativeApprovalPurpose::Lock).is_err());
+}
+
+#[test]
+fn network_credential_authentication_is_one_exact_purpose_not_an_effect_grant() {
+    let mut request = NativeApprovalRequest {
+        lock: lock(),
+        transition: None,
+        principal: value(PrincipalId::new("unix:uid:1000")),
+        request: value(RequestId::new("request:v010:network-credential:test")),
+        plan: value(PlanId::new("request:v010:network-credential:test")),
+        request_digest: ComponentDigest::from_bytes([1; 32]),
+        observation_digest: ComponentDigest::from_bytes([2; 32]),
+        review_digest: ComponentDigest::from_bytes([3; 32]),
+        purpose: NativeApprovalPurpose::NetworkCredential,
+    };
+    assert_eq!(value(request.wire()).7, 8);
+    assert_eq!(
+        authentication_action(request.purpose),
+        Ok("org.linura.authority.use-network-credential"),
+    );
+    request.purpose = NativeApprovalPurpose::Unlock;
+    assert!(request.wire().is_err());
+    request.purpose = NativeApprovalPurpose::NetworkCredential;
+    request.principal = value(PrincipalId::new("unix:uid:0"));
+    assert!(request.wire().is_err());
+    request.principal = value(PrincipalId::new("unix:uid:1000"));
+    request.transition = Some(value(SessionTransitionId::new(
+        request.lock.clone(),
+        SessionTransition::Reboot,
+    )));
+    assert!(request.wire().is_err());
+    request.transition = None;
+    for slug in ["", "-x", "x-", "x--y", "Upper", "a/b"] {
+        request.request = value(RequestId::new(format!(
+            "request:v010:network-credential:{slug}"
+        )));
+        request.plan = value(PlanId::new(request.request.as_str()));
+        assert!(request.wire().is_err());
+    }
+    request.request = value(RequestId::new("request:v010:session-lock:test"));
+    request.plan = value(PlanId::new(request.request.as_str()));
+    assert!(request.wire().is_err());
 }
 
 #[test]

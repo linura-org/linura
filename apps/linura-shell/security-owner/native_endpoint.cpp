@@ -51,7 +51,7 @@ const QDBusArgument &operator>>(const QDBusArgument &wire, NativePowerPermission
 
 std::optional<NativeApprovalScope> NativeApprovalWire::scope() const
 {
-    if (purpose > 7)
+    if (purpose > 8)
         return std::nullopt;
     const bool power = purpose >= 2 && purpose <= 5;
     const auto transition = power ? NativeTransitionIdentity::parse(resource) : std::nullopt;

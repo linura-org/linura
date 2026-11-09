@@ -36,6 +36,7 @@ enum class ApprovalPurpose {
     AuthenticatePowerOff = 5,
     EnableProtectiveLock = 6,
     RevokeProtectiveLock = 7,
+    AuthenticateNetworkCredential = 8,
 };
 
 enum class NativeSessionTransition { Suspend, Logout, Reboot, PowerOff };
