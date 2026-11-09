@@ -146,6 +146,7 @@ bool NativeApprovalScope::valid() const
                        purpose == ApprovalPurpose::AuthenticatePowerOff;
     const bool setting = purpose == ApprovalPurpose::EnableProtectiveLock ||
                          purpose == ApprovalPurpose::RevokeProtectiveLock;
+    const bool network = purpose == ApprovalPurpose::AuthenticateNetworkCredential;
     if (power) {
         if (!transition || transition->lock != lock)
             return false;
@@ -174,9 +175,13 @@ bool NativeApprovalScope::valid() const
         }
     } else if (transition)
         return false;
-    const QString prefix = power     ? QStringLiteral("request:v010:session-transition:")
-                           : setting ? QStringLiteral("request:v010:protective-lock-setting:")
-                                     : QStringLiteral("request:v010:session-lock:");
+    QString prefix = QStringLiteral("request:v010:session-lock:");
+    if (power)
+        prefix = QStringLiteral("request:v010:session-transition:");
+    else if (setting)
+        prefix = QStringLiteral("request:v010:protective-lock-setting:");
+    else if (network)
+        prefix = QStringLiteral("request:v010:network-credential:");
     const QStringView slug = QStringView(request).mid(prefix.size());
     if (!request.startsWith(prefix) || slug.isEmpty() || slug.size() > 64 ||
         slug.startsWith(QLatin1Char('-')) || slug.endsWith(QLatin1Char('-')) ||
@@ -197,6 +202,7 @@ bool NativeApprovalScope::valid() const
     case ApprovalPurpose::AuthenticatePowerOff:
     case ApprovalPurpose::EnableProtectiveLock:
     case ApprovalPurpose::RevokeProtectiveLock:
+    case ApprovalPurpose::AuthenticateNetworkCredential:
         return true;
     }
     return false;
@@ -221,6 +227,8 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
         return "org.linura.authority.enable-protective-lock";
     case ApprovalPurpose::RevokeProtectiveLock:
         return "org.linura.authority.revoke-protective-lock";
+    case ApprovalPurpose::AuthenticateNetworkCredential:
+        return "org.linura.authority.use-network-credential";
     }
     return nullptr;
 }
@@ -229,7 +237,8 @@ bool NativeApprovalScope::requiresSessionOwnerAuthentication() const noexcept
 {
     return purpose == ApprovalPurpose::AuthenticateUnlock ||
            purpose == ApprovalPurpose::EnableProtectiveLock ||
-           purpose == ApprovalPurpose::RevokeProtectiveLock;
+           purpose == ApprovalPurpose::RevokeProtectiveLock ||
+           purpose == ApprovalPurpose::AuthenticateNetworkCredential;
 }
 
 } // namespace Linura::SecurityOwner
