@@ -22,7 +22,7 @@ use linura_provider_sdk::{
 use linura_transaction::{TransactionId, digest_parts};
 
 const SETTLE_ATTEMPTS: usize = 30;
-const SETTLE_INTERVAL: Duration = Duration::from_millis(100);
+const SETTLE_INTERVAL: Duration = Duration::from_millis(350);
 
 /// Terminal receipt for this invocation. Indeterminate is *not* permission
 /// to redispatch, recover via an old permit, or infer completion.
@@ -92,7 +92,8 @@ pub fn scan_device_binding(scope: &NativeWifiScanScope) -> Result<String, String
                 scope.principal.as_str().as_bytes(),
                 scope.seat.as_bytes(),
             ]
-        ).hex()
+        )
+        .hex()
     ))
 }
 
@@ -107,7 +108,16 @@ pub fn execute_authorized_wifi_scan(
     request_id: &str,
 ) -> Result<WifiScanEventOutcome, String> {
     let (effect, binding) = authorization.into_executor_request();
-    execute_spent_event(channel, journal, effect, binding, scope, request_id, SETTLE_ATTEMPTS, SETTLE_INTERVAL)
+    execute_spent_event(
+        channel,
+        journal,
+        effect,
+        binding,
+        scope,
+        request_id,
+        SETTLE_ATTEMPTS,
+        SETTLE_INTERVAL,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -125,16 +135,19 @@ fn execute_spent_event<N: WifiScanNativePort>(
     // this orchestration sets it after the SQLite FULL-sync commit succeeds.
     scope.durable_attempt_fenced = false;
     let request = RequestId::new(request_id.to_owned()).map_err(|e| e.to_string())?;
-    if !request_id.starts_with("request:v010:wifi-scan:") ||
-        binding.transaction_id != TransactionId::for_namespace(&scope.principal, &request).as_str()
+    if !request_id.starts_with("request:v010:wifi-scan:")
+        || binding.transaction_id
+            != TransactionId::for_namespace(&scope.principal, &request).as_str()
     {
         return Err("scan request is not the exact original Control transaction".into());
     }
     binding.validate_for(&effect).map_err(|e| e.to_string())?;
     let pre = native.preflight(&scope)?;
-    if pre.network != scope.network || pre.device != scope.device ||
-        pre.last_scan_boot_ms != scope.baseline_last_scan_boot_ms ||
-        pre.scanning || pre.sampled_boot_us == 0
+    if pre.network != scope.network
+        || pre.device != scope.device
+        || pre.last_scan_boot_ms != scope.baseline_last_scan_boot_ms
+        || pre.scanning
+        || pre.sampled_boot_us == 0
     {
         return Err("native scan preflight does not match the original device".into());
     }
@@ -162,8 +175,8 @@ fn execute_spent_event<N: WifiScanNativePort>(
     let Ok(outcome) = result else {
         return Ok(WifiScanEventOutcome::Indeterminate);
     };
-    if outcome.dispatch_digest != binding.dispatch_digest ||
-        outcome.disposition != ExecutionDisposition::Dispatched
+    if outcome.dispatch_digest != binding.dispatch_digest
+        || outcome.disposition != ExecutionDisposition::Dispatched
     {
         return Ok(WifiScanEventOutcome::Indeterminate);
     }
@@ -172,8 +185,9 @@ fn execute_spent_event<N: WifiScanNativePort>(
         let measured = native.completion(&scope, started_ms);
         match measured {
             Ok(Some(observation)) => {
-                if observation.network != scope.network || observation.device != scope.device ||
-                    observation.sampled_boot_us / 1_000 < observation.last_scan_boot_ms
+                if observation.network != scope.network
+                    || observation.device != scope.device
+                    || observation.sampled_boot_us / 1_000 < observation.last_scan_boot_ms
                 {
                     return Ok(WifiScanEventOutcome::Indeterminate);
                 }
@@ -185,7 +199,9 @@ fn execute_spent_event<N: WifiScanNativePort>(
                     last_scan_boot_ms: observation.last_scan_boot_ms,
                     independently_sampled_boot_ms: observation.sampled_boot_us / 1_000,
                 };
-                journal.verified_native(&evidence).map_err(|e| e.to_string())?;
+                journal
+                    .verified_native(&evidence)
+                    .map_err(|e| e.to_string())?;
                 return Ok(WifiScanEventOutcome::IndependentlyObserved {
                     last_scan_boot_ms: observation.last_scan_boot_ms,
                 });
@@ -207,8 +223,7 @@ mod tests {
     use linura_core::{
         BootId, NetworkDeviceId, NetworkInterfaceName, NetworkManagerEpoch, NetworkManagerOwner,
         NetworkObjectId, NetworkObjectKind, NetworkObservationId, PrincipalId, ProviderId,
-        ResourceId, SecurityOwnerInvocationId, SessionEpoch, SessionLockId,
-        SystemBusInstanceId,
+        ResourceId, SecurityOwnerInvocationId, SessionEpoch, SessionLockId, SystemBusInstanceId,
     };
     use linura_persistence_sqlite::SqliteIntegrityKey;
     use linura_provider_sdk::ComponentDigest;
@@ -231,23 +246,43 @@ mod tests {
         fn preflight(&self, _: &NativeWifiScanScope) -> Result<NativeWifiScanSample, String> {
             Ok(self.source.clone())
         }
-        fn dispatch(&self, _: EffectDescriptor, binding: ExecutionBinding, scope: &NativeWifiScanScope)
-            -> Result<ExecutionOutcome, String> {
-            assert!(scope.durable_attempt_fenced, "journal must be spent before dispatch");
+        fn dispatch(
+            &self,
+            _: EffectDescriptor,
+            binding: ExecutionBinding,
+            scope: &NativeWifiScanScope,
+        ) -> Result<ExecutionOutcome, String> {
+            assert!(
+                scope.durable_attempt_fenced,
+                "journal must be spent before dispatch"
+            );
             self.dispatches.set(self.dispatches.get() + 1);
             ExecutionOutcome::new(
                 ExecutionDisposition::Dispatched,
-                if self.wrong_digest { ComponentDigest::from_bytes([0x99; 32]) } else { binding.dispatch_digest },
+                if self.wrong_digest {
+                    ComponentDigest::from_bytes([0x99; 32])
+                } else {
+                    binding.dispatch_digest
+                },
                 "isolated fake; no real NetworkManager effect",
-            ).map_err(|e| e.to_string())
+            )
+            .map_err(|e| e.to_string())
         }
-        fn completion(&self, _: &NativeWifiScanScope, _: u64)
-            -> Result<Option<NativeWifiScanCompletion>, String> {
+        fn completion(
+            &self,
+            _: &NativeWifiScanScope,
+            _: u64,
+        ) -> Result<Option<NativeWifiScanCompletion>, String> {
             Ok(self.completed.clone())
         }
     }
 
-    fn fixture() -> (NativeWifiScanScope, EffectDescriptor, ExecutionBinding, Fake) {
+    fn fixture() -> (
+        NativeWifiScanScope,
+        EffectDescriptor,
+        ExecutionBinding,
+        Fake,
+    ) {
         let boot = ok(BootId::new("abcd1234-1234-4567-89ab-0123456789ab"));
         let network = NetworkManagerEpoch::new(
             boot.clone(),
@@ -256,57 +291,114 @@ mod tests {
         );
         let device = ok(NetworkDeviceId::new(
             network.clone(),
-            ok(NetworkObjectId::from_path(NetworkObjectKind::Device, "/org/freedesktop/NetworkManager/Devices/8")),
-            12456, 7, ok(NetworkInterfaceName::new("wlan0")), 8,
+            ok(NetworkObjectId::from_path(
+                NetworkObjectKind::Device,
+                "/org/freedesktop/NetworkManager/Devices/8",
+            )),
+            12456,
+            7,
+            ok(NetworkInterfaceName::new("wlan0")),
+            8,
         ));
         let lock = ok(SessionLockId::new(
             ok(SessionEpoch::new(boot, 1000, "2", 42)),
-            ok(SecurityOwnerInvocationId::new("98765432-1234-4567-89ab-0123456789ab")),
+            ok(SecurityOwnerInvocationId::new(
+                "98765432-1234-4567-89ab-0123456789ab",
+            )),
             1,
         ));
         let scope = NativeWifiScanScope {
-            lock, principal: ok(PrincipalId::new("unix:uid:1000")),
-            network: network.clone(), device: device.clone(),
+            lock,
+            principal: ok(PrincipalId::new("unix:uid:1000")),
+            network: network.clone(),
+            device: device.clone(),
             observation: ok(NetworkObservationId::new(network.clone(), 4, 100_000_000)),
-            seat: "seat0".into(), baseline_last_scan_boot_ms: 30_000,
+            seat: "seat0".into(),
+            baseline_last_scan_boot_ms: 30_000,
             durable_attempt_fenced: false,
         };
         let effect = ok(EffectDescriptor::new(
-            ok(ProviderId::new("networkmanager")), ok(ResourceId::new("networkmanager:wifi:wlan0")),
-            "request-wifi-scan", b"scan_requested=true\n".to_vec(),
+            ok(ProviderId::new("networkmanager")),
+            ok(ResourceId::new("networkmanager:wifi:wlan0")),
+            "request-wifi-scan",
+            b"scan_requested=true\n".to_vec(),
         ));
         let request = ok(RequestId::new("request:v010:wifi-scan:fixture"));
         let transaction = TransactionId::for_namespace(&scope.principal, &request);
         let binding = ok(ExecutionBinding::new(
-            transaction.as_str(), 0, 1,
-            ComponentDigest::from_bytes([1; 32]), ComponentDigest::from_bytes([2; 32]),
+            transaction.as_str(),
+            0,
+            1,
+            ComponentDigest::from_bytes([1; 32]),
+            ComponentDigest::from_bytes([2; 32]),
             &effect,
         ));
         let source = NativeWifiScanSample {
-            network: network.clone(), device: device.clone(), last_scan_boot_ms: 30_000,
-            scanning: false, sampled_boot_us: 101_000_000,
+            network: network.clone(),
+            device: device.clone(),
+            last_scan_boot_ms: 30_000,
+            scanning: false,
+            sampled_boot_us: 101_000_000,
         };
         let completed = NativeWifiScanCompletion {
-            network, device, last_scan_boot_ms: 101_005, sampled_boot_us: 101_030_000,
+            network,
+            device,
+            last_scan_boot_ms: 101_005,
+            sampled_boot_us: 101_030_000,
         };
-        (scope, effect, binding, Fake { source, completed: Some(completed), dispatches: Cell::new(0), wrong_digest: false })
+        (
+            scope,
+            effect,
+            binding,
+            Fake {
+                source,
+                completed: Some(completed),
+                dispatches: Cell::new(0),
+                wrong_digest: false,
+            },
+        )
     }
 
     #[test]
     fn durable_one_use_attempt_precedes_dispatch_and_replay_is_denied() {
         let (scope, effect, binding, native) = fixture();
-        let path = std::env::temp_dir().join(format!("linura-wifi-event-{}-{}.db", std::process::id(), ID.fetch_add(1, Ordering::Relaxed)));
+        let path = std::env::temp_dir().join(format!(
+            "linura-wifi-event-{}-{}.db",
+            std::process::id(),
+            ID.fetch_add(1, Ordering::Relaxed)
+        ));
         let key = || ok(SqliteIntegrityKey::new(vec![0x33; 32]));
         let mut journal = ok(SqliteWifiScanAttemptJournal::initialize(&path, key()));
         assert!(matches!(
-            execute_spent_event(&native, &mut journal, effect.clone(), binding.clone(), scope.clone(),
-                "request:v010:wifi-scan:fixture", 1, Duration::ZERO),
-            Ok(WifiScanEventOutcome::IndependentlyObserved { last_scan_boot_ms: 101_005 })
+            execute_spent_event(
+                &native,
+                &mut journal,
+                effect.clone(),
+                binding.clone(),
+                scope.clone(),
+                "request:v010:wifi-scan:fixture",
+                1,
+                Duration::ZERO
+            ),
+            Ok(WifiScanEventOutcome::IndependentlyObserved {
+                last_scan_boot_ms: 101_005
+            })
         ));
         assert_eq!(native.dispatches.get(), 1);
         let mut recovered = ok(SqliteWifiScanAttemptJournal::open(&path, key()));
-        assert!(execute_spent_event(&native, &mut recovered, effect, binding, scope,
-            "request:v010:wifi-scan:fixture", 1, Duration::ZERO).is_err());
+        assert!(
+            execute_spent_event(
+                &native,
+                &mut recovered,
+                effect,
+                binding,
+                scope,
+                "request:v010:wifi-scan:fixture",
+                1,
+                Duration::ZERO
+            )
+            .is_err()
+        );
         assert_eq!(native.dispatches.get(), 1);
         drop(recovered);
         drop(journal);
@@ -317,15 +409,42 @@ mod tests {
     fn no_evidence_or_mismatched_dispatch_remains_permanently_spent() {
         let (scope, effect, binding, mut native) = fixture();
         native.completed = None;
-        let path = std::env::temp_dir().join(format!("linura-wifi-event-{}-{}.db", std::process::id(), ID.fetch_add(1, Ordering::Relaxed)));
-        let mut journal = ok(SqliteWifiScanAttemptJournal::initialize(&path, ok(SqliteIntegrityKey::new(vec![0x33; 32]))));
+        let path = std::env::temp_dir().join(format!(
+            "linura-wifi-event-{}-{}.db",
+            std::process::id(),
+            ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut journal = ok(SqliteWifiScanAttemptJournal::initialize(
+            &path,
+            ok(SqliteIntegrityKey::new(vec![0x33; 32])),
+        ));
         assert_eq!(
-            execute_spent_event(&native, &mut journal, effect.clone(), binding.clone(), scope.clone(),
-                "request:v010:wifi-scan:fixture", 1, Duration::ZERO).unwrap_or_else(|error| unreachable!("fixture: {error}")),
+            execute_spent_event(
+                &native,
+                &mut journal,
+                effect.clone(),
+                binding.clone(),
+                scope.clone(),
+                "request:v010:wifi-scan:fixture",
+                1,
+                Duration::ZERO
+            )
+            .unwrap_or_else(|error| unreachable!("fixture: {error}")),
             WifiScanEventOutcome::Indeterminate
         );
-        assert!(execute_spent_event(&native, &mut journal, effect, binding, scope,
-            "request:v010:wifi-scan:fixture", 1, Duration::ZERO).is_err());
+        assert!(
+            execute_spent_event(
+                &native,
+                &mut journal,
+                effect,
+                binding,
+                scope,
+                "request:v010:wifi-scan:fixture",
+                1,
+                Duration::ZERO
+            )
+            .is_err()
+        );
         assert_eq!(native.dispatches.get(), 1);
         drop(journal);
         let _ = std::fs::remove_file(path);
