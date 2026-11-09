@@ -19,6 +19,68 @@ std::optional<quint64> bootMilliseconds()
 }
 } // namespace
 
+std::optional<NativeNetworkCredentialScope> NativeNetworkCredentialWire::scope() const
+{
+    const auto lock = NativeLockIdentity::parse(resource);
+    if (!lock)
+        return std::nullopt;
+    NativeNetworkCredentialScope result;
+    result.lock = *lock;
+    result.principal = principal;
+    result.operation = operation;
+    result.request = request;
+    result.originalSender = originalSender;
+    result.systemBusId = systemBusId;
+    result.networkManagerOwner = networkManagerOwner;
+    result.seat = seat;
+    result.deviceObject = deviceObject;
+    result.deviceInterface = deviceInterface;
+    result.profileObject = profileObject;
+    result.profileUuid = profileUuid;
+    result.profileFingerprint = profileFingerprint;
+    result.requestDigest = requestDigest;
+    result.reviewDigest = reviewDigest;
+    result.deviceIfindex = deviceIfindex;
+    result.networkNamespace = networkNamespace;
+    result.settingsVersion = settingsVersion;
+    result.persistRequested = persistRequested;
+    return result.valid() ? std::optional{result} : std::nullopt;
+}
+
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeNetworkCredentialWire &scope)
+{
+    wire.beginStructure();
+    wire.beginStructure();
+    wire << scope.resource << scope.principal << scope.operation << scope.request
+         << scope.originalSender << scope.systemBusId << scope.networkManagerOwner << scope.seat;
+    wire.endStructure();
+    wire.beginStructure();
+    wire << scope.deviceObject << scope.deviceInterface << scope.profileObject << scope.profileUuid
+         << scope.profileFingerprint << scope.requestDigest << scope.reviewDigest
+         << scope.deviceIfindex << scope.networkNamespace << scope.settingsVersion
+         << scope.persistRequested;
+    wire.endStructure();
+    wire.endStructure();
+    return wire;
+}
+
+const QDBusArgument &operator>>(const QDBusArgument &wire, NativeNetworkCredentialWire &scope)
+{
+    wire.beginStructure();
+    wire.beginStructure();
+    wire >> scope.resource >> scope.principal >> scope.operation >> scope.request >>
+        scope.originalSender >> scope.systemBusId >> scope.networkManagerOwner >> scope.seat;
+    wire.endStructure();
+    wire.beginStructure();
+    wire >> scope.deviceObject >> scope.deviceInterface >> scope.profileObject >>
+        scope.profileUuid >> scope.profileFingerprint >> scope.requestDigest >>
+        scope.reviewDigest >> scope.deviceIfindex >> scope.networkNamespace >>
+        scope.settingsVersion >> scope.persistRequested;
+    wire.endStructure();
+    wire.endStructure();
+    return wire;
+}
+
 bool NativeLockObservationWire::freshAtBootMs(quint64 now) const
 {
     return NativeLockIdentity::parse(resource).has_value() && sampledBootMs != 0 &&
@@ -51,7 +113,7 @@ const QDBusArgument &operator>>(const QDBusArgument &wire, NativePowerPermission
 
 std::optional<NativeApprovalScope> NativeApprovalWire::scope() const
 {
-    if (purpose > 7)
+    if (purpose > 8)
         return std::nullopt;
     const bool power = purpose >= 2 && purpose <= 5;
     const auto transition = power ? NativeTransitionIdentity::parse(resource) : std::nullopt;
@@ -110,6 +172,7 @@ QString NativeEndpoint::objectPath()
 void NativeEndpoint::registerWireTypes()
 {
     qDBusRegisterMetaType<NativeApprovalWire>();
+    qDBusRegisterMetaType<NativeNetworkCredentialWire>();
     qDBusRegisterMetaType<NativeLockObservationWire>();
     qDBusRegisterMetaType<NativePowerPermissionWire>();
 }
@@ -127,6 +190,17 @@ void NativeEndpoint::CancelApproval()
 {
     if (calledFromDBus())
         runtime_.cancelApproval(message());
+}
+bool NativeEndpoint::ArmNetworkCredential(const NativeNetworkCredentialWire &wire)
+{
+    const auto scope = wire.scope();
+    return calledFromDBus() && scope && runtime_.armNetworkCredential(message(), *scope);
+}
+
+void NativeEndpoint::CancelNetworkCredential()
+{
+    if (calledFromDBus())
+        runtime_.cancelNetworkCredential(message());
 }
 NativeLockObservationWire NativeEndpoint::ObserveLock()
 {

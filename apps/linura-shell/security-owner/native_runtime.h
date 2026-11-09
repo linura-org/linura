@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_scope.h"
+#include "native_network_credentials.h"
 #include "native_sleep_fence.h"
 #include "native_startup.h"
 #include "compositor_probe.h"
@@ -32,6 +33,9 @@ class NativeRuntime final : public QObject
     [[nodiscard]] bool armApproval(const QDBusMessage &received, const NativeApprovalScope &scope);
     [[nodiscard]] bool consumeApproval(const QDBusMessage &received,
                                        const NativeApprovalScope &scope);
+    [[nodiscard]] bool armNetworkCredential(const QDBusMessage &received,
+                                            const NativeNetworkCredentialScope &scope);
+    void cancelNetworkCredential(const QDBusMessage &received);
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);

@@ -8,8 +8,10 @@
     <!-- Approval scope: exact resource, authenticated principal, request, plan,
          request/evidence/review digests, and purpose (0 lock, 1 unlock,
          2 suspend, 3 logout, 4 reboot, 5 power-off, 6 enable protective locking,
-         7 revoke protective locking). Lock/unlock/settings require a
-         SessionLockId; only purposes 2..5 require the matching SessionTransitionId.
+         7 revoke protective locking, 8 protected network-credential
+         session-owner authentication). Lock/unlock/settings/network input
+         require a SessionLockId; only purposes 2..5 require the matching
+         SessionTransitionId. Purpose 8 is not a network effect permit.
          Each authentication proves only this scope; it never dispatches an
          effect or releases a lock. Power authentication requires secure coverage. -->
     <method name="ArmApproval">
@@ -21,6 +23,13 @@
       <arg name="consumed" type="b" direction="out"/>
     </method>
     <method name="CancelApproval"/>
+    <!-- S18-4: an attested, one-use Control proof is required before the native
+         SecretAgent is even registered. This is not network effect authority. -->
+    <method name="ArmNetworkCredential">
+      <arg name="scope" type="((ssssssss)(sssssssuttb))" direction="in"/>
+      <arg name="armed" type="b" direction="out"/>
+    </method>
+    <method name="CancelNetworkCredential"/>
     <method name="ObserveLock">
       <!-- Consistent in-flight acquisition/release returns the fixed private
            NativeTransitionPending error, never secure=false. Other unknown or

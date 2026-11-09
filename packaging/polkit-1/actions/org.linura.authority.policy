@@ -62,4 +62,14 @@
     <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_self</allow_active></defaults>
   </action>
+  <action id="org.linura.authority.use-network-credential">
+    <description>Authenticate the exact session owner for a one-time reviewed Linura network credential</description>
+    <message>Authenticate for one protected Wi-Fi credential interaction. This does not authorize a network change or storing the secret.</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

@@ -2,6 +2,7 @@
 #include "authentication_agent.h"
 #include "native_deadline.h"
 #include "native_endpoint.h"
+#include "native_network_agent.h"
 #include "native_lock_protocol.h"
 #include "native_presentation.h"
 #include "native_wayland_lock.h"
@@ -21,6 +22,7 @@
 #include <wayland-client.h>
 #include <chrono>
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <sys/prctl.h>
 #include <unistd.h>
@@ -44,6 +46,13 @@ template <std::size_t N> bool runtimeUnavailable(const char (&reason)[N]) noexce
 class NativeRuntime::Impl final
 {
   public:
+    struct NetworkProof final
+    {
+        NativeApprovalScope approval;
+        NativePeerIdentity control;
+        quint64 spentAtBootMs = 0;
+    };
+
     NativeRuntime &owner;
     std::optional<PeerGuard> peers;
     std::optional<NativeSessionBinding> binding;
@@ -54,6 +63,9 @@ class NativeRuntime::Impl final
     std::unique_ptr<NativeWaylandLock> backend;
     std::unique_ptr<NativeLockProtocol> protocol;
     std::unique_ptr<AuthenticationAgent> authentication;
+    std::unique_ptr<NativeNetworkSecretAgent> networkAgent;
+    std::optional<NetworkProof> networkProof;
+    std::optional<NativePeerIdentity> networkControlPeer;
     std::optional<NativePeerIdentity> approvalPeer;
     std::optional<NativeApprovalScope> approvalScope;
     NativeTransitionFence transitionFence;
@@ -92,6 +104,9 @@ class NativeRuntime::Impl final
             delete endpoint;
             endpoint = nullptr;
         }
+        if (networkAgent)
+            networkAgent->cancel();
+        networkAgent.reset();
         authentication.reset();
         assistive.reset();
         protocol.reset();
@@ -145,6 +160,9 @@ class NativeRuntime::Impl final
             return;
         if (transitionFence.active() || sleepFence.active())
             presentation->present(NativePresentation::State::Recovering);
+        else if (networkAgent && networkAgent->active() &&
+                 presentation->protectedEntry().acceptsInput())
+            presentation->presentAuthentication(ApprovalPurpose::AuthenticateNetworkCredential);
         else if (approvalScope && approvalScope->purpose != ApprovalPurpose::ConfirmLock)
             presentation->presentAuthentication(approvalScope->purpose);
         else if (authentication->confirmationPending())
@@ -292,6 +310,54 @@ bool NativeRuntime::initialize(NativeStartup startup)
         return runtimeUnavailable("linura-security-owner: runtime/auth-registration\n");
     if (!impl_->authentication->setNativeProgress(impl_->probeProgress))
         return runtimeUnavailable("linura-security-owner: runtime/auth-progress\n");
+    NativeNetworkSecretAgent::registerWireTypes();
+    const auto witness = [this](const NativeNetworkCredentialScope &scope)
+        -> std::optional<NativeNetworkCredentialWitness> {
+        if (!impl_->initialized || !impl_->networkControlPeer)
+            return std::nullopt;
+        if (!impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval,
+                                       *impl_->networkControlPeer))
+            return std::nullopt;
+        if (impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active())
+            return std::nullopt;
+        if (!impl_->currentSession() || impl_->protocol->inspect() != LockMechanism::State::Secure ||
+            impl_->independentState() != NativeCompositorLockState::Locked)
+            return std::nullopt;
+        NativeNetworkCredentialWitness observed;
+        observed.lock = identity();
+        observed.operation = QStringLiteral("operation:network.wifi.join");
+        observed.request = scope.request;
+        observed.originalSender = impl_->networkControlPeer->uniqueOwner;
+        observed.systemBusId = scope.systemBusId;
+        observed.networkManagerOwner = scope.networkManagerOwner;
+        observed.deviceObject = scope.deviceObject;
+        observed.deviceInterface = scope.deviceInterface;
+        observed.deviceIfindex = scope.deviceIfindex;
+        observed.networkNamespace = scope.networkNamespace;
+        observed.profileObject = scope.profileObject;
+        observed.profileUuid = scope.profileUuid;
+        observed.profileFingerprint = scope.profileFingerprint;
+        observed.settingsVersion = scope.settingsVersion;
+        observed.seat = scope.seat;
+        // Fresh session/seat, spent original Polkit proof and independent
+        // compositor lock are checked above, not copied from the caller.
+        observed.activeLogindSession = true;
+        observed.exactPolkitSubject = true;
+        observed.protectedHumanConsent = true;
+        observed.secureCompositor = true;
+        return observed;
+    };
+    const auto presentNetwork = [this](bool input) {
+        if (!impl_->presentation)
+            return;
+        if (input)
+            impl_->presentation->presentAuthentication(
+                ApprovalPurpose::AuthenticateNetworkCredential);
+        else
+            impl_->refreshPresentation();
+    };
+    impl_->networkAgent = std::make_unique<NativeNetworkSecretAgent>(
+        *impl_->peers, impl_->presentation->protectedEntry(), witness, presentNetwork, this);
     impl_->assistive = std::make_unique<NativeAssistiveBridge>(startup.uid_);
     impl_->publishAssistiveMetadata();
     connect(impl_->presentation.get(), &NativePresentation::repaintRequested, this,
@@ -339,6 +405,21 @@ bool NativeRuntime::initialize(NativeStartup startup)
         if (impl_->approvalPeer &&
             !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *impl_->approvalPeer))
             impl_->clearApproval();
+        const quint64 now = NativeApproval::nativeBootTimeClock()();
+        if (impl_->networkProof) {
+            const bool rollback = now < impl_->networkProof->spentAtBootMs;
+            const bool expired =
+                !rollback && now - impl_->networkProof->spentAtBootMs >= 10'000;
+            if (rollback || expired)
+                impl_->networkProof.reset();
+        }
+        if (impl_->networkControlPeer &&
+            (!impl_->networkAgent->active() ||
+             !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval,
+                                         *impl_->networkControlPeer))) {
+            impl_->networkAgent->cancel();
+            impl_->networkControlPeer.reset();
+        }
         if (impl_->protocol->inspect() == LockMechanism::State::Faulted)
             failClosed();
         if (impl_->sleepFence.active())
@@ -601,8 +682,10 @@ void NativeRuntime::recoverNativeUnlock()
 bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprovalScope &scope)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
-    if (!peer || impl_->approvalScope || impl_->transitionFence.active() ||
-        impl_->sleepFence.active() || !scope.valid() || scope.lock != identity())
+    if (!peer || impl_->approvalScope || impl_->networkProof ||
+        (impl_->networkAgent && impl_->networkAgent->active()) ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || !scope.valid() ||
+        scope.lock != identity())
         return false;
     NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto state = impl_->independentState();
@@ -665,12 +748,69 @@ bool NativeRuntime::consumeApproval(const QDBusMessage &received, const NativeAp
     if (scope.purpose == ApprovalPurpose::AuthenticateUnlock &&
         impl_->unlockRequestLock == scope.lock)
         impl_->unlockProofConsumed = true;
+    if (scope.purpose == ApprovalPurpose::AuthenticateNetworkCredential) {
+        const quint64 now = NativeApproval::nativeBootTimeClock()();
+        if (now == std::numeric_limits<quint64>::max())
+            return false;
+        impl_->networkProof = Impl::NetworkProof{scope, *peer, now};
+    }
     impl_->approvalScope.reset();
     impl_->approvalPeer.reset();
     if (scope.purpose == ApprovalPurpose::EnableProtectiveLock ||
-        scope.purpose == ApprovalPurpose::RevokeProtectiveLock)
+        scope.purpose == ApprovalPurpose::RevokeProtectiveLock ||
+        scope.purpose == ApprovalPurpose::AuthenticateNetworkCredential)
         impl_->refreshPresentation(); // Authentication emitted before runtime scope retirement.
     return true;
+}
+
+bool NativeRuntime::armNetworkCredential(const QDBusMessage &received,
+                                         const NativeNetworkCredentialScope &scope)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->networkProof || impl_->networkProof->control != *peer)
+        return false; // A foreign caller cannot spend someone else's proof.
+    // The actual Control caller spends BEFORE all subsequent checks.
+    // Uncertainty never permits a second attempt for the same review.
+    const auto proof = std::exchange(impl_->networkProof, std::nullopt);
+    if (!proof || !impl_->networkAgent || impl_->networkAgent->active() ||
+        impl_->networkControlPeer || !scope.valid() ||
+        scope.lock != proof->approval.lock ||
+        scope.principal != proof->approval.principal ||
+        scope.request != proof->approval.request ||
+        scope.requestDigest != proof->approval.requestDigest ||
+        scope.reviewDigest != proof->approval.reviewDigest ||
+        scope.originalSender != peer->uniqueOwner || *peer != proof->control ||
+        scope.lock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active())
+        return false;
+    const quint64 now = NativeApproval::nativeBootTimeClock()();
+    if (now < proof->spentAtBootMs || now - proof->spentAtBootMs >= 10'000 ||
+        impl_->protocol->inspect() != LockMechanism::State::Secure ||
+        impl_->independentState() != NativeCompositorLockState::Locked ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return false;
+    const auto networkManager = impl_->peers->namedPeer(NativePeerPurpose::NetworkManagerDaemon);
+    if (!networkManager || networkManager->uniqueOwner != scope.networkManagerOwner)
+        return false;
+    impl_->networkControlPeer = *peer;
+    if (!impl_->networkAgent->arm(scope, *networkManager)) {
+        impl_->networkControlPeer.reset();
+        return false;
+    }
+    return true;
+}
+
+void NativeRuntime::cancelNetworkCredential(const QDBusMessage &received)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer)
+        return;
+    if (impl_->networkProof && impl_->networkProof->control == *peer)
+        impl_->networkProof.reset();
+    if (impl_->networkControlPeer == peer) {
+        impl_->networkAgent->cancel();
+        impl_->networkControlPeer.reset();
+    }
 }
 
 bool NativeRuntime::dispatchPrepared(const QDBusMessage &received, const NativeLockIdentity &lock,

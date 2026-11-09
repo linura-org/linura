@@ -15,7 +15,8 @@ namespace Linura::SecurityOwner {
 enum class NativePeerPurpose {
     ControlApproval,
     PreparedSessionDispatch,
-    NativeAuthenticationDaemon
+    NativeAuthenticationDaemon,
+    NetworkManagerDaemon
 };
 
 // Private native transport correlation, never exported as authority or a public

@@ -174,6 +174,35 @@ void protectiveSettingApprovalIsPurposeBound()
     }
 }
 
+void networkCredentialApprovalIsPurposeBound()
+{
+    auto reviewed = scope(ApprovalPurpose::AuthenticateNetworkCredential);
+    check(!reviewed.valid());
+    reviewed.request = reviewed.plan = QStringLiteral("request:v010:network-credential:unit-test");
+    check(reviewed.valid());
+    check(reviewed.requiresSessionOwnerAuthentication());
+    check(std::strcmp(reviewed.authenticationAction(),
+                      "org.linura.authority.use-network-credential") == 0);
+    quint64 time = 100;
+    NativeApproval approval(identity(), [&time] { return time; });
+    check(!approval.begin(reviewed, false)); // first-party secure compositor required
+    check(approval.begin(reviewed, true));
+    check(!approval.consume(reviewed));
+    check(approval.nativePrompt(reviewed) && approval.nativeCompleted(reviewed, true));
+    auto substituted = reviewed;
+    substituted.purpose = ApprovalPurpose::AuthenticateUnlock;
+    check(!substituted.valid() && !approval.consume(substituted));
+    substituted = reviewed;
+    substituted.reviewDigest[7] = QLatin1Char('4');
+    check(substituted.valid() && !approval.consume(substituted));
+    check(approval.consume(reviewed) && !approval.consume(reviewed));
+    // Expired original two-second approval cannot transfer to another request.
+    auto newReview = reviewed;
+    newReview.request = newReview.plan = QStringLiteral("request:v010:network-credential:other");
+    check(newReview.valid());
+    check(!approval.consume(newReview));
+}
+
 void transitionApprovalIsPurposeBound()
 {
     const std::array purposes{
@@ -948,6 +977,7 @@ int main(int argc, char **argv)
         approvalNeverUnlocks();
         transitionApprovalIsPurposeBound();
         protectiveSettingApprovalIsPurposeBound();
+        networkCredentialApprovalIsPurposeBound();
         scopeSubstitution();
         approvalDenialsAndDeadlines();
         confirmationAndClockFailure();
