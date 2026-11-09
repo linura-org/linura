@@ -986,6 +986,13 @@ where
         E: AuthorizedEffectExecutor,
         V: IndependentManagedVerifier,
     {
+        // No accidental future operation-registry entry, provider selection,
+        // receipt, or public request can open S18 native network authority
+        // before the reviewed S18-4+ authenticated executor and exact native
+        // qualification exist. Deny BEFORE risk review, durable prepare,
+        // approval issuance, or any executor call.
+        crate::network_authority::require_network_effect_inactive(request.provider.as_str())
+            .map_err(|reason| ManagedLifecycleError::UnsupportedEffect(reason.into()))?;
         validate_public_request(&request)?;
         if let Some(context) = &protective {
             context

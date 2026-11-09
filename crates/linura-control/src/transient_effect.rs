@@ -294,6 +294,7 @@ pub enum TransientEffectError {
     },
     AuditFailed(String),
     BlockedPlan,
+    UnqualifiedNetworkEffect,
 }
 
 impl Display for TransientEffectError {
@@ -361,6 +362,9 @@ impl Display for TransientEffectError {
             ),
             Self::AuditFailed(detail) => write!(formatter, "transient audit failed: {detail}"),
             Self::BlockedPlan => formatter.write_str("transient canonical plan is blocked"),
+            Self::UnqualifiedNetworkEffect => formatter.write_str(
+                "S18 network effects cannot enter the transient execution or approval path",
+            ),
         }
     }
 }
@@ -433,6 +437,14 @@ where
         operation_id: OperationId,
         request: PlanDesiredStateRequest,
     ) -> Result<TransientEffectReceipt, TransientEffectError> {
+        // Do not allow a future registration error to downgrade S18
+        // RequestScan or any network effect into unprivileged transient
+        // dispatch. Deny before observation, policy, audit or executor work.
+        crate::network_authority::require_network_transient_inactive(
+            request.provider.as_str(),
+            operation_id.as_str(),
+        )
+        .map_err(|_| TransientEffectError::UnqualifiedNetworkEffect)?;
         let requested_desired_state = request.desired_state.clone();
         let (plan, pre_effect_observation) = self
             .previews
@@ -1339,6 +1351,33 @@ mod tests {
             audit.clone(),
         );
         (control, audit)
+    }
+
+    #[test]
+    fn unqualified_network_provider_or_operation_cannot_enter_transient_dispatch() {
+        let (mut control, audit) = control("20", false, true, false);
+        let operation = OperationId::new("operation:network.wifi.scan")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let outcome = control.execute(principal(), actor(), operation, request("40"));
+        assert!(matches!(
+            outcome,
+            Err(TransientEffectError::UnqualifiedNetworkEffect)
+        ));
+        assert_eq!(control.executor.calls, 0);
+        let mut masquerading = request("40");
+        masquerading.provider =
+            ProviderId::new("networkmanager").unwrap_or_else(|error| unreachable!("{error}"));
+        let outcome = control.execute(principal(), actor(), operation_id(), masquerading);
+        assert!(matches!(
+            outcome,
+            Err(TransientEffectError::UnqualifiedNetworkEffect)
+        ));
+        assert_eq!(control.executor.calls, 0);
+        let records = audit
+            .records
+            .lock()
+            .unwrap_or_else(|_| unreachable!("test audit lock poisoned"));
+        assert!(records.is_empty());
     }
 
     #[test]
