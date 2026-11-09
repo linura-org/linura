@@ -40,6 +40,8 @@ jobs:
               'crates/linura-linux-session/src/lib.rs',
               'crates/linura-persistence-sqlite/src/network_scan_attempts.rs',
               'crates/linura-persistence-sqlite/src/lib.rs',
+              'apps/linura-authorityd/src/lib.rs',
+              'apps/linura-authorityd/src/wifi_scan.rs',
           ]:
               content = Path(name).read_text()
               print('SCAN_SOURCE_BEGIN:' + name, flush=True)
@@ -51,9 +53,11 @@ jobs:
         run: |
           set -euo pipefail
           cargo +1.98.0 fmt --all -- --check
+          cargo +1.98.0 test --locked -p linura-authorityd wifi_scan
           cargo +1.98.0 test --locked -p linura-linux-session
           cargo +1.98.0 test --locked -p linura-control wifi_scan
           cargo +1.98.0 test --locked -p linura-persistence-sqlite network_scan_attempts
+          cargo +1.98.0 clippy --locked -p linura-authorityd --all-targets -- -D warnings
           cargo +1.98.0 clippy --locked -p linura-linux-session --all-targets -- -D warnings
           cargo +1.98.0 clippy --locked -p linura-control --all-targets -- -D warnings
           cargo +1.98.0 clippy --locked -p linura-persistence-sqlite --all-targets -- -D warnings

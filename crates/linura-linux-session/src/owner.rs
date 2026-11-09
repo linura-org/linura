@@ -6,7 +6,7 @@ mod sleep_fence;
 mod wifi_scan;
 
 pub use network_credential::{NativeNetworkSubjectCorrelation, NativeNetworkSubjectRequest};
-pub use wifi_scan::{NativeWifiScanSample, NativeWifiScanScope};
+pub use wifi_scan::{NativeWifiScanCompletion, NativeWifiScanSample, NativeWifiScanScope};
 
 use std::collections::HashMap;
 use std::fs;

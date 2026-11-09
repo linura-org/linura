@@ -103,6 +103,18 @@ pub enum WifiScanAttemptState {
     Verified,
 }
 
+/// Source-bound evidence provided only by trusted Control after independent
+/// native re-observation. The record does not itself authenticate its caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WifiScanNativeEvidence {
+    pub request_id: String,
+    pub device_binding: String,
+    pub boot_id: String,
+    pub dispatch_digest: String,
+    pub last_scan_boot_ms: u64,
+    pub independently_sampled_boot_ms: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WifiScanAttemptStatus {
     pub attempt: WifiScanAttempt,
@@ -243,6 +255,7 @@ fn load_events(
                 || *original != &event.attempt
                 || event.completed_last_scan_ms.is_none_or(|ms| {
                     ms < original.started_boot_ms
+                        || ms > original.started_boot_ms.saturating_add(15_000)
                         || ms <= u64::try_from(original.baseline_last_scan_ms).unwrap_or(0)
                 })
             {
@@ -404,7 +417,7 @@ impl SqliteWifiScanAttemptJournal {
 
     /// Only an independently attested native observer may provide this
     /// completion evidence. It does not grant permission to dispatch again.
-    pub fn verified(
+    fn verified(
         &mut self,
         request_id: &str,
         observed_last_scan_ms: u64,
@@ -444,6 +457,30 @@ impl SqliteWifiScanAttemptJournal {
             },
         )?;
         transaction.commit().map_err(sqlite)
+    }
+
+    /// Only exact native-source and one-use-dispatch-bound evidence can finish
+    /// an event. An arbitrary AP list, method return or timestamp is insufficient.
+    pub fn verified_native(&mut self, evidence: &WifiScanNativeEvidence) -> Result<(), TransactionStoreError> {
+        let Some(status) = self.status(&evidence.request_id)? else {
+            return Err(TransactionStoreError::NotFound);
+        };
+        let original = &status.attempt;
+        if status.state != WifiScanAttemptState::Indeterminate ||
+            evidence.device_binding != original.device_binding ||
+            evidence.dispatch_digest != original.dispatch_digest ||
+            evidence.boot_id != original.boot_id ||
+            !canonical_sha256(&evidence.device_binding) ||
+            !canonical_sha256(&evidence.dispatch_digest) ||
+            evidence.last_scan_boot_ms < original.started_boot_ms ||
+            evidence.last_scan_boot_ms > evidence.independently_sampled_boot_ms ||
+            evidence.independently_sampled_boot_ms < original.started_boot_ms ||
+            evidence.independently_sampled_boot_ms - original.started_boot_ms > 15_000 ||
+            (original.baseline_last_scan_ms >= 0 && evidence.last_scan_boot_ms <= original.baseline_last_scan_ms as u64)
+        {
+            return Err(TransactionStoreError::AuthorityRejected);
+        }
+        self.verified(&evidence.request_id, evidence.last_scan_boot_ms)
     }
 
     pub fn status(
@@ -599,6 +636,42 @@ mod tests {
         assert!(SqliteWifiScanAttemptJournal::open(&path, key()).is_err());
         let _ = std::fs::remove_file(path);
     }
+    #[test]
+    fn native_completion_rejects_foreign_or_stale_source() {
+        let path = scratch("native-completion");
+        let mut db = SqliteWifiScanAttemptJournal::open(&path, key()).unwrap_or_else(|e| unreachable!("{e}"));
+        db.begin(attempt("first", 120_000)).unwrap_or_else(|e| unreachable!("{e}"));
+        let correct = WifiScanNativeEvidence {
+            request_id: "request:v010:wifi-scan:first".into(),
+            device_binding: format!("sha256:{}", "1".repeat(64)),
+            dispatch_digest: format!("sha256:{}", "2".repeat(64)),
+            boot_id: "abcd1234-1234-4567-89ab-0123456789ab".into(),
+            last_scan_boot_ms: 120_005,
+            independently_sampled_boot_ms: 120_030,
+        };
+        let mut wrong = correct.clone();
+        wrong.device_binding = format!("sha256:{}", "3".repeat(64));
+        assert!(db.verified_native(&wrong).is_err());
+        wrong = correct.clone();
+        wrong.dispatch_digest = format!("sha256:{}", "3".repeat(64));
+        assert!(db.verified_native(&wrong).is_err());
+        wrong = correct.clone();
+        wrong.boot_id = "abcd1234-1234-4567-89ab-0123456789ac".into();
+        assert!(db.verified_native(&wrong).is_err());
+        wrong = correct.clone();
+        wrong.independently_sampled_boot_ms = 119_999;
+        assert!(db.verified_native(&wrong).is_err());
+        wrong = correct.clone();
+        wrong.last_scan_boot_ms = 120_031;
+        assert!(db.verified_native(&wrong).is_err());
+        wrong = correct.clone();
+        wrong.independently_sampled_boot_ms = 135_001;
+        assert!(db.verified_native(&wrong).is_err());
+        assert!(db.verified_native(&correct).is_ok());
+        assert!(db.verified_native(&correct).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn malformed_requests_and_unverified_evidence_are_denied() {
         let path = scratch("negative");

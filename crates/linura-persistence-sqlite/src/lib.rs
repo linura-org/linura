@@ -32,6 +32,7 @@ mod validation_base;
 pub use integrity::SqliteIntegrityKey;
 pub use network_scan_attempts::{
     SqliteWifiScanAttemptJournal, WifiScanAttempt, WifiScanAttemptState, WifiScanAttemptStatus,
+    WifiScanNativeEvidence,
 };
 pub use protective_lock_settings::SqliteProtectiveLockSettingStore;
 pub use request_journal::SqliteApprovedRequestJournal;

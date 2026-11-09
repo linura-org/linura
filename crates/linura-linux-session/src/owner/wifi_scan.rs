@@ -47,6 +47,47 @@ pub struct NativeWifiScanSample {
     pub sampled_boot_us: u64,
 }
 
+/// An independently reread native post-dispatch sample, not a D-Bus method
+/// acknowledgement, cached AP inventory, or authorization token. Exact
+/// owner/device and original-session binding are rechecked at sampling time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeWifiScanCompletion {
+    pub network: NetworkManagerEpoch,
+    pub device: NetworkDeviceId,
+    pub last_scan_boot_ms: u64,
+    pub sampled_boot_us: u64,
+}
+
+/// A new LastScan under the same owner is necessary, but not by itself a
+/// cryptographic proof of causal attribution if a foreign process also scans.
+/// The caller must retain and validate the original durable attempt binding.
+fn correlated_scan_completion(
+    last_scan: i64,
+    scanning: bool,
+    baseline: i64,
+    attempted_at_boot_ms: u64,
+    sampled_boot_ms: u64,
+) -> Result<Option<u64>, String> {
+    if attempted_at_boot_ms == 0 || baseline < -1 || last_scan < -1 ||
+        sampled_boot_ms < attempted_at_boot_ms ||
+        sampled_boot_ms.saturating_sub(attempted_at_boot_ms) > 15_000
+    {
+        return Err("native Wi-Fi scan completion clock/epoch is unsupported".into());
+    }
+    let Some(scan_ms) = u64::try_from(last_scan).ok() else {
+        return Ok(None);
+    };
+    if scan_ms > sampled_boot_ms {
+        return Err("native Wi-Fi scan completed in the future".into());
+    }
+    if scanning || scan_ms < attempted_at_boot_ms ||
+        (baseline >= 0 && scan_ms <= baseline as u64)
+    {
+        return Ok(None);
+    }
+    Ok(Some(scan_ms))
+}
+
 impl NativeWifiScanScope {
     pub fn validate(
         &self,
@@ -234,7 +275,7 @@ impl NativeSessionChannel {
         Ok(())
     }
 
-    fn native_wifi_scan_sample(
+    pub fn native_wifi_scan_sample(
         &self,
         scope: &NativeWifiScanScope,
     ) -> Result<NativeWifiScanSample, String> {
@@ -321,6 +362,75 @@ impl NativeSessionChannel {
             scanning: false,
             sampled_boot_us: now_boot_us,
         })
+    }
+
+    /// Separate fresh native read for a *spent* durable event attempt.
+    /// A returned observation is only a source-bound correlation: it cannot
+    /// complete a Control transaction or issue permission without the exact
+    /// attempt journal and a qualified exclusive-attribution policy.
+    pub fn observe_sealed_wifi_scan_completion(
+        &self,
+        scope: &NativeWifiScanScope,
+        attempted_at_boot_ms: u64,
+    ) -> Result<Option<NativeWifiScanCompletion>, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let started = Instant::now();
+        scope.network.require_same(&self.native_network_epoch(started)?)
+            .map_err(|_| "native NetworkManager owner/bus/boot changed".to_owned())?;
+        self.native_wifi_scan_seat(scope, started)?;
+        let owner = scope.network.owner().as_str();
+        let device_path = scope.device.object().native_path();
+        let inventory = self.call(owner, NM_ROOT, NM_INTERFACE, "GetDevices", &(), started)?;
+        if inventory.body().len() > MAX_NATIVE_WIFI_REPLY_BYTES {
+            return Err("native scan completion inventory exceeds bounded wire budget".into());
+        }
+        let devices: Vec<OwnedObjectPath> = inventory.body().deserialize()
+            .map_err(|_| "native scan completion device inventory is malformed".to_owned())?;
+        if devices.len() > MAX_SCAN_DEVICES ||
+            devices.iter().filter(|item| item.as_str() == device_path).count() != 1
+        {
+            return Err("native scan completion device changed or disappeared".into());
+        }
+        let manager = self.properties(owner, NM_ROOT, NM_INTERFACE, started)?;
+        let device = self.properties(owner, &device_path, NM_DEVICE, started)?;
+        let wifi = self.properties(owner, &device_path, NM_WIFI, started)?;
+        let interface: &str = property(&device, "Interface")?;
+        if interface != scope.device.interface().as_str() ||
+            scope.device.generation() != scope.device.object().sequence() ||
+            property::<u32>(&device, "DeviceType")? != 2 ||
+            !property::<bool>(&device, "Managed")? ||
+            !property::<bool>(&manager, "NetworkingEnabled")? ||
+            !property::<bool>(&manager, "WirelessEnabled")? ||
+            !property::<bool>(&manager, "WirelessHardwareEnabled")?
+        {
+            return Err("native scan completion device or radio was replaced/disabled".into());
+        }
+        let namespace = fs::metadata("/proc/self/ns/net").map_err(|_| "scan namespace vanished")?.ino();
+        let filename = format!("/sys/class/net/{interface}/ifindex");
+        let ifindex: u32 = fs::read_to_string(&filename).map_err(|_| "scan interface vanished")?
+            .trim().parse().map_err(|_| "scan interface index is malformed")?;
+        if namespace != scope.device.namespace_inode() || ifindex != scope.device.ifindex() || ifindex == 0 ||
+            fs::metadata("/proc/self/ns/net").map_err(|_| "scan namespace vanished")?.ino() != namespace ||
+            fs::read_to_string(&filename).map_err(|_| "scan interface vanished")?.trim() != ifindex.to_string()
+        {
+            return Err("native scan completion kernel device changed".into());
+        }
+        kernel_wifi_rfkill_clear()?;
+        let last_scan: i64 = property(&wifi, "LastScan")?;
+        let scanning: bool = property(&wifi, "Scanning")?;
+        let now_ms = boot_ms()?;
+        let completed = correlated_scan_completion(last_scan, scanning, scope.baseline_last_scan_boot_ms,
+            attempted_at_boot_ms, now_ms)?;
+        if self.native_network_epoch(started)? != scope.network {
+            return Err("native scan completion source owner changed".into());
+        }
+        self.native_wifi_scan_seat(scope, started)?;
+        Ok(completed.map(|last_scan_boot_ms| NativeWifiScanCompletion {
+            network: scope.network.clone(),
+            device: scope.device.clone(),
+            last_scan_boot_ms,
+            sampled_boot_us: now_ms.saturating_mul(1_000),
+        }))
     }
 
     /// Native transport, never an authorization. Only Authority1's trusted
@@ -446,6 +556,18 @@ mod tests {
         wrong = effect.clone();
         wrong.canonical_payload = b"scan_requested=true\nssids=secret\n".to_vec();
         assert!(s.validate(&wrong, &binding, 101_000_000).is_err());
+    }
+
+    #[test]
+    fn independent_scan_completion_rejects_cached_ambiguous_and_future_samples() {
+        assert_eq!(correlated_scan_completion(105_100, false, 80_000, 105_000, 105_500).unwrap(), Some(105_100));
+        assert_eq!(correlated_scan_completion(80_000, false, 80_000, 105_000, 105_500).unwrap(), None);
+        assert_eq!(correlated_scan_completion(105_100, true, 80_000, 105_000, 105_500).unwrap(), None);
+        assert_eq!(correlated_scan_completion(104_999, false, 80_000, 105_000, 105_500).unwrap(), None);
+        assert!(correlated_scan_completion(105_600, false, 80_000, 105_000, 105_500).is_err());
+        assert!(correlated_scan_completion(120_000, false, 80_000, 105_000, 121_000).is_err());
+        assert!(correlated_scan_completion(105_100, false, -2, 105_000, 105_500).is_err());
+        assert!(correlated_scan_completion(105_100, false, 80_000, 105_000, 104_900).is_err());
     }
 
     #[test]
