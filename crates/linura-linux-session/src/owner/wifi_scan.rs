@@ -351,7 +351,7 @@ impl NativeSessionChannel {
             Instant::now(),
         );
         let disposition = match call {
-            Ok(reply) if reply.body().len() == 0 => ExecutionDisposition::Dispatched,
+            Ok(reply) if reply.body().is_empty() => ExecutionDisposition::Dispatched,
             Ok(_) | Err(_) => ExecutionDisposition::Indeterminate,
         };
         ExecutionOutcome::new(
@@ -397,7 +397,7 @@ mod tests {
         let lock = ok(SessionLockId::new(
             linura_core::SessionEpoch::new(boot, 1000, "2", 42)
                 .unwrap_or_else(|error| unreachable!("{error:?}")),
-            ok(linura_core::SecurityOwnerInvocationId::new(
+            ok(SecurityOwnerInvocationId::new(
                 "98765432-1234-4567-89ab-0123456789ab",
             )),
             1,
