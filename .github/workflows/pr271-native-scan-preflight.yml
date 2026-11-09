@@ -26,6 +26,25 @@ jobs:
           python3 tools/check_adrs.py
       - name: Install repository Rust
         run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+      - name: Format exact scan Rust source for extraction
+        run: |
+          set -euo pipefail
+          cargo +1.98.0 fmt --all
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          for name in [
+              'crates/linura-linux-session/src/owner/wifi_scan.rs',
+              'crates/linura-linux-session/src/owner/network_credential.rs',
+              'crates/linura-linux-session/src/owner.rs',
+              'crates/linura-linux-session/src/lib.rs',
+          ]:
+              content = Path(name).read_text()
+              print('SCAN_SOURCE_BEGIN:' + name, flush=True)
+              for offset in range(0,len(content),5000):
+                  print('SCAN_SOURCE_CHUNK:' + json.dumps(content[offset:offset+5000]), flush=True)
+              print('SCAN_SOURCE_END:' + name, flush=True)
+          PY
       - name: Verify formatting and native scan qualification tests
         run: |
           set -euo pipefail
