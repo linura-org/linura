@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - wip/v010-s18-network
+      - validation/s18-integrated-reference
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
       - name: Check WIP branch and exact source binding
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/wip/v010-s18-network"
+          test "$GITHUB_REF" = "refs/heads/wip/v010-s18-network" || test "$GITHUB_REF" = "refs/heads/validation/s18-integrated-reference"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Test S18 contract and decomposition
         run: python3 -m unittest tests.tooling.test_v010_s18_design tests.tooling.test_v010_s18_decomposition
