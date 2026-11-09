@@ -1,0 +1,75 @@
+# Isolated developer feedback only. Never a merge, release, or evidence gate.
+name: PR270 native staging
+
+on:
+  push:
+    branches: [validation/pr270-native-agent]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr270-native-staging
+  cancel-in-progress: true
+
+jobs:
+  format-and-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install repository-pinned clang-format
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/pr270-clang"
+          "$RUNNER_TEMP/pr270-clang/bin/python3" -m pip install --disable-pip-version-check \
+            --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+            -r tools/source-format/clang-requirements.lock
+      - name: Format changed native source and emit exact verified UTF-8 source
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/pr270-clang/bin/clang-format" --version
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import subprocess
+          paths = [
+              'apps/linura-shell/security-owner/native_network_agent.cpp',
+              'apps/linura-shell/security-owner/native_network_agent.h',
+              'apps/linura-shell/security-owner/native_network_credentials.cpp',
+              'apps/linura-shell/security-owner/native_runtime.cpp',
+              'apps/linura-shell/security-owner/tests/native_network_agent.cpp',
+          ]
+          binary = str(Path(__import__('os').environ['RUNNER_TEMP'])/'pr270-clang/bin/clang-format')
+          for path in paths:
+              subprocess.run([binary, '-i', '--style=file', path], check=True)
+          subprocess.run(['git', 'diff', '--check'], check=True)
+          for path in paths:
+              payload = Path(path).read_text()
+              print('PR270_SOURCE_BEGIN:' + path, flush=True)
+              for at in range(0, len(payload), 6000):
+                  print('PR270_SOURCE_CHUNK:' + json.dumps(payload[at:at+6000]), flush=True)
+              print('PR270_SOURCE_END:' + path, flush=True)
+          PY
+      - name: Install native runtime build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config libwayland-dev libpolkit-agent-1-dev \
+            libxkbcommon-dev qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            wayland-protocols qml6-module-qtqml qml6-module-qtqml-models \
+            qml6-module-qtqml-workerscript qml6-module-qtquick \
+            qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-templates qml6-module-qtquick-window
+      - name: Build protected native agent and execute boundary tests
+        run: |
+          set -euo pipefail
+          cmake -S apps/linura-shell/security-owner -B "$RUNNER_TEMP/pr270-native-build" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Debug -DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON \
+            -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/pr270-native-build" --parallel 2
+          QT_QPA_PLATFORM=offscreen ctest --test-dir "$RUNNER_TEMP/pr270-native-build" \
+            --output-on-failure -R 'security-owner-(network|native-network|protected-input)'
