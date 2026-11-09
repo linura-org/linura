@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod logind;
+mod networkmanager_native;
 pub mod platform_discovery;
 pub use logind::{
     LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
@@ -247,7 +248,20 @@ impl Debug for NetworkManagerObserver {
 
 impl NetworkManagerObserver {
     pub fn connect() -> Result<Self, ProviderError> {
-        let connection = Connection::system().map_err(provider_connection_error)?;
+        // Network observation must not inherit zbus's unbounded default
+        // method deadline. Bound connection/authentication separately too.
+        let builder = zbus::connection::Builder::system()
+            .map_err(provider_connection_error)?
+            .method_timeout(Duration::from_millis(350));
+        let connection = platform_discovery::build_dbus_connection_with_deadline(
+            builder,
+            "NetworkManager system D-Bus",
+        )
+        .map_err(|_| {
+            ProviderError::Unavailable(
+                "NetworkManager system bus authentication timed out or failed".into(),
+            )
+        })?;
         Ok(Self {
             connection,
             sequence: AtomicU64::new(0),
@@ -280,9 +294,11 @@ impl NetworkManagerObserver {
             "org.freedesktop.DBus",
         )
         .map_err(provider_bus_error)?;
-        let owner: String = bus
-            .call("GetNameOwner", &(NM_SERVICE,))
+        let reply = bus
+            .call_method("GetNameOwner", &(NM_SERVICE,))
             .map_err(provider_bus_error)?;
+        networkmanager_native::require_bounded_body(&reply)?;
+        let owner: String = reply.body().deserialize().map_err(provider_bus_error)?;
         if !owner.starts_with(':') || owner.len() > MAX_NM_INTERFACE_BYTES {
             return Err(ProviderError::InvalidState(
                 "NetworkManager D-Bus owner is not a bounded unique name".into(),
@@ -302,9 +318,11 @@ impl NetworkManagerObserver {
     ) -> Result<BTreeMap<String, OwnedObjectPath>, ProviderError> {
         let manager = Proxy::new(&self.connection, owner, NM_PATH, NM_INTERFACE)
             .map_err(provider_bus_error)?;
-        let paths: Vec<OwnedObjectPath> = manager
-            .call("GetDevices", &())
+        let reply = manager
+            .call_method("GetDevices", &())
             .map_err(provider_bus_error)?;
+        networkmanager_native::require_bounded_body(&reply)?;
+        let paths: Vec<OwnedObjectPath> = reply.body().deserialize().map_err(provider_bus_error)?;
         if paths.len() > MAX_NM_DEVICES {
             return Err(ProviderError::InvalidState(
                 "NetworkManager device inventory exceeds the supported limit".into(),
@@ -314,8 +332,12 @@ impl NetworkManagerObserver {
         for path in paths {
             // Individual proxy property reads may use a stale PropertiesChanged
             // cache; resolve identity from the same unique-owner GetAll snapshot.
-            let properties =
-                all_properties(&self.connection, owner, path.as_str(), NM_DEVICE_INTERFACE)?;
+            let properties = networkmanager_native::bounded_props(
+                &self.connection,
+                owner,
+                path.as_str(),
+                NM_DEVICE_INTERFACE,
+            )?;
             let interface: String = snapshot_property(&properties, "Interface")?;
             validate_nm_interface(&interface)?;
             rows.push((interface, path));
@@ -341,9 +363,11 @@ impl NetworkManagerObserver {
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
         let started = Instant::now();
-        let boot_id = nm_boot_id()?;
-        let owner = self.unique_owner()?;
-        let properties = all_properties(&self.connection, &owner, NM_PATH, NM_INTERFACE)?;
+        let epoch = self.native_epoch()?;
+        let boot_id = epoch.boot().as_str().to_owned();
+        let owner = epoch.owner().as_str().to_owned();
+        let properties =
+            networkmanager_native::bounded_props(&self.connection, &owner, NM_PATH, NM_INTERFACE)?;
         let version: String = snapshot_property(&properties, "Version")?;
         bounded_nm_text("version", &version)?;
         let state: u32 = snapshot_property(&properties, "State")?;
@@ -362,6 +386,10 @@ impl NetworkManagerObserver {
             ),
             ("service_owner".into(), ObservedValue::Text(owner.clone())),
             ("boot_id".into(), ObservedValue::Text(boot_id.clone())),
+            (
+                "system_bus_id".into(),
+                ObservedValue::Text(epoch.bus().as_str().to_owned()),
+            ),
         ]);
         for (native, attribute) in [
             ("WirelessEnabled", "wireless_enabled"),
@@ -376,6 +404,7 @@ impl NetworkManagerObserver {
         }
         self.require_same_owner(&owner)?;
         require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        self.require_native_epoch(&epoch)?;
         require_nm_elapsed(started)?;
         Ok(ObservationEnvelope {
             provider: provider_id(NM_PROVIDER),
@@ -395,12 +424,17 @@ impl NetworkManagerObserver {
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
         let started = Instant::now();
-        let boot_id = nm_boot_id()?;
+        let epoch = self.native_epoch()?;
+        let boot_id = epoch.boot().as_str().to_owned();
         let interface = Self::device_interface(resource)?;
-        let owner = self.unique_owner()?;
+        let owner = epoch.owner().as_str().to_owned();
         let path = self.find_device_path(&owner, interface)?;
-        let properties =
-            all_properties(&self.connection, &owner, path.as_str(), NM_DEVICE_INTERFACE)?;
+        let properties = networkmanager_native::bounded_props(
+            &self.connection,
+            &owner,
+            path.as_str(),
+            NM_DEVICE_INTERFACE,
+        )?;
         let observed_interface: String = snapshot_property(&properties, "Interface")?;
         if observed_interface != interface {
             return Err(ProviderError::InvalidState(
@@ -424,6 +458,10 @@ impl NetworkManagerObserver {
             ("object_path".into(), ObservedValue::Text(path.to_string())),
             ("service_owner".into(), ObservedValue::Text(owner.clone())),
             ("boot_id".into(), ObservedValue::Text(boot_id.clone())),
+            (
+                "system_bus_id".into(),
+                ObservedValue::Text(epoch.bus().as_str().to_owned()),
+            ),
         ]);
         // These are correlations to NM-owned objects, not sufficient mutation IDs.
         for (native, attribute) in [
@@ -469,6 +507,7 @@ impl NetworkManagerObserver {
         }
         self.require_same_owner(&owner)?;
         require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        self.require_native_epoch(&epoch)?;
         require_nm_elapsed(started)?;
         Ok(ObservationEnvelope {
             provider: provider_id(NM_PROVIDER),
@@ -584,6 +623,16 @@ impl Observer for NetworkManagerObserver {
 
     fn observation_capabilities(&self) -> Vec<Capability> {
         let health = self.health();
+        // New S18-2 observation families have executable read-only code,
+        // but have not earned real-NM, receive-byte-limit, or hardware
+        // qualification. Do not promote them to supported just because the
+        // well-known NM service is present.
+        let passive_availability = match health.availability {
+            ProviderAvailability::Available => ProviderAvailability::Degraded,
+            unavailable => unavailable,
+        };
+        let passive_reason =
+            Some("S18-2 read-only native observations remain under qualification".into());
         vec![
             capability(
                 NM_MANAGER_CAPABILITY,
@@ -595,7 +644,25 @@ impl Observer for NetworkManagerObserver {
                 NM_DEVICE_CAPABILITY,
                 NM_PROVIDER,
                 health.availability,
-                health.reason,
+                health.reason.clone(),
+            ),
+            capability(
+                networkmanager_native::WIFI_CAPABILITY,
+                NM_PROVIDER,
+                passive_availability,
+                passive_reason.clone(),
+            ),
+            capability(
+                networkmanager_native::CONNECTIONS_CAPABILITY,
+                NM_PROVIDER,
+                passive_availability,
+                passive_reason.clone(),
+            ),
+            capability(
+                networkmanager_native::IPCONFIG_CAPABILITY,
+                NM_PROVIDER,
+                passive_availability,
+                passive_reason,
             ),
         ]
     }
@@ -611,13 +678,13 @@ impl Observer for NetworkManagerObserver {
                 .map_err(|error| invalid_identifier("NetworkManager manager resource", error))?,
         ];
         let started = Instant::now();
-        let boot_id = nm_boot_id()?;
-        let owner = self.unique_owner()?;
-        for interface in self.device_index(&owner)?.keys() {
+        let epoch = self.native_epoch()?;
+        let owner = epoch.owner().as_str();
+        for interface in self.device_index(owner)?.keys() {
             resources.push(Self::device_resource(interface)?);
         }
-        self.require_same_owner(&owner)?;
-        require_nm_boot_match(&boot_id, &nm_boot_id()?)?;
+        resources.extend(self.passive_resources(&epoch)?);
+        self.require_native_epoch(&epoch)?;
         require_nm_elapsed(started)?;
         resources.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(resources)
@@ -638,6 +705,12 @@ impl Observer for NetworkManagerObserver {
             {
                 self.observe_device(resource, capability)
             }
+            (
+                _,
+                networkmanager_native::WIFI_CAPABILITY
+                | networkmanager_native::CONNECTIONS_CAPABILITY
+                | networkmanager_native::IPCONFIG_CAPABILITY,
+            ) => self.observe_passive(resource, capability),
             _ => Err(ProviderError::Unsupported(format!(
                 "NetworkManager cannot observe {} with {}",
                 resource.as_str(),
