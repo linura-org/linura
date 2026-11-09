@@ -575,7 +575,10 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 15 && signals == 1 && annotations == 3);
+    assert(introspection.contains(QStringLiteral("ArmNetworkCredential")) &&
+           introspection.contains(QStringLiteral("CancelNetworkCredential")) &&
+           introspection.contains(QStringLiteral("((ssssssss)(sssssssuttb))")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
