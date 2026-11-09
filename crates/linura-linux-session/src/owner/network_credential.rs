@@ -238,7 +238,10 @@ impl NativeSessionChannel {
         self.revalidate(&identity, started)
     }
 
-    pub(super) fn native_network_epoch(&self, started: Instant) -> Result<NetworkManagerEpoch, String> {
+    pub(super) fn native_network_epoch(
+        &self,
+        started: Instant,
+    ) -> Result<NetworkManagerEpoch, String> {
         let bus: String = self
             .bus_call("GetId", &(), started)?
             .body()

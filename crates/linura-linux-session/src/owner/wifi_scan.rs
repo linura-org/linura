@@ -108,14 +108,21 @@ fn check_radio_state(
     let state: u32 = property(device, "State")?;
     let scanning: bool = property(wifi, "Scanning")?;
     let last_scan: i64 = property(wifi, "LastScan")?;
-    if !networking || !enabled || !hardware || kind != 2 || !managed
-        || !matches!(state, 30 | 100) || scanning
+    if !networking
+        || !enabled
+        || !hardware
+        || kind != 2
+        || !managed
+        || !matches!(state, 30 | 100)
+        || scanning
     {
         return Err("native Wi-Fi device/radio is unavailable, blocked or already scanning".into());
     }
-    if last_scan != expected_last_scan || last_scan < -1
-        || (last_scan >= 0 && u64::try_from(last_scan).is_ok_and(|ms|
-            ms > boot_ms || boot_ms.saturating_sub(ms) < MIN_SCAN_INTERVAL_MS))
+    if last_scan != expected_last_scan
+        || last_scan < -1
+        || (last_scan >= 0
+            && u64::try_from(last_scan)
+                .is_ok_and(|ms| ms > boot_ms || boot_ms.saturating_sub(ms) < MIN_SCAN_INTERVAL_MS))
     {
         return Err("native scan generation changed, is malformed or is rate limited".into());
     }
@@ -125,8 +132,8 @@ fn check_radio_state(
 fn kernel_wifi_rfkill_clear() -> Result<(), String> {
     // Conservative global WLAN rfkill, never a guessed adapter-specific unblock.
     // A kernel without independently readable rfkill cannot qualify this path.
-    let iter = fs::read_dir("/sys/class/rfkill")
-        .map_err(|_| "native rfkill inventory is unavailable")?;
+    let iter =
+        fs::read_dir("/sys/class/rfkill").map_err(|_| "native rfkill inventory is unavailable")?;
     let mut found = false;
     let mut count = 0_usize;
     for item in iter {
@@ -138,13 +145,15 @@ fn kernel_wifi_rfkill_clear() -> Result<(), String> {
         let name = item.file_name();
         let name = name.to_string_lossy();
         if !name.starts_with("rfkill")
-            || !name["rfkill".len()..].bytes().all(|byte| byte.is_ascii_digit())
+            || !name["rfkill".len()..]
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
         {
             return Err("native rfkill identity is not canonical".into());
         }
         let base = item.path();
-        let kind = fs::read_to_string(base.join("type"))
-            .map_err(|_| "native rfkill type disappeared")?;
+        let kind =
+            fs::read_to_string(base.join("type")).map_err(|_| "native rfkill type disappeared")?;
         if kind.trim() != "wlan" {
             continue;
         }
@@ -191,7 +200,9 @@ impl NativeSessionChannel {
             .deserialize()
             .map_err(|_| "native scan logind session vanished".to_owned())?;
         if path.as_str().len() > 256
-            || !path.as_str().starts_with("/org/freedesktop/login1/session/")
+            || !path
+                .as_str()
+                .starts_with("/org/freedesktop/login1/session/")
         {
             return Err("native scan session object is not canonical".into());
         }
@@ -207,10 +218,9 @@ impl NativeSessionChannel {
             .ok_or("native scan seat is absent")?
             .try_clone()
             .map_err(|_| "native scan seat is malformed".to_owned())?;
-        let (seat, path): (String, OwnedObjectPath) =
-            zbus::zvariant::Value::from(seat_value)
-                .try_into()
-                .map_err(|_| "native scan seat has the wrong type".to_owned())?;
+        let (seat, path): (String, OwnedObjectPath) = zbus::zvariant::Value::from(seat_value)
+            .try_into()
+            .map_err(|_| "native scan seat has the wrong type".to_owned())?;
         let fresh: String = self
             .bus_call("GetNameOwner", &("org.freedesktop.login1",), started)?
             .body()
@@ -231,15 +241,14 @@ impl NativeSessionChannel {
     ) -> Result<NativeWifiScanSample, String> {
         self.require_role(NativeSessionRole::Control)?;
         let started = Instant::now();
-        scope.network
+        scope
+            .network
             .require_same(&self.native_network_epoch(started)?)
             .map_err(|_| "native NetworkManager owner/bus/boot changed".to_owned())?;
         self.native_wifi_scan_seat(scope, started)?;
         let owner = scope.network.owner().as_str();
         let path = scope.device.object().native_path();
-        let reply = self.call(
-            owner, NM_ROOT, NM_INTERFACE, "GetDevices", &(), started,
-        )?;
+        let reply = self.call(owner, NM_ROOT, NM_INTERFACE, "GetDevices", &(), started)?;
         if reply.body().len() > MAX_NATIVE_WIFI_REPLY_BYTES {
             return Err("native scan device list exceeds decoder budget".into());
         }
@@ -267,28 +276,39 @@ impl NativeSessionChannel {
         let filename = format!("/sys/class/net/{interface}/ifindex");
         let ifindex: u32 = fs::read_to_string(&filename)
             .map_err(|_| "network ifindex vanished")?
-            .trim().parse().map_err(|_| "network ifindex is malformed")?;
+            .trim()
+            .parse()
+            .map_err(|_| "network ifindex is malformed")?;
         let second_namespace = fs::metadata("/proc/self/ns/net")
             .map_err(|_| "network namespace changed")?
             .ino();
         let second_ifindex: u32 = fs::read_to_string(&filename)
             .map_err(|_| "network device changed")?
-            .trim().parse().map_err(|_| "network ifindex is malformed")?;
-        if namespace == 0 || namespace != scope.device.namespace_inode()
+            .trim()
+            .parse()
+            .map_err(|_| "network ifindex is malformed")?;
+        if namespace == 0
+            || namespace != scope.device.namespace_inode()
             || namespace != second_namespace
-            || ifindex != scope.device.ifindex() || ifindex == 0
+            || ifindex != scope.device.ifindex()
+            || ifindex == 0
             || ifindex != second_ifindex
         {
             return Err("native kernel Wi-Fi identity changed".into());
         }
         let now_boot_us = boot_ms()?
-            .checked_mul(1000).ok_or("native boot clock overflow")?;
-        scope.observation
+            .checked_mul(1000)
+            .ok_or("native boot clock overflow")?;
+        scope
+            .observation
             .require_fresh(&scope.network, now_boot_us, MAX_OBSERVATION_AGE_US)
             .map_err(|_| "original scan observation is stale".to_owned())?;
         check_radio_state(
-            &manager, &device, &wifi, now_boot_us / 1000,
-            scope.baseline_last_scan_boot_ms
+            &manager,
+            &device,
+            &wifi,
+            now_boot_us / 1000,
+            scope.baseline_last_scan_boot_ms,
         )?;
         kernel_wifi_rfkill_clear()?;
         if self.native_network_epoch(started)? != scope.network {
@@ -315,7 +335,9 @@ impl NativeSessionChannel {
     ) -> Result<ExecutionOutcome, String> {
         self.require_role(NativeSessionRole::Control)?;
         let (effect, binding) = authorization.into_executor_request();
-        let now = boot_ms()?.checked_mul(1000).ok_or("native clock overflow")?;
+        let now = boot_ms()?
+            .checked_mul(1000)
+            .ok_or("native clock overflow")?;
         scope.validate(&effect, &binding, now)?;
         self.native_wifi_scan_sample(scope)?;
         // Any failure after the one-use authority handoff is ambiguous.
@@ -344,8 +366,10 @@ impl NativeSessionChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linura_core::{BootId, NetworkInterfaceName, NetworkManagerOwner,
-        NetworkObjectId, PrincipalId, ProviderId, ResourceId, SystemBusInstanceId};
+    use linura_core::{
+        BootId, NetworkInterfaceName, NetworkManagerOwner, NetworkObjectId, PrincipalId,
+        ProviderId, ResourceId, SystemBusInstanceId,
+    };
     use linura_provider_sdk::ComponentDigest;
 
     fn ok<T, E: std::fmt::Debug>(value: Result<T, E>) -> T {
@@ -361,19 +385,28 @@ mod tests {
         );
         let device = ok(NetworkDeviceId::new(
             epoch.clone(),
-            ok(NetworkObjectId::from_path(NetworkObjectKind::Device,
-                "/org/freedesktop/NetworkManager/Devices/8")),
-            12456, 7, ok(NetworkInterfaceName::new("wlan0")), 8,
+            ok(NetworkObjectId::from_path(
+                NetworkObjectKind::Device,
+                "/org/freedesktop/NetworkManager/Devices/8",
+            )),
+            12456,
+            7,
+            ok(NetworkInterfaceName::new("wlan0")),
+            8,
         ));
         let lock = ok(SessionLockId::new(
             linura_core::SessionEpoch::new(boot, 1000, "2", 42)
                 .unwrap_or_else(|error| unreachable!("{error:?}")),
             ok(linura_core::SecurityOwnerInvocationId::new(
-                "98765432-1234-4567-89ab-0123456789ab")), 1,
+                "98765432-1234-4567-89ab-0123456789ab",
+            )),
+            1,
         ));
         let scope = NativeWifiScanScope {
-            lock, principal: ok(PrincipalId::new("unix:uid:1000")),
-            network: epoch.clone(), device,
+            lock,
+            principal: ok(PrincipalId::new("unix:uid:1000")),
+            network: epoch.clone(),
+            device,
             observation: ok(NetworkObservationId::new(epoch, 4, 100_000_000)),
             seat: "seat0".into(),
             baseline_last_scan_boot_ms: -1,
@@ -386,7 +419,9 @@ mod tests {
             b"scan_requested=true\n".to_vec(),
         ));
         let binding = ok(ExecutionBinding::new(
-            "txn:wifi:fixture", 0, 1,
+            "txn:wifi:fixture",
+            0,
+            1,
             ComponentDigest::from_bytes([1; 32]),
             ComponentDigest::from_bytes([2; 32]),
             &effect,
@@ -426,15 +461,15 @@ mod tests {
         let mut wifi = Properties::new();
         wifi.insert("Scanning".into(), OwnedValue::from(false));
         wifi.insert("LastScan".into(), OwnedValue::from(-1_i64));
-        assert!(check_radio_state(&manager,&device,&wifi,100_000,-1).is_ok());
+        assert!(check_radio_state(&manager, &device, &wifi, 100_000, -1).is_ok());
         wifi.insert("LastScan".into(), OwnedValue::from(99_000_i64));
-        assert!(check_radio_state(&manager,&device,&wifi,100_000,99_000).is_err());
+        assert!(check_radio_state(&manager, &device, &wifi, 100_000, 99_000).is_err());
         wifi.insert("LastScan".into(), OwnedValue::from(40_000_i64));
-        assert!(check_radio_state(&manager,&device,&wifi,100_000,40_000).is_ok());
-        manager.insert("WirelessEnabled".into(),OwnedValue::from(false));
-        assert!(check_radio_state(&manager,&device,&wifi,100_000,40_000).is_err());
-        manager.insert("WirelessEnabled".into(),OwnedValue::from(true));
-        wifi.insert("Scanning".into(),OwnedValue::from(true));
-        assert!(check_radio_state(&manager,&device,&wifi,100_000,40_000).is_err());
+        assert!(check_radio_state(&manager, &device, &wifi, 100_000, 40_000).is_ok());
+        manager.insert("WirelessEnabled".into(), OwnedValue::from(false));
+        assert!(check_radio_state(&manager, &device, &wifi, 100_000, 40_000).is_err());
+        manager.insert("WirelessEnabled".into(), OwnedValue::from(true));
+        wifi.insert("Scanning".into(), OwnedValue::from(true));
+        assert!(check_radio_state(&manager, &device, &wifi, 100_000, 40_000).is_err());
     }
 }

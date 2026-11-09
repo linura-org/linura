@@ -1,9 +1,9 @@
 //! Root-supervised native owner discovery and bounded private transport only.
 //! Neither these identities nor successful calls mint policy/dispatch authority.
 mod network_credential;
-mod wifi_scan;
 mod polkit;
 mod sleep_fence;
+mod wifi_scan;
 
 pub use network_credential::{NativeNetworkSubjectCorrelation, NativeNetworkSubjectRequest};
 pub use wifi_scan::{NativeWifiScanSample, NativeWifiScanScope};

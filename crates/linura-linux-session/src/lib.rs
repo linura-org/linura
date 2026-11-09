@@ -18,9 +18,9 @@ mod sleep_observer;
 pub use bus::{NativeSessionChannel, NativeSessionRole};
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
-    NativeWifiScanSample, NativeWifiScanScope,
     NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject,
     NativeNetworkSubjectCorrelation, NativeNetworkSubjectRequest, NativeOwnerIdentity,
+    NativeWifiScanSample, NativeWifiScanScope,
 };
 pub use service::protect_before_native_sleep;
 pub use sleep_gate::NativeSleepEntry;
