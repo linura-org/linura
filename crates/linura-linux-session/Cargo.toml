@@ -10,6 +10,7 @@ repository.workspace = true
 async-io = "2.6"
 futures-lite = "2.6"
 linura-core = { path = "../linura-core" }
+linura-control = { path = "../linura-control" }
 linura-observation = { path = "../linura-observation" }
 linura-provider-sdk = { path = "../linura-provider-sdk" }
 rustix = { version = "1.1", features = ["fs", "net", "process", "thread", "time"] }

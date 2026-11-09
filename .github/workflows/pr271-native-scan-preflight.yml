@@ -1,0 +1,36 @@
+# Isolated native scan engineering preflight. Not a release/evidence gate and
+# not part of the PR extraction.
+name: PR271 native scan preflight
+on:
+  push:
+    branches: [validation/pr271-native-scan]
+permissions:
+  contents: read
+concurrency:
+  group: pr271-native-scan-preflight
+  cancel-in-progress: true
+jobs:
+  native-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify isolated exact source and S18 contracts
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/validation/pr271-native-scan"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m unittest tests.tooling.test_v010_s18_design tests.tooling.test_v010_s18_decomposition
+          python3 tools/check_adrs.py
+      - name: Install repository Rust
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+      - name: Verify formatting and native scan qualification tests
+        run: |
+          set -euo pipefail
+          cargo +1.98.0 fmt --all -- --check
+          cargo +1.98.0 test --locked -p linura-linux-session
+          cargo +1.98.0 test --locked -p linura-control wifi_scan
+          cargo +1.98.0 clippy --locked -p linura-linux-session --all-targets -- -D warnings
+          cargo +1.98.0 clippy --locked -p linura-control --all-targets -- -D warnings
