@@ -92,7 +92,7 @@ pub fn scan_device_binding(scope: &NativeWifiScanScope) -> Result<String, String
                 scope.principal.as_str().as_bytes(),
                 scope.seat.as_bytes(),
             ]
-        )
+        ).hex()
     ))
 }
 
