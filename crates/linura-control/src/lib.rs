@@ -27,6 +27,7 @@ mod platform_compatibility;
 mod policy_review;
 mod protective_lock_execution;
 mod protective_sleep_gate;
+pub mod wifi_scan;
 pub use protective_sleep_gate::{
     NativeSleepCoveragePort, NativeSleepGateAttempt, NativeSleepGateMonitor,
     coordinate_native_sleep_coverage,
