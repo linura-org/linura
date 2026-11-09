@@ -41,26 +41,26 @@ class NativeNetworkSecretAgent final : public QObject, protected QDBusContext
     Q_CLASSINFO("D-Bus Introspection",
                 ""
                 "<interface name=\"org.freedesktop.NetworkManager.SecretAgent\">"
-        "<method name=\"GetSecrets\">"
-        "<arg name=\"connection\" type=\"a{sa{sv}}\" direction=\"in\"/>"
-        "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
-        "<arg name=\"setting_name\" type=\"s\" direction=\"in\"/>"
-        "<arg name=\"hints\" type=\"as\" direction=\"in\"/>"
-        "<arg name=\"flags\" type=\"u\" direction=\"in\"/>"
-        "<arg name=\"secrets\" type=\"a{sa{sv}}\" direction=\"out\"/>"
-        "</method>"
-        "<method name=\"CancelGetSecrets\">"
-        "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
-        "<arg name=\"setting_name\" type=\"s\" direction=\"in\"/>"
-        "</method>"
-        "<method name=\"SaveSecrets\">"
-        "<arg name=\"connection\" type=\"a{sa{sv}}\" direction=\"in\"/>"
-        "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
-        "</method>"
-        "<method name=\"DeleteSecrets\">"
-        "<arg name=\"connection\" type=\"a{sa{sv}}\" direction=\"in\"/>"
-        "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
-        "</method></interface>")
+                "<method name=\"GetSecrets\">"
+                "<arg name=\"connection\" type=\"a{sa{sv}}\" direction=\"in\"/>"
+                "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
+                "<arg name=\"setting_name\" type=\"s\" direction=\"in\"/>"
+                "<arg name=\"hints\" type=\"as\" direction=\"in\"/>"
+                "<arg name=\"flags\" type=\"u\" direction=\"in\"/>"
+                "<arg name=\"secrets\" type=\"a{sa{sv}}\" direction=\"out\"/>"
+                "</method>"
+                "<method name=\"CancelGetSecrets\">"
+                "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
+                "<arg name=\"setting_name\" type=\"s\" direction=\"in\"/>"
+                "</method>"
+                "<method name=\"SaveSecrets\">"
+                "<arg name=\"connection\" type=\"a{sa{sv}}\" direction=\"in\"/>"
+                "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
+                "</method>"
+                "<method name=\"DeleteSecrets\">"
+                "<arg name=\"connection\" type=\"a{sa{sv}}\" direction=\"in\"/>"
+                "<arg name=\"connection_path\" type=\"o\" direction=\"in\"/>"
+                "</method></interface>")
 
   public:
     using Witness = std::function<std::optional<NativeNetworkCredentialWitness>(
@@ -86,10 +86,8 @@ class NativeNetworkSecretAgent final : public QObject, protected QDBusContext
     void GetSecrets(const NativeNmSettings &connection, const QDBusObjectPath &connectionPath,
                     const QString &settingName, const QStringList &hints, quint32 flags);
     void CancelGetSecrets(const QDBusObjectPath &connectionPath, const QString &settingName);
-    void SaveSecrets(const NativeNmSettings &connection,
-                     const QDBusObjectPath &connectionPath);
-    void DeleteSecrets(const NativeNmSettings &connection,
-                       const QDBusObjectPath &connectionPath);
+    void SaveSecrets(const NativeNmSettings &connection, const QDBusObjectPath &connectionPath);
+    void DeleteSecrets(const NativeNmSettings &connection, const QDBusObjectPath &connectionPath);
 
   private:
     [[nodiscard]] bool live() const;

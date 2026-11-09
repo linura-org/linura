@@ -316,11 +316,12 @@ bool NativeRuntime::initialize(NativeStartup startup)
         if (!impl_->initialized || !impl_->networkControlPeer)
             return std::nullopt;
         if (!impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval,
-                                       *impl_->networkControlPeer))
+                                        *impl_->networkControlPeer))
             return std::nullopt;
         if (impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active())
             return std::nullopt;
-        if (!impl_->currentSession() || impl_->protocol->inspect() != LockMechanism::State::Secure ||
+        if (!impl_->currentSession() ||
+            impl_->protocol->inspect() != LockMechanism::State::Secure ||
             impl_->independentState() != NativeCompositorLockState::Locked)
             return std::nullopt;
         NativeNetworkCredentialWitness observed;
@@ -408,8 +409,7 @@ bool NativeRuntime::initialize(NativeStartup startup)
         const quint64 now = NativeApproval::nativeBootTimeClock()();
         if (impl_->networkProof) {
             const bool rollback = now < impl_->networkProof->spentAtBootMs;
-            const bool expired =
-                !rollback && now - impl_->networkProof->spentAtBootMs >= 10'000;
+            const bool expired = !rollback && now - impl_->networkProof->spentAtBootMs >= 10'000;
             if (rollback || expired)
                 impl_->networkProof.reset();
         }
@@ -683,9 +683,8 @@ bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprov
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
     if (!peer || impl_->approvalScope || impl_->networkProof ||
-        (impl_->networkAgent && impl_->networkAgent->active()) ||
-        impl_->transitionFence.active() || impl_->sleepFence.active() || !scope.valid() ||
-        scope.lock != identity())
+        (impl_->networkAgent && impl_->networkAgent->active()) || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || !scope.valid() || scope.lock != identity())
         return false;
     NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto state = impl_->independentState();
@@ -773,15 +772,13 @@ bool NativeRuntime::armNetworkCredential(const QDBusMessage &received,
     // Uncertainty never permits a second attempt for the same review.
     const auto proof = std::exchange(impl_->networkProof, std::nullopt);
     if (!proof || !impl_->networkAgent || impl_->networkAgent->active() ||
-        impl_->networkControlPeer || !scope.valid() ||
-        scope.lock != proof->approval.lock ||
-        scope.principal != proof->approval.principal ||
-        scope.request != proof->approval.request ||
+        impl_->networkControlPeer || !scope.valid() || scope.lock != proof->approval.lock ||
+        scope.principal != proof->approval.principal || scope.request != proof->approval.request ||
         scope.requestDigest != proof->approval.requestDigest ||
         scope.reviewDigest != proof->approval.reviewDigest ||
         scope.originalSender != peer->uniqueOwner || *peer != proof->control ||
-        scope.lock != identity() || impl_->approvalScope ||
-        impl_->transitionFence.active() || impl_->sleepFence.active())
+        scope.lock != identity() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active())
         return false;
     const quint64 now = NativeApproval::nativeBootTimeClock()();
     if (now < proof->spentAtBootMs || now - proof->spentAtBootMs >= 10'000 ||

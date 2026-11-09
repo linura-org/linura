@@ -107,7 +107,7 @@ void addSize(QCryptographicHash &hash, quint32 count)
     char bytes[4];
     for (int shift = 0; shift < 4; ++shift)
         bytes[shift] = static_cast<char>((count >> (shift * 8)) & 0xff);
-    hash.addData(bytes, 4);
+    hash.addData(QByteArrayView(bytes, 4));
 }
 
 // Identical normalization and domain separation to S18-2's read-only Rust
@@ -175,7 +175,7 @@ std::optional<QString> fingerprint(const NativeNmSettings &settings, const QStri
     }
     QCryptographicHash hash(QCryptographicHash::Sha256);
     constexpr char domain[] = "linura-s18-profile-projection-v1";
-    hash.addData(domain, sizeof(domain)); // NUL-terminated, intentional.
+    hash.addData(QByteArrayView(domain, sizeof(domain))); // NUL-terminated.
     for (auto it = projection.cbegin(); it != projection.cend(); ++it) {
         const auto name = it.key().toUtf8();
         addSize(hash, static_cast<quint32>(name.size()));
@@ -203,7 +203,8 @@ std::optional<quint64> propertyVersion(const QDBusConnection &bus, const QString
     const QString method = QStringLiteral("Get");
     const QList<QVariant> arguments = {QStringLiteral("org.freedesktop.NetworkManager.Settings"),
                                        QStringLiteral("VersionId")};
-    const QDBusReply<QDBusVariant> result(nativeCall(bus, owner, path, interface, method, arguments));
+    const QDBusReply<QDBusVariant> result(
+        nativeCall(bus, owner, path, interface, method, arguments));
     if (!result.isValid())
         return std::nullopt;
     if (result.value().variant().metaType() != QMetaType::fromType<quint64>())
@@ -236,8 +237,7 @@ std::optional<QString> nativeProfileFingerprint(const NativeNmSettings &settings
 bool nativeOneTimeWpaProfile(const NativeNmSettings &settings, const QString &profileUuid,
                              const QString &expectedFingerprint)
 {
-    return isNotSavedWpa(settings) &&
-           fingerprint(settings, profileUuid) == expectedFingerprint;
+    return isNotSavedWpa(settings) && fingerprint(settings, profileUuid) == expectedFingerprint;
 }
 
 void NativeNetworkSecretAgent::registerWireTypes()
@@ -262,9 +262,7 @@ NativeNetworkSecretAgent::NativeNetworkSecretAgent(PeerGuard &peers, SecretEntry
     // Slot connection is required; an unobserved replacement must not pass.
     expiry_.setSingleShot(true);
     expiry_.setInterval(30'000);
-    connect(&expiry_, &QTimer::timeout, this, [this] {
-        retire(QStringLiteral("AgentCanceled"));
-    });
+    connect(&expiry_, &QTimer::timeout, this, [this] { retire(QStringLiteral("AgentCanceled")); });
     connect(&entry_, &SecretEntry::submissionRequested, this, &NativeNetworkSecretAgent::deliver);
     connect(&entry_, &SecretEntry::cancellationRequested, this, [this] {
         if (pending_)
@@ -282,8 +280,7 @@ bool NativeNetworkSecretAgent::active() const noexcept
     return registered_ && scope_.has_value() && manager_.has_value();
 }
 
-void NativeNetworkSecretAgent::nativeNameOwnerChanged(const QString &name,
-                                                      const QString &oldOwner,
+void NativeNetworkSecretAgent::nativeNameOwnerChanged(const QString &name, const QString &oldOwner,
                                                       const QString &newOwner)
 {
     if (!scope_ || retiring_)
@@ -298,37 +295,35 @@ void NativeNetworkSecretAgent::nativeNameOwnerChanged(const QString &name,
 bool NativeNetworkSecretAgent::arm(const NativeNetworkCredentialScope &scope,
                                    const NativePeerIdentity &manager)
 {
-    if (QThread::currentThread() != thread() || active() || registered_ || pending_ || !scope.valid() ||
-        !witness_ || !presentation_ || manager.uid != 0 ||
+    if (QThread::currentThread() != thread() || active() || registered_ || pending_ ||
+        !scope.valid() || !witness_ || !presentation_ || manager.uid != 0 ||
         manager.uniqueOwner != scope.networkManagerOwner ||
         !peers_.stillCurrent(NativePeerPurpose::NetworkManagerDaemon, manager))
         return false;
     scope_ = scope;
     manager_ = manager;
-    const bool watching = peers_.nativeConnection().connect(
-        QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("/org/freedesktop/DBus"),
-        QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("NameOwnerChanged"), this,
-        SLOT(nativeNameOwnerChanged(QString,QString,QString)));
+    auto bus = peers_.nativeConnection(); // Mutable shared connection handle.
+    const bool watching = bus.connect(
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameOwnerChanged"), this,
+        SLOT(nativeNameOwnerChanged(QString, QString, QString)));
     if (!watching) {
         cancel();
         return false;
     }
-    session_ = std::make_unique<NativeNetworkCredentialSession>(
-        NativeApproval::nativeBootTimeClock());
-    if (!live() ||
-        !peers_.nativeConnection().registerObject(
-            objectPath(), this, QDBusConnection::ExportAllSlots)) {
+    session_ =
+        std::make_unique<NativeNetworkCredentialSession>(NativeApproval::nativeBootTimeClock());
+    if (!live() || !bus.registerObject(objectPath(), this,
+                                                             QDBusConnection::ExportAllSlots)) {
         cancel();
         return false;
     }
-    const QDBusMessage result = nativeCall(
-        peers_.nativeConnection(), manager.uniqueOwner,
-        QStringLiteral("/org/freedesktop/NetworkManager/AgentManager"),
-        QStringLiteral("org.freedesktop.NetworkManager.AgentManager"),
-        QStringLiteral("RegisterWithCapabilities"),
-        {QStringLiteral("org.linura.protected-network"), quint32(0)});
+    const QDBusMessage result =
+        nativeCall(peers_.nativeConnection(), manager.uniqueOwner,
+                   QStringLiteral("/org/freedesktop/NetworkManager/AgentManager"),
+                   QStringLiteral("org.freedesktop.NetworkManager.AgentManager"),
+                   QStringLiteral("RegisterWithCapabilities"),
+                   {QStringLiteral("org.linura.protected-network"), quint32(0)});
     if (result.type() != QDBusMessage::ReplyMessage || !result.arguments().isEmpty()) {
         cancel();
         return false;
@@ -347,35 +342,35 @@ bool NativeNetworkSecretAgent::originalSessionSeat() const
     if (!scope_)
         return false;
     const auto &bus = peers_.nativeConnection();
-    const QDBusReply<QString> owner(nativeCall(
-        bus, QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("GetNameOwner"), {QStringLiteral("org.freedesktop.login1")}));
+    const QDBusReply<QString> owner(
+        nativeCall(bus, QStringLiteral("org.freedesktop.DBus"),
+                   QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
+                   QStringLiteral("GetNameOwner"), {QStringLiteral("org.freedesktop.login1")}));
     if (!owner.isValid())
         return false;
-    const QDBusReply<quint32> uid(nativeCall(
-        bus, QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("GetConnectionUnixUser"), {owner.value()}));
+    const QDBusReply<quint32> uid(
+        nativeCall(bus, QStringLiteral("org.freedesktop.DBus"),
+                   QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
+                   QStringLiteral("GetConnectionUnixUser"), {owner.value()}));
     if (!uid.isValid() || uid.value() != 0)
         return false;
-    const QDBusReply<QDBusObjectPath> session(nativeCall(
-        bus, owner.value(), QStringLiteral("/org/freedesktop/login1"),
-        QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("GetSession"),
-        {scope_->lock.session}));
+    const QDBusReply<QDBusObjectPath> session(
+        nativeCall(bus, owner.value(), QStringLiteral("/org/freedesktop/login1"),
+                   QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("GetSession"),
+                   {scope_->lock.session}));
     if (!session.isValid() ||
         !session.value().path().startsWith(QLatin1String("/org/freedesktop/login1/session/")))
         return false;
-    const QDBusReply<QDBusVariant> seat(nativeCall(
-        bus, owner.value(), session.value().path(),
-        QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"),
-        {QStringLiteral("org.freedesktop.login1.Session"), QStringLiteral("Seat")}));
-    const auto identity = seat.isValid() ? decodeNativeLogindSeat(seat.value().variant())
-                                         : std::nullopt;
-    const QDBusReply<QString> fresh(nativeCall(
-        bus, QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("GetNameOwner"), {QStringLiteral("org.freedesktop.login1")}));
+    const QDBusReply<QDBusVariant> seat(
+        nativeCall(bus, owner.value(), session.value().path(),
+                   QStringLiteral("org.freedesktop.DBus.Properties"), QStringLiteral("Get"),
+                   {QStringLiteral("org.freedesktop.login1.Session"), QStringLiteral("Seat")}));
+    const auto identity =
+        seat.isValid() ? decodeNativeLogindSeat(seat.value().variant()) : std::nullopt;
+    const QDBusReply<QString> fresh(
+        nativeCall(bus, QStringLiteral("org.freedesktop.DBus"),
+                   QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
+                   QStringLiteral("GetNameOwner"), {QStringLiteral("org.freedesktop.login1")}));
     return identity && identity->name == scope_->seat && fresh.isValid() &&
            fresh.value() == owner.value();
 }
@@ -387,23 +382,21 @@ bool NativeNetworkSecretAgent::profileMatches() const
     const auto &bus = peers_.nativeConnection();
     const auto &owner = manager_->uniqueOwner;
     const QDBusReply<QString> busId(nativeCall(
-        bus, QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("/org/freedesktop/DBus"), QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("GetId")));
+        bus, QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("GetId")));
     const auto before = propertyVersion(bus, owner);
-    if (!busId.isValid() || busId.value() != scope_->systemBusId ||
-        !before || *before != scope_->settingsVersion)
+    if (!busId.isValid() || busId.value() != scope_->systemBusId || !before ||
+        *before != scope_->settingsVersion)
         return false;
-    if (!containsNativePath(nativeCall(
-                                bus, owner, QStringLiteral("/org/freedesktop/NetworkManager"),
-                                QStringLiteral("org.freedesktop.NetworkManager"),
-                                QStringLiteral("GetDevices")),
+    if (!containsNativePath(nativeCall(bus, owner,
+                                       QStringLiteral("/org/freedesktop/NetworkManager"),
+                                       QStringLiteral("org.freedesktop.NetworkManager"),
+                                       QStringLiteral("GetDevices")),
                             scope_->deviceObject) ||
-        !containsNativePath(nativeCall(
-                                bus, owner,
-                                QStringLiteral("/org/freedesktop/NetworkManager/Settings"),
-                                QStringLiteral("org.freedesktop.NetworkManager.Settings"),
-                                QStringLiteral("ListConnections")),
+        !containsNativePath(nativeCall(bus, owner,
+                                       QStringLiteral("/org/freedesktop/NetworkManager/Settings"),
+                                       QStringLiteral("org.freedesktop.NetworkManager.Settings"),
+                                       QStringLiteral("ListConnections")),
                             scope_->profileObject))
         return false;
     const QDBusReply<QDBusVariant> device(nativeCall(
@@ -422,7 +415,8 @@ bool NativeNetworkSecretAgent::profileMatches() const
         deviceType.value().variant().metaType() != QMetaType::fromType<quint32>() ||
         deviceType.value().variant().toUInt() != 2U) // NM_DEVICE_TYPE_WIFI
         return false;
-    struct stat namespaceFacts {};
+    struct stat namespaceFacts
+    {};
     if (stat("/proc/self/ns/net", &namespaceFacts) != 0 ||
         static_cast<quint64>(namespaceFacts.st_ino) != scope_->networkNamespace)
         return false;
@@ -434,12 +428,13 @@ bool NativeNetworkSecretAgent::profileMatches() const
     const auto observed = ifindex.toUInt(&ok);
     if (!ok || observed != scope_->deviceIfindex)
         return false;
-    const QDBusReply<NativeNmSettings> settings(nativeCall(
-        bus, owner, scope_->profileObject,
-        QStringLiteral("org.freedesktop.NetworkManager.Settings.Connection"),
-        QStringLiteral("GetSettings")));
-    if (!settings.isValid() || !nativeOneTimeWpaProfile(settings.value(), scope_->profileUuid,
-                                scope_->profileFingerprint) ||
+    const QDBusReply<NativeNmSettings> settings(
+        nativeCall(bus, owner, scope_->profileObject,
+                   QStringLiteral("org.freedesktop.NetworkManager.Settings.Connection"),
+                   QStringLiteral("GetSettings")));
+    if (!settings.isValid() ||
+        !nativeOneTimeWpaProfile(settings.value(), scope_->profileUuid,
+                                 scope_->profileFingerprint) ||
         propertyVersion(bus, owner) != before)
         return false;
     if (stat("/proc/self/ns/net", &namespaceFacts) != 0 ||
@@ -459,8 +454,8 @@ bool NativeNetworkSecretAgent::live() const
 
 bool NativeNetworkSecretAgent::requestSettingsSafe(const NativeNmSettings &connection) const
 {
-    if (!scope_ || !nativeOneTimeWpaProfile(connection, scope_->profileUuid,
-                                 scope_->profileFingerprint))
+    if (!scope_ ||
+        !nativeOneTimeWpaProfile(connection, scope_->profileUuid, scope_->profileFingerprint))
         return false;
     // The incoming GetSecrets settings map may include unrelated nonsecret
     // profile properties, but no inline PSK or EAP credential is ever admitted.
@@ -474,17 +469,17 @@ bool NativeNetworkSecretAgent::requestSettingsSafe(const NativeNmSettings &conne
 }
 
 void NativeNetworkSecretAgent::GetSecrets(const NativeNmSettings &connection,
-                                           const QDBusObjectPath &connectionPath,
-                                           const QString &settingName, const QStringList &hints,
-                                           quint32 flags)
+                                          const QDBusObjectPath &connectionPath,
+                                          const QString &settingName, const QStringList &hints,
+                                          quint32 flags)
 {
     if (!calledFromDBus() || pending_ || !registered_ || !scope_ || !manager_ || !session_) {
         if (calledFromDBus())
             sendErrorReply(AgentError + QStringLiteral("NotAuthorized"));
         return;
     }
-    const NativeNetworkSecretAgentCall call{message().service(), connectionPath.path(),
-                                             settingName, hints, flags};
+    const NativeNetworkSecretAgentCall call{message().service(), connectionPath.path(), settingName,
+                                            hints, flags};
     const auto current = witness_(*scope_);
     if (!current || !call.admissible(*scope_, *current) || !requestSettingsSafe(connection) ||
         !live()) {
@@ -522,8 +517,7 @@ void NativeNetworkSecretAgent::deliver()
         security.insert(QStringLiteral("name"), Setting);
         security.insert(QStringLiteral("psk"), QString::fromLatin1(password));
         response.insert(Setting, security);
-        sent = peers_.nativeConnection().send(
-            pending_->createReply(QVariant::fromValue(response)));
+        sent = peers_.nativeConnection().send(pending_->createReply(QVariant::fromValue(response)));
     });
     if (consumed && sent)
         pending_.reset();
@@ -531,10 +525,9 @@ void NativeNetworkSecretAgent::deliver()
 }
 
 void NativeNetworkSecretAgent::CancelGetSecrets(const QDBusObjectPath &connectionPath,
-                                                 const QString &settingName)
+                                                const QString &settingName)
 {
-    if (!calledFromDBus() || !scope_ || !manager_ ||
-        message().service() != manager_->uniqueOwner) {
+    if (!calledFromDBus() || !scope_ || !manager_ || message().service() != manager_->uniqueOwner) {
         if (calledFromDBus())
             sendErrorReply(AgentError + QStringLiteral("NotAuthorized"));
         return;
@@ -544,15 +537,13 @@ void NativeNetworkSecretAgent::CancelGetSecrets(const QDBusObjectPath &connectio
         retire(QStringLiteral("AgentCanceled"));
 }
 
-void NativeNetworkSecretAgent::SaveSecrets(const NativeNmSettings &,
-                                            const QDBusObjectPath &)
+void NativeNetworkSecretAgent::SaveSecrets(const NativeNmSettings &, const QDBusObjectPath &)
 {
     if (calledFromDBus())
         sendErrorReply(AgentError + QStringLiteral("NotAuthorized"));
 }
 
-void NativeNetworkSecretAgent::DeleteSecrets(const NativeNmSettings &,
-                                              const QDBusObjectPath &)
+void NativeNetworkSecretAgent::DeleteSecrets(const NativeNmSettings &, const QDBusObjectPath &)
 {
     if (calledFromDBus())
         sendErrorReply(AgentError + QStringLiteral("NotAuthorized"));
@@ -567,8 +558,8 @@ void NativeNetworkSecretAgent::retire(const QString &error)
     if (session_)
         session_->cancel();
     if (pending_) {
-        (void)peers_.nativeConnection().send(pending_->createErrorReply(AgentError + error,
-                                                                      QString()));
+        (void)peers_.nativeConnection().send(
+            pending_->createErrorReply(AgentError + error, QString()));
         pending_.reset();
     }
     call_.reset();
@@ -581,13 +572,12 @@ void NativeNetworkSecretAgent::retire(const QString &error)
         (void)peers_.nativeConnection().asyncCall(request, BusDeadlineMs);
     }
     registered_ = false;
-    peers_.nativeConnection().disconnect(
-        QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("/org/freedesktop/DBus"),
-        QStringLiteral("org.freedesktop.DBus"),
-        QStringLiteral("NameOwnerChanged"), this,
-        SLOT(nativeNameOwnerChanged(QString,QString,QString)));
-    peers_.nativeConnection().unregisterObject(objectPath());
+    auto bus = peers_.nativeConnection();
+    bus.disconnect(
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameOwnerChanged"), this,
+        SLOT(nativeNameOwnerChanged(QString, QString, QString)));
+    bus.unregisterObject(objectPath());
     session_.reset();
     manager_.reset();
     scope_.reset();

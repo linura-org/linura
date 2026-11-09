@@ -44,9 +44,8 @@ void nativeProfileRevisionAndOneTimeSecretFlags()
 {
     const auto sample = profile();
     const auto uuid = QStringLiteral("10203040-5060-7080-90ab-cdef12345678");
-    const auto fingerprint = QString::fromLatin1(
-        "2acb9af3277371c52d00b43f5385ced7"
-        "4d5f4f5ee906ae7abc08be4c72666981");
+    const auto fingerprint = QString::fromLatin1("2acb9af3277371c52d00b43f5385ced7"
+                                                 "4d5f4f5ee906ae7abc08be4c72666981");
     check(nativeProfileFingerprint(sample, uuid) == fingerprint);
     check(nativeOneTimeWpaProfile(sample, uuid, fingerprint));
     check(!nativeOneTimeWpaProfile(sample, uuid, QString(64, QLatin1Char('a'))));
