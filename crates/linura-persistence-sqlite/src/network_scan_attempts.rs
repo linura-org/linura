@@ -14,6 +14,7 @@
 //! independently witnessed postcondition before marking an attempt verified.
 
 use std::fmt::{Debug, Formatter};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -129,6 +130,10 @@ struct Event {
     kind: &'static str,
     completed_last_scan_ms: Option<u64>,
     tag: Vec<u8>,
+}
+
+fn sqlite_io(error: std::io::Error) -> TransactionStoreError {
+    TransactionStoreError::Storage(error.to_string())
 }
 
 fn corrupt() -> TransactionStoreError {
@@ -279,14 +284,29 @@ impl Debug for SqliteWifiScanAttemptJournal {
 }
 
 impl SqliteWifiScanAttemptJournal {
-    pub fn open(
+    /// Explicit first-use provisioning only. Production callers must never
+    /// invoke this to recover a missing/rolled-back live journal.
+    pub fn initialize(
         path: impl AsRef<Path>,
         key: SqliteIntegrityKey,
     ) -> Result<Self, TransactionStoreError> {
+        let path = path.as_ref();
+        let created = std::fs::OpenOptions::new().write(true).create_new(true)
+            .mode(0o600).open(path).map_err(sqlite_io)?;
+        drop(created);
+        Self::open_impl(path, key, true)
+    }
+
+    /// Existing-state reopening: a missing journal is NEVER an empty history.
+    pub fn open(path: impl AsRef<Path>, key: SqliteIntegrityKey) -> Result<Self, TransactionStoreError> {
+        Self::open_impl(path.as_ref(), key, false)
+    }
+
+    fn open_impl(path: &Path, key: SqliteIntegrityKey, initializing: bool)
+        -> Result<Self, TransactionStoreError> {
         let db = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
@@ -307,7 +327,7 @@ impl SqliteWifiScanAttemptJournal {
             )
             .map_err(sqlite)?;
         let fresh = application == 0 && version == 0 && objects == 0;
-        if !fresh && (application != APPLICATION_ID || version != SCHEMA_VERSION) {
+        if fresh != initializing || (!fresh && (application != APPLICATION_ID || version != SCHEMA_VERSION)) {
             return Err(corrupt());
         }
         db.execute_batch(
@@ -585,10 +605,23 @@ mod tests {
         }
     }
     #[test]
+    fn missing_journal_is_never_interpreted_as_empty_history() {
+        let path = scratch("missing-history");
+        assert!(SqliteWifiScanAttemptJournal::open(&path, key()).is_err());
+        let mut db = SqliteWifiScanAttemptJournal::initialize(&path, key())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        db.begin(attempt("one", 120_000)).unwrap_or_else(|e| unreachable!("{e}"));
+        drop(db);
+        assert!(SqliteWifiScanAttemptJournal::initialize(&path, key()).is_err());
+        let _ = std::fs::remove_file(&path);
+        assert!(SqliteWifiScanAttemptJournal::open(&path, key()).is_err());
+    }
+
+    #[test]
     fn spent_attempt_survives_restart_and_never_replays() {
         let path = scratch("restart");
         {
-            let mut db = SqliteWifiScanAttemptJournal::open(&path, key())
+            let mut db = SqliteWifiScanAttemptJournal::initialize(&path, key())
                 .unwrap_or_else(|e| unreachable!("{e}"));
             db.begin(attempt("first", 120_000))
                 .unwrap_or_else(|e| unreachable!("{e}"));
@@ -616,7 +649,7 @@ mod tests {
     fn tamper_deletion_and_changed_credentials_refuse_reopen() {
         let path = scratch("tamper");
         {
-            let mut db = SqliteWifiScanAttemptJournal::open(&path, key())
+            let mut db = SqliteWifiScanAttemptJournal::initialize(&path, key())
                 .unwrap_or_else(|e| unreachable!("{e}"));
             db.begin(attempt("first", 120_000))
                 .unwrap_or_else(|e| unreachable!("{e}"));
@@ -633,13 +666,13 @@ mod tests {
             .execute("DELETE FROM events WHERE sequence=1", [])
             .unwrap_or_else(|e| unreachable!("{e}"));
         drop(direct);
-        assert!(SqliteWifiScanAttemptJournal::open(&path, key()).is_err());
+        assert!(SqliteWifiScanAttemptJournal::initialize(&path, key()).is_err());
         let _ = std::fs::remove_file(path);
     }
     #[test]
     fn native_completion_rejects_foreign_or_stale_source() {
         let path = scratch("native-completion");
-        let mut db = SqliteWifiScanAttemptJournal::open(&path, key()).unwrap_or_else(|e| unreachable!("{e}"));
+        let mut db = SqliteWifiScanAttemptJournal::initialize(&path, key()).unwrap_or_else(|e| unreachable!("{e}"));
         db.begin(attempt("first", 120_000)).unwrap_or_else(|e| unreachable!("{e}"));
         let correct = WifiScanNativeEvidence {
             request_id: "request:v010:wifi-scan:first".into(),
@@ -675,7 +708,7 @@ mod tests {
     #[test]
     fn malformed_requests_and_unverified_evidence_are_denied() {
         let path = scratch("negative");
-        let mut db = SqliteWifiScanAttemptJournal::open(&path, key())
+        let mut db = SqliteWifiScanAttemptJournal::initialize(&path, key())
             .unwrap_or_else(|e| unreachable!("{e}"));
         let mut a = attempt("first", 120_000);
         a.principal = "unix:uid:0".into();

@@ -297,7 +297,7 @@ mod tests {
         let (scope, effect, binding, native) = fixture();
         let path = std::env::temp_dir().join(format!("linura-wifi-event-{}-{}.db", std::process::id(), ID.fetch_add(1, Ordering::Relaxed)));
         let key = || ok(SqliteIntegrityKey::new(vec![0x33; 32]));
-        let mut journal = ok(SqliteWifiScanAttemptJournal::open(&path, key()));
+        let mut journal = ok(SqliteWifiScanAttemptJournal::initialize(&path, key()));
         assert!(matches!(
             execute_spent_event(&native, &mut journal, effect.clone(), binding.clone(), scope.clone(),
                 "request:v010:wifi-scan:fixture", 1, Duration::ZERO),
@@ -318,10 +318,10 @@ mod tests {
         let (scope, effect, binding, mut native) = fixture();
         native.completed = None;
         let path = std::env::temp_dir().join(format!("linura-wifi-event-{}-{}.db", std::process::id(), ID.fetch_add(1, Ordering::Relaxed)));
-        let mut journal = ok(SqliteWifiScanAttemptJournal::open(&path, ok(SqliteIntegrityKey::new(vec![0x33; 32]))));
+        let mut journal = ok(SqliteWifiScanAttemptJournal::initialize(&path, ok(SqliteIntegrityKey::new(vec![0x33; 32]))));
         assert_eq!(
             execute_spent_event(&native, &mut journal, effect.clone(), binding.clone(), scope.clone(),
-                "request:v010:wifi-scan:fixture", 1, Duration::ZERO).unwrap(),
+                "request:v010:wifi-scan:fixture", 1, Duration::ZERO).unwrap_or_else(|error| unreachable!("fixture: {error}")),
             WifiScanEventOutcome::Indeterminate
         );
         assert!(execute_spent_event(&native, &mut journal, effect, binding, scope,
