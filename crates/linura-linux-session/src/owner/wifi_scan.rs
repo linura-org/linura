@@ -560,10 +560,10 @@ mod tests {
 
     #[test]
     fn independent_scan_completion_rejects_cached_ambiguous_and_future_samples() {
-        assert_eq!(correlated_scan_completion(105_100, false, 80_000, 105_000, 105_500).unwrap(), Some(105_100));
-        assert_eq!(correlated_scan_completion(80_000, false, 80_000, 105_000, 105_500).unwrap(), None);
-        assert_eq!(correlated_scan_completion(105_100, true, 80_000, 105_000, 105_500).unwrap(), None);
-        assert_eq!(correlated_scan_completion(104_999, false, 80_000, 105_000, 105_500).unwrap(), None);
+        assert_eq!(correlated_scan_completion(105_100, false, 80_000, 105_000, 105_500).unwrap_or_else(|error| unreachable!("fixture: {error}")), Some(105_100));
+        assert_eq!(correlated_scan_completion(80_000, false, 80_000, 105_000, 105_500).unwrap_or_else(|error| unreachable!("fixture: {error}")), None);
+        assert_eq!(correlated_scan_completion(105_100, true, 80_000, 105_000, 105_500).unwrap_or_else(|error| unreachable!("fixture: {error}")), None);
+        assert_eq!(correlated_scan_completion(104_999, false, 80_000, 105_000, 105_500).unwrap_or_else(|error| unreachable!("fixture: {error}")), None);
         assert!(correlated_scan_completion(105_600, false, 80_000, 105_000, 105_500).is_err());
         assert!(correlated_scan_completion(120_000, false, 80_000, 105_000, 121_000).is_err());
         assert!(correlated_scan_completion(105_100, false, -2, 105_000, 105_500).is_err());
