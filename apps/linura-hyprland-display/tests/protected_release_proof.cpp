@@ -314,8 +314,8 @@ int main()
     completed(a, &first, 8, Kind::Content);
     assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
     completed(b, &second, 9, Kind::Content);
-    const auto receipt = proof->observe({held, later, frames, scanout,
-                                         outputCommits(held, frames)});
+    const auto completedOutputCommits = outputCommits(held, frames);
+    const auto receipt = proof->observe({held, later, frames, scanout, completedOutputCommits});
     assert(receipt);
     assert(receipt->generation == held.generation);
     assert(receipt->securityEpoch == held.securityEpoch);
@@ -385,8 +385,8 @@ int main()
         else if (scenario == 3)
             current.heads[0].current.x++;
         const auto when = scenario == 4 ? ClockSample{12'000, 7'000} : later;
-        assert(!candidate->observe({current, when, frames, scanout,
-                                    outputCommits(current, frames)}));
+        const auto currentOutputCommits = outputCommits(current, frames);
+        assert(!candidate->observe({current, when, frames, scanout, currentOutputCommits}));
         assert(candidate->phase() == Phase::Faulted);
     }
 
