@@ -221,10 +221,14 @@ class NativeFirstFrameGate final
             const auto &frame = frames[i];
             const auto &scanout = kernel[i];
             const auto &nativeCommit = outputCommits[i];
-            if (frame.key != head.key || scanout.key != head.key ||
-                nativeCommit.key != head.key || !scanout.connector ||
-                nativeCommit.previousCommit < spentCommit_[i] ||
-                nativeCommit.previousCommit == std::numeric_limits<std::uint64_t>::max()) {
+            const bool frameMismatch = frame.key != head.key;
+            const bool kernelMismatch = scanout.key != head.key;
+            const bool commitMismatch = nativeCommit.key != head.key;
+            const auto observedCommit = nativeCommit.previousCommit;
+            const auto maxCommit = std::numeric_limits<std::uint64_t>::max();
+            const bool invalidCommit = observedCommit < spentCommit_[i] || observedCommit == maxCommit;
+            const bool outputMismatch = frameMismatch || kernelMismatch || commitMismatch;
+            if (outputMismatch || !scanout.connector || invalidCommit) {
                 phase_ = Phase::Faulted;
                 return {};
             }

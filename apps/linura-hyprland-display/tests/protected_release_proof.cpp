@@ -10,6 +10,9 @@ using Kind = ProtectedFrame::Kind;
 using Presentation = ProtectedFrame::Presentation;
 
 namespace {
+using Frame = NativeFirstFrameGate::NativeFrame;
+using Output = NativeFirstFrameGate::Output;
+
 Snapshot inventory(bool secondDisabled = false)
 {
     Snapshot snapshot;
@@ -56,8 +59,7 @@ std::vector<NativeFirstFrameGate::NativeScanout> kernel(const Snapshot &sample)
 }
 // Native output commit-result history is independent of the retained
 // presentation tracker. These fixtures synthesize both channels separately.
-std::vector<NativeFirstFrameGate::Output> outputCommits(
-    const Snapshot &sample, const std::vector<NativeFirstFrameGate::NativeFrame> &frames)
+std::vector<Output> outputCommits(const Snapshot &sample, const std::vector<Frame> &frames)
 {
     auto result = baseline(sample);
     if (frames.size() != result.size())
@@ -166,8 +168,8 @@ int main()
             {held.heads[0].key, &stale, &first, 0, false, 301},
             {held.heads[1].key, &fresh, &second, 0, false, 302},
         };
-        assert(!preSpent->observe({held, later, staleFrames, scanout,
-                                   outputCommits(held, staleFrames)}));
+        const auto staleOutputCommits = outputCommits(held, staleFrames);
+        assert(!preSpent->observe({held, later, staleFrames, scanout, staleOutputCommits}));
         assert(preSpent->phase() == Phase::Faulted);
         assert(!preSpent->spend(held, later, moved, scanout));
 
