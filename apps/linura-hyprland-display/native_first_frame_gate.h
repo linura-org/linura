@@ -226,7 +226,9 @@ class NativeFirstFrameGate final
             const bool commitMismatch = nativeCommit.key != head.key;
             const auto observedCommit = nativeCommit.previousCommit;
             const auto maxCommit = std::numeric_limits<std::uint64_t>::max();
-            const bool invalidCommit = observedCommit < spentCommit_[i] || observedCommit == maxCommit;
+            const bool commitBeforeGrant = observedCommit < spentCommit_[i];
+            const bool commitOverflow = observedCommit == maxCommit;
+            const bool invalidCommit = commitBeforeGrant || commitOverflow;
             const bool outputMismatch = frameMismatch || kernelMismatch || commitMismatch;
             if (outputMismatch || !scanout.connector || invalidCommit) {
                 phase_ = Phase::Faulted;
