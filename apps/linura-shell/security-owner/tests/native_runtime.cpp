@@ -626,7 +626,22 @@ int main(int argc, char **argv)
     assert(!wrongNetwork.scope());
     wrongNetwork = network;
     wrongNetwork.purpose = 9;
-    assert(!wrongNetwork.scope());
+    assert(!wrongNetwork.scope()); // Radio consent cannot reuse credential scope.
+
+    auto radio = network;
+    radio.purpose = 9;
+    radio.request = radio.plan =
+        QStringLiteral("request:v010:network-radio:networking-disable-runtime");
+    const auto radioScope = radio.scope();
+    assert(radioScope && radioScope->purpose == ApprovalPurpose::AuthenticateNetworkRadio);
+    assert(radioScope->requiresSessionOwnerAuthentication());
+    auto replacedRadio = radio;
+    replacedRadio.purpose = 8;
+    assert(!replacedRadio.scope()); // Radio consent cannot authenticate credentials.
+    replacedRadio = radio;
+    replacedRadio.purpose = 10;
+    assert(!replacedRadio.scope()); // Unknown future wire purpose is never accepted.
+
     wrongNetwork = network;
     wrongNetwork.request = wrongNetwork.plan =
         QStringLiteral("request:v010:network-credential:runtime--alias");
@@ -683,6 +698,9 @@ int main(int argc, char **argv)
     };
     const auto approved = qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(scope)));
     assert(approved.scope() == scope.scope());
+    const auto reviewedRadio =
+        qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(radio)));
+    assert(reviewedRadio.scope() == radio.scope());
     const auto unknownPurpose =
         qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(substituted)));
     assert(!unknownPurpose.scope());

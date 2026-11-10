@@ -52,6 +52,13 @@ class NativeRuntime::Impl final
         NativePeerIdentity control;
         quint64 spentAtBootMs = 0;
     };
+    struct RadioProof final
+    {
+        NativeApprovalScope approval;
+        NativePeerIdentity control;
+        NativePeerIdentity networkManager;
+        quint64 spentAtBootMs = 0;
+    };
 
     NativeRuntime &owner;
     std::optional<PeerGuard> peers;
@@ -65,6 +72,9 @@ class NativeRuntime::Impl final
     std::unique_ptr<AuthenticationAgent> authentication;
     std::unique_ptr<NativeNetworkSecretAgent> networkAgent;
     std::optional<NetworkProof> networkProof;
+    // A consumed original-session *human consent*, not Control's durable
+    // DispatchPermit. Nothing can dispatch from this proof by itself.
+    std::optional<RadioProof> radioProof;
     std::optional<NativePeerIdentity> networkControlPeer;
     std::optional<NativePeerIdentity> approvalPeer;
     std::optional<NativeApprovalScope> approvalScope;
@@ -413,6 +423,19 @@ bool NativeRuntime::initialize(NativeStartup startup)
             if (rollback || expired)
                 impl_->networkProof.reset();
         }
+        if (impl_->radioProof) {
+            const bool rollback = now < impl_->radioProof->spentAtBootMs;
+            const bool expired = !rollback && now - impl_->radioProof->spentAtBootMs >= 10'000;
+            const bool replaced =
+                !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval,
+                                            impl_->radioProof->control) ||
+                !impl_->peers->stillCurrent(NativePeerPurpose::NetworkManagerDaemon,
+                                            impl_->radioProof->networkManager);
+            if (rollback || expired || replaced ||
+                impl_->independentState() != NativeCompositorLockState::Locked ||
+                impl_->protocol->inspect() != LockMechanism::State::Secure)
+                impl_->radioProof.reset();
+        }
         if (impl_->networkControlPeer &&
             (!impl_->networkAgent->active() ||
              !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval,
@@ -682,7 +705,7 @@ void NativeRuntime::recoverNativeUnlock()
 bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprovalScope &scope)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
-    if (!peer || impl_->approvalScope || impl_->networkProof ||
+    if (!peer || impl_->approvalScope || impl_->networkProof || impl_->radioProof ||
         (impl_->networkAgent && impl_->networkAgent->active()) || impl_->transitionFence.active() ||
         impl_->sleepFence.active() || !scope.valid() || scope.lock != identity())
         return false;
@@ -752,12 +775,27 @@ bool NativeRuntime::consumeApproval(const QDBusMessage &received, const NativeAp
         if (now == std::numeric_limits<quint64>::max())
             return false;
         impl_->networkProof = Impl::NetworkProof{scope, *peer, now};
+    } else if (scope.purpose == ApprovalPurpose::AuthenticateNetworkRadio) {
+        // Bind native consent to the same authenticated Control and the live
+        // *supervised* NM daemon. The eventual radio sender must separately
+        // consume Control's spent durable grant, fresh native policy and
+        // independent offline-recovery proof; this consent grants none.
+        const auto manager = impl_->peers->namedPeer(NativePeerPurpose::NetworkManagerDaemon);
+        const quint64 now = NativeApproval::nativeBootTimeClock()();
+        if (!manager || now == std::numeric_limits<quint64>::max() || impl_->radioProof ||
+            impl_->networkProof ||
+            !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer) ||
+            impl_->independentState() != NativeCompositorLockState::Locked ||
+            impl_->protocol->inspect() != LockMechanism::State::Secure)
+            return false;
+        impl_->radioProof = Impl::RadioProof{scope, *peer, *manager, now};
     }
     impl_->approvalScope.reset();
     impl_->approvalPeer.reset();
     if (scope.purpose == ApprovalPurpose::EnableProtectiveLock ||
         scope.purpose == ApprovalPurpose::RevokeProtectiveLock ||
-        scope.purpose == ApprovalPurpose::AuthenticateNetworkCredential)
+        scope.purpose == ApprovalPurpose::AuthenticateNetworkCredential ||
+        scope.purpose == ApprovalPurpose::AuthenticateNetworkRadio)
         impl_->refreshPresentation(); // Authentication emitted before runtime scope retirement.
     return true;
 }
@@ -1058,6 +1096,8 @@ void NativeRuntime::cancelApproval(const QDBusMessage &received)
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
     if (peer && peer == impl_->approvalPeer)
         impl_->clearApproval();
+    if (peer && impl_->radioProof && impl_->radioProof->control == *peer)
+        impl_->radioProof.reset();
 }
 
 bool NativeRuntime::exportNativeEndpoint()

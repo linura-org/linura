@@ -310,6 +310,10 @@ fn each_authentication_purpose_has_its_own_fixed_non_lock_action() {
             NativeApprovalPurpose::NetworkCredential,
             "org.linura.authority.use-network-credential",
         ),
+        (
+            NativeApprovalPurpose::NetworkRadio,
+            "org.linura.authority.review-network-radio",
+        ),
     ] {
         assert_eq!(authentication_action(purpose), Ok(action));
     }
@@ -356,6 +360,117 @@ fn network_credential_authentication_is_one_exact_purpose_not_an_effect_grant() 
     request.request = value(RequestId::new("request:v010:session-lock:test"));
     request.plan = value(PlanId::new(request.request.as_str()));
     assert!(request.wire().is_err());
+}
+
+#[test]
+fn native_radio_consent_cannot_cross_to_credentials_or_effects() {
+    let mut request = NativeApprovalRequest {
+        lock: lock(),
+        transition: None,
+        principal: value(PrincipalId::new("unix:uid:1000")),
+        request: value(RequestId::new(
+            "request:v010:network-radio:networking-disable-sample",
+        )),
+        plan: value(PlanId::new(
+            "request:v010:network-radio:networking-disable-sample",
+        )),
+        request_digest: ComponentDigest::from_bytes([1; 32]),
+        observation_digest: ComponentDigest::from_bytes([2; 32]),
+        review_digest: ComponentDigest::from_bytes([3; 32]),
+        purpose: NativeApprovalPurpose::NetworkRadio,
+    };
+    assert_eq!(value(request.wire()).7, 9);
+    assert_eq!(
+        authentication_action(request.purpose),
+        Ok("org.linura.authority.review-network-radio"),
+    );
+    request.purpose = NativeApprovalPurpose::NetworkCredential;
+    assert!(request.wire().is_err());
+    request.purpose = NativeApprovalPurpose::Unlock;
+    assert!(request.wire().is_err());
+    request.purpose = NativeApprovalPurpose::NetworkRadio;
+    request.request = value(RequestId::new("request:v010:network-credential:sample"));
+    request.plan = value(PlanId::new(request.request.as_str()));
+    assert!(request.wire().is_err());
+    request.request = value(RequestId::new(
+        "request:v010:network-radio:networking-disable-sample",
+    ));
+    request.plan = value(PlanId::new(request.request.as_str()));
+    request.transition = Some(value(SessionTransitionId::new(
+        request.lock.clone(),
+        SessionTransition::Reboot,
+    )));
+    assert!(request.wire().is_err());
+}
+
+#[test]
+fn radio_subject_witness_rejects_foreign_or_substituted_native_review() {
+    use linura_core::{
+        NetworkManagerEpoch, NetworkManagerOwner, NetworkObservationId, SystemBusInstanceId,
+    };
+    let epoch = NetworkManagerEpoch::new(
+        value(BootId::new("abcd1234-1234-4567-89ab-0123456789ab")),
+        value(SystemBusInstanceId::new("fedcba9876543210abcdef0123456789")),
+        value(NetworkManagerOwner::new(":1.48")),
+    );
+    let request = NativeRadioSubjectRequest {
+        lock: lock(),
+        network: epoch.clone(),
+        observation: value(NetworkObservationId::new(epoch, 1, 10_000)),
+        principal: value(PrincipalId::new("unix:uid:1000")),
+        seat: "seat0".into(),
+        action: NativeRadioAction::NetworkingEnabled,
+        desired_enabled: false,
+        request: value(RequestId::new(
+            "request:v010:network-radio:networking-disable-sample",
+        )),
+        request_digest: ComponentDigest::from_bytes([1; 32]),
+        observation_digest: ComponentDigest::from_bytes([2; 32]),
+        review_digest: ComponentDigest::from_bytes([3; 32]),
+    };
+    let mut approval = NativeApprovalRequest {
+        lock: request.lock.clone(),
+        transition: None,
+        principal: request.principal.clone(),
+        request: request.request.clone(),
+        plan: value(PlanId::new(request.request.as_str())),
+        request_digest: request.request_digest,
+        observation_digest: request.observation_digest,
+        review_digest: request.review_digest,
+        purpose: NativeApprovalPurpose::NetworkRadio,
+    };
+    assert!(request.bind_original_approval(&approval).is_ok());
+    let mut wrong_action = request.clone();
+    wrong_action.action = NativeRadioAction::WifiEnabled;
+    assert!(wrong_action.bind_original_approval(&approval).is_err());
+    let mut wrong_effect = request.clone();
+    wrong_effect.desired_enabled = true;
+    assert!(wrong_effect.bind_original_approval(&approval).is_err());
+    approval.purpose = NativeApprovalPurpose::NetworkCredential;
+    assert!(request.bind_original_approval(&approval).is_err());
+    approval.purpose = NativeApprovalPurpose::NetworkRadio;
+    approval.review_digest = ComponentDigest::from_bytes([9; 32]);
+    assert!(request.bind_original_approval(&approval).is_err());
+    approval.review_digest = request.review_digest;
+    approval.observation_digest = ComponentDigest::from_bytes([9; 32]);
+    assert!(request.bind_original_approval(&approval).is_err());
+    approval.observation_digest = request.observation_digest;
+    approval.request_digest = ComponentDigest::from_bytes([9; 32]);
+    assert!(request.bind_original_approval(&approval).is_err());
+    approval.request_digest = request.request_digest;
+    approval.request = value(RequestId::new("request:v010:network-radio:other"));
+    approval.plan = value(PlanId::new(approval.request.as_str()));
+    assert!(request.bind_original_approval(&approval).is_err());
+    approval.request = request.request.clone();
+    approval.plan = value(PlanId::new(approval.request.as_str()));
+    approval.principal = value(PrincipalId::new("unix:uid:1001"));
+    assert!(request.bind_original_approval(&approval).is_err());
+    approval.principal = request.principal.clone();
+    approval.transition = Some(value(SessionTransitionId::new(
+        request.lock.clone(),
+        SessionTransition::Reboot,
+    )));
+    assert!(request.bind_original_approval(&approval).is_err());
 }
 
 #[test]

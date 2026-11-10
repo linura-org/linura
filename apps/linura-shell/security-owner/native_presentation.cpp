@@ -171,6 +171,12 @@ class NativePresentation::Impl final
                 explanation = QStringLiteral(
                     "Authenticate once for this reviewed Wi-Fi password. Escape cancels.");
                 break;
+            case ApprovalPurpose::AuthenticateNetworkRadio:
+                title = QStringLiteral("Review radio change");
+                explanation = QStringLiteral(
+                    "Authenticate the original owner for this exact networking or Wi-Fi "
+                    "radio review. This does not authorize execution. Escape cancels.");
+                break;
             case ApprovalPurpose::ConfirmLock:
             default:
                 faulted = true;

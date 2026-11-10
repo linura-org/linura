@@ -72,4 +72,16 @@
       <allow_active>auth_self</allow_active>
     </defaults>
   </action>
+  <!-- Original active local session owner consent only. This policy action
+       is NOT NetworkManager authorization, durable execution, or an NM grant. -->
+  <action id="org.linura.authority.review-network-radio">
+    <description>Authenticate the original session owner for a reviewed radio request</description>
+    <message>Authenticate to review the exact networking or Wi-Fi radio change. This does not authorize native execution.</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

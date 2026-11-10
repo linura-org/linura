@@ -164,6 +164,11 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.authority.review-network-radio"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "org.linura.authority.suspend-session"
 kind = "polkit-action"
 status = "active"
@@ -350,6 +355,13 @@ source = "crates/linura-linux-session/src/owner.rs"
 usage = "native-approval-action"
 token = '"org.linura.authority.use-network-credential"'
 action = "org.linura.authority.use-network-credential"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.review-network-radio"'
+action = "org.linura.authority.review-network-radio"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]

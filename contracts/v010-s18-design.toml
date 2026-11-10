@@ -68,7 +68,7 @@ observation = "networkmanager.manager.observe"
 class = "managed-external-effect"
 risk_floor = "security-sensitive"
 resource = "exact-provider-global-network-epoch"
-requested_keys = ["enabled"]
+requested_keys = ["networking_enabled"]
 requires = ["route-impact-review", "offline-local-recovery", "durable-prepare", "independent-reobserve"]
 enabled = false
 
@@ -80,7 +80,7 @@ observation = "networkmanager.manager.observe"
 class = "managed-external-effect"
 risk_floor = "security-sensitive"
 resource = "exact-provider-radio-epoch"
-requested_keys = ["enabled"]
+requested_keys = ["wireless_enabled"]
 requires = ["radio-impact-review", "offline-local-recovery", "durable-prepare", "independent-reobserve"]
 enabled = false
 

@@ -16,7 +16,7 @@ use linura_dbus::{
     Authority1Context, Authority1Handler, Authority1ManagedRequest, Authority1SessionContext,
 };
 use linura_executor_systemd::{ManagedActiveState, ManagedUnitName};
-use linura_linux_observation::{LogindSessionObserver, SystemdObserver};
+use linura_linux_observation::{LogindSessionObserver, NetworkManagerObserver, SystemdObserver};
 use linura_linux_session::{
     NativeLockObserver, NativePowerPermissionObserver, NativeSessionChannel,
     NativeSleepEntryObserver,
@@ -96,6 +96,22 @@ impl ManagedRuntime {
         coordinator
             .register_observer(Box::new(control_observer))
             .map_err(|error| format!("cannot register authoritative systemd observer: {error}"))?;
+        // S18-6: connect the existing read-only, unique-owner-pinned NM
+        // observer to the *same* Control observation coordinator. It uses the
+        // canonical ObservationEnvelope and has no executable effect port.
+        //
+        // NetworkManager is not required for the other qualified systemd and
+        // session services: unavailable bus authentication simply leaves NM
+        // absent from the authoritative capability inventory. There is no
+        // fallback to a guessed or cached network observation. An observer
+        // that does connect must register unambiguously, or startup fails.
+        if let Ok(network) = NetworkManagerObserver::connect() {
+            coordinator
+                .register_observer(Box::new(network))
+                .map_err(|error| {
+                    format!("cannot register native NetworkManager observer: {error}")
+                })?;
+        }
         coordinator
             .register_observer(Box::new(LogindSessionObserver::connect().map_err(
                 |error| format!("cannot connect native session observer: {error}"),

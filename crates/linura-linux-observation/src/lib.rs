@@ -2,6 +2,14 @@
 
 mod logind;
 mod networkmanager_native;
+mod radio_dns;
+mod radio_impact;
+mod radio_netlink;
+mod radio_remote;
+pub use radio_impact::{
+    KernelLinkState, KernelRadioBlock, NativeRadioLink, NativeRadioReadback,
+    NativeRadioSafetySample, NativeRadioSetting,
+};
 pub mod platform_discovery;
 pub use logind::{
     LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
@@ -56,6 +64,9 @@ const NM_DEVICE_CAPABILITY: &str = "networkmanager.device.observe";
 const NM_MANAGER_RESOURCE: &str = "networkmanager:manager";
 const NM_DEVICE_RESOURCE_PREFIX: &str = "networkmanager:device:";
 const MAX_NM_DEVICES: usize = 128;
+// Non-serializable process-local identity: a sequence from a new observer
+// instance is never interchangeable with an earlier observer's sequence.
+static RADIO_OBSERVER_INSTANCE_IDS: AtomicU64 = AtomicU64::new(0);
 const MAX_NM_INTERFACE_BYTES: usize = 128;
 const MAX_NM_TEXT_BYTES: usize = 1024;
 // Post-read guard only: this does not set a zbus receive or decode deadline.
@@ -237,6 +248,7 @@ impl Observer for SystemdObserver {
 pub struct NetworkManagerObserver {
     connection: Connection,
     sequence: AtomicU64,
+    radio_observer_instance: u64,
 }
 
 impl Debug for NetworkManagerObserver {
@@ -265,6 +277,7 @@ impl NetworkManagerObserver {
         Ok(Self {
             connection,
             sequence: AtomicU64::new(0),
+            radio_observer_instance: next_sequence(&RADIO_OBSERVER_INSTANCE_IDS)?,
         })
     }
 
