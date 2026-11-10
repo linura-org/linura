@@ -263,7 +263,7 @@ fn bounded_unique(
     Ok(paths)
 }
 
-fn ip_row(
+pub(super) fn ip_row(
     values: &HashMap<String, OwnedValue>,
     family: u8,
     is_route: bool,
@@ -425,7 +425,7 @@ impl NetworkManagerObserver {
         Ok(inventory)
     }
 
-    fn wireless_index(
+    pub(super) fn wireless_index(
         &self,
         owner: &str,
         device: &OwnedObjectPath,
@@ -467,7 +467,10 @@ impl NetworkManagerObserver {
         Ok(devices)
     }
 
-    fn active_index(&self, owner: &str) -> Result<BTreeMap<u64, OwnedObjectPath>, ProviderError> {
+    pub(super) fn active_index(
+        &self,
+        owner: &str,
+    ) -> Result<BTreeMap<u64, OwnedObjectPath>, ProviderError> {
         let props = bounded_props(&self.connection, owner, NM_PATH, NM_INTERFACE)?;
         let paths: Vec<OwnedObjectPath> = snapshot_property(&props, "ActiveConnections")?;
         native_index(
@@ -477,7 +480,10 @@ impl NetworkManagerObserver {
         )
     }
 
-    fn profile_index(&self, owner: &str) -> Result<BTreeMap<u64, OwnedObjectPath>, ProviderError> {
+    pub(super) fn profile_index(
+        &self,
+        owner: &str,
+    ) -> Result<BTreeMap<u64, OwnedObjectPath>, ProviderError> {
         let settings = Proxy::new(
             &self.connection,
             owner,
@@ -523,7 +529,7 @@ impl NetworkManagerObserver {
         Ok(version)
     }
 
-    fn profile_revision(
+    pub(super) fn profile_revision(
         &self,
         epoch: &NetworkManagerEpoch,
         path: &OwnedObjectPath,

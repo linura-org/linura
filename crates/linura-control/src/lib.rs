@@ -17,6 +17,7 @@ mod agent_interpretation;
 mod approval;
 mod approval_review;
 mod authority_clock;
+pub mod connection_lifecycle;
 mod durable_authority;
 mod managed_lifecycle;
 pub mod network_authority;

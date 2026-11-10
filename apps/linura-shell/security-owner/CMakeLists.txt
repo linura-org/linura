@@ -41,6 +41,8 @@ add_library(linura-security-owner-mechanisms STATIC
     native_managed_lock_backend.cpp native_managed_lock_backend.h
     secret_buffer.cpp secret_buffer.h
     peer_guard.cpp peer_guard.h
+    native_connection_method.cpp native_connection_method.h
+    native_connection_dispatch.cpp native_connection_dispatch.h
     native_sleep_fence.cpp native_sleep_fence.h
     native_sleep_probe.cpp native_sleep_probe.h
     native_transition_fence.cpp native_transition_fence.h
@@ -239,6 +241,32 @@ if(BUILD_TESTING)
     set_tests_properties(security-owner-protected-input PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
     )
+
+    # S18-7 fixed native activation/deactivation method encoder does NOT
+    # transmit. Keep its negative-target/wire regression independently
+    # testable without a real NetworkManager daemon or a privileged session.
+    add_executable(linura-security-owner-connection-method-tests
+        tests/native_connection_method.cpp)
+    target_link_libraries(linura-security-owner-connection-method-tests PRIVATE
+        linura-security-owner-mechanisms)
+    target_compile_options(linura-security-owner-connection-method-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    )
+    add_test(NAME security-owner-connection-method-contract
+        COMMAND linura-security-owner-connection-method-tests)
+    set_tests_properties(security-owner-connection-method-contract PROPERTIES TIMEOUT 20)
+
+    # Private, single-spend native sender remains uncallable from the public
+    # runtime until Control-to-original-user authorization is independently proven.
+    add_executable(linura-security-owner-connection-dispatch-tests
+        tests/native_connection_dispatch.cpp)
+    target_link_libraries(linura-security-owner-connection-dispatch-tests PRIVATE
+        linura-security-owner-mechanisms)
+    target_compile_options(linura-security-owner-connection-dispatch-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME security-owner-connection-dispatch-contract
+        COMMAND linura-security-owner-connection-dispatch-tests)
+    set_tests_properties(security-owner-connection-dispatch-contract PROPERTIES TIMEOUT 20)
 
     # S18-4 protected input component remains independently testable. The
     # native SecretAgent has a separate on-wire contract and scope suite.
