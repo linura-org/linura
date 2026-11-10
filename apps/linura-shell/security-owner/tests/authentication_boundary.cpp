@@ -197,6 +197,9 @@ void wrongNativeIdentityAndCancellationNeverUnlock(ApprovalPurpose purpose)
     if (purpose == ApprovalPurpose::AuthenticateNetworkCredential)
         reviewed.request = reviewed.plan =
             QStringLiteral("request:v010:network-credential:auth-component");
+    else if (purpose == ApprovalPurpose::AuthenticateNetworkRadio)
+        reviewed.request = reviewed.plan =
+            QStringLiteral("request:v010:network-radio:auth-component");
     else if (purpose != ApprovalPurpose::AuthenticateUnlock)
         reviewed.request = reviewed.plan =
             QStringLiteral("request:v010:protective-lock-setting:auth-component");
@@ -242,6 +245,7 @@ int main(int argc, char **argv)
               ApprovalPurpose::RevokeProtectiveLock,
               ApprovalPurpose::AuthenticateNetworkCredential})
             wrongNativeIdentityAndCancellationNeverUnlock(purpose);
+        wrongNativeIdentityAndCancellationNeverUnlock(ApprovalPurpose::AuthenticateNetworkRadio);
         std::cout << "official native authentication boundary: " << checks
                   << " component checks passed\n";
         return 0;

@@ -16,6 +16,7 @@ find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
 
 add_library(linura-security-owner-foundation STATIC
     native_scope.cpp
+    native_radio_method.cpp native_radio_method.h
     native_launch.cpp
     native_deadline.cpp
     lock_mechanism.cpp
@@ -152,6 +153,7 @@ if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
         native_unlock_status.cpp native_unlock_status.h
         native_endpoint.cpp native_endpoint.h
         native_network_agent.cpp native_network_agent.h
+        native_radio_dispatch.cpp native_radio_dispatch.h
     )
     target_link_libraries(linura-security-owner-runtime PUBLIC
         linura-security-owner-auth linura-security-owner-wayland
@@ -256,6 +258,17 @@ if(BUILD_TESTING)
     )
 
     if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
+        add_executable(linura-security-owner-radio-dispatch-tests
+            tests/native_radio_dispatch.cpp)
+        target_link_libraries(linura-security-owner-radio-dispatch-tests PRIVATE
+            linura-security-owner-runtime)
+        target_compile_options(linura-security-owner-radio-dispatch-tests PRIVATE
+            -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+        add_test(NAME security-owner-radio-single-use-dispatch
+            COMMAND linura-security-owner-radio-dispatch-tests)
+        set_tests_properties(security-owner-radio-single-use-dispatch PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
+
         add_executable(linura-security-owner-network-agent-tests
             tests/native_network_agent.cpp)
         target_link_libraries(linura-security-owner-network-agent-tests PRIVATE

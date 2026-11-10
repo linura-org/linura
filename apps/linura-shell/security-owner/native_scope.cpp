@@ -147,6 +147,7 @@ bool NativeApprovalScope::valid() const
     const bool setting = purpose == ApprovalPurpose::EnableProtectiveLock ||
                          purpose == ApprovalPurpose::RevokeProtectiveLock;
     const bool network = purpose == ApprovalPurpose::AuthenticateNetworkCredential;
+    const bool radio = purpose == ApprovalPurpose::AuthenticateNetworkRadio;
     if (power) {
         if (!transition || transition->lock != lock)
             return false;
@@ -182,6 +183,8 @@ bool NativeApprovalScope::valid() const
         prefix = QStringLiteral("request:v010:protective-lock-setting:");
     else if (network)
         prefix = QStringLiteral("request:v010:network-credential:");
+    else if (radio)
+        prefix = QStringLiteral("request:v010:network-radio:");
     const QStringView slug = QStringView(request).mid(prefix.size());
     if (!request.startsWith(prefix) || slug.isEmpty() || slug.size() > 64 ||
         slug.startsWith(QLatin1Char('-')) || slug.endsWith(QLatin1Char('-')) ||
@@ -203,6 +206,7 @@ bool NativeApprovalScope::valid() const
     case ApprovalPurpose::EnableProtectiveLock:
     case ApprovalPurpose::RevokeProtectiveLock:
     case ApprovalPurpose::AuthenticateNetworkCredential:
+    case ApprovalPurpose::AuthenticateNetworkRadio:
         return true;
     }
     return false;
@@ -229,6 +233,8 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
         return "org.linura.authority.revoke-protective-lock";
     case ApprovalPurpose::AuthenticateNetworkCredential:
         return "org.linura.authority.use-network-credential";
+    case ApprovalPurpose::AuthenticateNetworkRadio:
+        return "org.linura.authority.review-network-radio";
     }
     return nullptr;
 }
@@ -238,7 +244,8 @@ bool NativeApprovalScope::requiresSessionOwnerAuthentication() const noexcept
     return purpose == ApprovalPurpose::AuthenticateUnlock ||
            purpose == ApprovalPurpose::EnableProtectiveLock ||
            purpose == ApprovalPurpose::RevokeProtectiveLock ||
-           purpose == ApprovalPurpose::AuthenticateNetworkCredential;
+           purpose == ApprovalPurpose::AuthenticateNetworkCredential ||
+           purpose == ApprovalPurpose::AuthenticateNetworkRadio;
 }
 
 } // namespace Linura::SecurityOwner

@@ -238,7 +238,10 @@ impl NativeSessionChannel {
         self.revalidate(&identity, started)
     }
 
-    fn native_network_epoch(&self, started: Instant) -> Result<NetworkManagerEpoch, String> {
+    pub(super) fn native_network_epoch(
+        &self,
+        started: Instant,
+    ) -> Result<NetworkManagerEpoch, String> {
         let bus: String = self
             .bus_call("GetId", &(), started)?
             .body()
@@ -260,9 +263,10 @@ impl NativeSessionChannel {
         ))
     }
 
-    fn native_network_seat(
+    pub(super) fn native_network_seat(
         &self,
-        request: &NativeNetworkSubjectRequest,
+        lock: &SessionLockId,
+        wanted_seat: &str,
         started: Instant,
     ) -> Result<String, String> {
         let owner: String = self
@@ -279,7 +283,7 @@ impl NativeSessionChannel {
                 "/org/freedesktop/login1",
                 "org.freedesktop.login1.Manager",
                 "GetSession",
-                &(request.lock.epoch().session_id(),),
+                &(lock.epoch().session_id(),),
                 started,
             )?
             .body()
@@ -300,7 +304,7 @@ impl NativeSessionChannel {
         )?;
         // The S17-qualified check rejects root, remote, inactive, non-Wayland
         // and replaced login leaders before binding the seat property.
-        let _leader = authentication_leader(&request.lock, &facts)?;
+        let _leader = authentication_leader(lock, &facts)?;
         let seat_value = facts
             .get("Seat")
             .ok_or("native network seat property is absent")?
@@ -309,7 +313,7 @@ impl NativeSessionChannel {
         let (seat, seat_path): (String, OwnedObjectPath) = zbus::zvariant::Value::from(seat_value)
             .try_into()
             .map_err(|_| "native network seat identity has wrong type".to_owned())?;
-        if seat != request.seat
+        if seat != wanted_seat
             || seat_path.as_str() != format!("/org/freedesktop/login1/seat/{seat}")
         {
             return Err("native network request came from a foreign seat".into());
@@ -506,7 +510,7 @@ impl NativeSessionChannel {
             .require_same(&epoch)
             .map_err(|_| "native NetworkManager epoch has changed".to_owned())?;
         let subject = self.authentication_subject(&request.lock)?;
-        let seat = self.native_network_seat(request, started)?;
+        let seat = self.native_network_seat(&request.lock, &request.seat, started)?;
         let device_path = request.device.object().native_path();
         let profile_path = request.profile.object().native_path();
         self.native_network_inventory(&epoch, &device_path, &profile_path, started)?;
@@ -515,7 +519,7 @@ impl NativeSessionChannel {
         self.native_network_identity_facts(request, started)?;
         if self.native_network_epoch(started)? != epoch
             || self.authentication_subject(&request.lock)? != subject
-            || self.native_network_seat(request, started)? != seat
+            || self.native_network_seat(&request.lock, &request.seat, started)? != seat
             || started.elapsed() >= crate::bus::PROBE_BUDGET
         {
             return Err("native network subject or provider changed during attestation".into());

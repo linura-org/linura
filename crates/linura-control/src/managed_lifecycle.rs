@@ -46,9 +46,25 @@ const MANAGED_APPROVAL_TTL_SECONDS: u64 = 300;
 const MANAGED_REQUEST_PREFIX: &str = "request:v06:";
 const SESSION_REQUEST_PREFIX: &str = "request:v010:session-lock:";
 const TRANSITION_REQUEST_PREFIX: &str = "request:v010:session-transition:";
+const RADIO_REQUEST_PREFIX: &str = "request:v010:network-radio:";
 const MAX_OPERATION_ID_BYTES: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_ATTEMPTS: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_INTERVAL: Duration = Duration::from_millis(250);
+
+/// S18 radio and other NetworkManager effects must never inherit v0.6's
+/// administrative recovery path, which can reprepare and redispatch an
+/// independently observed unsatisfied systemd operation. A network timeout
+/// can mean that the original effect succeeded and removed the caller's own
+/// connectivity; absence of a reply is not a safe retry signal.
+fn requires_native_observe_only_recovery(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == crate::network_authority::NETWORK_PROVIDER
+        || request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
+        || is_session_transition(request)
+}
+
+fn is_reserved_network_request(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == crate::network_authority::NETWORK_PROVIDER
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ManagedApprovalBinding {
@@ -343,6 +359,29 @@ impl AuthorizedEffect {
         } = self;
         (effect, binding)
     }
+
+    /// The sole trusted radio extraction route. This consumes the original
+    /// durable-CAS-minted permit instead of constructing a handoff from client
+    /// descriptors, a historical journal entry, or an ExecutionBinding alone.
+    /// Extraction cannot enable an unregistered operation or claim native
+    /// dispatch/safety verification.
+    pub fn into_radio_control_handoff(
+        self,
+        principal: PrincipalId,
+        request: RequestId,
+    ) -> Result<crate::network_radio_effect::SpentRadioControlHandoff, String> {
+        crate::network_radio_effect::SpentRadioControlHandoff::from_authorized(
+            self, principal, request,
+        )
+    }
+
+    /// Control's original process-local grant is moved, never cloned. Neither
+    /// `Debug` output nor serialized transport material is a replay permit.
+    pub(crate) fn into_radio_components(
+        self,
+    ) -> (EffectDescriptor, ExecutionBinding, DispatchPermit) {
+        (self.effect, self.binding, self.permit)
+    }
 }
 
 pub trait AuthorizedEffectExecutor: Debug + Send {
@@ -456,11 +495,16 @@ pub fn managed_request_id(
 ) -> Result<RequestId, ManagedLifecycleError> {
     validate_operation_id(operation_id)?;
     let prefix = if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
-        SESSION_REQUEST_PREFIX
+        SESSION_REQUEST_PREFIX.to_owned()
     } else if is_session_transition(request) {
-        TRANSITION_REQUEST_PREFIX
+        TRANSITION_REQUEST_PREFIX.to_owned()
+    } else if is_reserved_network_request(request) {
+        format!(
+            "{RADIO_REQUEST_PREFIX}{}",
+            exact_radio_request_slug(request)?
+        )
     } else {
-        MANAGED_REQUEST_PREFIX
+        MANAGED_REQUEST_PREFIX.to_owned()
     };
     RequestId::new(format!("{prefix}{operation_id}"))
         .map_err(|error| ManagedLifecycleError::InvalidRequestIdentity(error.to_string()))
@@ -621,6 +665,45 @@ where
         }
         self.authority.assert_request_matches(principal, &request)?;
         Ok(request)
+    }
+
+    /// Read authenticated historical S18-6 radio attempt state only. The
+    /// write-once retained request and durable transaction anchor must agree
+    /// byte-for-byte on the original principal, operation and requested state.
+    /// No native observer/approval/executor is accepted; a historical
+    /// Committed/Verified state is NOT current network health or permission to
+    /// replay. Absent, corrupt, foreign or orphaned requests fail closed.
+    pub fn retained_network_radio_attempt_status(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<TransactionState, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str().to_owned())
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        self.authority.integrity_check()?;
+        let journal = self.request_journal.as_ref().ok_or_else(|| {
+            ManagedLifecycleError::Authority("S18 radio request journal is unavailable".into())
+        })?;
+        journal
+            .integrity_check()
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        let record = journal
+            .load(&principal_id, request_id)
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        let retained = validate_retained_radio_record(&principal_id, request_id, &record)?;
+        self.authority
+            .assert_request_matches(principal, &retained)?;
+        let transaction = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction)?;
+        if snapshot.principal != principal_id
+            || snapshot.request_id != *request_id
+            || snapshot.transaction_id != transaction
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "retained S18 radio transaction identity was replaced".into(),
+            ));
+        }
+        Ok(snapshot.state)
     }
 
     /// Historical status remains readable after native generation rotation or
@@ -1113,9 +1196,10 @@ where
         } else {
             (candidate, None)
         };
-        if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
-            || is_session_transition(&request)
-        {
+        // S17 and S18 network effects must retain the exact canonical request
+        // before durable prepare. A journal record alone is never a permit.
+        // The S18 registration/dispatch guard above remains fail-closed.
+        if requires_native_observe_only_recovery(&request) {
             let retained = crate::retained_request::encode(principal_id, &request)?;
             if retained.digest() != &crate::durable_authority::digest_request(&request)? {
                 return Err(ManagedLifecycleError::Authority(
@@ -1289,6 +1373,14 @@ where
         }
         let snapshot = self.authority.snapshot(&transaction_id)?;
         let plan_id = request.request_id.as_str().to_owned();
+        if is_reserved_network_request(&request) {
+            // No native S18-specific recovery can yet verify durable effect
+            // causality, route/DNS continuity and original-session recovery.
+            // Never enter the generic systemd reprepare/re-dispatch branch.
+            return Err(ManagedLifecycleError::Indeterminate(
+                "S18 network transaction requires native observe-only recovery; generic managed retry and redispatch are forbidden".into(),
+            ));
+        }
         match snapshot.state {
             TransactionState::Prepared => Err(ManagedLifecycleError::Indeterminate(format!(
                 "{} is still prepared after a failed pre-dispatch authority use; restart the trusted control composition root so restart recovery can retire it before retry",
@@ -1297,10 +1389,7 @@ where
             // A client repeating Converge is not a different recovery policy.
             // Session lock/unlock/power can never enter the older systemd recovery
             // path that may reprepare and dispatch an approved retry.
-            TransactionState::Indeterminate
-                if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
-                    || is_session_transition(&request) =>
-            {
+            TransactionState::Indeterminate if requires_native_observe_only_recovery(&request) => {
                 self.recover_session_request_without_replay(
                     principal,
                     actor,
@@ -1402,6 +1491,15 @@ where
         E: AuthorizedEffectExecutor,
         V: IndependentManagedVerifier,
     {
+        // A future registry entry must not silently inherit the old systemd
+        // "not satisfied => fresh approval => reprepare => redispatch" path.
+        // The root composition must supply a separately reviewed, strictly
+        // observe-only network recovery entrypoint before radio activation.
+        if is_reserved_network_request(&request) {
+            return Err(ManagedLifecycleError::Indeterminate(
+                "network effect remains indeterminate: no generic recovery re-dispatch".into(),
+            ));
+        }
         let verification = verifier
             .verify_effect(&effect)
             .map_err(ManagedLifecycleError::Verification)?;
@@ -1524,6 +1622,14 @@ where
         E: AuthorizedEffectExecutor,
         V: IndependentManagedVerifier,
     {
+        if is_reserved_network_request(&request) {
+            // Even a freshly approved recovery of this prepared request is
+            // not a new radio authority. Reversal requires a separate,
+            // independently qualified and durably reviewed transaction.
+            return Err(ManagedLifecycleError::Indeterminate(
+                "native network recovery cannot dispatch a reprepared effect".into(),
+            ));
+        }
         let plan_id = prepared.binding().plan_id().as_str().to_owned();
         if plan_id != request.request_id.as_str() {
             return Err(ManagedLifecycleError::Contract(
@@ -2145,6 +2251,18 @@ fn effect_from_parts(
         )
         .map_err(|error| ManagedLifecycleError::Contract(error.to_string()));
     }
+    if provider.as_str() == crate::network_authority::NETWORK_PROVIDER {
+        // The descriptor is sealed, but it cannot be used: registered_route
+        // and the public network-effect guard deny before durable preparation.
+        return crate::network_radio_effect::ExactRadioEffect::from_desired_state(
+            provider.as_str(),
+            resource.as_str(),
+            desired_state,
+        )
+        .map_err(|reason| ManagedLifecycleError::UnsupportedEffect(reason.into()))?
+        .descriptor()
+        .map_err(ManagedLifecycleError::Contract);
+    }
     if provider.as_str() != MANAGED_SYSTEMD_PROVIDER {
         return Err(ManagedLifecycleError::UnsupportedEffect(
             "provider has no sealed managed effect factory".into(),
@@ -2248,26 +2366,76 @@ fn validate_operation_id(operation_id: &str) -> Result<(), ManagedLifecycleError
     Ok(())
 }
 
+/// Authenticate a historical radio request without using the unqualified
+/// registered managed-effect factory. A retained journal record cannot become
+/// a durable dispatch permit, even when the stored operation is well formed.
+fn validate_retained_radio_record(
+    principal: &PrincipalId,
+    request_id: &RequestId,
+    record: &linura_transaction::RetainedRequest,
+) -> Result<PlanDesiredStateRequest, ManagedLifecycleError> {
+    if record.principal() != principal || record.request_id() != request_id {
+        return Err(ManagedLifecycleError::Authority(
+            "retained radio principal or request identity mismatch".into(),
+        ));
+    }
+    let request = crate::retained_request::decode(record)?;
+    if !is_reserved_network_request(&request) {
+        return Err(ManagedLifecycleError::UnsupportedEffect(
+            "retained request is not an S18 radio operation".into(),
+        ));
+    }
+    validate_request_identity(&request)?;
+    if crate::durable_authority::digest_request(&request)? != *record.digest() {
+        return Err(ManagedLifecycleError::Authority(
+            "retained radio request digest does not match the Control record".into(),
+        ));
+    }
+    Ok(request)
+}
+
 fn validate_request_identity(
     request: &PlanDesiredStateRequest,
 ) -> Result<(), ManagedLifecycleError> {
     let prefix = if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
-        SESSION_REQUEST_PREFIX
+        SESSION_REQUEST_PREFIX.to_owned()
     } else if is_session_transition(request) {
-        TRANSITION_REQUEST_PREFIX
+        TRANSITION_REQUEST_PREFIX.to_owned()
+    } else if is_reserved_network_request(request) {
+        format!(
+            "{RADIO_REQUEST_PREFIX}{}",
+            exact_radio_request_slug(request)?
+        )
     } else {
-        MANAGED_REQUEST_PREFIX
+        MANAGED_REQUEST_PREFIX.to_owned()
     };
     let operation_id = request
         .request_id
         .as_str()
-        .strip_prefix(prefix)
+        .strip_prefix(prefix.as_str())
         .ok_or_else(|| {
             ManagedLifecycleError::InvalidRequestIdentity(format!(
                 "request id must begin with {prefix}"
             ))
         })?;
     validate_operation_id(operation_id)
+}
+
+fn exact_radio_request_slug(
+    request: &PlanDesiredStateRequest,
+) -> Result<&'static str, ManagedLifecycleError> {
+    if request.observation_capability.as_str() != "networkmanager.manager.observe" {
+        return Err(ManagedLifecycleError::UnsupportedEffect(
+            "radio request must use the native NetworkManager manager observation".into(),
+        ));
+    }
+    crate::network_radio_effect::ExactRadioEffect::from_desired_state(
+        request.provider.as_str(),
+        request.resource.as_str(),
+        &request.desired_state,
+    )
+    .map(|radio| radio.request_slug())
+    .map_err(|error| ManagedLifecycleError::UnsupportedEffect(error.into()))
 }
 
 fn is_session_transition(request: &PlanDesiredStateRequest) -> bool {
@@ -2414,6 +2582,89 @@ mod tests {
     }
 
     #[test]
+    fn reserved_network_provider_cannot_inherit_systemd_retry_authority() {
+        let mut request = request("systemd:unit:linura-managed-a.service", "active");
+        assert!(!requires_native_observe_only_recovery(&request));
+        assert!(!is_reserved_network_request(&request));
+        request.provider =
+            ProviderId::new("networkmanager").unwrap_or_else(|e| unreachable!("{e}"));
+        for operation in crate::network_authority::NetworkOperation::ALL {
+            assert!(requires_native_observe_only_recovery(&request));
+            assert!(is_reserved_network_request(&request));
+            assert!(
+                crate::network_authority::require_network_effect_inactive(
+                    request.provider.as_str()
+                )
+                .is_err()
+            );
+            assert_eq!(
+                crate::network_authority::NetworkOperation::from_id(operation.operation_id()),
+                Some(operation),
+            );
+        }
+        // Only exact provider classification receives the no-replay network
+        // rule; a forged near-match cannot become a registered effect route.
+        request.provider =
+            ProviderId::new("networkmanager-alias").unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(!is_reserved_network_request(&request));
+        assert!(!requires_native_observe_only_recovery(&request));
+    }
+
+    #[test]
+    fn radio_historical_request_never_inherits_replay_or_implicit_authority() {
+        let principal = PrincipalId::new("unix:uid:1000").unwrap_or_else(|e| unreachable!("{e}"));
+        let other = PrincipalId::new("unix:uid:1001").unwrap_or_else(|e| unreachable!("{e}"));
+        let mut radio = request("networkmanager:manager", "false");
+        radio.provider = ProviderId::new("networkmanager").unwrap_or_else(|e| unreachable!("{e}"));
+        radio.observation_capability = CapabilityId::new("networkmanager.manager.observe")
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        radio.desired_state = BTreeMap::from([("wireless_enabled".into(), "false".into())]);
+        // Retained canonical requests require a concrete semantic provenance.
+        radio.reason.capability_ids = vec![
+            CapabilityId::new("networkmanager.manager.observe")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+        ];
+        radio.request_id =
+            managed_request_id("historical-radio", &radio).unwrap_or_else(|e| unreachable!("{e}"));
+        let original = crate::retained_request::encode(principal.clone(), &radio)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            validate_retained_radio_record(&principal, &radio.request_id, &original)
+                .unwrap_or_else(|e| unreachable!("{e:?}")),
+            radio
+        );
+        assert!(validate_retained_radio_record(&other, &radio.request_id, &original).is_err());
+        let foreign_request = RequestId::new("request:v010:network-radio:wifi-disable-other")
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(validate_retained_radio_record(&principal, &foreign_request, &original).is_err());
+        let mut changed = radio.clone();
+        changed.desired_state = BTreeMap::from([("networking_enabled".into(), "false".into())]);
+        let substituted = crate::retained_request::encode(principal.clone(), &changed)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            validate_retained_radio_record(&principal, &radio.request_id, &substituted).is_err()
+        );
+        changed = radio.clone();
+        changed.observation_capability = CapabilityId::new("networkmanager.wifi.observe")
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let substituted = crate::retained_request::encode(principal.clone(), &changed)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            validate_retained_radio_record(&principal, &radio.request_id, &substituted).is_err()
+        );
+        changed = radio;
+        changed.provider = ProviderId::new("systemd").unwrap_or_else(|e| unreachable!("{e}"));
+        let substituted = crate::retained_request::encode(principal.clone(), &changed)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            validate_retained_radio_record(&principal, &changed.request_id, &substituted).is_err()
+        );
+        assert!(
+            crate::network_authority::require_network_effect_inactive("networkmanager").is_err()
+        );
+    }
+
+    #[test]
     fn public_effect_is_exactly_one_reserved_systemd_active_state() {
         let effect = effect_from_request(&request(
             "systemd:unit:linura-managed-example.service",
@@ -2459,6 +2710,46 @@ mod tests {
             digest_managed_request(&request).unwrap_or_default(),
             digest_managed_request(&substituted).unwrap_or_default()
         );
+    }
+
+    #[test]
+    fn radio_request_identity_is_scoped_to_exact_action_and_postcondition() {
+        let mut request = request("systemd:unit:linura-managed-example.service", "active");
+        request.provider =
+            ProviderId::new("networkmanager").unwrap_or_else(|e| unreachable!("{e}"));
+        request.resource =
+            ResourceId::new("networkmanager:manager").unwrap_or_else(|e| unreachable!("{e}"));
+        request.observation_capability = CapabilityId::new("networkmanager.manager.observe")
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        for (key, value, expected) in [
+            ("networking_enabled", "true", "networking-enable-"),
+            ("networking_enabled", "false", "networking-disable-"),
+            ("wireless_enabled", "true", "wifi-enable-"),
+            ("wireless_enabled", "false", "wifi-disable-"),
+        ] {
+            request.desired_state = BTreeMap::from([(key.into(), value.into())]);
+            request.request_id = managed_request_id("radio-test", &request)
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            assert_eq!(
+                request.request_id.as_str(),
+                format!("{RADIO_REQUEST_PREFIX}{expected}radio-test")
+            );
+            assert!(validate_request_identity(&request).is_ok());
+            let mut substituted = request.clone();
+            let opposite = if value == "true" { "false" } else { "true" };
+            substituted.desired_state = BTreeMap::from([(key.into(), opposite.into())]);
+            assert!(validate_request_identity(&substituted).is_err());
+            substituted = request.clone();
+            substituted.request_id = RequestId::new("request:v06:radio-test")
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            assert!(validate_request_identity(&substituted).is_err());
+            substituted = request.clone();
+            substituted.observation_capability = CapabilityId::new("networkmanager.wifi.observe")
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            assert!(validate_request_identity(&substituted).is_err());
+        }
+        request.desired_state = BTreeMap::from([("wireless_enabled".into(), "unknown".into())]);
+        assert!(managed_request_id("radio-test", &request).is_err());
     }
 
     #[test]

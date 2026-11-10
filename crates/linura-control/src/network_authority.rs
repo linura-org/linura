@@ -82,7 +82,8 @@ impl NetworkOperation {
     pub const fn change_key(self) -> &'static str {
         match self {
             Self::WifiScan => "scan_requested",
-            Self::NetworkingEnabled | Self::WifiEnabled => "enabled",
+            Self::NetworkingEnabled => "networking_enabled",
+            Self::WifiEnabled => "wireless_enabled",
             Self::ConnectionActivate | Self::ConnectionDeactivate | Self::WifiJoin => "active",
             Self::ProfileCreate | Self::ProfileUpdate => "typed_profile",
             Self::ProfileDelete => "removed",
@@ -570,6 +571,37 @@ mod tests {
             NetworkOperation::from_id("operation:systemd.unit.set-active-state"),
             None
         );
+    }
+
+    #[test]
+    fn networking_and_wifi_radio_requests_use_disjoint_observed_manager_keys() {
+        let networking = NetworkOperation::NetworkingEnabled;
+        let wireless = NetworkOperation::WifiEnabled;
+        assert_eq!(networking.change_key(), "networking_enabled");
+        assert_eq!(wireless.change_key(), "wireless_enabled");
+        assert_ne!(networking.change_key(), wireless.change_key());
+        assert_eq!(
+            networking.observation_capability(),
+            "networkmanager.manager.observe"
+        );
+        assert_eq!(
+            wireless.observation_capability(),
+            "networkmanager.manager.observe"
+        );
+        let design = include_str!("../../../contracts/v010-s18-design.toml");
+        for (op, key) in [
+            (networking, "networking_enabled"),
+            (wireless, "wireless_enabled"),
+        ] {
+            let marker = format!("id = \"{}\"", op.operation_id());
+            let blocks = design
+                .split("[[candidate_operation]]")
+                .filter(|block| block.contains(&marker))
+                .collect::<Vec<_>>();
+            assert_eq!(blocks.len(), 1);
+            assert!(blocks[0].contains(&format!("requested_keys = [\"{key}\"]")));
+            assert!(blocks[0].contains("enabled = false"));
+        }
     }
 
     #[test]

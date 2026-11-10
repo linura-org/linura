@@ -37,6 +37,8 @@ enum class ApprovalPurpose {
     EnableProtectiveLock = 6,
     RevokeProtectiveLock = 7,
     AuthenticateNetworkCredential = 8,
+    // Original-user protected consent, not native NetworkManager authority.
+    AuthenticateNetworkRadio = 9,
 };
 
 enum class NativeSessionTransition { Suspend, Logout, Reboot, PowerOff };

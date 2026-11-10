@@ -1,6 +1,8 @@
 #include "lock_mechanism.h"
 #include "native_approval.h"
 #include "native_scope.h"
+#include "native_radio_method.h"
+#include <QDBusVariant>
 #include "secret_buffer.h"
 #include "process_guard.h"
 #include "native_launch.h"
@@ -172,6 +174,82 @@ void protectiveSettingApprovalIsPurposeBound()
         check(!substituted.valid() && !approval.consume(substituted));
         check(approval.consume(reviewed) && !approval.consume(reviewed));
     }
+}
+
+void radioConsentCannotBecomeCredentialOrNativeEffect()
+{
+    auto reviewed = scope(ApprovalPurpose::AuthenticateNetworkRadio);
+    check(!reviewed.valid());
+    reviewed.request = reviewed.plan = QStringLiteral("request:v010:network-radio:unit-test");
+    check(reviewed.valid() && reviewed.requiresSessionOwnerAuthentication());
+    check(std::strcmp(reviewed.authenticationAction(),
+                      "org.linura.authority.review-network-radio") == 0);
+    quint64 time = 100;
+    NativeApproval approval(identity(), [&time] { return time; });
+    check(!approval.begin(reviewed, false));
+    check(approval.begin(reviewed, true));
+    check(!approval.consume(reviewed));
+    check(approval.nativePrompt(reviewed) && approval.nativeCompleted(reviewed, true));
+    auto switched = reviewed;
+    switched.purpose = ApprovalPurpose::AuthenticateNetworkCredential;
+    check(!switched.valid() && !approval.consume(switched));
+    switched = reviewed;
+    switched.request = switched.plan = QStringLiteral("request:v010:network-credential:unit-test");
+    check(!switched.valid() && !approval.consume(switched));
+    switched = reviewed;
+    switched.reviewDigest[7] = QLatin1Char('4');
+    check(switched.valid() && !approval.consume(switched));
+    check(approval.consume(reviewed) && !approval.consume(reviewed));
+}
+
+void nativeRadioMessagesOnlyEncodeTwoExactNmMethods()
+{
+    const QString owner = QStringLiteral(":1.48");
+    const QString root = QStringLiteral("/org/freedesktop/NetworkManager");
+    for (const bool enabled : {false, true}) {
+        const auto network =
+            NativeRadioMethod::encode(owner, NativeRadioMutation::NetworkingEnabled, enabled);
+        check(network.has_value() && network->enabled() == enabled);
+        const auto enable = network->message();
+        check(enable.type() == QDBusMessage::MethodCallMessage);
+        check(!enable.autoStartService());
+        check(enable.service() == owner && enable.path() == root);
+        check(enable.interface() == QLatin1String("org.freedesktop.NetworkManager"));
+        check(enable.member() == QLatin1String("Enable"));
+        check(enable.arguments().size() == 1 && enable.arguments()[0].toBool() == enabled);
+
+        const auto radio =
+            NativeRadioMethod::encode(owner, NativeRadioMutation::WirelessEnabled, enabled);
+        check(radio.has_value() && radio->enabled() == enabled);
+        const auto wireless = radio->message();
+        check(wireless.type() == QDBusMessage::MethodCallMessage);
+        check(!wireless.autoStartService());
+        check(wireless.service() == owner && wireless.path() == root);
+        check(wireless.interface() == QLatin1String("org.freedesktop.DBus.Properties"));
+        check(wireless.member() == QLatin1String("Set"));
+        const auto args = wireless.arguments();
+        check(args.size() == 3);
+        check(args[0].toString() == QLatin1String("org.freedesktop.NetworkManager"));
+        check(args[1].toString() == QLatin1String("WirelessEnabled"));
+        check(args[2].canConvert<QDBusVariant>());
+        const auto value = qvariant_cast<QDBusVariant>(args[2]).variant();
+        check(value.userType() == QMetaType::Bool && value.toBool() == enabled);
+    }
+
+    const auto rejectOwner = [](const QString &ownerName) {
+        check(!NativeRadioMethod::encode(ownerName, NativeRadioMutation::NetworkingEnabled, true));
+        check(!NativeRadioMethod::encode(ownerName, NativeRadioMutation::WirelessEnabled, false));
+    };
+    rejectOwner({});
+    rejectOwner(QStringLiteral("org.freedesktop.NetworkManager"));
+    rejectOwner(QStringLiteral(":1."));
+    rejectOwner(QStringLiteral(":1.01"));
+    rejectOwner(QStringLiteral(":1.-1"));
+    rejectOwner(QStringLiteral(":2.4"));
+    rejectOwner(QStringLiteral(":1.123 extra"));
+    rejectOwner(QStringLiteral(":1.1/evil"));
+    rejectOwner(QString(33, QLatin1Char('1')));
+    check(!NativeRadioMethod::encode(owner, static_cast<NativeRadioMutation>(255), false));
 }
 
 void networkCredentialApprovalIsPurposeBound()
@@ -977,6 +1055,8 @@ int main(int argc, char **argv)
         approvalNeverUnlocks();
         transitionApprovalIsPurposeBound();
         protectiveSettingApprovalIsPurposeBound();
+        nativeRadioMessagesOnlyEncodeTwoExactNmMethods();
+        radioConsentCannotBecomeCredentialOrNativeEffect();
         networkCredentialApprovalIsPurposeBound();
         scopeSubstitution();
         approvalDenialsAndDeadlines();
