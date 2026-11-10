@@ -1,8 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod connection_ipv4;
+mod connection_kernel;
+mod connection_lifecycle;
 mod logind;
 mod networkmanager_native;
 pub mod platform_discovery;
+pub use connection_lifecycle::{
+    ConnectionReadbackRequirements, NativeConnectionLifecycleReadback,
+    NativeConnectionLifecycleSample, NativeConnectionTarget, NativeIpConfiguration,
+};
 pub use logind::{
     LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
     LOGIND_SESSION_PROVIDER, LOGIND_TRANSITION_CAPABILITY, LogindSessionObserver,

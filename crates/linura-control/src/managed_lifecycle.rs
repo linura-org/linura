@@ -334,6 +334,26 @@ impl AuthorizedEffect {
         &self.binding
     }
 
+    /// Only the original durably spent Control authorization can provide
+    /// the non-cloneable S18-7 connection effect handoff. No public executor
+    /// or unregistered NetworkManager mutation consumes it yet.
+    pub fn into_connection_lifecycle_handoff(
+        self,
+        target: crate::connection_lifecycle::ExactConnectionLifecycleEffect,
+        principal: PrincipalId,
+        request: RequestId,
+    ) -> Result<crate::connection_lifecycle::SpentConnectionLifecycleHandoff, String> {
+        crate::connection_lifecycle::SpentConnectionLifecycleHandoff::from_authorized(
+            self, target, principal, request,
+        )
+    }
+
+    pub(crate) fn into_connection_lifecycle_components(
+        self,
+    ) -> (EffectDescriptor, ExecutionBinding, DispatchPermit) {
+        (self.effect, self.binding, self.permit)
+    }
+
     #[must_use]
     pub fn into_executor_request(self) -> (EffectDescriptor, ExecutionBinding) {
         let Self {
@@ -621,6 +641,56 @@ where
         }
         self.authority.assert_request_matches(principal, &request)?;
         Ok(request)
+    }
+
+    /// Read an S18-7 retained attempt without dispatching, reauthorizing,
+    /// inferring current connectivity or turning a historical Committed state
+    /// into a fresh successful verification. The journal and transaction
+    /// must independently agree on the original authenticated principal and
+    /// canonical request. After a crash this API does not replay anything.
+    pub fn retained_connection_lifecycle_attempt_status(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<TransactionState, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        self.authority.integrity_check()?;
+        let journal = self.request_journal.as_ref().ok_or_else(|| {
+            ManagedLifecycleError::Authority("S18 connection request journal unavailable".into())
+        })?;
+        journal
+            .integrity_check()
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        let record = journal
+            .load(&principal_id, request_id)
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        if record.principal() != &principal_id || record.request_id() != request_id {
+            return Err(ManagedLifecycleError::Authority(
+                "S18 connection retained request namespace was substituted".into(),
+            ));
+        }
+        let request = crate::retained_request::decode(&record)?;
+        validate_retained_connection_lifecycle_request(&request)?;
+        if request.request_id != *request_id
+            || crate::durable_authority::digest_request(&request)? != *record.digest()
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "retained S18 connection request digest or ID differs".into(),
+            ));
+        }
+        self.authority.assert_request_matches(principal, &request)?;
+        let transaction = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction)?;
+        if snapshot.principal != principal_id
+            || snapshot.request_id != *request_id
+            || snapshot.transaction_id != transaction
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "S18 connection durable transaction identity was substituted".into(),
+            ));
+        }
+        Ok(snapshot.state)
     }
 
     /// Historical status remains readable after native generation rotation or
@@ -2248,6 +2318,64 @@ fn validate_operation_id(operation_id: &str) -> Result<(), ManagedLifecycleError
     Ok(())
 }
 
+/// This validator is deliberately NOT operation registration. It may only
+/// classify a preexisting immutable historical record for read-only status.
+/// A user-supplied lookalike cannot create or spend a durable authority grant.
+fn validate_retained_connection_lifecycle_request(
+    request: &PlanDesiredStateRequest,
+) -> Result<(), ManagedLifecycleError> {
+    if request.provider.as_str() != crate::network_authority::NETWORK_PROVIDER
+        || request.observation_capability.as_str() != "networkmanager.connections.observe"
+        || request.desired_state.len() != 1
+    {
+        return Err(ManagedLifecycleError::UnsupportedEffect(
+            "retained request is not a canonical S18 connection lifecycle record".into(),
+        ));
+    }
+    let (operation, family) = match request.desired_state.get("active") {
+        Some(value) if value == "true" => ("activate-", "networkmanager:profile:"),
+        Some(value) if value == "false" => ("deactivate-", "networkmanager:active:"),
+        _ => {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "retained lifecycle desired state is invalid".into(),
+            ));
+        }
+    };
+    let suffix = request
+        .request_id
+        .as_str()
+        .strip_prefix("request:v010:network-connection:")
+        .and_then(|value| value.strip_prefix(operation))
+        .ok_or_else(|| {
+            ManagedLifecycleError::InvalidRequestIdentity(
+                "retained S18 lifecycle operation identity differs".into(),
+            )
+        })?;
+    validate_operation_id(suffix)?;
+    let generation = request
+        .resource
+        .as_str()
+        .strip_prefix(family)
+        .ok_or_else(|| {
+            ManagedLifecycleError::UnsupportedEffect(
+                "retained connection lifecycle resource family differs".into(),
+            )
+        })?;
+    if generation.starts_with('0')
+        || generation.len() > 20
+        || !generation.bytes().all(|byte| byte.is_ascii_digit())
+        || generation
+            .parse::<u64>()
+            .ok()
+            .is_none_or(|value| value == 0)
+    {
+        return Err(ManagedLifecycleError::UnsupportedEffect(
+            "retained lifecycle native object generation is not canonical".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_request_identity(
     request: &PlanDesiredStateRequest,
 ) -> Result<(), ManagedLifecycleError> {
@@ -2388,7 +2516,7 @@ const fn verification_name(disposition: VerificationDisposition) -> &'static str
 
 #[cfg(test)]
 mod tests {
-    use linura_core::{CapabilityId, SemanticReason};
+    use linura_core::{CapabilityId, IntentId, RequirementId, SemanticReason};
 
     use super::*;
 
@@ -2459,6 +2587,76 @@ mod tests {
             digest_managed_request(&request).unwrap_or_default(),
             digest_managed_request(&substituted).unwrap_or_default()
         );
+    }
+
+    #[test]
+    fn retained_network_connection_status_is_read_only_and_exactly_typed() {
+        let mut original = request("systemd:unit:linura-managed-example.service", "active");
+        original.reason.intent_ids = vec![
+            IntentId::new("intent:s18-connection-lifecycle")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+        ];
+        original.reason.requirement_ids = vec![
+            RequirementId::new("requirement:s18-connection-lifecycle")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+        ];
+        original.reason.capability_ids = vec![
+            CapabilityId::new("networkmanager.connections.observe")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+        ];
+        original.provider =
+            ProviderId::new("networkmanager").unwrap_or_else(|error| unreachable!("{error}"));
+        original.observation_capability = CapabilityId::new("networkmanager.connections.observe")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        original.resource = ResourceId::new("networkmanager:profile:9")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        original.desired_state = BTreeMap::from([("active".into(), "true".into())]);
+        original.request_id = RequestId::new("request:v010:network-connection:activate-original")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(validate_retained_connection_lifecycle_request(&original).is_ok());
+        let record = crate::retained_request::encode(
+            PrincipalId::new("unix:uid:1000").unwrap_or_else(|error| unreachable!("{error}")),
+            &original,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let decoded = crate::retained_request::decode(&record)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(decoded, original);
+        assert_eq!(
+            crate::durable_authority::digest_request(&decoded)
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            *record.digest(),
+        );
+        let mut substituted = original.clone();
+        substituted.resource = ResourceId::new("networkmanager:active:9")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(validate_retained_connection_lifecycle_request(&substituted).is_err());
+        substituted = original.clone();
+        substituted.request_id =
+            RequestId::new("request:v010:network-connection:deactivate-original")
+                .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(validate_retained_connection_lifecycle_request(&substituted).is_err());
+        substituted = original.clone();
+        substituted
+            .desired_state
+            .insert("enabled".into(), "true".into());
+        assert!(validate_retained_connection_lifecycle_request(&substituted).is_err());
+        substituted = original.clone();
+        substituted.resource = ResourceId::new("networkmanager:profile:09")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(validate_retained_connection_lifecycle_request(&substituted).is_err());
+        substituted = original.clone();
+        substituted.provider =
+            ProviderId::new("systemd").unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(validate_retained_connection_lifecycle_request(&substituted).is_err());
+        let mut deactivation = original;
+        deactivation.request_id =
+            RequestId::new("request:v010:network-connection:deactivate-original")
+                .unwrap_or_else(|error| unreachable!("{error}"));
+        deactivation.resource = ResourceId::new("networkmanager:active:9")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        deactivation.desired_state = BTreeMap::from([("active".into(), "false".into())]);
+        assert!(validate_retained_connection_lifecycle_request(&deactivation).is_ok());
     }
 
     #[test]
