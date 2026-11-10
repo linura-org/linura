@@ -261,16 +261,17 @@ int main()
         auto incomplete = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(incomplete && incomplete->spend(held, later, before, scanout));
         noFrames[0] = {held.heads[0].key, nullptr, &first, 0, false, 301};
-        assert(!incomplete->observe({held, later, noFrames, scanout,
-                                     outputCommits(held, noFrames)}));
+        const auto incompleteOutputCommits = outputCommits(held, noFrames);
+        assert(!incomplete->observe({held, later, noFrames, scanout, incompleteOutputCommits}));
         assert(incomplete->phase() == Phase::Faulted);
 
         auto expired = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(expired && expired->spend(held, later, before, scanout));
         noFrames[0] = {held.heads[0].key, nullptr, nullptr, 0, false, 0};
         noFrames[1] = {held.heads[1].key, nullptr, nullptr, 0, false, 0};
-        assert(!expired->observe({held, {12'000, 7'000}, noFrames, scanout,
-                                  outputCommits(held, noFrames)}));
+        const ClockSample expiredClock{12'000, 7'000};
+        const auto expiredOutputCommits = outputCommits(held, noFrames);
+        assert(!expired->observe({held, expiredClock, noFrames, scanout, expiredOutputCommits}));
         assert(expired->phase() == Phase::Faulted);
     }
 
