@@ -47,6 +47,7 @@ mod secure_proposal_acceptance;
 mod session_power_plan;
 mod session_safety;
 mod session_transition;
+mod storage_contract;
 mod transient_effect;
 
 pub use agent_interpretation::{
@@ -110,6 +111,9 @@ pub use session_safety::{
 };
 pub use session_transition::{
     SessionTransitionPostcondition, review_session_transition_postcondition,
+};
+pub use storage_contract::{
+    ProposedStorageEffect, STORAGE_GENERATION_DIGEST_BYTES, StorageContractError, StorageOperation,
 };
 pub use transient_effect::{
     AuthorizedTransientEffect, TransientEffectAuditDisposition, TransientEffectAuditError,

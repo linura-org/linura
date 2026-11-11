@@ -2,6 +2,14 @@
 
 mod logind;
 pub mod platform_discovery;
+pub mod removable_storage;
+pub mod removable_storage_kernel;
+pub mod removable_storage_kernel_device;
+pub mod removable_storage_namespace;
+pub mod removable_storage_native;
+pub mod removable_storage_polkit;
+pub mod removable_storage_postcondition;
+pub mod removable_storage_usb_group;
 pub use logind::{
     LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
     LOGIND_SESSION_PROVIDER, LOGIND_TRANSITION_CAPABILITY, LogindSessionObserver,
