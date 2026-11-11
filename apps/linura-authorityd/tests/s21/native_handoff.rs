@@ -1,0 +1,538 @@
+//! Real Control + authenticated SQLite history with SIMULATED native sources.
+//! No KMS/compositor execution, hardware or Level A/B evidence is claimed.
+use super::*;
+use linura_control::{
+    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
+    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayRetirementPreparationPort,
+};
+use linura_observation::{
+    DisplayNativeHandoffFacts, DisplayNativeHandoffLineage, DisplayNativeHandoffOutput,
+    DisplayNativeHandoffWindow,
+};
+
+pub(super) fn observe(
+    machine: &mut Machine,
+    mut sample: ObservationEnvelope,
+    scope: &DisplayRecoveryScope,
+) -> Result<ObservationEnvelope, ProviderError> {
+    let unavailable =
+        || ProviderError::Unavailable("simulated first ordinary frame unavailable".into());
+    let (started, deadline) = machine.native_handoff_window.ok_or_else(unavailable)?;
+    if machine.finalization_native_phase != 6 {
+        return Err(unavailable());
+    }
+    let now = sample.observed_at_unix_ms;
+    let elapsed = now.checked_sub(started).ok_or_else(unavailable)?;
+    let window = DisplayNativeHandoffWindow {
+        observed_unix_ms: now,
+        observed_boot_ms: 100_000 + elapsed,
+        deadline_unix_ms: deadline,
+        deadline_boot_ms: 100_000 + (deadline - started),
+    };
+    let valid_for_ms = window.valid_for_ms().map_err(|_| unavailable())?;
+    let terminal = machine
+        .finalization_binding
+        .as_ref()
+        .ok_or_else(unavailable)?;
+    let restoration = machine
+        .restoration_binding
+        .as_ref()
+        .ok_or_else(unavailable)?;
+    let material = linura_core::DisplayFinalizationMaterial::decode(
+        machine
+            .finalization_material
+            .as_deref()
+            .ok_or_else(unavailable)?,
+    )
+    .map_err(|_| unavailable())?;
+    let current = DisplayObservationFacts::from_envelope(&sample, scope.replacement(), now)
+        .map_err(|_| unavailable())?;
+    let frames = value(DisplayNativeHandoffFacts::new(
+        scope.clone(),
+        DisplayNativeHandoffLineage {
+            checkpoint: material.restoration().original_checkpoint().into(),
+            restoration_transaction: restoration.transaction_id.clone(),
+            restoration_effect: restoration.effect_digest.to_hex(),
+            restoration_dispatch: restoration.dispatch_digest.to_hex(),
+            terminal_transaction: terminal.transaction_id.clone(),
+            terminal_effect: terminal.effect_digest.to_hex(),
+            terminal_dispatch: terminal.dispatch_digest.to_hex(),
+            terminal_link: material.terminal_link().into(),
+            source_guard: material.restored_source_guard().into(),
+            post_write_epoch: material.post_write_epoch(),
+            security_epoch: 1,
+        },
+        window,
+        current
+            .inventory()
+            .outputs()
+            .iter()
+            .cloned()
+            .map(|output| {
+                (
+                    output,
+                    DisplayNativeHandoffOutput {
+                        enabled: true,
+                        connector: 5,
+                        crtc: 7,
+                        plane: 8,
+                        framebuffer: 43,
+                        spend_high_water: 99,
+                        completed_commit: 100,
+                    },
+                )
+            })
+            .collect(),
+    ));
+    sample.resource = value(scope.resource_id());
+    sample.capability = value(CapabilityId::new(
+        linura_observation::DISPLAY_NATIVE_HANDOFF_CAPABILITY,
+    ));
+    sample.valid_for_ms = valid_for_ms;
+    sample.attributes = frames.attributes();
+    machine.native_handoff_reads += 1;
+    match machine.native_handoff_fault {
+        1 => {
+            sample
+                .attributes
+                .insert("source_guard".into(), ObservedValue::Text("a".repeat(64)));
+        }
+        2 => {
+            sample.attributes.insert(
+                "terminal_dispatch".into(),
+                ObservedValue::Text("b".repeat(64)),
+            );
+        }
+        3 => {
+            sample.attributes.insert(
+                "restoration_transaction".into(),
+                ObservedValue::Text("transaction:foreign".into()),
+            );
+        }
+        4 => {
+            sample
+                .attributes
+                .insert("output.0.completed_commit".into(), ObservedValue::U64(99));
+        }
+        5 => {
+            sample.authority = ObservationAuthority::SyntheticTest;
+        }
+        6 => {
+            sample.valid_for_ms = 2000;
+        }
+        7 if machine.native_handoff_reads > 1 => {
+            sample
+                .attributes
+                .insert("output.0.framebuffer".into(), ObservedValue::U64(44));
+        }
+        8 if machine.native_handoff_reads > 1 => {
+            sample.attributes.insert(
+                "deadline_boot_ms".into(),
+                ObservedValue::U64(window.deadline_boot_ms + 1),
+            );
+        }
+        9 => {
+            sample
+                .attributes
+                .insert("native_ack".into(), ObservedValue::Bool(true));
+        }
+        _ => (),
+    }
+    Ok(sample)
+}
+
+#[derive(Debug)]
+struct RootPort(Arc<Mutex<Machine>>, bool);
+impl OriginalDisplayRetirementPreparationPort for RootPort {
+    fn prepare_retirement(
+        &mut self,
+        preparation: AuthorizedOriginalDisplayRetirementPreparation,
+    ) -> Result<(), String> {
+        let mut machine = self
+            .0
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(machine.finalization_native_phase, 2);
+        assert_eq!(
+            Some(preparation.material()),
+            machine.finalization_material.as_deref()
+        );
+        assert!(preparation.expires_at_unix_ms() > now_unix_ms());
+        eprintln!(
+            "simulated Root retirement remaining={}ms",
+            preparation.expires_at_unix_ms() - now_unix_ms()
+        );
+        machine.retirement_preparations += 1;
+        machine.finalization_native_phase = 3;
+        Ok(())
+    }
+}
+impl OriginalDisplayNativeReleaseReservationPort for RootPort {
+    fn reserve_native_release(
+        &mut self,
+        reservation: AuthorizedOriginalDisplayNativeReleaseReservation,
+    ) -> Result<(), String> {
+        let mut machine = self
+            .0
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(machine.finalization_native_phase, 3);
+        assert_eq!(
+            Some(reservation.material()),
+            machine.finalization_material.as_deref()
+        );
+        assert!(reservation.expires_at_unix_ms() > now_unix_ms());
+        eprintln!(
+            "simulated Root reservation remaining={}ms",
+            reservation.expires_at_unix_ms() - now_unix_ms()
+        );
+        machine.native_release_reservations += 1;
+        machine.finalization_native_phase = 5;
+        Ok(())
+    }
+}
+impl OriginalDisplayNativeReleaseSpendPort for RootPort {
+    fn spend_native_release(
+        &mut self,
+        attempt: AuthorizedOriginalDisplayNativeReleaseSpend,
+    ) -> Result<(), String> {
+        let mut machine = self
+            .0
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(machine.finalization_native_phase, 5);
+        assert_eq!(
+            Some(attempt.material()),
+            machine.finalization_material.as_deref()
+        );
+        let now = now_unix_ms();
+        assert!(attempt.expires_at_unix_ms() > now);
+        eprintln!(
+            "simulated native spend remaining={}ms",
+            attempt.expires_at_unix_ms() - now
+        );
+        machine.native_release_spends += 1;
+        machine.finalization_native_phase = 6;
+        machine.native_handoff_window = Some((now, attempt.expires_at_unix_ms().min(now + 2000)));
+        if self.1 {
+            Err("simulated lost native spend reply".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn quiesced(
+    database: &TestDatabase,
+    machine: &Arc<Mutex<Machine>>,
+) -> (
+    ManagedLifecycleControl<SqliteTransactionStore>,
+    PlanDesiredStateRequest,
+    OriginalDisplayRestorationRequest,
+    RequestId,
+) {
+    let (original, input) = prepare_original(database, machine);
+    let previews = replacement_previews(machine, &original, &input);
+    let mut control = open_with_previews(database.path(), machine, 0, previews);
+    let restoration = value(control.begin_original_display_restoration(
+        principal(),
+        actor(true),
+        input.clone(),
+        &approval(),
+        &mut Executor(machine.clone()),
+    ));
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .restoration_native_verified = true;
+    value(control.retire_original_display_restoration(
+        principal(),
+        actor(true),
+        &restoration.request_id,
+    ));
+    let terminal = value(control.begin_original_display_finalization(
+        principal(),
+        actor(true),
+        finalization_input(&restoration.request_id),
+        &TerminalApproval(machine.clone(), 0),
+        &mut TerminalPort(machine.clone()),
+    ));
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .finalization_native_phase = 2;
+    (control, original, input, terminal.request_id)
+}
+
+fn prepared(
+    database: &TestDatabase,
+    machine: &Arc<Mutex<Machine>>,
+) -> (
+    ManagedLifecycleControl<SqliteTransactionStore>,
+    PlanDesiredStateRequest,
+    OriginalDisplayRestorationRequest,
+    RequestId,
+) {
+    let (mut control, original, input, request) = quiesced(database, machine);
+    let mut root = RootPort(machine.clone(), false);
+    value(control.prepare_original_display_terminal_retirement(
+        principal(),
+        actor(true),
+        &request,
+        &mut root,
+    ));
+    value(control.prepare_original_display_native_release(
+        principal(),
+        actor(true),
+        &request,
+        &mut root,
+    ));
+    (control, original, input, request)
+}
+
+#[test]
+fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
+    for after_retirement in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = quiesced(&database, &machine);
+        if after_retirement {
+            value(control.prepare_original_display_terminal_retirement(
+                principal(),
+                actor(true),
+                &request,
+                &mut RootPort(machine.clone(), false),
+            ));
+        }
+        drop(control);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        let sampled = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .sequence;
+        let result = if after_retirement {
+            restarted.prepare_original_display_native_release(
+                principal(),
+                actor(true),
+                &request,
+                &mut RootPort(machine.clone(), false),
+            )
+        } else {
+            restarted.prepare_original_display_terminal_retirement(
+                principal(),
+                actor(true),
+                &request,
+                &mut RootPort(machine.clone(), false),
+            )
+        };
+        assert!(
+            matches!(result, Err(ManagedLifecycleError::ApprovalBoundary(_))),
+            "{result:?}"
+        );
+        let state = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(state.sequence, sampled);
+        assert_eq!(state.retirement_preparations, usize::from(after_retirement));
+        assert_eq!(state.native_release_reservations, 0);
+        assert_eq!(state.native_release_spends, 0);
+    }
+}
+
+#[test]
+fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_replay() {
+    for lost_reply in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = prepared(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        let before = snapshot(&database, &transaction);
+        let attempt = control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), lost_reply),
+        );
+        assert_eq!(attempt.is_err(), lost_reply, "{attempt:?}");
+        let verification = match attempt {
+            Ok(first) => first,
+            Err(_) => value(
+                control.verify_native_handoff_original_display_finalization(principal(), &request),
+            ),
+        };
+        let digest = verification.record_digest().clone();
+        let expires_at = verification.valid_until_unix_ms();
+        assert_eq!(verification.inspection().terminal(), &before);
+        assert_eq!(snapshot(&database, &transaction), before);
+        drop(control);
+        let journal = value(
+            linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
+                database.path().with_extension("requests.sqlite3"),
+                value(SqliteIntegrityKey::new(fixture_key(6))),
+            ),
+        );
+        let key = value(RequestId::new(format!(
+            "request:v010:display-physical-verified:{}",
+            linura_transaction::digest_bytes(
+                "linura.display.original-physical-release-verified-key.v1",
+                request.as_str().as_bytes()
+            )
+            .hex()
+        )));
+        let retained = value(journal.load(&value(PrincipalId::new(principal().as_str())), &key));
+        assert_eq!(
+            linura_transaction::digest_bytes(
+                "linura.display.original-physical-release-verified.v1",
+                retained.canonical()
+            ),
+            digest
+        );
+        drop(journal);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        // Deliberately expire the ORIGINAL retained window. Restart and a
+        // durable verification record must not manufacture current evidence.
+        let now = now_unix_ms();
+        if now <= expires_at {
+            std::thread::sleep(std::time::Duration::from_millis(expires_at - now + 1));
+        }
+        assert!(
+            restarted
+                .verify_native_handoff_original_display_finalization(principal(), &request)
+                .is_err()
+        );
+        assert!(
+            restarted
+                .spend_original_display_native_release(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut RootPort(machine.clone(), false)
+                )
+                .is_err()
+        );
+        assert_eq!(snapshot(&database, &transaction), before);
+        let state = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(
+            (
+                state.retirement_preparations,
+                state.native_release_reservations,
+                state.native_release_spends
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(state.finalization_native_phase, 6);
+        assert_eq!(state.applies, 1);
+        assert_eq!(state.restoration_calls, 1);
+    }
+}
+
+#[test]
+fn post_effect_proof_faults_do_not_commit_or_repeat_the_spent_handoff() {
+    for fault in 1..=9 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, _, _, request) = prepared(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        let before = snapshot(&database, &transaction);
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .native_handoff_fault = fault;
+        assert!(
+            control
+                .spend_original_display_native_release(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut RootPort(machine.clone(), false)
+                )
+                .is_err(),
+            "fault {fault}"
+        );
+        assert!(
+            control
+                .spend_original_display_native_release(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut RootPort(machine.clone(), false)
+                )
+                .is_err()
+        );
+        assert_eq!(snapshot(&database, &transaction), before);
+        let state = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(state.native_release_spends, 1);
+        assert!(
+            state.native_handoff_reads >= if matches!(fault, 7 | 8) { 2 } else { 1 },
+            "fault {fault} must exercise independent post-effect observation"
+        );
+    }
+}
+
+#[test]
+fn verification_storage_failure_or_false_ack_keeps_terminal_indeterminate_and_spend_once() {
+    for fault in 1..=3 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, _, _, request) = prepared(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        let before = snapshot(&database, &transaction);
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .native_verification_write_fault = fault;
+        let result = control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false),
+        );
+        assert!(matches!(
+            result,
+            Err(ManagedLifecycleError::Indeterminate(_))
+        ));
+        assert!(
+            control
+                .spend_original_display_native_release(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut RootPort(machine.clone(), false)
+                )
+                .is_err()
+        );
+        assert_eq!(snapshot(&database, &transaction), before);
+        let state = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert!(state.native_handoff_reads >= 2);
+        assert_eq!(state.native_release_spends, 1);
+        drop(state);
+        let journal = value(
+            linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
+                database.path().with_extension("requests.sqlite3"),
+                value(SqliteIntegrityKey::new(fixture_key(6))),
+            ),
+        );
+        let key = value(RequestId::new(format!(
+            "request:v010:display-physical-verified:{}",
+            linura_transaction::digest_bytes(
+                "linura.display.original-physical-release-verified-key.v1",
+                request.as_str().as_bytes()
+            )
+            .hex()
+        )));
+        let stored = journal.load(&value(PrincipalId::new(principal().as_str())), &key);
+        assert_eq!(stored.is_ok(), fault == 3);
+    }
+}

@@ -15,6 +15,8 @@ use linura_transaction::{
 use crate::ManagedLifecycleError;
 use crate::display_native_release_reservation::NativeReleasePrepared;
 
+pub(crate) mod verification;
+
 // Keep the key unchanged: a historical spend-only entry must still prevent
 // redelivery. Its old payload is not upgraded into a physical handoff permit.
 const DOMAIN: &str = "linura.display.original-native-handoff-attempt.v1";
@@ -275,6 +277,10 @@ impl NativeReleaseSpendPrepared {
     }
     pub(crate) const fn expiry(&self) -> u64 {
         self.expiry
+    }
+
+    pub(crate) fn digest(&self) -> ContentDigest {
+        digest_bytes(DOMAIN, &self.canonical)
     }
 }
 

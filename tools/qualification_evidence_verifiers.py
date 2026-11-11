@@ -886,7 +886,7 @@ def _v06_matrix_inventory(root: Path) -> tuple[str, ...]:
     data = _stable_repository_bytes(root / "tests/acceptance/v06/fault-matrix.txt")
     _require(len(data) <= 16 * 1024, "v0.6 test inventory exceeds its bound")
     _require(
-        re.fullmatch(rb"(?:[a-z][a-z0-9_]*(?:::[a-z][a-z0-9_]*)*\n){67}", data)
+        re.fullmatch(rb"(?:[a-z][a-z0-9_]*(?:::[a-z][a-z0-9_]*)*\n){71}", data)
         is not None,
         "v0.6 test inventory is malformed or has the wrong cardinality",
     )
@@ -1006,7 +1006,7 @@ def _verify_v06(
             "real-idempotency=qualified",
             "real-verification-not-satisfied-explicit-recovery=qualified",
             "real-crash-restart-explicit-no-effect-recovery=qualified",
-            "deterministic-fault-matrix=67/67",
+            "deterministic-fault-matrix=71/71",
         ],
         "v0.6 qualification transcript",
     )
@@ -1053,7 +1053,7 @@ def _verify_v06(
     inventory = _v06_matrix_inventory(root)
     _require_v06_matrix_result(
         matrix,
-        67,
+        71,
         "v0.6 complete fault matrix",
         filtered_out=0,
         expected_tests=inventory,
@@ -1062,7 +1062,7 @@ def _verify_v06(
         legacy_matrix,
         11,
         "v0.6 original fault matrix",
-        filtered_out=56,
+        filtered_out=60,
         expected_tests=tuple(
             name
             for name in inventory
@@ -1077,7 +1077,7 @@ def _verify_v06(
     expanded_matrix = primary.get("expanded_fault_matrix")
     _require(
         isinstance(expanded_matrix, dict)
-        and expanded_matrix.get("cases") == 67
+        and expanded_matrix.get("cases") == 71
         and expanded_matrix.get("includes_original_cases") == 11,
         "v0.6 expanded fault-matrix cardinality mismatch",
     )
@@ -1137,13 +1137,13 @@ def _verify_v06(
             "crash-restart-no-blind-replay-proved",
             "sqlite-integrity-proved",
             "fault-matrix-11-of-11-passed",
-            "expanded-fault-matrix-67-of-67-passed",
+            "expanded-fault-matrix-71-of-71-passed",
             "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
         details={
             "fault_matrix_cases": 11,
-            "expanded_fault_matrix_cases": 67,
+            "expanded_fault_matrix_cases": 71,
             "repository_artifacts": len(artifacts),
         },
     )

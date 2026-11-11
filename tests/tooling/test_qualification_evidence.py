@@ -924,7 +924,7 @@ jobs:
         )
         self.assertIn('"fault_matrix": {\n                  "cases": 11,', workflow)
         self.assertIn(
-            '"expanded_fault_matrix": {\n                  "cases": 67,', workflow
+            '"expanded_fault_matrix": {\n                  "cases": 71,', workflow
         )
 
         self.assertIn(
@@ -932,10 +932,10 @@ jobs:
             workflow,
         )
         inventory = semantic_verifier._v06_matrix_inventory(ROOT)
-        for count, filtered in ((67, 0), (11, 56)):
+        for count, filtered in ((71, 0), (11, 60)):
             expected = (
                 inventory
-                if count == 67
+                if count == 71
                 else tuple(
                     name
                     for name in inventory
@@ -992,6 +992,7 @@ jobs:
         good = inventory.read_bytes()
         lines = good.splitlines(keepends=True)
         invalid = (
+            b"".join(line for line in lines if b"::native_handoff::" not in line),
             b"".join(lines[:-1]),
             good + lines[-1],
             b"".join([lines[0], lines[0], *lines[2:]]),
@@ -1006,7 +1007,7 @@ jobs:
             target = root / "tests/acceptance/v06/fault-matrix.txt"
             target.parent.mkdir(parents=True)
             target.write_bytes(good)
-            self.assertEqual(len(semantic_verifier._v06_matrix_inventory(root)), 67)
+            self.assertEqual(len(semantic_verifier._v06_matrix_inventory(root)), 71)
             for data in invalid:
                 with self.subTest(data=data[:100]):
                     target.write_bytes(data)

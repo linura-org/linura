@@ -58,3 +58,20 @@ all = { level = "warn", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+
+# Full-history integrity checks participate in fixed real-clock freshness windows.
+# Exercise their production-like performance while preserving all test assertions.
+[profile.test.package.sha2]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true
+
+[profile.test.package.linura-transaction]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true
+
+[profile.test.package.linura-persistence-sqlite]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true

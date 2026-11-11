@@ -337,11 +337,29 @@ not authority for any of them.
 | PhysicalReleaseVerified | Fresh native + independent KMS/frame/input/S17 evidence joined to unchanged durable anchors | Exact durable finalization only |
 | ReleasedCurrent | Root and Control re-read matching final records while admission remains serialized | Qualified admission and reference-aware cleanup may proceed |
 
-These are proposed **design** states, not currently implemented wire enum
-variants. Existing durable bytes and protocol versions keep their meanings.
+These states have distinct meanings, rather than interchangeable wire codes.
+`PhysicalReleaseVerified` is now an immutable Control journal record after the
+independent first-ordinary-frame join; it is not a new Root wire phase or a
+Committed terminal transaction. The record binds signed terminal generation,
+version and authority binding, canonical request and spent ancestry, contributor
+digests, complete immutable first-frame/KMS identity and both original deadlines.
+Read-only recovery after a missing spend reply can retain or reconcile that
+proof. An existing record keeps its first verification time and expiry; later
+reads cannot adopt a successor frame, replace contradictory bytes or renew it.
+Torn/unavailable storage and failed readback leave the terminal Indeterminate.
+Final `ReleasedCurrent` completion and fence retirement remain source work.
+Existing durable bytes and protocol versions keep their meanings.
 In particular, RootRetiredHeld, native Confirmed/Restored and a physical ACK
 are never aliases for ReleasedCurrent. An unknown, mismatched or unrecognized
 state must remain fenced.
+
+Before either Root retirement preparation or native-release reservation, Control
+requires the retained review of this exact original canonical finalization and
+revalidates current policy, registered risk and live approval again immediately
+before dispatch. Losing the review at restart denies these further Root writes;
+durable correlation and an interactive caller do not reconstruct it. Verification
+of an already spent handoff has no effect port and does not require recreating
+that approval. No record introduced here can retire input, power or admission.
 
 ### Distinct authorities
 

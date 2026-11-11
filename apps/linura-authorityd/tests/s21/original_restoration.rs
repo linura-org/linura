@@ -11,6 +11,9 @@ use linura_core::DisplayRecoveryScope;
 use linura_observation::{DisplayObservationFacts, DisplayOriginalProtectionFacts};
 use linura_transaction::{TransactionId, TransactionStore};
 
+#[path = "native_handoff.rs"]
+mod native_handoff;
+
 fn finalization_input(restoration_request: &RequestId) -> OriginalDisplayFinalizationRequest {
     OriginalDisplayFinalizationRequest {
         operation_id: "finalize-original-once".into(),
@@ -204,6 +207,7 @@ impl Observer for RestorationObserver {
         [
             linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
             linura_observation::DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY,
+            linura_observation::DISPLAY_NATIVE_HANDOFF_CAPABILITY,
         ]
         .into_iter()
         .map(|id| Capability {
@@ -239,7 +243,7 @@ impl Observer for RestorationObserver {
         };
         let mut sample =
             base.observe_authoritative(&self.template.resource, &self.template.capability)?;
-        let m = self
+        let mut m = self
             .machine
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
@@ -276,6 +280,11 @@ impl Observer for RestorationObserver {
             && resource == &sample.resource
         {
             return Ok(sample);
+        }
+        if capability.as_str() == linura_observation::DISPLAY_NATIVE_HANDOFF_CAPABILITY
+            && resource == &value(self.scope.resource_id())
+        {
+            return native_handoff::observe(&mut m, sample, &self.scope);
         }
         if capability.as_str() != linura_observation::DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY
             || resource != &value(self.scope.resource_id())

@@ -936,10 +936,26 @@ agree with the original ownership-derived restored source and complete mapping.
 It reconciles a second independently sampled read of the same first frame,
 rechecks Root/protection and durable anchors, and intersects all original
 expiries. Opaque safety-frame evidence cannot replace ordinary presentation and
-an ACK cannot replace either proof. The result is comparison only: durable
+an ACK cannot replace either proof. Its separate verification route retains an
+immutable `PhysicalReleaseVerified` Control record only after this independent
+join. The record binds the exact signed terminal generation/version/binding,
+request and spend ancestry, all contributor digests, complete first-frame/KMS
+tuple and original wall/BOOTTIME deadlines. Retention failure or contradictory
+history refuses; reconciliation preserves the first proof and cannot refresh its
+time or create another spend. A missing spend reply can be reconciled by fresh
+observation after restart, without reconstructing approval or effect authority.
+The signed terminal remains Indeterminate: terminal durable
 completion, final fence retirement, ordinary release, committed adoption,
 authorized succession and reference-aware cleanup remain unimplemented. The
 public production mutation prohibition and physical release gates remain intact.
+
+Both earlier Root reservation writes also revalidate the original full canonical
+finalization review, current registered risk/policy and live administrator
+approval before journal preparation and immediately before the Root call. An
+interactive caller plus durable history cannot reconstruct this process-local
+review after restart. The read-only inspection and durable verification routes
+remain available for already spent history; they cannot publish another Root
+reservation or recreate a grant.
 
 Control's separate read-only held-quiescence inspection loads the actual terminal
 request, immutable complete intent/claim and prepared/dispatched history, requiring

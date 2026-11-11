@@ -15,7 +15,9 @@ use linura_observation::{
 };
 use linura_transaction::TransactionSnapshot;
 mod handoff;
-pub use handoff::OriginalDisplayNativeHandoffInspection;
+pub use handoff::{
+    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeHandoffVerification,
+};
 
 /// The caller identifies existing restoration history and supplies provenance.
 /// Original sources, current proof and terminal material come only from Control.
@@ -339,6 +341,42 @@ fn invalid() -> ManagedLifecycleError {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
+    // Root reservation writes are continuations of the SAME reviewed managed
+    // finalization. Durable history and a matching interactive caller cannot
+    // reconstruct its live policy/risk/approval after Control restarts.
+    fn require_current_original_finalization_review(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        terminal: &TerminalInspectionContext,
+    ) -> Result<(), ManagedLifecycleError> {
+        let floor = self.registered_managed_risk_floor(&terminal.request)?;
+        let retained = self
+            .display_reviews
+            .get(&terminal.snapshot.transaction_id)
+            .ok_or_else(|| {
+                ManagedLifecycleError::ApprovalBoundary(
+                    "original terminal review unavailable; Root continuation remains fenced".into(),
+                )
+            })?;
+        let now = now_ms()?;
+        if retained.review.purpose()
+            != crate::durable_authority::DisplayReviewPurpose::OriginalFinalization
+            || now < retained.created_unix_ms
+            || now >= retained.deadline_unix_ms
+        {
+            return Err(invalid());
+        }
+        self.validate_registered_managed_plan(retained.review.plan(), retained.review.risk())?;
+        self.authority.revalidate_display_review(
+            principal,
+            &terminal.request,
+            &retained.review,
+            floor,
+            &terminal.snapshot,
+        )?;
+        Ok(())
+    }
+
     fn finalization_receipt(
         &self,
         principal: &AuthenticatedPrincipal,
@@ -1191,6 +1229,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .as_ref()
             .ok_or_else(invalid)?
             .clone();
+        self.require_current_original_finalization_review(&principal, &terminal)?;
         let complete = self.inspect_quiesced_original_display_finalization(
             principal.clone(),
             actor.clone(),
@@ -1240,6 +1279,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         observation
             .require_current(now_ms()?)
             .map_err(|_| invalid())?;
+        self.require_current_original_finalization_review(&principal, &terminal)?;
         // The port receives a non-cloneable private correlation, not a renewed
         // permit. Reconciliation may inspect only the already-spent history.
         port.prepare_retirement(prepared).map_err(|_| {
@@ -1284,6 +1324,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             ));
         }
         let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        self.require_current_original_finalization_review(&principal, &terminal)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
         let dispatch = terminal
             .receipt
@@ -1357,6 +1398,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             control_observation: original.observation().clone(),
             expires_at_unix_ms: record.expiry(),
         };
+        self.require_current_original_finalization_review(&principal, &terminal)?;
         port.reserve_native_release(authorized).map_err(|_| {
             ManagedLifecycleError::Indeterminate(
                 "native release Root reservation reply is uncertain; no retry".into(),
@@ -1383,16 +1425,16 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     /// Root identity and earlier Control reservation must remain unchanged.
     /// Only the initial first-ordinary-frame handoff is permitted. Input, S17,
     /// power and Root admission retirement require independent completion.
-    /// A successful return contains fresh comparison evidence only; the signed
-    /// terminal state remains Indeterminate. Missing ACK/frame proof permits
-    /// only the read-only handoff inspection, never a second spend.
+    /// A successful return retains independent first-frame verification; the
+    /// signed terminal state remains Indeterminate. Missing ACK/frame proof
+    /// permits observation and durable verification only, never a second spend.
     pub fn spend_original_display_native_release<P: OriginalDisplayNativeReleaseSpendPort>(
         &mut self,
         principal: AuthenticatedPrincipal,
         actor: Actor,
         terminal_request: &RequestId,
         port: &mut P,
-    ) -> Result<OriginalDisplayNativeHandoffInspection, ManagedLifecycleError> {
+    ) -> Result<OriginalDisplayNativeHandoffVerification, ManagedLifecycleError> {
         if actor.kind != ActorKind::Human || !actor.interactive {
             return Err(ManagedLifecycleError::ApprovalBoundary(
                 "native Root release spend requires authenticated interactive ownership".into(),
@@ -1538,19 +1580,22 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // The physical attempt replaces opaque frames. The pre-effect
         // restoration/safety-frame recipe cannot be reused as post-effect
         // first-ordinary-frame evidence. Join the distinct fresh post-effect
-        // proof without committing terminal state or releasing another fence.
-        record
-            .require_readback(self.display_journal()?, &principal_id, terminal_request)
-            .map_err(|_| {
-                ManagedLifecycleError::Indeterminate(
-                    "native physical handoff attempted; durable readback unavailable; no retry"
-                        .into(),
-                )
-            })?;
-        self.inspect_native_handoff_original_display_finalization(principal, terminal_request)
-            .map_err(|_| ManagedLifecycleError::Indeterminate(
-                "native handoff attempted; first ordinary frame not independently proven; read-only inspection only, no retry".into(),
-            ))
+        // proof and retain immutable verification without committing terminal
+        // state or releasing another fence.
+        // The independent inspection reads/authenticates the exact spent bytes
+        // before providers and reloads all durable anchors afterward. Reuse
+        // that qualified readback, rather than consuming the original window
+        // with another identical pre-inspection storage scan.
+        self.verify_native_handoff_with_spend(principal, terminal_request, Some(&record))
+            .map_err(|error| {
+                let reason = match error {
+                    ManagedLifecycleError::Verification(reason) => reason,
+                    _ => "terminal authority or durable ancestry unavailable".into(),
+                };
+                ManagedLifecycleError::Indeterminate(format!(
+                    "native handoff attempted; {reason}; observation only, no retry",
+                ))
+            })
     }
 
     fn terminal_inspection_context(

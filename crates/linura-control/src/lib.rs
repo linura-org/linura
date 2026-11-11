@@ -99,11 +99,12 @@ pub use managed_lifecycle::{
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayNativeHandoffInspection,
-    OriginalDisplayNativeReleaseReservationPort, OriginalDisplayNativeReleaseSpendPort,
-    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
-    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
-    OriginalDisplayRestorationTerminalReceipt, OriginalDisplayRetirementPreparationPort,
-    TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,
+    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQuiescenceInspection,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    OriginalDisplayRetirementPreparationPort, TrustedDisplayDecision, TrustedHumanApproval,
+    managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

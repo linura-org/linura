@@ -590,3 +590,16 @@ renew that receipt or grant another effect. Current-source/Root witness loss or
 clock rollback remains terminal. Production Root/native finalization and public
 Authority1 display mutation remain unavailable until the remaining workflow and
 native acceptance are complete.
+
+The Experimental internal Control native-spend method now returns
+`OriginalDisplayNativeHandoffVerification`: immutable first-frame verification
+history plus its fresh independent inspection, first verification time and
+unrenewed validity limit. Its signed terminal remains Indeterminate. The separate
+`inspect_native_handoff_original_display_finalization` route remains read-only;
+`verify_native_handoff_original_display_finalization` may retain or reconcile the
+bounded Control proof without an effect port. The latter can observe an already
+spent attempt after a lost reply or Control restart, but cannot recreate approval,
+repeat the spend or treat an expired proof as current. All in-repository Rust
+consumers move together; there is no compatibility shim or public SDK/D-Bus
+mutation activation. Final Root/Control ReleasedCurrent completion and ordered
+fence retirement remain a separate unfinished protocol.

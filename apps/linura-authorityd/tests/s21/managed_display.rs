@@ -58,6 +58,13 @@ struct Machine {
     finalization_state_fault: u8,
     restoration_frame_version: u32,
     finalization_history_fault: u8,
+    retirement_preparations: usize,
+    native_release_reservations: usize,
+    native_release_spends: usize,
+    native_handoff_reads: usize,
+    native_handoff_fault: u8,
+    native_handoff_window: Option<(u64, u64)>,
+    native_verification_write_fault: u8,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -291,6 +298,8 @@ impl Observer for LiveFixtureObserver {
                     2 => linura_observation::DisplayFinalizationPhase::Quiesced,
                     3 => linura_observation::DisplayFinalizationPhase::Retired,
                     4 => linura_observation::DisplayFinalizationPhase::ReleasedCurrent,
+                    5 => linura_observation::DisplayFinalizationPhase::NativeReleaseReserved,
+                    6 => linura_observation::DisplayFinalizationPhase::NativeReleaseSpent,
                     _ => unreachable!("unsupported simulated terminal phase"),
                 },
                 if machine.finalization_native_phase == 0 {
@@ -476,6 +485,28 @@ struct FailingJournal {
 }
 impl ApprovedRequestJournal for FailingJournal {
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-physical-verified:")
+        {
+            let fault = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .native_verification_write_fault;
+            match fault {
+                1 => return Err(TransactionStoreError::CapacityExceeded),
+                2 => return Ok(()), // Acknowledged but not durable.
+                3 => {
+                    self.inner.retain(record)?;
+                    return Err(TransactionStoreError::Storage(
+                        "simulated ambiguous verification sync".into(),
+                    ));
+                }
+                _ => (),
+            }
+        }
         let fault = self
             .machine
             .lock()

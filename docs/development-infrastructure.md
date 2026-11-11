@@ -35,6 +35,14 @@ cargo xtask check
 
 This checks Rust formatting, pinned Ruff Python lint and repository-wide formatting, Clippy, workspace tests, repository invariants, and structured asset validation. Additional commands expose acceptance scenarios and build plans without requiring contributors to memorize implementation-specific scripts.
 
+The test profile compiles SHA-256, transaction digests and SQLite integrity code
+at optimization level 2, with debug assertions and overflow checks explicitly
+enabled. Complete authenticated-history scans must fit the same real-clock
+freshness windows used by production. This exercises their computational cost
+without widening deadlines, caching away integrity checks or skipping cases.
+Control and test harnesses retain their ordinary debug settings; release build
+settings are unchanged.
+
 The canonical tooling test suite is discovered in full, then partitioned by
 module into up to two isolated Python workers (bounded by available CPU affinity).
 Each worker must report its exact executed test identities. The orchestrator
