@@ -349,6 +349,19 @@ reads cannot adopt a successor frame, replace contradictory bytes or renew it.
 Torn/unavailable storage and failed readback leave the terminal Indeterminate.
 Final `ReleasedCurrent` completion and fence retirement remain source work.
 Existing durable bytes and protocol versions keep their meanings.
+The Control continuation now moves the original process-local canonical review
+from initial spend to a distinct handoff-verified stage only after direct
+acknowledgement and durable independent first-frame verification. A separate
+immutable `original-completion-prepared.v1` record binds that exact terminal
+generation/version/binding, spend, verification and full frame digest before a
+non-cloneable completion port can be called. The original expiry is retained and
+checked after policy and durable readbacks immediately before dispatch; clock
+rollback also refuses. Removing the review precedes persistence and dispatch,
+so storage ambiguity, a lost completion reply or a restart cannot rearm it.
+Read-only handoff reconciliation never creates this continuation. Its receipt
+records only the attempt: an adapter ACK leaves Control Indeterminate and every
+unimplemented native/Root retirement gate outstanding. The native completion
+adapter, ordered fence retirement and final independent commit are still required.
 In particular, RootRetiredHeld, native Confirmed/Restored and a physical ACK
 are never aliases for ReleasedCurrent. An unknown, mismatched or unrecognized
 state must remain fenced.
@@ -360,6 +373,18 @@ before dispatch. Losing the review at restart denies these further Root writes;
 durable correlation and an interactive caller do not reconstruct it. Verification
 of an already spent handoff has no effect port and does not require recreating
 that approval. No record introduced here can retire input, power or admission.
+
+Root preparation and native-release reservation change durable authority markers
+while every physical fence remains held. Their postcondition verifier reads the
+exact Root phase twice through the authenticated observation route, matches the
+terminal and restoration lineage, reloads both Control histories and checks the
+unchanged original deadlines. It returns no physical restoration or release proof.
+False acknowledgement, missing/mismatched phase, expired evidence and contradictory
+history fail closed without repeating the reserved write. The complete independent
+display/source/Root/logind/S17 comparison still runs before each reservation and
+immediately before the actual native handoff. Fresh post-effect frame/KMS comparison
+and immutable verification retention remain mandatory afterward. Metadata readback
+cannot replace either physical verification boundary or complete the terminal.
 
 ### Distinct authorities
 

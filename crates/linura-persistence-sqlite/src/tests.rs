@@ -533,6 +533,29 @@ fn logical_audit_capacity_still_reserves_a_safe_exit() {
 }
 
 #[test]
+fn completed_integrity_check_never_caches_current_rows_or_reservations() {
+    let good_db = TestDatabase::new();
+    let (_, mut good) = open_store(&good_db.path);
+    good.prepare(&binding_with_observation("independent-good-store"))
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    for sql in [
+        "UPDATE transactions SET integrity_tag=zeroblob(32)",
+        "UPDATE generations SET integrity_tag=zeroblob(32)",
+        "UPDATE audit_reservations SET reserved=zeroblob(16384)",
+    ] {
+        let db = TestDatabase::new();
+        let (_, mut store) = open_store(&db.path);
+        store.prepare(&binding_with_observation("live-after-check"))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(store.integrity_check().is_ok());
+        let raw = Connection::open(&db.path).unwrap_or_else(|error| unreachable!("{error}"));
+        raw.execute_batch(sql).unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(store.integrity_check().is_err(), "{sql}");
+        assert!(good.integrity_check().is_ok());
+    }
+}
+
+#[test]
 fn installed_schema_tampering_is_detected_on_reopen() {
     let db = TestDatabase::new();
     drop(open_store(&db.path).1);

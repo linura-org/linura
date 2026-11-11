@@ -20,7 +20,7 @@ use crate::validation::{
     pragma_i64, pragma_string, reservation_bytes, sqlite, transaction_tag,
     validate_aggregate_capacity, validate_audit_chain, validate_generation_history,
     validate_logical_audit_reserve, validate_physical_reservations_locked, validate_runtime_settings,
-    validate_schema_identity, with_immediate_validation,
+    validate_schema_identity, validate_physical_reservations_for_current_locked, with_immediate_validation,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1290,28 +1290,30 @@ impl SqliteTransactionStore {
         }
         drop(foreign);
 
+        let mut current_snapshots = Vec::new();
         for transaction_id in list_transaction_ids(&self.connection)? {
-            let (transaction, _, _) =
+            let (_, generation, snapshot) =
                 load_current(&self.connection, &self.integrity_key, &transaction_id)?;
             validate_generation_history(
                 &self.connection,
                 &self.integrity_key,
                 &transaction_id,
-                transaction.current_generation,
+                &generation,
                 self.limits,
             )?;
             validate_audit_chain(
                 &self.connection,
                 &self.integrity_key,
                 &transaction_id,
-                transaction.current_generation,
-                transaction.state_version,
+                &generation,
+                &snapshot,
                 self.limits,
             )?;
+            current_snapshots.push(snapshot);
         }
-        validate_physical_reservations_locked(
+        validate_physical_reservations_for_current_locked(
             &self.connection,
-            &self.integrity_key,
+            current_snapshots.into_iter().map(Ok),
             self.opener_released_for_terminal_recovery,
         )
     }

@@ -18,6 +18,9 @@ const SHA256_BLOCK_BYTES: usize = 64;
 /// per-record HMACs; neither reveals this key.
 pub struct SqliteIntegrityKey {
     bytes: Vec<u8>,
+    // Fixed-key HMAC pads have exactly the key's protected lifetime. Keeping
+    // them here avoids making and scrubbing fresh key copies for every row.
+    pads: Box<[[u8; SHA256_BLOCK_BYTES]; 2]>,
 }
 
 impl Debug for SqliteIntegrityKey {
@@ -31,14 +34,25 @@ impl Debug for SqliteIntegrityKey {
 
 impl Drop for SqliteIntegrityKey {
     fn drop(&mut self) {
-        scrub_secret(&mut self.bytes);
+        self.scrub();
     }
 }
 
 impl SqliteIntegrityKey {
+    fn scrub(&mut self) {
+        scrub_secret(&mut self.bytes);
+        scrub_secret(&mut self.pads[0]);
+        scrub_secret(&mut self.pads[1]);
+    }
+
     pub fn new(mut bytes: Vec<u8>) -> Result<Self, TransactionStoreError> {
         validate_integrity_key_bytes(&mut bytes)?;
-        Ok(Self { bytes })
+        let mut pads = Box::new([[0x36; SHA256_BLOCK_BYTES], [0x5c; SHA256_BLOCK_BYTES]]);
+        for (index, byte) in bytes.iter().enumerate() {
+            pads[0][index] ^= byte;
+            pads[1][index] ^= byte;
+        }
+        Ok(Self { bytes, pads })
     }
 
     #[must_use]
@@ -55,7 +69,8 @@ impl SqliteIntegrityKey {
         canonical: &[u8],
     ) -> Result<[u8; INTEGRITY_TAG_BYTES], TransactionStoreError> {
         Ok(hmac_sha256(
-            &self.bytes,
+            &self.pads[0],
+            &self.pads[1],
             [
                 b"linura.sqlite.record-integrity.v1".as_slice(),
                 record_domain.as_bytes(),
@@ -96,24 +111,10 @@ fn scrub_secret(bytes: &mut [u8]) {
 }
 
 fn hmac_sha256<'a>(
-    key: &[u8],
+    inner_pad: &[u8; SHA256_BLOCK_BYTES],
+    outer_pad: &[u8; SHA256_BLOCK_BYTES],
     fields: impl IntoIterator<Item = &'a [u8]>,
 ) -> [u8; INTEGRITY_TAG_BYTES] {
-    let mut key_block = [0_u8; SHA256_BLOCK_BYTES];
-    if key.len() > SHA256_BLOCK_BYTES {
-        let digest = Sha256::digest(key);
-        key_block[..INTEGRITY_TAG_BYTES].copy_from_slice(&digest);
-    } else {
-        key_block[..key.len()].copy_from_slice(key);
-    }
-
-    let mut inner_pad = [0x36_u8; SHA256_BLOCK_BYTES];
-    let mut outer_pad = [0x5c_u8; SHA256_BLOCK_BYTES];
-    for index in 0..SHA256_BLOCK_BYTES {
-        inner_pad[index] ^= key_block[index];
-        outer_pad[index] ^= key_block[index];
-    }
-
     let mut inner = Sha256::new();
     inner.update(inner_pad);
     for field in fields {
@@ -129,9 +130,6 @@ fn hmac_sha256<'a>(
 
     let mut tag = [0_u8; INTEGRITY_TAG_BYTES];
     tag.copy_from_slice(&digest);
-    scrub_secret(&mut key_block);
-    scrub_secret(&mut inner_pad);
-    scrub_secret(&mut outer_pad);
     tag
 }
 
@@ -161,6 +159,39 @@ pub(crate) fn canonical_optional(buffer: &mut Vec<u8>, value: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_owned_pads_preserve_persisted_hmac_and_fingerprint() {
+        // Independent Python stdlib hmac/hashlib vectors over the unchanged
+        // three u64-length-prefixed fields; this is public fixture material.
+        let key = SqliteIntegrityKey::new(vec![0x0b; 32])
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(key.fingerprint().hex(), "54f318f0310adb92cba0f507d9ec9aaa09612a6d79f47b6951281e413f7a7e82");
+        for (domain, canonical, expected) in [
+            ("linura.sqlite.test.v1", b"".as_slice(), "ccae577be5a0fbff0c3f09bdbd4ed0fd39cd0982819e30cd1a8bcf3682801a7d"),
+            ("linura.sqlite.test.v1", b"persisted-record".as_slice(), "947f33e7d51e0c126fc6c6b423217120d59cc39e2bd07ffea605fa143dc4f48e"),
+            ("linura.sqlite.test.v2", b"persisted-record".as_slice(), "af333c42a1598e57e96f11b048c008a96f4d6dee34caa7fcd70e8593d1fb46bb"),
+        ] {
+            let tag = key.tag(domain, canonical).unwrap_or_else(|error| unreachable!("{error}"));
+            let hex: String = tag.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert_eq!(hex, expected);
+            assert!(key.verify(domain, canonical, &tag));
+            assert!(!key.verify("foreign", canonical, &tag));
+            assert!(!key.verify(domain, canonical, &tag[..31]));
+            let mut altered = tag;
+            altered[0] ^= 1;
+            assert!(!key.verify(domain, canonical, &altered));
+        }
+    }
+
+    #[test]
+    fn key_destruction_scrubs_original_and_derived_key_material() {
+        let mut key = SqliteIntegrityKey::new(vec![0x0b; 32])
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        key.scrub();
+        assert!(key.bytes.iter().all(|byte| *byte == 0));
+        assert!(key.pads.iter().flatten().all(|byte| *byte == 0));
+    }
 
     #[test]
     fn rejected_integrity_key_material_is_scrubbed_before_error_returns() {

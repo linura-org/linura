@@ -3,6 +3,7 @@
 
 use std::fmt::{Debug, Formatter};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use linura_core::{PrincipalId, RequestId};
@@ -56,6 +57,8 @@ impl SqliteApprovedRequestJournal {
         )
         .map_err(sqlite)?;
         connection
+            .set_prepared_statement_cache_capacity(crate::VALIDATION_STATEMENT_CACHE_CAPACITY);
+        connection
             .busy_timeout(Duration::from_millis(500))
             .map_err(sqlite)?;
         // Refuse foreign schemas before applying persistent journal settings.
@@ -66,11 +69,9 @@ impl SqliteApprovedRequestJournal {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(sqlite)?;
         let objects: i64 = connection
-            .query_row(
-                "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
-                [],
-                |r| r.get(0),
-            )
+            .prepare_cached("SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+            .map_err(sqlite)?
+            .query_row([], |r| r.get(0))
             .map_err(sqlite)?;
         if !((application == 0 && version == 0 && objects == 0)
             || (application == APPLICATION_ID && version == 1))
@@ -143,9 +144,24 @@ fn identity_material(key: &SqliteIntegrityKey) -> (String, String, Vec<u8>) {
 
 type SchemaObject = (String, String, String, String);
 
+fn expected_schema_objects() -> Result<&'static [SchemaObject], TransactionStoreError> {
+    // Only the compiled schema is retained. Each caller still reads and checks
+    // its live database, identity, durability settings and authenticated rows.
+    static EXPECTED: OnceLock<Result<Vec<SchemaObject>, TransactionStoreError>> = OnceLock::new();
+    EXPECTED
+        .get_or_init(|| {
+            let reference = Connection::open_in_memory().map_err(sqlite)?;
+            reference.execute_batch(SCHEMA).map_err(sqlite)?;
+            schema_objects(&reference)
+        })
+        .as_ref()
+        .map(Vec::as_slice)
+        .map_err(Clone::clone)
+}
+
 fn schema_objects(connection: &Connection) -> Result<Vec<SchemaObject>, TransactionStoreError> {
     let mut statement = connection
-        .prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY name LIMIT 4")
+        .prepare_cached("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY name LIMIT 4")
         .map_err(sqlite)?;
     let rows = statement
         .query_map([], |row| {
@@ -164,9 +180,7 @@ fn validate_identity(
     connection: &Connection,
     key: &SqliteIntegrityKey,
 ) -> Result<(), TransactionStoreError> {
-    let reference = Connection::open_in_memory().map_err(sqlite)?;
-    reference.execute_batch(SCHEMA).map_err(sqlite)?;
-    if schema_objects(connection)? != schema_objects(&reference)? {
+    if schema_objects(connection)?.as_slice() != expected_schema_objects()? {
         return Err(corrupt());
     }
     let application: i64 = connection
@@ -205,22 +219,28 @@ fn validate_identity(
         return Err(corrupt());
     }
     let identities: i64 = connection
-        .query_row("SELECT count(*) FROM request_journal_identity", [], |r| {
-            r.get(0)
-        })
+        .prepare_cached("SELECT count(*) FROM request_journal_identity")
+        .map_err(sqlite)?
+        .query_row([], |r| r.get(0))
         .map_err(sqlite)?;
     if identities != 1 {
         return Err(corrupt());
     }
     let (expected_fingerprint, expected_schema, canonical) = identity_material(key);
-    let valid = connection.query_row("SELECT format,integrity_fingerprint,schema_digest,integrity_tag FROM request_journal_identity WHERE singleton=1", [], |r| {
+    let valid = connection.prepare_cached("SELECT format,integrity_fingerprint,schema_digest,integrity_tag FROM request_journal_identity WHERE singleton=1",
+            )
+            .map_err(sqlite)?
+            .query_row(
+                [], |r| {
         Ok(r.get::<_, i64>(0)? == 1
             && r.get_ref(1)?.as_str()? == expected_fingerprint
             && r.get_ref(2)?.as_str()? == expected_schema
             && key.verify(IDENTITY_DOMAIN, &canonical, r.get_ref(3)?.as_blob()?))
     }).map_err(sqlite)?;
     let count: i64 = connection
-        .query_row("SELECT count(*) FROM retained_requests", [], |r| r.get(0))
+        .prepare_cached("SELECT count(*) FROM retained_requests")
+        .map_err(sqlite)?
+        .query_row([], |r| r.get(0))
         .map_err(sqlite)?;
     if !valid || count > MAX_REQUESTS {
         return Err(corrupt());
@@ -244,7 +264,7 @@ fn load_record(
     principal: &PrincipalId,
     request_id: &RequestId,
 ) -> Result<Option<RetainedRequest>, TransactionStoreError> {
-    connection.query_row("SELECT format,CASE WHEN length(canonical) BETWEEN 1 AND 262144 THEN canonical ELSE NULL END,CASE WHEN length(CAST(request_digest AS BLOB))=71 THEN request_digest ELSE NULL END,CASE WHEN length(integrity_tag)=32 THEN integrity_tag ELSE NULL END FROM retained_requests WHERE principal=?1 AND request_id=?2",
+    connection.prepare_cached("SELECT format,CASE WHEN length(canonical) BETWEEN 1 AND 262144 THEN canonical ELSE NULL END,CASE WHEN length(CAST(request_digest AS BLOB))=71 THEN request_digest ELSE NULL END,CASE WHEN length(integrity_tag)=32 THEN integrity_tag ELSE NULL END FROM retained_requests WHERE principal=?1 AND request_id=?2").map_err(|_| corrupt())?.query_row(
         params![principal.as_str(), request_id.as_str()], |row| {
             let bytes = row.get_ref(1)?.as_blob()?;
             let digest = row.get_ref(2)?.as_str()?;
@@ -280,7 +300,9 @@ impl ApprovedRequestJournal for SqliteApprovedRequestJournal {
             }
         } else {
             let count: i64 = transaction
-                .query_row("SELECT count(*) FROM retained_requests", [], |r| r.get(0))
+                .prepare_cached("SELECT count(*) FROM retained_requests")
+                .map_err(sqlite)?
+                .query_row([], |r| r.get(0))
                 .map_err(sqlite)?;
             if count >= MAX_REQUESTS {
                 return Err(TransactionStoreError::CapacityExceeded);
@@ -325,7 +347,7 @@ impl ApprovedRequestJournal for SqliteApprovedRequestJournal {
             return Err(corrupt());
         }
         let mut statement = transaction
-            .prepare("SELECT principal,request_id FROM retained_requests LIMIT 4097")
+            .prepare_cached("SELECT principal,request_id FROM retained_requests LIMIT 4097")
             .map_err(sqlite)?;
         let rows = statement
             .query_map([], |row| {
@@ -499,6 +521,35 @@ mod tests {
             if !sql.starts_with("DELETE") {
                 assert!(journal.integrity_check().is_err());
             }
+        }
+    }
+
+    #[test]
+    fn independent_journals_revalidate_live_state_after_reference_is_warm() {
+        let good_database = Database::new();
+        let mut good = good_database.open();
+        let request = record("unix:uid:1000", "request:s17:a", b"lock");
+        assert!(good.retain(&request).is_ok());
+        for sql in [
+            "CREATE TABLE foreign_schema(value BLOB)",
+            "UPDATE request_journal_identity SET integrity_tag=zeroblob(32)",
+            "UPDATE retained_requests SET integrity_tag=zeroblob(32)",
+            "PRAGMA synchronous=OFF",
+        ] {
+            let bad_database = Database::new();
+            let mut bad = bad_database.open();
+            assert!(bad.retain(&request).is_ok());
+            assert!(bad.integrity_check().is_ok());
+            bad.connection
+                .execute_batch(sql)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert!(bad.integrity_check().is_err());
+            assert!(bad.load(request.principal(), request.request_id()).is_err());
+            assert!(good.integrity_check().is_ok());
+            assert_eq!(
+                good.load(request.principal(), request.request_id()),
+                Ok(request.clone())
+            );
         }
     }
 

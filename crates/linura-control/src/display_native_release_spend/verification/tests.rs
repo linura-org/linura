@@ -405,3 +405,119 @@ fn clock_rollback_boundary_expiry_and_changed_first_buffer_never_refresh_proof()
         NativeHandoffVerified::reconcile(&first.canonical, &value(changed.capture(1003))).is_err()
     );
 }
+
+fn completion(
+    fixture: &Fixture,
+    proof: &NativeHandoffVerified,
+    now: u64,
+) -> Result<completion::NativeCompletionPrepared, ManagedLifecycleError> {
+    completion::NativeCompletionPrepared::capture(
+        &fixture.principal,
+        &fixture.request,
+        &fixture.snapshot,
+        &fixture.dispatch,
+        &fixture.material,
+        &fixture.parent,
+        proof,
+        &fixture.observation,
+        &fixture.frames,
+        now,
+    )
+}
+
+#[test]
+fn completion_preparation_is_separate_durable_once_and_preserves_original_expiry() {
+    let fixture = Fixture::new();
+    let proof = value(fixture.capture(1002));
+    let prepared = value(completion(&fixture, &proof, 1003));
+    assert_eq!(prepared.expiry(), proof.expiry());
+    for now in [1003, prepared.expiry() - 1] {
+        value(prepared.require_current(now));
+    }
+    for now in [0, 1002, prepared.expiry(), u64::MAX] {
+        assert!(prepared.require_current(now).is_err());
+    }
+    assert_ne!(prepared.digest(), proof.digest());
+    let mut journal = Journal::default();
+    value(prepared.retain_once(&mut journal));
+    value(prepared.require_readback(&journal));
+    assert!(prepared.retain_once(&mut journal).is_err());
+    assert!(
+        completion::NativeCompletionPrepared::require_absent(
+            &journal,
+            &fixture.principal,
+            &fixture.request.request_id,
+        )
+        .is_err()
+    );
+    assert_eq!(journal.records.len(), 1);
+    assert_eq!(fixture.snapshot.state, TransactionState::Indeterminate);
+}
+
+#[test]
+fn completion_cannot_adopt_foreign_proof_frame_generation_or_later_clock() {
+    let fixture = Fixture::new();
+    let proof = value(fixture.capture(1002));
+    for case in 0..7 {
+        let mut changed = Fixture::new();
+        match case {
+            0 => changed.principal = value(PrincipalId::new("unix:uid:1001")),
+            1 => changed.snapshot.current_generation += 1,
+            2 => changed.snapshot.binding_digest = digest_bytes("foreign", b"binding"),
+            3 => changed.parent.canonical.push(1),
+            4 => changed.dispatch = "9".repeat(64),
+            5 => changed.snapshot.state = TransactionState::Committed,
+            _ => changed.request.request_id = value(RequestId::new("request:foreign")),
+        }
+        assert!(completion(&changed, &proof, 1003).is_err(), "case {case}");
+    }
+    for now in [0, 1001, 1150, 1200, u64::MAX] {
+        assert!(completion(&fixture, &proof, now).is_err());
+    }
+    let mut changed = Fixture::new();
+    let mut outputs = changed.frames.outputs().clone();
+    outputs
+        .values_mut()
+        .next()
+        .unwrap_or_else(|| unreachable!())
+        .framebuffer += 1;
+    let scope =
+        value(value(DisplayFinalizationMaterial::decode(&changed.material)).recovery_scope());
+    changed.frames = value(DisplayNativeHandoffFacts::new(
+        scope,
+        changed.frames.lineage().clone(),
+        changed.frames.window(),
+        outputs,
+    ));
+    assert!(completion(&changed, &proof, 1003).is_err());
+}
+
+#[test]
+fn completion_storage_failure_ambiguity_or_substituted_readback_never_rearms() {
+    let fixture = Fixture::new();
+    let proof = value(fixture.capture(1002));
+    let prepared = value(completion(&fixture, &proof, 1003));
+    let mut journal = Journal {
+        write_failure: true,
+        ..Journal::default()
+    };
+    assert!(prepared.retain_once(&mut journal).is_err());
+    assert_eq!(journal.records.len(), 1); // Persisted-before-error remains spent.
+    journal.write_failure = false;
+    assert!(prepared.retain_once(&mut journal).is_err());
+    value(prepared.require_readback(&journal));
+    let key = value(completion::NativeCompletionPrepared::key(
+        &fixture.request.request_id,
+    ));
+    let entry = journal
+        .records
+        .get_mut(&(fixture.principal.clone(), key.clone()))
+        .unwrap_or_else(|| unreachable!());
+    let mut bytes = entry.canonical().to_vec();
+    bytes.push(0);
+    *entry = value(RetainedRequest::new(fixture.principal.clone(), key, bytes));
+    assert!(prepared.require_readback(&journal).is_err());
+    assert!(prepared.retain_once(&mut journal).is_err());
+    journal.integrity_failure = true;
+    assert!(prepared.require_readback(&journal).is_err());
+}

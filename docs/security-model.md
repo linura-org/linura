@@ -674,6 +674,21 @@ Post-commit reconciliation performs another independent check and deterministic 
 
 The v0.6 authority path uses durable SQLite/WAL transaction state with integrity/recovery checks. Durable storage is authoritative for Linura's control records, not for current Linux machine truth.
 
+SQLite validation may retain reference schemas derived solely from the compiled
+migrations and reuse compiled read-only SQL statements. Current schema objects,
+migration ledgers, identities, durability settings and authenticated record
+histories are still read and validated on every required check; neither cache
+retains a successful integrity result. A full transaction integrity check may
+reuse current rows it has just authenticated under its existing `BEGIN IMMEDIATE`
+write lock while it validates all generations, audit history and physical
+reservations. Those rows are local to that check; subsequent calls load them
+again, and no provider call or external effect occurs inside that read scope.
+Fixed-key HMAC pads remain private to the
+non-cloneable record-integrity key and are borrowed for fresh tag calculations.
+They share the key's protected lifetime and are scrubbed with its original bytes
+using sequentially consistent atomic stores before deallocation. Persisted HMAC
+framing, key fingerprints and constant-time tag comparison are unchanged.
+
 Observed state is always re-derived from authoritative Linux providers when truth matters for planning, execution eligibility, verification or recovery. Storage corruption, write uncertainty, stale evidence and conflicting machine state fail closed.
 
 Broader intent/graph/provenance persistence remains subject to its own milestone/migration requirements; v0.6 does not claim every future persistence domain is complete merely because the authority transaction store is durable.
@@ -948,6 +963,18 @@ The signed terminal remains Indeterminate: terminal durable
 completion, final fence retirement, ordinary release, committed adoption,
 authorized succession and reference-aware cleanup remain unimplemented. The
 public production mutation prohibition and physical release gates remain intact.
+
+Only direct successful native spend followed by independently retained first-frame
+proof can move the original process-local finalization review into a completion
+continuation. The separately durable completion preparation binds the canonical
+request, signed terminal generation/version/binding, original spend and immutable
+verification/frame identities. Control removes that review before any preparation
+write or adapter call, revalidates current registered risk, policy and live
+administrator approval, and checks the original deadline and clock ordering after
+readback immediately before dispatch. Neither a missing reply nor fresh read-only
+reconciliation recreates the continuation. An ACK-only adapter cannot commit the
+terminal or retire protection. Actual authenticated Root/native completion,
+post-retirement verification and ordered fence retirement remain required.
 
 Both earlier Root reservation writes also revalidate the original full canonical
 finalization review, current registered risk/policy and live administrator

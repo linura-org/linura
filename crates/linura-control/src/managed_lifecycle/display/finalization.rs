@@ -16,7 +16,9 @@ use linura_observation::{
 use linura_transaction::TransactionSnapshot;
 mod handoff;
 pub use handoff::{
-    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeHandoffVerification,
+    AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
+    OriginalDisplayCompletionReceipt, OriginalDisplayNativeHandoffInspection,
+    OriginalDisplayNativeHandoffVerification,
 };
 
 /// The caller identifies existing restoration history and supplies provenance.
@@ -285,6 +287,7 @@ pub trait OriginalDisplayNativeReleaseSpendPort: Debug + Send {
 pub struct OriginalDisplayQuiescenceInspection {
     restoration: OriginalDisplayFinalizationInspection,
     terminal: TransactionSnapshot,
+    context: TerminalInspectionContext,
 }
 impl OriginalDisplayQuiescenceInspection {
     #[must_use]
@@ -361,6 +364,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let now = now_ms()?;
         if retained.review.purpose()
             != crate::durable_authority::DisplayReviewPurpose::OriginalFinalization
+            || retained.stage != DisplayReviewStage::Initial
             || now < retained.created_unix_ms
             || now >= retained.deadline_unix_ms
         {
@@ -382,12 +386,29 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,
     ) -> Result<OriginalDisplayFinalizationReceipt, ManagedLifecycleError> {
-        self.authority.assert_request_matches(principal, request)?;
+        self.finalization_receipt_context(principal, request)
+            .map(|(_, _, receipt)| receipt)
+    }
+
+    fn finalization_receipt_context(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<
+        (
+            FinalizationIntent,
+            TransactionSnapshot,
+            OriginalDisplayFinalizationReceipt,
+        ),
+        ManagedLifecycleError,
+    > {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let transaction = TransactionId::for_namespace(&principal_id, &request.request_id);
+        let snapshot = self
+            .authority
+            .matching_request_snapshot(principal, request)?;
         let intent = FinalizationIntent::load(self.display_journal()?, &principal_id, request)?;
         intent.require_claim(self.display_journal()?, &principal_id, request)?;
-        let transaction = TransactionId::for_namespace(&principal_id, &request.request_id);
-        let snapshot = self.authority.snapshot(&transaction)?;
         if snapshot.principal != principal_id
             || snapshot.request_id != request.request_id
             || snapshot.transaction_id != transaction
@@ -432,11 +453,21 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 return Err(invalid());
             }
         }
-        Ok(OriginalDisplayFinalizationReceipt {
+        let receipt = OriginalDisplayFinalizationReceipt {
             request_id: request.request_id.clone(),
             transaction_id: transaction,
             dispatch_digest: dispatched.and_then(|record| record.dispatch_digest),
-        })
+        };
+        // Compare one coherent, request-bound snapshot across the complete
+        // journal read instead of reloading unchecked partial snapshots.
+        if self
+            .authority
+            .matching_request_snapshot(principal, request)?
+            != snapshot
+        {
+            return Err(invalid());
+        }
+        Ok((intent, snapshot, receipt))
     }
 
     /// Fresh terminal-purpose authorization and separately prepared one-use
@@ -697,6 +728,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         self.display_reviews.insert(
             dispatched.transaction_id.clone(),
             RetainedDisplayReview {
+                stage: DisplayReviewStage::Initial,
                 review: crate::durable_authority::DisplayRetainedReview::from_spent(
                     prepared,
                     crate::durable_authority::DisplayReviewPurpose::OriginalFinalization,
@@ -870,10 +902,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .strip_prefix(DISPLAY_RESTORATION_REQUEST_PREFIX)
             .ok_or_else(invalid)?;
         validate_operation_id(suffix)?;
-        self.display_journal()?
-            .integrity_check()
-            .map_err(|_| invalid())?;
-        self.authority.integrity_check()?;
+        let checked_history = self.checked_display_history()?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
         let retained = self
             .display_journal()?
@@ -929,7 +958,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if reserved.transaction_id != transaction || dispatched.transaction_id != transaction {
             return Err(invalid());
         }
-        let original = self.retained_display_request(principal, material.original_request())?;
+        let original = checked_history.original_request(principal, material.original_request())?;
         self.authority
             .assert_request_matches(principal, &original)?;
         let original_transaction =
@@ -948,7 +977,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // A link written before the original CAS is not terminal retirement.
         // State name alone also misses generation/version/binding substitution.
         link.require_retired(&original_snapshot, &committed)?;
-        let source = self.original_display_context(principal, &original.request_id)?;
+        let source = self.original_display_context_from_history(
+            principal,
+            original.clone(),
+            &original_snapshot,
+        )?;
         Ok(LinkedHistory {
             original,
             restoration: request,
@@ -1111,8 +1144,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else {
             None
         };
-        let proof =
-            self.inspect_terminal_phase(principal.clone(), actor, terminal_request, expected)?;
+        let restoration = self.inspect_terminal_phase_from_context(
+            principal.clone(),
+            actor,
+            &terminal,
+            expected,
+        )?;
         // A lost reply is reconciled by fresh physical facts and the exact
         // old immutable record, never another Root/native write or approval.
         if self.terminal_inspection_context(&principal, terminal_request)? != terminal
@@ -1152,7 +1189,86 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        Ok(proof)
+        Ok(OriginalDisplayQuiescenceInspection {
+            restoration,
+            terminal: terminal.snapshot.clone(),
+            context: terminal,
+        })
+    }
+
+    // These Root writes change durable authority markers while every physical
+    // fence remains held. This verifies that exact effect, not physical release.
+    // Native spend still joins every independent display source before dispatch
+    // and verifies the first ordinary frame independently afterward.
+    fn verify_original_root_reservation(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        terminal: &TerminalInspectionContext,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<(), ManagedLifecycleError> {
+        if !matches!(
+            expected,
+            DisplayFinalizationPhase::Retired | DisplayFinalizationPhase::NativeReleaseReserved
+        ) || self.terminal_inspection_context(principal, &terminal.request.request_id)?
+            != *terminal
+        {
+            return Err(invalid());
+        }
+        let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+            .map_err(|_| invalid())?;
+        let history = self.finalization_history(principal, material.restoration_request())?;
+        if material.terminal_link() != history.link.digest().hex()
+            || material.restoration_text() != history.restoration.desired_state["restore_original"]
+            || Some(material.restoration_dispatch())
+                != history.dispatched.dispatch_digest.as_deref()
+        {
+            return Err(invalid());
+        }
+        let scope = material.recovery_scope().map_err(|_| invalid())?;
+        let request = linura_protocol::ObservationRequest {
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY)
+                .map_err(|_| invalid())?,
+            resource: scope.resource_id().map_err(|_| invalid())?,
+        };
+        let mut before = None;
+        let mut observations = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let observation = self
+                .previews
+                .observe(&request)
+                .map_err(|_| invalid())?
+                .observation;
+            let current =
+                DisplayOriginalFinalizationFacts::from_envelope(&observation, &scope, now_ms()?)
+                    .map_err(|_| invalid())?;
+            if !terminal.matches(&current, expected)
+                || current.checkpoint() != material.restoration().original_checkpoint()
+                || current.restoration_transaction()
+                    != history.restoration_snapshot.transaction_id.as_str()
+                || current.restoration_effect()
+                    != effect_from_request(&history.restoration)?.digest().to_hex()
+                || Some(current.restoration_dispatch())
+                    != history.dispatched.dispatch_digest.as_deref()
+                || before.as_ref().is_some_and(|first| first != &current)
+            {
+                return Err(invalid());
+            }
+            before = Some(current);
+            observations.push(observation);
+        }
+        if self.finalization_history(principal, material.restoration_request())? != history
+            || self.terminal_inspection_context(principal, &terminal.request.request_id)?
+                != *terminal
+        {
+            return Err(invalid());
+        }
+        for observation in observations {
+            observation
+                .require_current(now_ms()?)
+                .map_err(|_| invalid())?;
+        }
+        Ok(())
     }
 
     fn inspect_terminal_phase(
@@ -1172,6 +1288,22 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(invalid());
         }
         let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let restoration =
+            self.inspect_terminal_phase_from_context(principal, actor, &terminal, expected)?;
+        Ok(OriginalDisplayQuiescenceInspection {
+            restoration,
+            terminal: terminal.snapshot.clone(),
+            context: terminal,
+        })
+    }
+
+    fn inspect_terminal_phase_from_context(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal: &TerminalInspectionContext,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
         let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
             .map_err(|_| invalid())?;
         let restoration_request = material.restoration_request().clone();
@@ -1183,17 +1315,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        let restoration = self.inspect_finalization_state(
+        self.inspect_finalization_state(
             principal,
             actor,
             &restoration_request,
             history,
-            Some((&terminal, expected)),
-        )?;
-        Ok(OriginalDisplayQuiescenceInspection {
-            restoration,
-            terminal: terminal.snapshot,
-        })
+            Some((terminal, expected)),
+        )
     }
 
     /// Journal a one-use Control retirement-preparation decision before asking
@@ -1235,9 +1363,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             actor.clone(),
             terminal_request,
         )?;
-        if complete.terminal != terminal.snapshot
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-        {
+        if complete.context != terminal {
             return Err(invalid());
         }
         let observation = complete.restoration.observation();
@@ -1288,19 +1414,16 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             )
         })?;
         record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
-        if self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || now_ms()? >= record.expiry()
-        {
+        if now_ms()? >= record.expiry() {
             return Err(invalid());
         }
-        // Re-check Root and all independent current sources after the native
-        // mechanism, even though this operation has no release side effect.
-        let after = self.inspect_root_retired_held_original_display_finalization(
-            principal,
-            actor,
-            terminal_request,
+        self.verify_original_root_reservation(
+            &principal,
+            &terminal,
+            DisplayFinalizationPhase::Retired,
         )?;
-        if after.terminal != terminal.snapshot {
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry() {
             return Err(invalid());
         }
         Ok(())
@@ -1349,9 +1472,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             actor.clone(),
             terminal_request,
         )?;
-        if held.terminal != terminal.snapshot
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-        {
+        if held.context != terminal {
             return Err(invalid());
         }
         let now = now_ms()?;
@@ -1405,15 +1526,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             )
         })?;
         record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
-        let after = self.inspect_native_release_reserved_original_display_finalization(
-            principal.clone(),
-            actor,
-            terminal_request,
+        self.verify_original_root_reservation(
+            &principal,
+            &terminal,
+            DisplayFinalizationPhase::NativeReleaseReserved,
         )?;
-        if after.terminal != terminal.snapshot
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || now_ms()? >= record.expiry()
-        {
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry() {
             return Err(invalid());
         }
         Ok(()) // Reservation only; no presentation or final fence retirement.
@@ -1474,9 +1593,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             actor.clone(),
             terminal_request,
         )?;
-        if held.terminal != terminal.snapshot
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-        {
+        if held.context != terminal {
             return Err(invalid());
         }
         let now = now_ms()?;
@@ -1484,7 +1601,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // finalization. LNRN/LNRX cannot reconstruct its review or approval.
         // Remove the refusal material before durable spend; ambiguity and
         // restart cannot recover a second grant-spend opportunity.
-        let review = self
+        let mut review = self
             .display_reviews
             .remove(&terminal.snapshot.transaction_id)
             .ok_or_else(|| {
@@ -1496,6 +1613,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let floor = self.registered_managed_risk_floor(&terminal.request)?;
         if review.review.purpose()
             != crate::durable_authority::DisplayReviewPurpose::OriginalFinalization
+            || review.stage != DisplayReviewStage::Initial
             || now < review.created_unix_ms
             || now >= review.deadline_unix_ms
         {
@@ -1586,7 +1704,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // before providers and reloads all durable anchors afterward. Reuse
         // that qualified readback, rather than consuming the original window
         // with another identical pre-inspection storage scan.
-        self.verify_native_handoff_with_spend(principal, terminal_request, Some(&record))
+        let verified = self
+            .verify_native_handoff_with_spend(principal.clone(), terminal_request, Some(&record))
             .map_err(|error| {
                 let reason = match error {
                     ManagedLifecycleError::Verification(reason) => reason,
@@ -1595,7 +1714,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 ManagedLifecycleError::Indeterminate(format!(
                     "native handoff attempted; {reason}; observation only, no retry",
                 ))
-            })
+            })?;
+        // Move the ORIGINAL full review forward only after direct, durable
+        // independent proof. The read-only verification route never enters
+        // this branch. Reuse the existing bounded cache, with no extra entry
+        // or new clock; the initial-spend/preparation paths reject this stage.
+        review.stage = DisplayReviewStage::HandoffVerified {
+            spend: record.digest(),
+            verification: verified.record_digest().clone(),
+            expires_at_unix_ms: verified.valid_until_unix_ms(),
+        };
+        self.check_display_review_capacity(review.retained_bytes)?;
+        let checked = now_ms()?;
+        if checked < review.created_unix_ms || checked >= review.deadline_unix_ms {
+            return Err(invalid());
+        }
+        self.display_reviews
+            .insert(terminal.snapshot.transaction_id, review);
+        Ok(verified)
     }
 
     fn terminal_inspection_context(
@@ -1624,13 +1760,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let request = crate::retained_request::decode(&retained)?;
         validate_public_request(&request)?;
         validate_request_identity(&request)?;
-        self.authority.assert_request_matches(principal, &request)?;
         if retained.digest() != &crate::durable_authority::digest_request(&request)? {
             return Err(invalid());
         }
-        let intent = FinalizationIntent::load(self.display_journal()?, &principal_id, &request)?;
-        let receipt = self.finalization_receipt(principal, &request)?;
-        let snapshot = self.authority.snapshot(&receipt.transaction_id)?;
+        let (intent, snapshot, receipt) = self.finalization_receipt_context(principal, &request)?;
         if snapshot.state != TransactionState::Indeterminate || receipt.dispatch_digest.is_none() {
             return Err(invalid());
         }

@@ -6,13 +6,64 @@ use crate::display_recovery_journal::{Phase, Record};
 use linura_core::DisplayLayoutMaterial;
 use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
+/// One synchronous history-read scope after both durable stores passed their
+/// full checks. It holds no approval, permit or current-provider evidence and
+/// cannot be used across a mutable provider/effect boundary.
+#[derive(Debug)]
+struct CheckedDisplayHistoryRead<'a> {
+    journal: &'a dyn ApprovedRequestJournal,
+}
+impl CheckedDisplayHistoryRead<'_> {
+    fn original_request(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<PlanDesiredStateRequest, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let retained = self
+            .journal
+            .load(&principal_id, request_id)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(ManagedLifecycleError::Authority(
+                "display journal substituted the retained request identity".into(),
+            ));
+        }
+        let request = crate::retained_request::decode(&retained)?;
+        require_owner(principal, &request)?;
+        if retained.digest() != &crate::durable_authority::digest_request(&request)? {
+            return Err(ManagedLifecycleError::Authority(
+                "display retained request digest mismatch".into(),
+            ));
+        }
+        Ok(request)
+    }
+}
+
 pub const DISPLAY_CONFIRMATION_WINDOW_MS: u64 = 15_000;
 const MAX_DISPLAY_REVIEWS: usize = 32;
 const MAX_DISPLAY_REVIEW_BYTES: usize = 256 * 1024;
 const MAX_TOTAL_DISPLAY_REVIEW_BYTES: usize = 8 * 1024 * 1024;
+/// Process-local refusal material can move forward exactly once. A durable
+/// proof, a restart or an inspection cannot reconstruct either stage.
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum DisplayReviewStage {
+    Initial,
+    HandoffVerified {
+        spend: linura_transaction::ContentDigest,
+        verification: linura_transaction::ContentDigest,
+        expires_at_unix_ms: u64,
+    },
+    CompletionDispatched {
+        preparation: linura_transaction::ContentDigest,
+        verification: linura_transaction::ContentDigest,
+    },
+}
 #[derive(Debug)]
 pub(super) struct RetainedDisplayReview {
     review: crate::durable_authority::DisplayRetainedReview,
+    stage: DisplayReviewStage,
     created_unix_ms: u64,
     deadline_unix_ms: u64,
     retained_bytes: usize,
@@ -24,14 +75,16 @@ mod release;
 mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
-    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativeReleaseReservation,
-    AuthorizedOriginalDisplayNativeReleaseSpend, AuthorizedOriginalDisplayRetirementPreparation,
-    OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
-    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
-    OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
-    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeHandoffVerification,
-    OriginalDisplayNativeReleaseReservationPort, OriginalDisplayNativeReleaseSpendPort,
-    OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
+    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayFinalization,
+    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
+    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayCompletionPort,
+    OriginalDisplayCompletionReceipt, OriginalDisplayFinalizationAuthorizer,
+    OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
+    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
+    OriginalDisplayFinalizationRequest, OriginalDisplayNativeHandoffInspection,
+    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQuiescenceInspection,
+    OriginalDisplayRetirementPreparationPort,
 };
 pub use release::OrdinaryDisplayReleaseInspection;
 pub use restoration::{
@@ -489,6 +542,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         })?;
         let now = now_ms()?;
         if retained.review.purpose() != crate::durable_authority::DisplayReviewPurpose::Keep
+            || retained.stage != DisplayReviewStage::Initial
             || now < retained.created_unix_ms
             || now >= retained.deadline_unix_ms
         {
@@ -643,34 +697,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             previous,
         )
     }
+    fn checked_display_history(
+        &self,
+    ) -> Result<CheckedDisplayHistoryRead<'_>, ManagedLifecycleError> {
+        let journal = self.display_journal()?;
+        journal
+            .integrity_check()
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        self.authority.integrity_check()?;
+        Ok(CheckedDisplayHistoryRead { journal })
+    }
+
     fn retained_display_request(
         &self,
         principal: &AuthenticatedPrincipal,
         request_id: &RequestId,
     ) -> Result<PlanDesiredStateRequest, ManagedLifecycleError> {
-        self.display_journal()?
-            .integrity_check()
-            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
-        self.authority.integrity_check()?;
-        let principal_id = PrincipalId::new(principal.as_str())
-            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
-        let retained = self
-            .display_journal()?
-            .load(&principal_id, request_id)
-            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
-        if retained.principal() != &principal_id || retained.request_id() != request_id {
-            return Err(ManagedLifecycleError::Authority(
-                "display journal substituted the retained request identity".into(),
-            ));
-        }
-        let request = crate::retained_request::decode(&retained)?;
-        require_owner(principal, &request)?;
-        if retained.digest() != &crate::durable_authority::digest_request(&request)? {
-            return Err(ManagedLifecycleError::Authority(
-                "display retained request digest mismatch".into(),
-            ));
-        }
-        Ok(request)
+        self.checked_display_history()?
+            .original_request(principal, request_id)
     }
 
     /// Prepare and dispatch once. Completion remains provisional until a separate
@@ -834,6 +878,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         self.display_reviews.insert(
             dispatched.transaction_id.clone(),
             RetainedDisplayReview {
+                stage: DisplayReviewStage::Initial,
                 review: crate::durable_authority::DisplayRetainedReview::from_spent(
                     prepared,
                     crate::durable_authority::DisplayReviewPurpose::Keep,

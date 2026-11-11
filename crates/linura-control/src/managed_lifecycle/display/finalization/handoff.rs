@@ -10,6 +10,12 @@ use linura_observation::{
 };
 use linura_protocol::ObservationRequest;
 
+mod completion;
+pub use completion::{
+    AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
+    OriginalDisplayCompletionReceipt,
+};
+
 fn unavailable_at(stage: &'static str) -> ManagedLifecycleError {
     ManagedLifecycleError::Verification(format!("original display handoff unavailable at {stage}"))
 }
@@ -22,6 +28,7 @@ pub struct OriginalDisplayNativeHandoffVerification {
     record_digest: linura_transaction::ContentDigest,
     first_verified_unix_ms: u64,
     valid_until_unix_ms: u64,
+    proof: NativeHandoffVerified,
 }
 impl OriginalDisplayNativeHandoffVerification {
     #[must_use]
@@ -154,6 +161,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             record_digest: retained.digest(),
             first_verified_unix_ms: retained.observed_at(),
             valid_until_unix_ms: expiry,
+            proof: retained,
         })
     }
 

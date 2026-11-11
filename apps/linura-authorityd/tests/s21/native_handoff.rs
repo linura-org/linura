@@ -2,14 +2,16 @@
 //! No KMS/compositor execution, hardware or Level A/B evidence is claimed.
 use super::*;
 use linura_control::{
-    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
-    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayNativeReleaseReservationPort,
+    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayNativeReleaseReservation,
+    AuthorizedOriginalDisplayNativeReleaseSpend, AuthorizedOriginalDisplayRetirementPreparation,
+    OriginalDisplayCompletionPort, OriginalDisplayNativeReleaseReservationPort,
     OriginalDisplayNativeReleaseSpendPort, OriginalDisplayRetirementPreparationPort,
 };
 use linura_observation::{
     DisplayNativeHandoffFacts, DisplayNativeHandoffLineage, DisplayNativeHandoffOutput,
     DisplayNativeHandoffWindow,
 };
+use linura_transaction::TransactionState;
 
 pub(super) fn observe(
     machine: &mut Machine,
@@ -143,7 +145,42 @@ pub(super) fn observe(
 }
 
 #[derive(Debug)]
-struct RootPort(Arc<Mutex<Machine>>, bool);
+struct RootPort(Arc<Mutex<Machine>>, bool, u8);
+
+// An ACK-only adapter deliberately performs no physical retirement. Control
+// must retain uncertainty rather than treating this reply as ReleasedCurrent.
+#[derive(Debug, Default)]
+struct CompletionPort {
+    calls: usize,
+    lose_reply: bool,
+}
+impl OriginalDisplayCompletionPort for CompletionPort {
+    fn dispatch_completion(
+        &mut self,
+        completion: AuthorizedOriginalDisplayCompletion,
+    ) -> Result<(), String> {
+        self.calls += 1;
+        assert!(completion.expires_at_unix_ms() > now_unix_ms());
+        assert_eq!(completion.terminal().state, TransactionState::Indeterminate);
+        assert_eq!(
+            completion.frames().lineage().terminal_transaction,
+            completion.terminal().transaction_id.as_str()
+        );
+        assert_eq!(
+            completion.frames().lineage().terminal_dispatch,
+            completion.dispatch_digest()
+        );
+        assert_ne!(
+            completion.preparation_digest(),
+            completion.verification_digest()
+        );
+        if self.lose_reply {
+            Err("simulated missing completion acknowledgement".into())
+        } else {
+            Ok(())
+        }
+    }
+}
 impl OriginalDisplayRetirementPreparationPort for RootPort {
     fn prepare_retirement(
         &mut self,
@@ -164,7 +201,7 @@ impl OriginalDisplayRetirementPreparationPort for RootPort {
             preparation.expires_at_unix_ms() - now_unix_ms()
         );
         machine.retirement_preparations += 1;
-        machine.finalization_native_phase = 3;
+        machine.finalization_native_phase = if self.2 == 3 { 5 } else { 3 };
         Ok(())
     }
 }
@@ -188,7 +225,7 @@ impl OriginalDisplayNativeReleaseReservationPort for RootPort {
             reservation.expires_at_unix_ms() - now_unix_ms()
         );
         machine.native_release_reservations += 1;
-        machine.finalization_native_phase = 5;
+        machine.finalization_native_phase = if self.2 == 5 { 3 } else { 5 };
         Ok(())
     }
 }
@@ -275,7 +312,7 @@ fn prepared(
     RequestId,
 ) {
     let (mut control, original, input, request) = quiesced(database, machine);
-    let mut root = RootPort(machine.clone(), false);
+    let mut root = RootPort(machine.clone(), false, 0);
     value(control.prepare_original_display_terminal_retirement(
         principal(),
         actor(true),
@@ -302,7 +339,7 @@ fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
                 principal(),
                 actor(true),
                 &request,
-                &mut RootPort(machine.clone(), false),
+                &mut RootPort(machine.clone(), false, 0),
             ));
         }
         drop(control);
@@ -317,14 +354,14 @@ fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
                 principal(),
                 actor(true),
                 &request,
-                &mut RootPort(machine.clone(), false),
+                &mut RootPort(machine.clone(), false, 0),
             )
         } else {
             restarted.prepare_original_display_terminal_retirement(
                 principal(),
                 actor(true),
                 &request,
-                &mut RootPort(machine.clone(), false),
+                &mut RootPort(machine.clone(), false, 0),
             )
         };
         assert!(
@@ -343,7 +380,7 @@ fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
 
 #[test]
 fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_replay() {
-    for lost_reply in [false, true] {
+    for (lost_reply, lost_completion_reply) in [(false, false), (false, true), (true, false)] {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));
         let (mut control, original, input, request) = prepared(&database, &machine);
@@ -354,7 +391,7 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
             principal(),
             actor(true),
             &request,
-            &mut RootPort(machine.clone(), lost_reply),
+            &mut RootPort(machine.clone(), lost_reply, 0),
         );
         assert_eq!(attempt.is_err(), lost_reply, "{attempt:?}");
         let verification = match attempt {
@@ -366,6 +403,42 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
         let digest = verification.record_digest().clone();
         let expires_at = verification.valid_until_unix_ms();
         assert_eq!(verification.inspection().terminal(), &before);
+        assert_eq!(snapshot(&database, &transaction), before);
+        let mut completion = CompletionPort {
+            lose_reply: lost_completion_reply,
+            ..CompletionPort::default()
+        };
+        let attempted = control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        );
+        // Only a directly acknowledged spend can carry its ORIGINAL live
+        // review forward. Read-only verification after a lost spend ACK
+        // cannot reconstruct that authority, even in the same process.
+        assert_eq!(
+            attempted.is_ok(),
+            !lost_reply && !lost_completion_reply,
+            "{attempted:?}"
+        );
+        assert_eq!(completion.calls, usize::from(!lost_reply));
+        if let Ok(receipt) = attempted {
+            assert_eq!(receipt.request(), &request);
+            assert_eq!(receipt.transaction(), &transaction);
+        }
+        assert!(
+            control
+                .dispatch_original_display_completion(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut completion,
+                )
+                .is_err()
+        );
+        assert_eq!(completion.calls, usize::from(!lost_reply));
+        // A completion ACK cannot retire a fence or sign terminal completion.
         assert_eq!(snapshot(&database, &transaction), before);
         drop(control);
         let journal = value(
@@ -393,6 +466,17 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
         drop(journal);
         let previews = replacement_previews(&machine, &original, &input);
         let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        assert!(
+            restarted
+                .dispatch_original_display_completion(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut completion,
+                )
+                .is_err()
+        );
+        assert_eq!(completion.calls, usize::from(!lost_reply));
         // Deliberately expire the ORIGINAL retained window. Restart and a
         // durable verification record must not manufacture current evidence.
         let now = now_unix_ms();
@@ -410,7 +494,7 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
                     principal(),
                     actor(true),
                     &request,
-                    &mut RootPort(machine.clone(), false)
+                    &mut RootPort(machine.clone(), false, 0)
                 )
                 .is_err()
         );
@@ -434,6 +518,56 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
 
 #[test]
 fn post_effect_proof_faults_do_not_commit_or_repeat_the_spent_handoff() {
+    // Metadata-only Root writes still need independent exact-phase readback.
+    // A false ACK must retain the spend exclusion and every physical fence.
+    for wrong_phase in [3, 5] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, _, _, request) = quiesced(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        let before = snapshot(&database, &transaction);
+        if wrong_phase == 5 {
+            value(control.prepare_original_display_terminal_retirement(
+                principal(),
+                actor(true),
+                &request,
+                &mut RootPort(machine.clone(), false, 0),
+            ));
+        }
+        let mut root = RootPort(machine.clone(), false, wrong_phase);
+        for _ in 0..2 {
+            let result = if wrong_phase == 3 {
+                control.prepare_original_display_terminal_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut root,
+                )
+            } else {
+                control.prepare_original_display_native_release(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut root,
+                )
+            };
+            assert!(result.is_err(), "false Root ACK for phase {wrong_phase}");
+        }
+        assert_eq!(snapshot(&database, &transaction), before);
+        let state = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(state.retirement_preparations, 1);
+        assert_eq!(
+            state.native_release_reservations,
+            usize::from(wrong_phase == 5)
+        );
+        assert_eq!(state.native_release_spends, 0);
+        assert_eq!(state.applies, 1);
+        assert_eq!(state.restoration_calls, 1);
+    }
+
     for fault in 1..=9 {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));
@@ -451,7 +585,7 @@ fn post_effect_proof_faults_do_not_commit_or_repeat_the_spent_handoff() {
                     principal(),
                     actor(true),
                     &request,
-                    &mut RootPort(machine.clone(), false)
+                    &mut RootPort(machine.clone(), false, 0)
                 )
                 .is_err(),
             "fault {fault}"
@@ -462,7 +596,7 @@ fn post_effect_proof_faults_do_not_commit_or_repeat_the_spent_handoff() {
                     principal(),
                     actor(true),
                     &request,
-                    &mut RootPort(machine.clone(), false)
+                    &mut RootPort(machine.clone(), false, 0)
                 )
                 .is_err()
         );
@@ -474,6 +608,22 @@ fn post_effect_proof_faults_do_not_commit_or_repeat_the_spent_handoff() {
         assert!(
             state.native_handoff_reads >= if matches!(fault, 7 | 8) { 2 } else { 1 },
             "fault {fault} must exercise independent post-effect observation"
+        );
+        drop(state);
+        let mut completion = CompletionPort::default();
+        assert!(
+            control
+                .dispatch_original_display_completion(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut completion,
+                )
+                .is_err()
+        );
+        assert_eq!(
+            completion.calls, 0,
+            "failed independent proof is not completion authority"
         );
     }
 }
@@ -495,7 +645,7 @@ fn verification_storage_failure_or_false_ack_keeps_terminal_indeterminate_and_sp
             principal(),
             actor(true),
             &request,
-            &mut RootPort(machine.clone(), false),
+            &mut RootPort(machine.clone(), false, 0),
         );
         assert!(matches!(
             result,
@@ -507,7 +657,7 @@ fn verification_storage_failure_or_false_ack_keeps_terminal_indeterminate_and_sp
                     principal(),
                     actor(true),
                     &request,
-                    &mut RootPort(machine.clone(), false)
+                    &mut RootPort(machine.clone(), false, 0)
                 )
                 .is_err()
         );

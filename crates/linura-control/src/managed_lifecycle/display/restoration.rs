@@ -78,6 +78,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
         let transaction = TransactionId::for_namespace(&principal_id, original_request);
         let snapshot = self.authority.snapshot(&transaction)?;
+        self.original_display_context_from_history(principal, request, &snapshot)
+    }
+
+    // The enclosing history read has already checked both stores and fetched
+    // this exact request/snapshot. No provider or external effect intervenes.
+    pub(super) fn original_display_context_from_history(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: PlanDesiredStateRequest,
+        snapshot: &linura_transaction::TransactionSnapshot,
+    ) -> Result<OriginalDisplayPlanningContext, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let transaction = TransactionId::for_namespace(&principal_id, &request.request_id);
         let history = DisplayHistory::load(
             self.display_journal()?,
             &principal_id,
@@ -99,13 +113,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let checkpoint = crate::display_checkpoint::Checkpoint::load(
             self.display_journal()?,
             &request,
-            &snapshot,
+            snapshot,
             now_ms()?,
         )?;
         OriginalDisplayPlanningContext::new(
             principal.clone(),
             request,
-            &snapshot,
+            snapshot,
             &dispatched,
             &checkpoint,
         )

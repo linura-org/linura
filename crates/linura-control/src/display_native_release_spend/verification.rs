@@ -5,6 +5,8 @@ use super::*;
 use linura_core::DisplayFinalizationMaterial;
 use linura_observation::{DisplayNativeHandoffFacts, ObservedValue};
 
+pub(crate) mod completion;
+
 const DOMAIN: &str = "linura.display.original-physical-release-verified.v1";
 const KEY_DOMAIN: &str = "linura.display.original-physical-release-verified-key.v1";
 const FRAME_DOMAIN: &str = "linura.display.original-first-ordinary-frame.v1";

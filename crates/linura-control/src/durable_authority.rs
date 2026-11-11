@@ -1368,17 +1368,29 @@ where
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,
     ) -> Result<(), DurableAuthorityError> {
+        self.matching_request_snapshot(principal, request)
+            .map(|_| ())
+    }
+
+    // A current authenticated comparison snapshot, never approval or effect
+    // authority. Callers must still revalidate after independent boundaries.
+    pub(crate) fn matching_request_snapshot(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<TransactionSnapshot, DurableAuthorityError> {
         let principal_id = PrincipalId::new(principal.as_str().to_owned())
             .map_err(|error| DurableAuthorityError::Preview(error.to_string()))?;
         let transaction_id = TransactionId::for_namespace(&principal_id, &request.request_id);
         let anchor = self.transactions.recovery_anchor(&transaction_id)?;
-        if anchor.snapshot.principal != principal_id
+        if anchor.snapshot.transaction_id != transaction_id
+            || anchor.snapshot.principal != principal_id
             || anchor.snapshot.request_id != request.request_id
             || anchor.request_digest != digest_request(request)?
         {
             return Err(DurableAuthorityError::RecoveryRequestMismatch);
         }
-        Ok(())
+        Ok(anchor.snapshot)
     }
     pub fn integrity_check(&self) -> Result<(), DurableAuthorityError> {
         self.transactions.integrity_check().map_err(Into::into)
