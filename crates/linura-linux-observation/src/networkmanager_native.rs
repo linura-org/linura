@@ -326,6 +326,40 @@ fn ip_rows(
     Ok(())
 }
 
+/// Validate only the bounded, visible profile UUID correlation. An empty
+/// result is NOT a permission, uniqueness proof or authorization to create.
+fn canonical_profile_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value != "00000000-0000-0000-0000-000000000000"
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
+            }
+        })
+}
+
+fn reject_visible_uuid_collision(requested: &str, visible: &[String]) -> Result<(), ProviderError> {
+    if !canonical_profile_uuid(requested) || visible.len() > MAX_PROFILE_OBJECTS {
+        return Err(invalid(
+            "requested profile UUID or visible inventory bounds",
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    for uuid in visible {
+        if !canonical_profile_uuid(uuid)
+            || !unique.insert(uuid.as_str())
+            || uuid.as_str() == requested
+        {
+            return Err(invalid(
+                "duplicate or already existing visible profile UUID",
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl NetworkManagerObserver {
     // The transport has a method timeout (configured in connect) independently
     // of these post-decode consistency checks. A sole unique owner is insufficient
@@ -571,6 +605,82 @@ impl NetworkManagerObserver {
             NetworkProfileRevision::new(epoch.clone(), object, uuid, before, fingerprint),
             "profile revision evidence",
         )
+    }
+
+    /// Read-only, double-source verification of an existing saved-profile
+    /// revision. The actual unique NM owner, original settings path, UUID,
+    /// global Settings.VersionId, secret-free fingerprint, flags and complete
+    /// bounded native inventory must agree across dependent reads.
+    ///
+    /// This is a preflight *veto*, not native compare-and-swap, Polkit consent,
+    /// a durable grant or a verified post-mutation state. An NM Update2/Delete
+    /// dispatcher must still prove atomic revision safety independently.
+    pub fn require_native_saved_profile_revision(
+        &self,
+        expected: &NetworkProfileRevision,
+    ) -> Result<(), ProviderError> {
+        let epoch = self.native_epoch()?;
+        if epoch != *expected.epoch() {
+            return Err(invalid("saved profile owner, bus or boot changed"));
+        }
+        let owner = epoch.owner().as_str();
+        let before = self.profile_index(owner)?;
+        let path = before
+            .get(&expected.object().sequence())
+            .ok_or_else(|| invalid("saved profile path is absent"))?;
+        if path.as_str() != expected.object().native_path() {
+            return Err(invalid("saved profile object path was substituted"));
+        }
+        let first_props =
+            bounded_props(&self.connection, owner, path.as_str(), NM_PROFILE_INTERFACE)?;
+        let first = self.profile_revision(&epoch, path, &first_props)?;
+        if first != *expected {
+            return Err(invalid("saved profile has a foreign or stale revision"));
+        }
+        let second_props =
+            bounded_props(&self.connection, owner, path.as_str(), NM_PROFILE_INTERFACE)?;
+        let second = self.profile_revision(&epoch, path, &second_props)?;
+        if first != second || self.profile_index(owner)? != before {
+            return Err(invalid("saved profile source changed during verification"));
+        }
+        self.require_native_epoch(&epoch)?;
+        Ok(())
+    }
+
+    /// Bounded and source-pinned *visible-inventory veto* for future
+    /// S18-8 create requests. D-Bus visibility depends on the authenticated
+    /// caller; absence in ListConnections is not authoritative proof that
+    /// another user's profile/UUID does not exist. A future native dispatcher
+    /// must establish complete original-user, Polkit and global uniqueness
+    /// evidence separately before AddConnection2 may be enabled.
+    pub fn reject_existing_visible_profile_uuid(
+        &self,
+        original_epoch: &NetworkManagerEpoch,
+        requested_uuid: &str,
+    ) -> Result<(), ProviderError> {
+        let current = self.native_epoch()?;
+        if current != *original_epoch {
+            return Err(invalid(
+                "saved profile inventory owner, bus or boot changed",
+            ));
+        }
+        let owner = current.owner().as_str();
+        let initial_version = self.settings_version(owner)?;
+        let initial_index = self.profile_index(owner)?;
+        let mut found = Vec::with_capacity(initial_index.len());
+        for path in initial_index.values() {
+            let props =
+                bounded_props(&self.connection, owner, path.as_str(), NM_PROFILE_INTERFACE)?;
+            let profile = self.profile_revision(&current, path, &props)?;
+            found.push(profile.uuid().to_owned());
+        }
+        if self.settings_version(owner)? != initial_version
+            || self.profile_index(owner)? != initial_index
+        {
+            return Err(invalid("saved profile inventory changed during UUID check"));
+        }
+        self.require_native_epoch(&current)?;
+        reject_visible_uuid_collision(requested_uuid, &found)
     }
 
     fn ip_resources(
@@ -1057,6 +1167,25 @@ mod tests {
                 ("type".to_owned(), text_value("802-3-ethernet")),
             ]),
         )])
+    }
+
+    #[test]
+    fn visible_uuid_veto_rejects_duplicate_or_substituted_profile_identity() {
+        const A: &str = "10203040-5060-7080-90ab-cdef12345678";
+        const B: &str = "20203040-5060-7080-90ab-cdef12345678";
+        const C: &str = "30203040-5060-7080-90ab-cdef12345678";
+        assert!(reject_visible_uuid_collision(A, &[]).is_ok());
+        assert!(reject_visible_uuid_collision(A, &[B.into(), C.into()]).is_ok());
+        assert!(reject_visible_uuid_collision(A, &[A.into()]).is_err());
+        assert!(reject_visible_uuid_collision(A, &[B.into(), B.into()]).is_err());
+        assert!(reject_visible_uuid_collision(A, &[String::new()]).is_err());
+        assert!(reject_visible_uuid_collision("NOT_A_UUID", &[]).is_err());
+        assert!(
+            reject_visible_uuid_collision("00000000-0000-0000-0000-000000000000", &[],).is_err()
+        );
+        assert!(
+            reject_visible_uuid_collision(A, &vec![B.into(); MAX_PROFILE_OBJECTS + 1],).is_err()
+        );
     }
 
     #[test]
