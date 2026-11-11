@@ -6,11 +6,12 @@ use std::fmt::{Display, Formatter};
 
 use linura_sdk::{
     ActorKind, CapabilityId, IntentId, LocalAuthorityClient, LocalControlClient,
-    LocalSessionClient, LocalSessionEffectReceipt, PlanDesiredStateRequest, PlanId, PlanPreview,
-    PlanReview, ProtectiveLockSettingReceipt, ProtectiveLockSettingRequest, ProtocolVersion,
-    ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason, SessionEpoch,
-    SessionLockId, SessionLockReceipt, SessionLockRequest, SessionTransitionCompletion,
-    SessionTransitionReceipt, SessionTransitionRequest,
+    LocalSessionClient, LocalSessionEffectReceipt, NETWORK_CAPABILITY, NETWORK_PROVIDER,
+    NETWORK_RESOURCE, PlanDesiredStateRequest, PlanId, PlanPreview, PlanReview,
+    ProtectiveLockSettingReceipt, ProtectiveLockSettingRequest, ProtocolVersion, ProviderId,
+    ReadOnlyNetworkOverview, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason,
+    SessionEpoch, SessionLockId, SessionLockReceipt, SessionLockRequest,
+    SessionTransitionCompletion, SessionTransitionReceipt, SessionTransitionRequest,
 };
 
 #[derive(Clone, Copy)]
@@ -114,6 +115,11 @@ const COMMANDS: &[CommandInfo] = &[
     CommandInfo {
         name: "capabilities",
         summary: "List observation providers, health, and capabilities",
+        offline: false,
+    },
+    CommandInfo {
+        name: "network-status",
+        summary: "Observe NetworkManager via Control1; no connectivity or mutation claim",
         offline: false,
     },
     CommandInfo {
@@ -376,6 +382,29 @@ fn run() -> Result<(), Box<dyn Error>> {
                     field("reason", &reason);
                 }
             }
+        }
+        Some("network-status") => {
+            require_arity(&args, 1, "network-status")?;
+            let (provider, resource, capability, authority, freshness, _, _, _, _) =
+                LocalControlClient::connect()?.observe(
+                    NETWORK_PROVIDER,
+                    NETWORK_RESOURCE,
+                    NETWORK_CAPABILITY,
+                )?;
+            let report = ReadOnlyNetworkOverview::from_control1(
+                &provider,
+                &resource,
+                &capability,
+                &authority,
+                &freshness,
+            );
+            field("resource", NETWORK_RESOURCE);
+            field("observation", report.source().as_str());
+            field("reachability", report.reachability());
+            field("captive_portal", report.portal_state());
+            field("profile_mutation", report.profile_mutation());
+            field("lifecycle_mutation", report.lifecycle_mutation());
+            field("native_execution_requested", "false");
         }
         Some("observe") => {
             let (provider, capability, resource) = parse_observe_args(&args)?;
@@ -965,6 +994,7 @@ fn print_help() {
     println!("  commands [--json]");
     println!("  whoami");
     println!("  capabilities");
+    println!("  network-status");
     println!("  observe <resource>");
     println!("  observe <provider> <capability> <resource>");
     println!("  graph");
@@ -1143,6 +1173,7 @@ mod tests {
         assert_eq!(names.len(), COMMANDS.len());
         assert!(names.contains("commands"));
         assert!(names.contains("observe"));
+        assert!(names.contains("network-status"));
         assert!(names.contains("plan-preview"));
         assert!(names.contains("get-plan-preview"));
         assert!(names.contains("explain-plan-preview"));
@@ -1177,6 +1208,7 @@ mod tests {
         assert!(json.ends_with(']'));
         assert!(json.contains("\"name\":\"commands\""));
         assert!(json.contains("\"name\":\"observe\""));
+        assert!(json.contains("\"name\":\"network-status\""));
         assert!(json.contains("\"name\":\"plan-preview\""));
         assert!(json.contains("\"name\":\"set-audio-output-volume\""));
         assert!(json.contains("\"offline\":true"));

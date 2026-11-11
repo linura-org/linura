@@ -22,6 +22,10 @@ qt_add_qml_module(linura-shell-bridge
         session_controller.cpp
         session_receipt.h
         session_receipt.cpp
+        network_observation_contract.h
+        network_observation_contract.cpp
+        network_overview_controller.h
+        network_overview_controller.cpp
 )
 
 target_link_libraries(linura-shell-bridge PRIVATE
@@ -50,7 +54,28 @@ if(BUILD_TESTING)
     target_compile_options(linura-session-tracking-tests PRIVATE -Wall -Wextra -Werror)
     add_test(NAME session-client-tracking COMMAND linura-session-tracking-tests)
     set_tests_properties(session-client-tracking PROPERTIES TIMEOUT 20)
+    add_executable(linura-network-observation-tests
+        tests/network_observation_contract.cpp network_observation_contract.cpp)
+    target_include_directories(linura-network-observation-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(linura-network-observation-tests PRIVATE Qt6::Core)
+    target_compile_options(linura-network-observation-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME network-observation-classification
+        COMMAND linura-network-observation-tests)
+    set_tests_properties(network-observation-classification PROPERTIES TIMEOUT 20)
+
     find_package(Qt6 6.4 REQUIRED COMPONENTS Gui Quick)
+    add_executable(linura-network-surface-tests tests/network_surface.cpp)
+    target_link_libraries(linura-network-surface-tests PRIVATE
+        Qt6::Gui Qt6::Qml Qt6::Quick)
+    target_compile_options(linura-network-surface-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME network-client-surface COMMAND linura-network-surface-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/../plugins/network/NetworkStatusCard.qml")
+    set_tests_properties(network-client-surface PROPERTIES TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+
     add_executable(linura-session-surface-tests tests/session_surface.cpp)
     target_link_libraries(linura-session-surface-tests PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick)
     target_compile_options(linura-session-surface-tests PRIVATE -Wall -Wextra -Werror)

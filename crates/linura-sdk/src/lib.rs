@@ -6,6 +6,12 @@
 //! and integrations. It does not expose Linura Control internals, policy-engine
 //! implementation details, providers, or privileged executors.
 
+pub mod network_overview;
+pub use network_overview::{
+    NETWORK_CAPABILITY, NETWORK_PROVIDER, NETWORK_RESOURCE, NetworkSourceStatus,
+    ReadOnlyNetworkOverview,
+};
+
 pub use linura_capability_sdk::{
     CapabilityBlueprint, CapabilityCatalog, CapabilityRelation, CapabilityRelationKind,
     DesiredResourceBlueprint, Resolution,

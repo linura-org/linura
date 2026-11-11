@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Wayland
 import org.linura.ShellBridge 1.0
 import org.linura.UI 1.0
+import "../network" as Network
 
 PanelWindow {
     id: root
@@ -40,6 +41,11 @@ PanelWindow {
     WlrLayershell.namespace: "linura-control-center"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+    NetworkOverviewController {
+        id: networkOverview
+        active: root.opened
+    }
 
     LinuraTheme {
         id: theme
@@ -165,6 +171,11 @@ PanelWindow {
                         Accessible.name: qsTr("Close Control Center")
                         onActiveFocusChanged: root.ensureVisible(closeButton)
                     }
+                }
+
+                Network.NetworkStatusCard {
+                    Layout.fillWidth: true
+                    controller: networkOverview
                 }
 
                 LinuraSurface {
