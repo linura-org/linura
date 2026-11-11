@@ -314,8 +314,11 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                 )
             self.assertEqual(len(commands), 2)
             self.assertEqual(
-                commands[0][2:6],
+                commands[0][4:8],
                 ["head", "-c", str(build.candidate.FILES["Hyprland"] + 1), "--"],
+            )
+            self.assertEqual(
+                commands[0][:4], ["ssh", "-o", "ConnectTimeout=30", "fixed-guest"]
             )
             self.assertEqual(
                 commands[0][-1], "/home/linura/s21/compositor-build/Hyprland"
@@ -331,6 +334,97 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                 retained[3]["staged-source.json"],
                 root / "upstream/linura-display-source.json",
             )
+
+    def test_candidate_export_reconnect_discards_partial_stream_without_rebuilding(
+        self,
+    ):
+        output = io.BytesIO()
+        commands = []
+
+        def exported(command, **kwargs):
+            commands.append(command)
+            self.assertEqual(kwargs["timeout"], 180)
+            self.assertEqual(kwargs["stdout"].getvalue(), b"")
+            if len(commands) == 1:
+                kwargs["stdout"].write(b"unqualified partial stream")
+                raise subprocess.CalledProcessError(255, command)
+            kwargs["stdout"].write(b"complete public file")
+            return subprocess.CompletedProcess(command, 0)
+
+        with (
+            patch.object(build, "run", side_effect=exported),
+            patch.object(build.time, "monotonic", return_value=100),
+        ):
+            build.export_candidate_file(
+                ["ssh", "-o", "ConnectTimeout=3", "fixed-guest"],
+                "/home/linura/s21/compositor-build/Hyprland",
+                512,
+                output,
+                io.BytesIO(),
+            )
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0], commands[1])
+        self.assertEqual(
+            commands[0][:5],
+            ["ssh", "-o", "ConnectTimeout=30", "-o", "ConnectTimeout=3"],
+        )
+        self.assertEqual(output.getvalue(), b"complete public file")
+
+    def test_candidate_export_never_retries_remote_failure_or_exceeds_attempt_budget(
+        self,
+    ):
+        for code, attempts in ((1, 1), (2, 1), (255, 3)):
+            with (
+                self.subTest(code=code),
+                patch.object(
+                    build, "run", side_effect=subprocess.CalledProcessError(code, [])
+                ) as read,
+                patch.object(build.time, "monotonic", return_value=100),
+                self.assertRaises(subprocess.CalledProcessError),
+            ):
+                try:
+                    build.export_candidate_file(
+                        ["ssh", "fixed-guest"],
+                        "/fixed",
+                        512,
+                        io.BytesIO(),
+                        io.BytesIO(),
+                    )
+                finally:
+                    self.assertEqual(read.call_count, attempts)
+
+    def test_candidate_export_reconnect_cannot_renew_original_wall_budget(self):
+        with (
+            patch.object(
+                build, "run", side_effect=subprocess.CalledProcessError(255, [])
+            ) as read,
+            patch.object(build.time, "monotonic", side_effect=[100, 100, 280]),
+            self.assertRaisesRegex(TimeoutError, "original read budget"),
+        ):
+            build.export_candidate_file(
+                ["ssh", "fixed-guest"], "/fixed", 512, io.BytesIO(), io.BytesIO()
+            )
+        self.assertEqual(read.call_count, 1)
+
+    def test_candidate_export_timeout_remains_failure_without_candidate_admission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(
+                    build, "run", side_effect=subprocess.TimeoutExpired([], 180)
+                ) as read,
+                patch.object(build.time, "monotonic", return_value=100),
+                patch.object(build.candidate, "retain") as retain,
+                self.assertRaises(subprocess.TimeoutExpired),
+            ):
+                build.export_candidate(
+                    ["ssh", "fixed-guest"],
+                    Path(directory),
+                    Path(directory) / "prepared.json",
+                    {"source_sha": "1" * 40},
+                    io.BytesIO(),
+                )
+            self.assertEqual(read.call_count, 3)
+            retain.assert_not_called()
 
     def test_shared_original_baseline_is_packaged_without_repository_relative_paths(
         self,

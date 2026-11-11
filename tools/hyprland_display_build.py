@@ -318,18 +318,56 @@ def export_candidate(
         destination = incoming / name
         # Limit the remote stream as well as checking the retained file. No
         # caller path, archive, guest home directory or credential is exported.
-        with destination.open("xb") as output:
-            run(
-                [*ssh, "head", "-c", str(candidate.FILES[name] + 1), "--", guest_path],
-                stdout=output,
-                stderr=log,
-                timeout=180,
-            )
+        with destination.open("xb+") as output:
+            export_candidate_file(ssh, guest_path, candidate.FILES[name], output, log)
         candidate.regular(destination, candidate.FILES[name])
         inputs[name] = destination
     candidate.retain(
         ROOT, temporary / "candidate", record["source_sha"], inputs, record
     )
+
+
+def export_candidate_file(
+    ssh: list[str], guest_path: str, limit: int, output, log
+) -> None:
+    """Reconnect only for an idempotent public-file read, within one budget.
+
+    The readiness probe's three-second handshake is too short immediately after
+    a memory-intensive guest build. OpenSSH uses the first option value, so this
+    read gets a bounded handshake before the readiness options. Neither build nor
+    mutation is retried. Partial streams are discarded, never concatenated or
+    admitted as candidates; all existing size/identity checks still follow.
+    """
+    command = [
+        ssh[0],
+        "-o",
+        "ConnectTimeout=30",
+        *ssh[1:],
+        "head",
+        "-c",
+        str(limit + 1),
+        "--",
+        guest_path,
+    ]
+    deadline = time.monotonic() + 180
+    for attempt in range(3):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("candidate export exceeded its original read budget")
+        output.seek(0)
+        output.truncate()
+        try:
+            run(command, stdout=output, stderr=log, timeout=remaining)
+            return
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 255 or attempt == 2:
+                raise
+        except subprocess.TimeoutExpired:
+            # subprocess.run has killed and reaped this local SSH process.
+            # Only unused time in the original budget permits another read.
+            if attempt == 2:
+                raise
+    raise RuntimeError("candidate export did not complete")
 
 
 def cloud_config(public_key: str, run_id: str) -> str:
