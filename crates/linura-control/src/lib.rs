@@ -20,6 +20,7 @@ mod authority_clock;
 mod durable_authority;
 mod managed_lifecycle;
 pub mod network_authority;
+pub mod network_profile;
 mod operation_registry;
 mod operation_semantics;
 mod plan_preview;
