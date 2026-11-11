@@ -240,6 +240,15 @@ original window expires, even without an observer requesting the receipt.
 No comparison result itself authenticates a later Root completion, retires
 S17/input/power protection, or releases the startup fence.
 
+The comparison gate additionally supports a distinct read-only reconciliation
+after its one-shot first-frame observation. Fresh native/KMS inputs must match
+the retained first completed commits, spend high-water marks, exact native
+trackers and immutable buffer identities. It never reissues the original
+observation or spends a grant. Missing evidence or drift permanently faults the
+gate, including either clock moving backward within the original window.
+The original deadline remains fixed. This mechanism does not implement the
+physical handoff, its independent Control verification or durable completion.
+
 The remaining requirements below are an acceptance contract, not currently
 implemented effect authority. The original-restoration terminal and ordinary
 Keep/Revert paths must stay distinct even where they share low-level mechanisms.

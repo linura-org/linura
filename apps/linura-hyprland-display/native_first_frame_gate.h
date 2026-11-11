@@ -61,6 +61,7 @@ class NativeFirstFrameGate final
         // state, and bracket the read by current native identity probes.
         std::uint32_t connector = 0, crtc = 0, framebuffer = 0, plane = 0;
         bool active = false;
+        bool operator==(const NativeScanout &) const = default;
     };
     struct OutputReceipt final
     {
@@ -72,6 +73,7 @@ class NativeFirstFrameGate final
         // grant spend boundary. Control must compare both counter values.
         std::uint64_t spendHighWater = 0;
         std::uint64_t completedCommit = 0;
+        bool operator==(const OutputReceipt &) const = default;
     };
     struct Receipt final
     {
@@ -143,7 +145,14 @@ class NativeFirstFrameGate final
 
     NativeFirstFrameGate(const NativeFirstFrameGate &) = delete;
     NativeFirstFrameGate &operator=(const NativeFirstFrameGate &) = delete;
-    NativeFirstFrameGate(NativeFirstFrameGate &&) = default;
+    NativeFirstFrameGate(NativeFirstFrameGate &&other) noexcept
+        : held_(std::move(other.held_)), epoch_(other.epoch_), sampled_(other.sampled_),
+          lastSample_(other.lastSample_), before_(std::move(other.before_)),
+          baselineKernel_(std::move(other.baselineKernel_)), spentCommit_(other.spentCommit_),
+          accepted_(std::move(other.accepted_)), acceptedFrames_(other.acceptedFrames_),
+          acceptedBuffers_(other.acceptedBuffers_),
+          phase_(std::exchange(other.phase_, Phase::Faulted))
+    {}
     NativeFirstFrameGate &operator=(NativeFirstFrameGate &&) = delete;
 
     // Called only AFTER the separately authenticated, durable Root/native
@@ -202,13 +211,52 @@ class NativeFirstFrameGate final
     };
     [[nodiscard]] std::optional<Receipt> observe(const ObservationRequest &sample) noexcept
     {
+        if (phase_ != Phase::Spent)
+            return {};
+        auto receipt = compare(sample);
+        if (!receipt)
+            return {};
+        accepted_ = *receipt;
+        for (std::size_t i = 0; i < sample.frames.size(); ++i) {
+            acceptedFrames_[i] = sample.frames[i].frame;
+            acceptedBuffers_[i] = sample.frames[i].retainedBuffer;
+        }
+        phase_ = Phase::Verified;
+        return receipt;
+    }
+
+    // A lost read reply cannot replay observe or spend. Reconciliation is a
+    // separate comparison with fresh native/KMS evidence for the SAME retained
+    // first frames. It cannot adopt new commits, buffers or output trackers,
+    // refresh the original deadline, release fences or complete Control history.
+    [[nodiscard]] std::optional<Receipt> reconcile(const ObservationRequest &sample) noexcept
+    {
+        if (phase_ != Phase::Verified)
+            return {};
+        auto receipt = compare(sample);
+        if (!receipt || !accepted_ || receipt->completedCount != accepted_->completedCount ||
+            receipt->completed != accepted_->completed) {
+            phase_ = Phase::Faulted;
+            return {};
+        }
+        for (std::size_t i = 0; i < sample.frames.size(); ++i) {
+            if (sample.frames[i].frame != acceptedFrames_[i] ||
+                sample.frames[i].retainedBuffer != acceptedBuffers_[i]) {
+                phase_ = Phase::Faulted;
+                return {};
+            }
+        }
+        return receipt;
+    }
+
+  private:
+    [[nodiscard]] std::optional<Receipt> compare(const ObservationRequest &sample) noexcept
+    {
         const auto &current = sample.current;
         const auto now = sample.now;
         const auto &frames = sample.frames;
         const auto &kernel = sample.kernel;
         const auto &outputCommits = sample.outputCommits;
-        if (phase_ != Phase::Spent)
-            return {};
         if (!currentSample(current, now) || frames.size() != before_.size() ||
             kernel.size() != before_.size() || outputCommits.size() != before_.size()) {
             phase_ = Phase::Faulted;
@@ -341,10 +389,10 @@ class NativeFirstFrameGate final
         }
         if (pending)
             return {};
-        phase_ = Phase::Verified; // Still no authority to unlock or release.
         return receipt;
     }
 
+  public:
     // The compositor's retained scene calls this on its existing watchdog
     // even if no readout is requested. A spent one-use grant cannot silently
     // gain a fresh proof window after the original absolute window expires.
@@ -372,26 +420,31 @@ class NativeFirstFrameGate final
     NativeFirstFrameGate(const Snapshot &held, std::uint64_t epoch, ClockSample sampled,
                          const std::vector<Output> &before,
                          const std::vector<NativeScanout> &kernel)
-        : held_(held), epoch_(epoch), sampled_(sampled), before_(before), baselineKernel_(kernel)
+        : held_(held), epoch_(epoch), sampled_(sampled), lastSample_(sampled), before_(before),
+          baselineKernel_(kernel)
     {}
-    [[nodiscard]] bool currentSample(const Snapshot &current, ClockSample now) const noexcept
+    [[nodiscard]] bool currentSample(const Snapshot &current, ClockSample now) noexcept
     {
-        if (current != held_ || now.unixMs < sampled_.unixMs || now.bootMs < sampled_.bootMs)
+        if (current != held_ || now.unixMs < lastSample_.unixMs || now.bootMs < lastSample_.bootMs)
             return false;
         if (now.unixMs >= sampled_.unixMs + MaxProofWindowMs)
             return false;
         if (now.bootMs >= sampled_.bootMs + MaxProofWindowMs)
             return false;
+        lastSample_ = now;
         return true;
     }
 
     Snapshot held_;
     std::uint64_t epoch_ = 0;
-    ClockSample sampled_;
+    ClockSample sampled_, lastSample_;
     std::vector<Output> before_;
     std::vector<NativeScanout> baselineKernel_; // Physical connector and plane ancestry.
     // Fixed-size per-output spend boundary, never a renewed grant/clock.
     std::array<std::uint64_t, DisplayTransaction::MaxHeads> spentCommit_{};
+    std::optional<Receipt> accepted_;
+    std::array<const ProtectedFrame *, DisplayTransaction::MaxHeads> acceptedFrames_{};
+    std::array<const void *, DisplayTransaction::MaxHeads> acceptedBuffers_{};
     Phase phase_ = Phase::Held;
 };
 

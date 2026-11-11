@@ -750,6 +750,14 @@ for the current implementation status.
 
 ### S21 device identity substitution, insecure output topology and media loss
 
+Lost first-frame comparison replies must not become permission to replay a
+native release or adopt later frames. The native gate's separate read-only
+reconciliation requires fresh evidence for the same retained first commits,
+output trackers and buffer identities under its original absolute deadlines.
+Missing evidence, physical/source drift and rollback of either clock permanently
+fault the gate. No returned comparison releases input, S17, power or Root
+admission, commits terminal history or establishes Level A/B/C acceptance.
+
 - Native attempt status is obtained only through the independently supervised
   Control caller and the owner's retained attested compositor connection. Exact
   canonical intent, current lock/topology and original effect/dispatch/deadline

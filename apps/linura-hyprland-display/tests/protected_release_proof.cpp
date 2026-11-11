@@ -129,6 +129,8 @@ int main()
 
     auto gate = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
     assert(gate && gate->phase() == Phase::Held);
+    assert(!gate->reconcile({held, later, {}, scanout, baseline(held)}));
+    assert(gate->phase() == Phase::Held); // A read cannot invent a spent grant.
     assert(!gate->observe({held, later, {}, scanout, baseline(held)}));
     assert(!gate->spend(held, {9'999, 4'999}, before, scanout));
     assert(gate->phase() == Phase::Faulted);
@@ -338,6 +340,89 @@ int main()
     assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
     assert(!proof->spend(held, later, before, scanout));
 
+    // A lost read reply permits only a distinct read-only reconciliation of
+    // the SAME first frames under the original clocks. It cannot spend again,
+    // reissue the one-shot observation or adopt later buffer/commit evidence.
+    const ClockSample reread{10'200, 5'200};
+    const auto reconciled =
+        proof->reconcile({held, reread, frames, scanout, completedOutputCommits});
+    assert(reconciled && proof->phase() == Phase::Verified);
+    assert(reconciled->observedUnixMs == reread.unixMs);
+    assert(reconciled->observedBootMs == reread.bootMs);
+    assert(reconciled->completedCount == receipt->completedCount);
+    assert(reconciled->completed[0].completedCommit == receipt->completed[0].completedCommit);
+    assert(reconciled->completed[0].spendHighWater == receipt->completed[0].spendHighWater);
+    assert(!proof->spend(held, reread, before, scanout));
+
+    // Transferring the retained gate cannot leave a second usable copy of
+    // either a spent or verified attempt in the moved-from object.
+    for (const bool verified : {false, true}) {
+        auto source = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(source && source->spend(held, later, before, scanout));
+        if (verified)
+            assert(source->observe({held, later, frames, scanout, completedOutputCommits}));
+        auto destination = std::move(*source);
+        assert(source->phase() == Phase::Faulted);
+        assert(!source->retain(held, reread));
+        assert(!source->spend(held, reread, before, scanout));
+        assert(!source->observe({held, reread, frames, scanout, completedOutputCommits}));
+        assert(!source->reconcile({held, reread, frames, scanout, completedOutputCommits}));
+        if (verified)
+            assert(destination.reconcile({held, reread, frames, scanout, completedOutputCommits}));
+        else
+            assert(destination.observe({held, reread, frames, scanout, completedOutputCommits}));
+    }
+
+    for (int loss = 0; loss < 10; ++loss) {
+        ProtectedFrame initialFirst;
+        ProtectedFrame initialSecond;
+        completed(initialFirst, &first, 8, Kind::Content);
+        completed(initialSecond, &second, 9, Kind::Content);
+        auto retained = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(retained && retained->spend(held, later, before, scanout));
+        auto liveFrames = frames;
+        liveFrames[0].frame = &initialFirst;
+        liveFrames[1].frame = &initialSecond;
+        assert(!retained->reconcile({held, later, liveFrames, scanout, completedOutputCommits}));
+        assert(retained->phase() == Phase::Spent);
+        assert(retained->observe({held, later, liveFrames, scanout, completedOutputCommits}));
+        auto liveKernel = scanout;
+        auto commits = completedOutputCommits;
+        auto current = held;
+        auto when = reread;
+        ProtectedFrame replacement;
+        if (loss == 0)
+            liveFrames[0] = {held.heads[0].key, nullptr, nullptr, 0, false, 0};
+        else if (loss == 1) {
+            completed(replacement, &first, 10, Kind::Content);
+            liveFrames[0].frame = &replacement;
+            commits[0].previousCommit = 10;
+        } else if (loss == 2) {
+            completed(replacement, &first, 8, Kind::Content);
+            liveFrames[0].frame = &replacement; // Same numbers, replaced native tracker.
+        } else if (loss == 3) {
+            completed(replacement, &swapped, 8, Kind::Content);
+            liveFrames[0].frame = &replacement;
+            liveFrames[0].retainedBuffer = &swapped;
+        } else if (loss == 4)
+            liveKernel[0].framebuffer++;
+        else if (loss == 5)
+            current.securityEpoch++;
+        else if (loss == 6)
+            when = {12'000, 7'000};
+        else if (loss == 7) {
+            assert(retained->retain(held, reread));
+            when = later; // Rollback remains inside the original arm window.
+        } else if (loss == 8)
+            when = {10'099, 5'200};
+        else
+            when = {10'200, 5'099};
+        assert(!retained->reconcile({current, when, liveFrames, liveKernel, commits}));
+        assert(retained->phase() == Phase::Faulted);
+        assert(!retained->reconcile({held, reread, frames, scanout, completedOutputCommits}));
+        assert(!retained->spend(held, reread, before, scanout));
+    }
+
     // An independently subscribed IOutput counter cannot be replaced by
     // the frame tracker's own counter. Concurrent or substituted output
     // commits after LNRX are not valid physical-release evidence.
@@ -470,6 +555,16 @@ int main()
     assert(disabledReceipt->completed[1].kernel.framebuffer == 0);
     assert(!disabledFresh->observe({partlyDisabled, later, disabledFrames, disabledKernel,
                                     outputCommits(partlyDisabled, disabledFrames)}));
+    const auto disabledReconciled =
+        disabledFresh->reconcile({partlyDisabled, reread, disabledFrames, disabledKernel,
+                                  outputCommits(partlyDisabled, disabledFrames)});
+    assert(disabledReconciled && disabledReconciled->completed == disabledReceipt->completed);
+    assert(!disabledFresh->reconcile({partlyDisabled,
+                                      {12'000, 7'000},
+                                      disabledFrames,
+                                      disabledKernel,
+                                      outputCommits(partlyDisabled, disabledFrames)}));
+    assert(disabledFresh->phase() == Phase::Faulted);
 
     const ClockSample exhaustedClock{std::numeric_limits<std::uint64_t>::max(), 5'000};
     auto exhaustion = NativeFirstFrameGate::arm({held, 13, exhaustedClock, before, scanout});

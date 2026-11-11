@@ -158,6 +158,14 @@ void terminalComparison(const std::string &material)
                                                material};
     const auto bytes = framed(reservation);
     assert(OriginalFinalizationGrantCodec::matches(bytes, terminal, material));
+    // Reject malformed terminal reservations directly as well as through the
+    // nested native-release codec.
+    for (std::size_t size = 0; size < bytes.size(); ++size)
+        assert(!OriginalFinalizationGrantCodec::matches(std::string_view(bytes).substr(0, size),
+                                                        terminal, material));
+    assert(!OriginalFinalizationGrantCodec::matches(bytes + 'x', terminal, material));
+    assert(!OriginalFinalizationGrantCodec::matches(
+        std::string(OriginalGrantCodec::MaxReservation + 1, 'x'), terminal, material));
     const std::string controlBinding(64, '7');
     const std::string controlObservation(64, '8');
     const std::vector<std::string> retirement{
