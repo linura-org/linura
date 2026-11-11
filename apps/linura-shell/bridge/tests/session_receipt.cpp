@@ -1,11 +1,12 @@
 #include "session_receipt.h"
 
 #include <QCoreApplication>
-#include <iostream>
 #include <functional>
+#include <iostream>
 #include <limits>
 
 using Linura::ShellClient::SessionReceipt;
+using Linura::ShellClient::validNativeIdleStatus;
 using Linura::ShellClient::validNativeSleepGateStatus;
 using Linura::ShellClient::validSessionLockResource;
 using Linura::ShellClient::validSessionReceipt;
@@ -16,6 +17,17 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     const QString epoch =
         QStringLiteral("session:epoch:12345678-1234-1234-1234-123456789abc:1000:c1:9");
+    if (!validNativeIdleStatus(epoch, QStringLiteral("seat0"), true, 42) ||
+        !validNativeIdleStatus(epoch, QStringLiteral("seat0"), false, 0))
+        return 31;
+    for (const auto &seat : {"", "seat 0", "seat0\\n", "../seat0"}) {
+        if (validNativeIdleStatus(epoch, QString::fromLatin1(seat), true, 42))
+            return 32;
+    }
+    const QString invalidRootIdleEpoch = QString(epoch).replace(":1000:", ":0:");
+    if (validNativeIdleStatus(epoch, QStringLiteral("seat0"), true, 0) ||
+        validNativeIdleStatus(invalidRootIdleEpoch, QStringLiteral("seat0"), false, 0))
+        return 33;
     for (const auto &state : {"unobserved", "checking", "coverage-fenced", "denied"}) {
         if (!Linura::ShellClient::validNativeSleepGateStatus(epoch, QString::fromLatin1(state)))
             return 6;

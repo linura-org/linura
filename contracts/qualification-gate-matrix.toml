@@ -764,6 +764,9 @@ paths = [
   "contracts/v010-workstation-qualification.toml",
   "contracts/v010-workstation-slices.toml",
   "contracts/v010-s21-design.toml",
+  "contracts/v010-s21-power-idle.toml",
+  "docs/qualification/v0.10.0-s21-power-idle.md",
+  "tests/tooling/test_v010_s21_power_idle.py",
   "docs/adr/0045-s21-workstation-device-authority.md",
   "docs/qualification/v0.10.0-s21.md",
   "docs/qualification/v0.10.0-s21-security.md",
@@ -1255,6 +1258,10 @@ gates = ["v010-workstation"]
 
 [[contract]]
 path = "contracts/v010-s21-design.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v010-s21-power-idle.toml"
 gates = ["v010-workstation"]
 
 [[contract]]

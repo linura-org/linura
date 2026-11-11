@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Wayland
 import org.linura.ShellBridge 1.0
 import "plugins/control-center"
 import "plugins/quick-settings"
@@ -121,6 +122,16 @@ ShellRoot {
             shell.hideCommandPalette()
         else
             shell.showCommandPaletteOnScreen(shell.defaultOverlayScreen())
+    }
+
+    // Compositor input inactivity is presentation advice only. It is never
+    // session identity, secure-lock coverage, authority or a dispatch trigger.
+    // Observe only while the supported Quick Settings surface is visible.
+    IdleMonitor {
+        id: inputIdleMonitor
+        enabled: shell.quickSettingsOpen && managedSessionController.idlePreferenceReady
+        timeout: managedSessionController.idleAdvisorySeconds
+        respectInhibitors: true
     }
 
     SessionController {
@@ -244,6 +255,11 @@ ShellRoot {
         opened: shell.quickSettingsOpen
         controller: audioController
         sessionController: managedSessionController
+        idleAdvisory: !managedSessionController.idlePreferenceReady
+            ? qsTr("Compositor idle advisory unavailable until its own-session preference is verified.")
+            : inputIdleMonitor.isIdle
+                ? qsTr("The compositor reports that the configured inactivity threshold was reached (idle inhibitors respected). This is advisory, not secure lock or power state.")
+                : qsTr("No inactivity threshold is currently reported. Activity and protective-lock state are not verified by this indicator.")
         onCloseRequested: shell.hideQuickSettings()
         onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)
     }

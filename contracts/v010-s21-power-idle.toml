@@ -1,0 +1,88 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S21-5"
+profile = "arch-hyprland-v1"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_idle_effects = false
+new_power_executor = false
+power_authority = "s17-managed-control"
+unattended_power_dispatch = false
+unattended_security_consent = false
+override_inhibitors = false
+root_permission_substitution = false
+skip_secure_lock_coverage = false
+indeterminate_replay = false
+unsupported_behavior = "fail-closed"
+architecture = "docs/adr/0045-s21-workstation-device-authority.md"
+qualification = "docs/qualification/v0.10.0-s21-power-idle.md"
+
+[existing_power]
+registered = [
+  "operation:session.lock.set-secure",
+  "operation:session.suspend",
+  "operation:session.logout",
+  "operation:session.reboot",
+  "operation:session.power-off",
+]
+session_identity = "trusted-boot-uid-session-seat-generation"
+authorization = "s17-native-owner-and-action-specific-authentication"
+dispatch = "control-managed-existing-operations"
+verification = "independent-native-postcondition"
+recovery = "durable-observe-only-no-replay"
+
+[idle]
+observation = "compositor-ext-idle-notify-presentation-advisory"
+source = "first-party-quickshell-idle-monitor"
+threshold_seconds = 300
+respect_inhibitors = true
+presentation_only = true
+native_authoritative_observation = false
+native_logind_idle_capability = "session.idle.observe"
+native_logind_hint_is_authorization = false
+observation_is_authorization = false
+clock = "monotonic"
+scope = "own-active-session-and-seat"
+defaults = "disabled"
+persistent_policy = "control-owned-versioned-sqlite-cas"
+preference_seconds_min = 60
+preference_seconds_max = 3600
+preference_step_seconds = 60
+preference_default_seconds = 300
+preference_write_authority = "authenticated-own-session-local-state-only"
+preference_never_authorizes_effects = true
+preference_revision_cas = true
+automatic_lock = false
+automatic_suspend = false
+automatic_logout = false
+automatic_reboot = false
+automatic_power_off = false
+automatic_display_off = false
+automatic_brightness = false
+last_visible_output_protection = "required-before-display-power-mutation"
+source_change_invalidates = ["boot", "session", "seat", "owner", "generation"]
+
+[ux]
+surface = "first-party-linura-power-controls"
+operation_selection = "fixed-registered-s17-action"
+no_ai = true
+no_optimistic_success = true
+retain_request_before_dispatch = true
+recovery_never_resumes_abandoned_workflow = true
+keyboard_and_accessibility = "qualified-native-evidence-required"
+
+[acceptance]
+required = [
+  "s17-secure-lock-generation-and-output-coverage",
+  "inhibitor-and-other-session-denials",
+  "exact-owner-action-specific-native-authentication",
+  "durable-prepare-and-independent-verification",
+  "lost-reply-observe-only-reconciliation",
+  "native-idle-provider-binding-and-race-invalidation",
+  "no-unattended-destructive-transition",
+  "keyboard-pointer-assistive-technology-qualification",
+  "exact-source-level-a-and-hardware-q11-where-claimed",
+]
+component_fixture_is_native = false
+physical_evidence_claimed = false

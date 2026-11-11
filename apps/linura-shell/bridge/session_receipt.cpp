@@ -62,6 +62,19 @@ bool resourceShape(const QString &value, bool transition, bool epoch = false)
 }
 } // namespace
 
+bool validNativeIdleStatus(const QString &epoch, const QString &seat, bool idle,
+                           quint64 changedMonotonicUs)
+{
+    static const QRegularExpression seatPattern(QStringLiteral("^[A-Za-z0-9_-]{1,64}$"));
+    if (!resourceShape(epoch, false, true) ||
+        epoch.split(QLatin1Char(':')).at(3) == QStringLiteral("0") ||
+        !seatPattern.match(seat).hasMatch())
+        return false;
+    bool valid = false;
+    const quint64 created = epoch.split(QLatin1Char(':')).at(5).toULongLong(&valid);
+    return valid && (!idle || (changedMonotonicUs >= created && changedMonotonicUs > 0));
+}
+
 bool validNativeSleepGateStatus(const QString &epoch, const QString &state)
 {
     return resourceShape(epoch, false, true) &&

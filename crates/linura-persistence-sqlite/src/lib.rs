@@ -18,6 +18,7 @@ mod schema;
 #[rustfmt::skip]
 #[allow(clippy::too_many_arguments)]
 mod store;
+mod idle_preferences;
 mod protective_lock_settings;
 mod request_journal;
 mod storage_error;
@@ -28,6 +29,7 @@ mod validation;
 #[path = "validation_base.rs"]
 mod validation_base;
 
+pub use idle_preferences::{IdleAdvisoryPreference, SqliteIdleAdvisoryPreferenceStore};
 pub use integrity::SqliteIntegrityKey;
 pub use protective_lock_settings::SqliteProtectiveLockSettingStore;
 pub use request_journal::SqliteApprovedRequestJournal;
