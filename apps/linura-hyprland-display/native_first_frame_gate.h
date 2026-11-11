@@ -79,6 +79,7 @@ class NativeFirstFrameGate final
     {
         std::uint64_t generation = 0, securityEpoch = 0, postWriteEpoch = 0;
         std::uint64_t observedUnixMs = 0, observedBootMs = 0;
+        std::uint64_t deadlineUnixMs = 0, deadlineBootMs = 0;
         // Fixed bounded comparison evidence, not a Root/Control authorization,
         // output-release ACK or ordinary-startup credential.
         std::array<OutputReceipt, DisplayTransaction::MaxHeads> completed{};
@@ -262,7 +263,14 @@ class NativeFirstFrameGate final
             phase_ = Phase::Faulted;
             return {};
         }
-        Receipt receipt{held_.generation, held_.securityEpoch, epoch_, now.unixMs, now.bootMs, {}};
+        Receipt receipt{};
+        receipt.generation = held_.generation;
+        receipt.securityEpoch = held_.securityEpoch;
+        receipt.postWriteEpoch = epoch_;
+        receipt.observedUnixMs = now.unixMs;
+        receipt.observedBootMs = now.bootMs;
+        receipt.deadlineUnixMs = sampled_.unixMs + MaxProofWindowMs;
+        receipt.deadlineBootMs = sampled_.bootMs + MaxProofWindowMs;
         bool pending = false;
         for (std::size_t i = 0; i < before_.size(); ++i) {
             const auto &head = current.heads[i];
@@ -343,7 +351,7 @@ class NativeFirstFrameGate final
                     continue;
                 }
                 if (commit != nativeCommit.previousCommit || commit <= spentCommit_[i] ||
-                    frame.frame->queuedKind() != ProtectedFrame::Kind::Content ||
+                    frame.frame->queuedKind() != ProtectedFrame::Kind::Ordinary ||
                     frame.frame->completedBuffer() != frame.retainedBuffer ||
                     !frame.retainedFramebuffer || !scanout.active || !scanout.crtc ||
                     !scanout.plane || !scanout.framebuffer ||

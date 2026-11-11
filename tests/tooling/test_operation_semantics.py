@@ -630,6 +630,27 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+    def test_display_continuations_cannot_drop_purpose_binding(self) -> None:
+        for fragment in (
+            "|| !self.purpose.matches(&self.plan)",
+            "|| !purpose.matches(&prepared.candidate.plan)",
+        ):
+            with self.subTest(fragment=fragment):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / "crates/linura-control/src/durable_authority.rs"
+                    text = path.read_text(encoding="utf-8")
+                    self.assertEqual(text.count(fragment), 1)
+                    path.write_text(text.replace(fragment, "", 1), encoding="utf-8")
+                    self.assertTrue(
+                        any(
+                            "durable authority handoff boundary missing required fragment"
+                            in failure
+                            for failure in check_operation_semantics.validate(root)
+                        )
+                    )
+
     def test_durable_authority_cannot_drop_floored_policy_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

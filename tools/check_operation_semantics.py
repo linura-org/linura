@@ -566,14 +566,20 @@ def validate(root: Path) -> list[str]:
             "review_plan_with_classification",
             "candidate.risk_floor",
             "review.subject().prospective_risk() != risk.risk",
-            "pub(crate) fn revalidate_display_keep(",
+            "pub(crate) fn revalidate_display_review(",
+            "pub(crate) enum DisplayReviewPurpose",
+            "Self::Keep => (",
+            "Self::OriginalFinalization => (",
+            "|| !self.purpose.matches(&self.plan)",
+            "|| !purpose.matches(&prepared.candidate.plan)",
             "original.revalidate(principal, floor, &self.approvals)",
         ):
             if fragment not in durable_text:
                 failures.append(
                     f"durable authority handoff boundary missing required fragment: {fragment}"
                 )
-        # Candidate, recovery, prepared handoff and original display Keep review.
+        # Candidate, recovery, prepared handoff and purpose-bound original
+        # display review (shared by Keep and original finalization).
         expected_review_paths = 4
         actual_review_paths = durable_text.count("review_plan_with_classification(")
         if actual_review_paths != expected_review_paths:

@@ -77,8 +77,9 @@ void completed(ProtectedFrame &frame, const void *buffer, std::uint64_t commit, 
     assert(frame.rendered(buffer, kind));
     assert(frame.queued(buffer, commit));
     assert(frame.submitted(commit, true));
-    assert(frame.presented(commit, true) ==
-           (kind == Kind::Content ? Presentation::Content : Presentation::Safety));
+    assert(frame.presented(commit, true) == (kind == Kind::Ordinary  ? Presentation::Ordinary
+                                             : kind == Kind::Content ? Presentation::Content
+                                                                     : Presentation::Safety));
 }
 } // namespace
 
@@ -141,7 +142,7 @@ int main()
     // output must have its own native completed-frame witness.
     {
         ProtectedFrame shared;
-        completed(shared, &first, 8, Kind::Content);
+        completed(shared, &first, 8, Kind::Ordinary);
         auto alias = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(alias && alias->spend(held, later, before, scanout));
         std::vector<NativeFirstFrameGate::NativeFrame> reused{
@@ -162,8 +163,8 @@ int main()
         moved[0].previousCommit = 8;
         ProtectedFrame stale;
         ProtectedFrame fresh;
-        completed(stale, &first, 8, Kind::Content);
-        completed(fresh, &second, 9, Kind::Content);
+        completed(stale, &first, 8, Kind::Ordinary);
+        completed(fresh, &second, 9, Kind::Ordinary);
         auto preSpent = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(preSpent && preSpent->spend(held, later, moved, scanout));
         std::vector<NativeFirstFrameGate::NativeFrame> staleFrames{
@@ -215,16 +216,18 @@ int main()
 
     // A completed opaque frame is NOT a first ordinary frame, and neither is
     // an old hardware completion or a presented frame on the wrong buffer.
-    for (int scenario = 0; scenario < 4; ++scenario) {
+    for (int scenario = 0; scenario < 5; ++scenario) {
         ProtectedFrame a;
         ProtectedFrame b;
         auto proof = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(proof && proof->spend(held, later, before, scanout));
-        if (scenario == 0)
+        if (scenario == 4)
+            completed(a, &first, 8, Kind::Content); // Protected review is not ordinary output.
+        else if (scenario == 0)
             completed(a, &first, 8, Kind::Safety);
         else
-            completed(a, &first, scenario == 1 ? 7 : 8, Kind::Content);
-        completed(b, &second, 9, Kind::Content);
+            completed(a, &first, scenario == 1 ? 7 : 8, Kind::Ordinary);
+        completed(b, &second, 9, Kind::Ordinary);
         const auto target = scenario == 3 ? &swapped : &first;
         std::vector<NativeFirstFrameGate::NativeFrame> frames{
             {held.heads[0].key, &a, target, 0, false, 301},
@@ -251,8 +254,8 @@ int main()
         assert(absent->phase() == Phase::Spent);
         ProtectedFrame freshFirst;
         ProtectedFrame freshSecond;
-        completed(freshFirst, &first, 8, Kind::Content);
-        completed(freshSecond, &second, 9, Kind::Content);
+        completed(freshFirst, &first, 8, Kind::Ordinary);
+        completed(freshSecond, &second, 9, Kind::Ordinary);
         noFrames[0] = {held.heads[0].key, &freshFirst, &first, 0, false, 301};
         assert(!absent->observe({held, later, noFrames, scanout, outputCommits(held, noFrames)}));
         assert(absent->phase() == Phase::Spent);
@@ -282,7 +285,7 @@ int main()
     // physical receipt. An unrelated third commit faults the original window.
     {
         ProtectedFrame queued;
-        assert(queued.rendered(&first, Kind::Content));
+        assert(queued.rendered(&first, Kind::Ordinary));
         assert(queued.queued(&first, 8));
         std::vector<NativeFirstFrameGate::NativeFrame> pendingFrames{
             {held.heads[0].key, &queued, &first, 0, false, 301},
@@ -313,15 +316,17 @@ int main()
     };
     assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
     assert(proof->phase() == Phase::Spent);
-    completed(a, &first, 8, Kind::Content);
+    completed(a, &first, 8, Kind::Ordinary);
     assert(!proof->observe({held, later, frames, scanout, outputCommits(held, frames)}));
-    completed(b, &second, 9, Kind::Content);
+    completed(b, &second, 9, Kind::Ordinary);
     const auto completedOutputCommits = outputCommits(held, frames);
     const auto receipt = proof->observe({held, later, frames, scanout, completedOutputCommits});
     assert(receipt);
     assert(receipt->generation == held.generation);
     assert(receipt->securityEpoch == held.securityEpoch);
     assert(receipt->postWriteEpoch == 13);
+    assert(receipt->deadlineUnixMs == 12'000);
+    assert(receipt->deadlineBootMs == 7'000);
     assert(receipt->completedCount == 2);
     assert(receipt->completed[0].spendHighWater == 7);
     assert(receipt->completed[1].spendHighWater == 7);
@@ -349,6 +354,8 @@ int main()
     assert(reconciled && proof->phase() == Phase::Verified);
     assert(reconciled->observedUnixMs == reread.unixMs);
     assert(reconciled->observedBootMs == reread.bootMs);
+    assert(reconciled->deadlineUnixMs == receipt->deadlineUnixMs);
+    assert(reconciled->deadlineBootMs == receipt->deadlineBootMs);
     assert(reconciled->completedCount == receipt->completedCount);
     assert(reconciled->completed[0].completedCommit == receipt->completed[0].completedCommit);
     assert(reconciled->completed[0].spendHighWater == receipt->completed[0].spendHighWater);
@@ -376,8 +383,8 @@ int main()
     for (int loss = 0; loss < 10; ++loss) {
         ProtectedFrame initialFirst;
         ProtectedFrame initialSecond;
-        completed(initialFirst, &first, 8, Kind::Content);
-        completed(initialSecond, &second, 9, Kind::Content);
+        completed(initialFirst, &first, 8, Kind::Ordinary);
+        completed(initialSecond, &second, 9, Kind::Ordinary);
         auto retained = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
         assert(retained && retained->spend(held, later, before, scanout));
         auto liveFrames = frames;
@@ -394,14 +401,14 @@ int main()
         if (loss == 0)
             liveFrames[0] = {held.heads[0].key, nullptr, nullptr, 0, false, 0};
         else if (loss == 1) {
-            completed(replacement, &first, 10, Kind::Content);
+            completed(replacement, &first, 10, Kind::Ordinary);
             liveFrames[0].frame = &replacement;
             commits[0].previousCommit = 10;
         } else if (loss == 2) {
-            completed(replacement, &first, 8, Kind::Content);
+            completed(replacement, &first, 8, Kind::Ordinary);
             liveFrames[0].frame = &replacement; // Same numbers, replaced native tracker.
         } else if (loss == 3) {
-            completed(replacement, &swapped, 8, Kind::Content);
+            completed(replacement, &swapped, 8, Kind::Ordinary);
             liveFrames[0].frame = &replacement;
             liveFrames[0].retainedBuffer = &swapped;
         } else if (loss == 4)

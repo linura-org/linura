@@ -12,8 +12,8 @@ namespace Linura::HyprlandDisplay {
 class ProtectedFrame final
 {
   public:
-    enum class Kind { Safety, Content };
-    enum class Presentation { Ignored, Safety, Content, Failed };
+    enum class Kind { Safety, Content, Ordinary };
+    enum class Presentation { Ignored, Safety, Content, Ordinary, Failed };
 
     [[nodiscard]] bool rendered(const void *buffer, Kind kind) noexcept
     {
@@ -64,6 +64,8 @@ class ProtectedFrame final
             return Presentation::Failed;
         }
         presented_ = true;
+        if (kind_ == Kind::Ordinary)
+            return Presentation::Ordinary;
         return kind_ == Kind::Content ? Presentation::Content : Presentation::Safety;
     }
     [[nodiscard]] Kind queuedKind() const noexcept

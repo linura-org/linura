@@ -241,6 +241,17 @@ authenticates the supervised owner and grants no restoration or executor
 permission. It neither acquires nor releases S17 state. Component checks do not
 qualify the real first-frame and crash matrix; public mutations stay disabled.
 
+First ordinary frames have a separate native tracker kind from protected owner
+review/PAM content and opaque safety frames. Neither protected kind can satisfy
+the ordinary-frame comparison. A comparison receipt retains the original wall
+and BOOTTIME deadlines, including after read-only reconciliation.
+Before the original finalization's native grant spend, Control additionally
+revalidates the original canonical purpose, registered operation, current
+policy/risk, exact durable binding and still-valid administrator approval. This
+bounded process-local refusal material is removed before spend; neither restart
+nor retained Root/Control records reconstructs it. These checks do not enable
+the physical handoff, retire protection or certify terminal completion.
+
 The startup RPC is addressed to the original independently attested unique bus
 owner, never its replaceable well-known name. Qt 6.11 intentionally returns an
 empty `QDBusMessage::service()` for reply messages; an exposed sender must match,

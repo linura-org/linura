@@ -249,6 +249,21 @@ gate, including either clock moving backward within the original window.
 The original deadline remains fixed. This mechanism does not implement the
 physical handoff, its independent Control verification or durable completion.
 
+An ordinary frame now has its own native tracker kind, distinct from opaque
+safety frames and protected owner review/PAM content. Protected owner content
+cannot satisfy the ordinary-frame comparison. The receipt carries both original
+absolute deadlines; a later comparison timestamp never renews either window.
+
+Control also retains bounded, process-local review material from the original
+prepared canonical finalization. Before native grant spend it checks the exact
+purpose, registered operation, current policy/risk, unchanged durable binding and
+live original administrator approval. It removes the retained review before
+durable spend and revalidates again immediately before dispatch. A restart,
+revocation, expiry or lost review refuses this continuation; durable records
+cannot reconstruct approval. This adds refusal checks to the existing
+before-effect protocol. It does not connect the physical release or supply its
+independent completion proof.
+
 The remaining requirements below are an acceptance contract, not currently
 implemented effect authority. The original-restoration terminal and ordinary
 Keep/Revert paths must stay distinct even where they share low-level mechanisms.

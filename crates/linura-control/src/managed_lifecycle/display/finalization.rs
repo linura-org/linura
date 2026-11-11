@@ -582,6 +582,9 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let mut prepared = self
             .authority
             .prepare(refreshed, Some(evidence.id().clone()))?;
+        let retained_bytes =
+            crate::durable_authority::DisplayRetainedReview::estimated_bytes(&prepared);
+        self.check_display_review_capacity(retained_bytes)?;
         let started = now_ms()?;
         let deadline = started
             .checked_add(DISPLAY_CONFIRMATION_WINDOW_MS)
@@ -649,6 +652,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .display_checkpoint_observation()
             .require_current(now_ms()?)
             .map_err(|_| invalid())?;
+        self.display_reviews.insert(
+            dispatched.transaction_id.clone(),
+            RetainedDisplayReview {
+                review: crate::durable_authority::DisplayRetainedReview::from_spent(
+                    prepared,
+                    crate::durable_authority::DisplayReviewPurpose::OriginalFinalization,
+                )?,
+                created_unix_ms: started,
+                deadline_unix_ms: deadline,
+                retained_bytes,
+            },
+        );
         if now_ms()? < deadline
             && let Ok(outcome) = port.dispatch_finalization(AuthorizedOriginalDisplayFinalization {
                 authorization,
@@ -1415,6 +1430,35 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(invalid());
         }
         let now = now_ms()?;
+        // This purpose-specific phase continues the original full canonical
+        // finalization. LNRN/LNRX cannot reconstruct its review or approval.
+        // Remove the refusal material before durable spend; ambiguity and
+        // restart cannot recover a second grant-spend opportunity.
+        let review = self
+            .display_reviews
+            .remove(&terminal.snapshot.transaction_id)
+            .ok_or_else(|| {
+                ManagedLifecycleError::ApprovalBoundary(
+                    "original terminal review unavailable; native grant spend remains fenced"
+                        .into(),
+                )
+            })?;
+        let floor = self.registered_managed_risk_floor(&terminal.request)?;
+        if review.review.purpose()
+            != crate::durable_authority::DisplayReviewPurpose::OriginalFinalization
+            || now < review.created_unix_ms
+            || now >= review.deadline_unix_ms
+        {
+            return Err(invalid());
+        }
+        self.validate_registered_managed_plan(review.review.plan(), review.review.risk())?;
+        self.authority.revalidate_display_review(
+            &principal,
+            &terminal.request,
+            &review.review,
+            floor,
+            &terminal.snapshot,
+        )?;
         let record = NativeReleaseSpendPrepared::capture(
             &principal_id,
             &terminal.request,
@@ -1460,6 +1504,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             control_observation: original.observation().clone(),
             expires_at_unix_ms: record.expiry(),
         };
+        // Storage/probes can consume the remaining window. Recheck the
+        // original signed binding, current policy/risk and nonrevoked approval
+        // immediately before the sole Root/native spend.
+        let dispatch_now = now_ms()?;
+        if dispatch_now < now
+            || dispatch_now >= review.deadline_unix_ms
+            || dispatch_now >= record.expiry()
+        {
+            return Err(invalid());
+        }
+        self.validate_registered_managed_plan(review.review.plan(), review.review.risk())?;
+        self.authority.revalidate_display_review(
+            &principal,
+            &terminal.request,
+            &review.review,
+            floor,
+            &terminal.snapshot,
+        )?;
         port.spend_native_release(attempt).map_err(|_| {
             ManagedLifecycleError::Indeterminate(
                 "native Root release grant spend outcome uncertain; no retry".into(),

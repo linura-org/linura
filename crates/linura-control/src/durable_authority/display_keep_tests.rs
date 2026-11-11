@@ -34,14 +34,38 @@ fn administrator() -> PolicyAuthenticatedApprover {
 
 // Policy-only fixture: the real planner and approval store produce the original
 // review. These string attributes never enter a native layout/effect adapter.
-fn fixture() -> (DisplayKeepReview, crate::ApprovalReviewControl) {
-    let provider = checked(ProviderId::new(linura_observation::DISPLAY_PROVIDER));
-    let resource = checked(ResourceId::new(
-        "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3",
-    ));
-    let capability = checked(CapabilityId::new(
-        linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
-    ));
+fn fixture() -> (DisplayRetainedReview, crate::ApprovalReviewControl) {
+    fixture_for(DisplayReviewPurpose::Keep)
+}
+fn finalization_floor() -> TrustedRiskFloor {
+    TrustedRiskFloor::new(
+        RiskClass::SecuritySensitive,
+        crate::operation_registry::MANAGED_DISPLAY_FINALIZATION_RISK_FLOOR_RULE_ID,
+    )
+}
+fn fixture_for(
+    purpose: DisplayReviewPurpose,
+) -> (DisplayRetainedReview, crate::ApprovalReviewControl) {
+    let topology = "11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3";
+    let (provider, capability, resource, key, floor) = match purpose {
+        DisplayReviewPurpose::Keep => (
+            linura_observation::DISPLAY_PROVIDER,
+            linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
+            format!("display:topology:{topology}"),
+            "layout",
+            floor(),
+        ),
+        DisplayReviewPurpose::OriginalFinalization => (
+            linura_observation::DISPLAY_RECOVERY_PROVIDER,
+            linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            format!("display:recovery:{}:{topology}", "a".repeat(64)),
+            "finalize_original",
+            finalization_floor(),
+        ),
+    };
+    let provider = checked(ProviderId::new(provider));
+    let capability = checked(CapabilityId::new(capability));
+    let resource = checked(ResourceId::new(resource));
     let plan = checked(DeterministicPlanner.plan_resource(
         checked(RequestId::new("request:display-keep-policy")),
         Actor {
@@ -53,7 +77,7 @@ fn fixture() -> (DisplayKeepReview, crate::ApprovalReviewControl) {
             provider: provider.clone(),
             resource: resource.clone(),
             observation_capability: capability.clone(),
-            state: BTreeMap::from([("layout".into(), "desired-layout".into())]),
+            state: BTreeMap::from([(key.into(), "desired-layout".into())]),
             reason: SemanticReason {
                 summary: "keep the explicitly reviewed layout".into(),
                 intent_ids: vec![checked(IntentId::new("intent:display-keep-policy"))],
@@ -68,10 +92,10 @@ fn fixture() -> (DisplayKeepReview, crate::ApprovalReviewControl) {
             authority: "hyprland-native".into(),
             evidence_id: "evidence:display-keep-policy".into(),
             freshness: PlanningFreshness::Current,
-            attributes: BTreeMap::from([("layout".into(), "baseline-layout".into())]),
+            attributes: BTreeMap::from([(key.into(), "baseline-layout".into())]),
         },
     ));
-    let classification = classify_candidate_risk(&plan, Some(floor()));
+    let classification = classify_candidate_risk(&plan, Some(floor));
     let risk = checked(risk_provenance_for_plan(&plan, &classification));
     let review = checked(review_plan_with_classification(
         &principal(),
@@ -113,16 +137,43 @@ fn fixture() -> (DisplayKeepReview, crate::ApprovalReviewControl) {
         ))),
     ));
     (
-        DisplayKeepReview {
+        DisplayRetainedReview {
+            purpose,
             plan,
             binding,
-            risk_floor: floor(),
+            risk_floor: floor,
             approval_evidence_id: evidence.id().clone(),
             transaction_id: checked(TransactionId::new("transaction:display-keep-policy")),
             generation: 1,
         },
         approvals,
     )
+}
+
+#[test]
+fn original_finalization_revalidates_its_distinct_canonical_purpose_and_live_approval() {
+    let (mut original, mut approvals) = fixture_for(DisplayReviewPurpose::OriginalFinalization);
+    assert_eq!(
+        original.revalidate(&principal(), finalization_floor(), &approvals),
+        Ok(())
+    );
+    assert_eq!(
+        original.revalidate(&principal(), floor(), &approvals),
+        Err(DurableAuthorityError::AuthorityChanged)
+    );
+    original.purpose = DisplayReviewPurpose::Keep;
+    assert_eq!(
+        original.revalidate(&principal(), finalization_floor(), &approvals),
+        Err(DurableAuthorityError::AuthorityChanged)
+    );
+    original.purpose = DisplayReviewPurpose::OriginalFinalization;
+    checked(approvals.revoke(&original.approval_evidence_id, &administrator()));
+    assert_eq!(
+        original.revalidate(&principal(), finalization_floor(), &approvals),
+        Err(DurableAuthorityError::ApprovalUnsatisfied(
+            ApprovalValidation::Revoked
+        ))
+    );
 }
 
 #[test]

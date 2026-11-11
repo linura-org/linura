@@ -84,6 +84,14 @@ int main()
     assert(configure.queued(&replacement, 12));
     assert(configure.submitted(12, true));
     assert(configure.presented(12, true) == Presentation::Safety);
+    // The post-commit ordinary scene is purpose-distinct from both opaque
+    // protection and the protected review/PAM surface.
+    assert(configure.rendered(&first, Kind::Ordinary));
+    assert(configure.queued(&first, 13));
+    assert(configure.submitted(13, true));
+    assert(configure.presented(13, true) == Presentation::Ordinary);
+    assert(configure.queuedKind() == Kind::Ordinary);
+    assert(configure.completedBuffer() == &first);
     // Exhaustion fails closed rather than wrapping the native commit namespace.
     ProtectedFrame exhausted;
     assert(exhausted.rendered(&first, Kind::Safety));

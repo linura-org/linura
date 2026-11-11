@@ -7,12 +7,12 @@ use linura_core::DisplayLayoutMaterial;
 use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
 pub const DISPLAY_CONFIRMATION_WINDOW_MS: u64 = 15_000;
-const MAX_KEEP_REVIEWS: usize = 32;
-const MAX_KEEP_REVIEW_BYTES: usize = 256 * 1024;
-const MAX_TOTAL_KEEP_REVIEW_BYTES: usize = 8 * 1024 * 1024;
+const MAX_DISPLAY_REVIEWS: usize = 32;
+const MAX_DISPLAY_REVIEW_BYTES: usize = 256 * 1024;
+const MAX_TOTAL_DISPLAY_REVIEW_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug)]
-pub(super) struct RetainedKeepReview {
-    review: crate::durable_authority::DisplayKeepReview,
+pub(super) struct RetainedDisplayReview {
+    review: crate::durable_authority::DisplayRetainedReview,
     created_unix_ms: u64,
     deadline_unix_ms: u64,
     retained_bytes: usize,
@@ -454,20 +454,20 @@ fn validate_terminal_display_history(
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn check_keep_review_capacity(&mut self, bytes: usize) -> Result<(), ManagedLifecycleError> {
+    fn check_display_review_capacity(&mut self, bytes: usize) -> Result<(), ManagedLifecycleError> {
         let now = now_ms()?;
         // Discarding this refusal-only review cache cannot cancel a native
         // reservation, replay an effect or keep it after expiry/clock rollback.
-        self.display_keep_reviews
+        self.display_reviews
             .retain(|_, value| now >= value.created_unix_ms && now < value.deadline_unix_ms);
         let retained = self
-            .display_keep_reviews
+            .display_reviews
             .values()
             .map(|value| value.retained_bytes)
             .fold(0_usize, usize::saturating_add);
-        if self.display_keep_reviews.len() >= MAX_KEEP_REVIEWS
-            || bytes > MAX_KEEP_REVIEW_BYTES
-            || retained.saturating_add(bytes) > MAX_TOTAL_KEEP_REVIEW_BYTES
+        if self.display_reviews.len() >= MAX_DISPLAY_REVIEWS
+            || bytes > MAX_DISPLAY_REVIEW_BYTES
+            || retained.saturating_add(bytes) > MAX_TOTAL_DISPLAY_REVIEW_BYTES
         {
             return Err(ManagedLifecycleError::Authority(
                 "pending display review retention is at capacity".into(),
@@ -483,17 +483,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         snapshot: &linura_transaction::TransactionSnapshot,
     ) -> Result<(), ManagedLifecycleError> {
         let floor = self.registered_managed_risk_floor(request)?;
-        let retained = self.display_keep_reviews.get(&snapshot.transaction_id).ok_or_else(|| {
+        let retained = self.display_reviews.get(&snapshot.transaction_id).ok_or_else(|| {
             ManagedLifecycleError::ApprovalBoundary("original display review is unavailable; observe and restore without reconstructing keep authority".into())
         })?;
         let now = now_ms()?;
-        if now < retained.created_unix_ms || now >= retained.deadline_unix_ms {
+        if retained.review.purpose() != crate::durable_authority::DisplayReviewPurpose::Keep
+            || now < retained.created_unix_ms
+            || now >= retained.deadline_unix_ms
+        {
             return Err(ManagedLifecycleError::ApprovalBoundary(
                 "original display review deadline expired".into(),
             ));
         }
         self.validate_registered_managed_plan(retained.review.plan(), retained.review.risk())?;
-        self.authority.revalidate_display_keep(
+        self.authority.revalidate_display_review(
             principal,
             request,
             &retained.review,
@@ -714,7 +717,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .integrity_check()
             .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         self.reconcile_prior_display_recovery(&principal_id, &request, port, verifier)?;
-        self.check_keep_review_capacity(0)?;
+        self.check_display_review_capacity(0)?;
         let floor = self.registered_managed_risk_floor(&request)?;
         let candidate = self.authority.candidate_with_risk_floor(
             &mut self.previews,
@@ -791,8 +794,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             now_ms()?,
         )?;
         let retained_bytes =
-            crate::durable_authority::DisplayKeepReview::estimated_bytes(&prepared);
-        self.check_keep_review_capacity(retained_bytes)?;
+            crate::durable_authority::DisplayRetainedReview::estimated_bytes(&prepared);
+        self.check_display_review_capacity(retained_bytes)?;
         let started = now_ms()?;
         let deadline = started
             .checked_add(DISPLAY_CONFIRMATION_WINDOW_MS)
@@ -827,10 +830,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // Persist both baseline and ambiguity/dispatch correlation BEFORE calling
         // the effect port. A failed or uncertain journal write cannot dispatch.
         self.append_display_record(&dispatched, principal_id.clone(), Some(&reserved))?;
-        self.display_keep_reviews.insert(
+        self.display_reviews.insert(
             dispatched.transaction_id.clone(),
-            RetainedKeepReview {
-                review: crate::durable_authority::DisplayKeepReview::from_spent(prepared)?,
+            RetainedDisplayReview {
+                review: crate::durable_authority::DisplayRetainedReview::from_spent(
+                    prepared,
+                    crate::durable_authority::DisplayReviewPurpose::Keep,
+                )?,
                 created_unix_ms: started,
                 deadline_unix_ms: deadline,
                 retained_bytes,
@@ -919,7 +925,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             now_ms()?,
         )?;
         if history.confirmed.is_some() || history.restored.is_some() {
-            self.display_keep_reviews.remove(&transaction);
+            self.display_reviews.remove(&transaction);
             return Ok(receipt(
                 &request,
                 reserved.deadline_unix_ms,

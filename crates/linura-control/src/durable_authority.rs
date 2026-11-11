@@ -216,12 +216,39 @@ pub struct PreparedDurableAuthority {
     handed_off: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DisplayReviewPurpose {
+    Keep,
+    OriginalFinalization,
+}
+impl DisplayReviewPurpose {
+    fn matches(self, plan: &linura_planner::ReconciliationPlan) -> bool {
+        let (provider, capability, key) = match self {
+            Self::Keep => (
+                linura_observation::DISPLAY_PROVIDER,
+                linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
+                "layout",
+            ),
+            Self::OriginalFinalization => (
+                linura_observation::DISPLAY_RECOVERY_PROVIDER,
+                linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+                "finalize_original",
+            ),
+        };
+        plan.provider.as_str() == provider
+            && plan.observation_capability.as_str() == capability
+            && plan.status == linura_planner::PlanStatus::ChangeProposed
+            && matches!(plan.changes.as_slice(), [change] if change.key == key)
+    }
+}
+
 /// Historical canonical review material after its dispatch permit was spent.
-/// This owns no observation envelope, permit, signer or effect handle. Its sole
-/// use is to refuse keep when CURRENT policy/risk/approval no longer matches the
-/// original mutation. Losing it at restart cannot reconstruct review authority.
+/// This owns no observation envelope, permit, signer or effect handle. It can
+/// only refuse a purpose-bound continuation when CURRENT policy/risk/approval
+/// no longer matches the original canonical mutation. Losing it at restart cannot reconstruct review authority.
 #[derive(Debug)]
-pub(crate) struct DisplayKeepReview {
+pub(crate) struct DisplayRetainedReview {
+    purpose: DisplayReviewPurpose,
     plan: linura_planner::ReconciliationPlan,
     binding: AuthorityBinding,
     risk_floor: TrustedRiskFloor,
@@ -229,7 +256,7 @@ pub(crate) struct DisplayKeepReview {
     transaction_id: TransactionId,
     generation: u64,
 }
-impl DisplayKeepReview {
+impl DisplayRetainedReview {
     fn revalidate(
         &self,
         principal: &AuthenticatedPrincipal,
@@ -238,11 +265,7 @@ impl DisplayKeepReview {
     ) -> Result<(), DurableAuthorityError> {
         if principal.as_str() != self.binding.principal().as_str()
             || self.risk_floor != floor
-            || self.plan.status != linura_planner::PlanStatus::ChangeProposed
-            || self.plan.provider.as_str() != linura_observation::DISPLAY_PROVIDER
-            || self.plan.observation_capability.as_str()
-                != linura_observation::DISPLAY_OUTPUTS_CAPABILITY
-            || !matches!(self.plan.changes.as_slice(), [change] if change.key == "layout")
+            || !self.purpose.matches(&self.plan)
         {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
@@ -286,18 +309,16 @@ impl DisplayKeepReview {
 
     pub(crate) fn from_spent(
         prepared: PreparedDurableAuthority,
+        purpose: DisplayReviewPurpose,
     ) -> Result<Self, DurableAuthorityError> {
         if !prepared.handed_off
             || prepared.candidate.protective.is_some()
-            || prepared.candidate.plan.provider.as_str() != linura_observation::DISPLAY_PROVIDER
-            || prepared.candidate.plan.observation_capability.as_str()
-                != linura_observation::DISPLAY_OUTPUTS_CAPABILITY
-            || prepared.candidate.plan.status != linura_planner::PlanStatus::ChangeProposed
-            || !matches!(prepared.candidate.plan.changes.as_slice(), [change] if change.key == "layout")
+            || !purpose.matches(&prepared.candidate.plan)
         {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
         Ok(Self {
+            purpose,
             plan: prepared.candidate.plan,
             binding: prepared.binding,
             risk_floor: prepared
@@ -316,6 +337,9 @@ impl DisplayKeepReview {
     }
     pub(crate) fn risk(&self) -> RiskClass {
         self.binding.trusted_risk()
+    }
+    pub(crate) fn purpose(&self) -> DisplayReviewPurpose {
+        self.purpose
     }
 }
 
@@ -453,11 +477,11 @@ where
     /// is not marked current, re-observed, re-prepared or converted into a new
     /// permit. The display controller separately requires newer native attempt,
     /// layout/coverage and protected-decision facts before any continuation.
-    pub(crate) fn revalidate_display_keep(
+    pub(crate) fn revalidate_display_review(
         &mut self,
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,
-        original: &DisplayKeepReview,
+        original: &DisplayRetainedReview,
         floor: TrustedRiskFloor,
         expected: &TransactionSnapshot,
     ) -> Result<(), DurableAuthorityError> {
