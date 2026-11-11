@@ -408,6 +408,11 @@ where
         risk_floor: Option<TrustedRiskFloor>,
         protective: Option<crate::protective_lock_execution::ProtectiveLockContext>,
     ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
+        if request.provider.as_str() == crate::backlight_contract::PROVIDER
+            && !crate::backlight_contract::original_subject_matches(&principal, &request.resource)
+        {
+            return Err(DurableAuthorityError::CandidateBlocked);
+        }
         let request_digest = digest_request(&request)?;
         let (plan, observation) = if let Some(context) = &protective {
             previews.protective_authority_candidate(principal.clone(), actor, request, context)?
@@ -784,7 +789,15 @@ where
         let request_digest = anchor.request_digest.clone();
         let protective_recovery =
             crate::protective_lock_execution::retained_protective_request(&principal, &request);
-        if protective_recovery && !matches!(&approval, RecoveryApproval::ObserveOnly) {
+        let backlight_recovery = request.provider.as_str() == crate::backlight_contract::PROVIDER;
+        if backlight_recovery
+            && !crate::backlight_contract::original_subject_matches(&principal, &request.resource)
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        if (protective_recovery || backlight_recovery)
+            && !matches!(&approval, RecoveryApproval::ObserveOnly)
+        {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
         let (plan, observation) = if protective_recovery {

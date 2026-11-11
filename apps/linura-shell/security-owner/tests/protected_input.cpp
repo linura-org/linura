@@ -4,6 +4,7 @@
 #include <QAccessible>
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QQuickItem>
 #include <QMetaMethod>
 #include <QMetaProperty>
 
@@ -36,7 +37,12 @@ int main(int argc, char **argv)
 {
     QGuiApplication application(argc, argv);
     try {
-        SecretEntry entry;
+        // Native input is hosted by a presentation item. A parentless Qt item
+        // can remain effectively hidden after a hide/show cycle, so it cannot
+        // model the production visibility precondition for accepting input.
+        QQuickItem presentationRoot;
+        SecretEntry entry(&presentationRoot);
+        check(presentationRoot.isVisible() && entry.isVisible());
         using Linura::SecurityOwner::classifyNativePrompt;
         using Linura::SecurityOwner::nativePromptLabel;
         check(classifyNativePrompt(" Password: ") == NativePromptKind::Password);
@@ -177,6 +183,11 @@ int main(int argc, char **argv)
             check(cancelled && !entry.acceptsInput() && entry.maskedLength() == 0);
             entry.setVisible(true);
         }
+        check(entry.beginNativePrompt());
+        key(entry, Qt::Key_A, Qt::NoModifier, generated);
+        presentationRoot.setVisible(false);
+        check(!entry.acceptsInput() && entry.maskedLength() == 0);
+        check(!entry.beginNativePrompt());
         std::cout << "protected native input: " << checks << " checks passed\n";
         return 0;
     } catch (const std::exception &error) {

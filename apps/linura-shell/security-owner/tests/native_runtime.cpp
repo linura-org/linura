@@ -575,8 +575,9 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 14 && signals == 1 && annotations == 3);
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
+    assert(introspection.contains(QStringLiteral("ObserveBacklightOwner")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
     NativeEndpoint::registerWireTypes();
@@ -588,6 +589,8 @@ int main(int argc, char **argv)
                QMetaType::fromType<NativeLockObservationWire>())) == "(sbt)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativePowerPermissionWire>())) == "(sst)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeBacklightOwnerWire>())) == "(st)");
     NativeApprovalWire scope{QStringLiteral("session:lock:abcd1234-1234-4567-89ab-0123456789ab:"
                                             "1000:2:42:98765432-1234-4567-89ab-0123456789ab:1"),
                              QStringLiteral("unix:uid:1000"),
@@ -683,6 +686,20 @@ int main(int argc, char **argv)
     invalid = decoded;
     invalid.resource = QStringLiteral("session:lock:unsupported");
     assert(!invalid.freshAtBootMs(12345));
+
+    // A different user, generation, forged format, future/expired sample
+    // and zero timestamp cannot represent a fresh protected worker proof.
+    NativeBacklightOwnerWire worker{scope.resource, 12345};
+    const auto workerWire =
+        qdbus_cast<NativeBacklightOwnerWire>(roundTrip(QVariant::fromValue(worker)));
+    assert(workerWire.sessionLock == worker.sessionLock && workerWire.sampledBootMs == 12345);
+    assert(workerWire.freshAtBootMs(12345) && workerWire.freshAtBootMs(14344));
+    assert(!workerWire.freshAtBootMs(14345) && !workerWire.freshAtBootMs(12344));
+    worker.sampledBootMs = 0;
+    assert(!worker.freshAtBootMs(12345));
+    worker = workerWire;
+    worker.sessionLock = QStringLiteral("session:lock:untrusted");
+    assert(!worker.freshAtBootMs(12345));
 
     const auto suffix = scope.resource.mid(qsizetype(sizeof("session:lock:") - 1));
     for (const auto &action : {"suspend", "reboot", "power-off", "logout"}) {

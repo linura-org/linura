@@ -30,6 +30,18 @@ struct NativeLockObservationWire final
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeLockObservationWire &observation);
 const QDBusArgument &operator>>(const QDBusArgument &wire, NativeLockObservationWire &observation);
 
+// Read-only proof of the protected per-UID security supervisor and its
+// independently attested active login. This system unit is NOT itself proven
+// to be a member of the graphical login's logind Session. No write authority.
+struct NativeBacklightOwnerWire final
+{
+    QString sessionLock;
+    quint64 sampledBootMs = 0;
+    [[nodiscard]] bool freshAtBootMs(quint64 now) const;
+};
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeBacklightOwnerWire &observation);
+const QDBusArgument &operator>>(const QDBusArgument &wire, NativeBacklightOwnerWire &observation);
+
 struct NativePowerPermissionWire final
 {
     QString resource, availability;
@@ -61,6 +73,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<method name=\"CancelApproval\"/>"
         "<method name=\"ObserveLock\"><arg name=\"observation\" type=\"(sbt)\" "
         "direction=\"out\"/></method>"
+        "<method name=\"ObserveBacklightOwner\">"
+        "<arg name=\"observation\" type=\"(st)\" direction=\"out\"/></method>"
         "<method name=\"ObservePowerPermission\"><arg name=\"resource\" type=\"s\" "
         "direction=\"in\"/>"
         "<arg name=\"observation\" type=\"(sst)\" direction=\"out\"/></method>"
@@ -99,6 +113,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     bool ConsumeApproval(const NativeApprovalWire &scope);
     void CancelApproval();
     NativeLockObservationWire ObserveLock();
+    NativeBacklightOwnerWire ObserveBacklightOwner();
     NativePowerPermissionWire ObservePowerPermission(const QString &resource);
     bool FencePreparedTransition(const QString &resource);
     bool CancelUndispatchedTransition(const QString &resource);
@@ -121,3 +136,4 @@ class NativeEndpoint final : public QObject, protected QDBusContext
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeApprovalWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeLockObservationWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePowerPermissionWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeBacklightOwnerWire)

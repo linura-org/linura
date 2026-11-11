@@ -147,6 +147,183 @@ fn prepared_snapshot(outcome: linura_transaction::PrepareOutcome) -> Transaction
     }
 }
 
+// S21-3 physical brightness is deliberately not registered or executable.
+// This fixture checks only the existing production SQLite transaction store's
+// persistence/one-shot behavior when handed syntactically canonical backlight
+// authority material. The signer represents trusted Control in this test; it
+// is NOT proof of hardware qualification, native execution or approval policy.
+fn s21_backlight_sqlite_binding(
+    generation: &str,
+) -> linura_transaction::AuthorityBinding {
+    use linura_core::{
+        ApprovalEvidenceId, ApprovalRequestId, BacklightDeviceGeneration,
+        BacklightResourceId, BootId, SessionEpoch,
+    };
+    use linura_transaction::ApprovalAuthority;
+    let target = BacklightResourceId::new(
+        SessionEpoch::new(
+            BootId::new("abcd1234-1234-4567-89ab-0123456789ab")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            1000,
+            "c2",
+            42,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}")),
+        BacklightDeviceGeneration::new(generation)
+            .unwrap_or_else(|error| unreachable!("{error}")),
+    )
+    .unwrap_or_else(|error| unreachable!("{error}"));
+    let approval = ApprovalAuthority::try_new(
+        id(ApprovalEvidenceId::new("approval:backlight-sqlite")),
+        id(ApprovalRequestId::new("approval-request:backlight-sqlite")),
+        id(PrincipalId::new("unix:uid:1000")),
+        "administrator",
+        1,
+        u64::MAX,
+    )
+    .unwrap_or_else(|error| unreachable!("{error}"));
+    linura_transaction::AuthorityBinding::try_new(
+        id(PrincipalId::new("unix:uid:1000")),
+        id(RequestId::new("request:backlight-sqlite-once")),
+        id(PlanId::new("request:backlight-sqlite-once")),
+        digest("backlight-request"),
+        digest("physical-qualification-not-proven"),
+        digest("fresh-native-observation-not-proven"),
+        id(ProviderId::new("logind-backlight")),
+        target.resource_id().unwrap_or_else(|error| unreachable!("{error}")),
+        id(CapabilityId::new("display.backlight.observe")),
+        id(PolicyId::new("policy:baseline")),
+        id(PolicyRevisionId::new("policy:baseline:v1")),
+        RiskClass::SecuritySensitive,
+        "risk-policy:s21-3:1",
+        vec!["test.backlight.security-sensitive".into()],
+        digest("review"),
+        AuthorizationBasis::Approval(approval),
+    )
+    .unwrap_or_else(|error| unreachable!("{error}"))
+}
+
+#[test]
+fn s21_backlight_sqlite_consumed_handoff_survives_reopen_without_replay() {
+    let db = TestDatabase::new();
+    let binding = s21_backlight_sqlite_binding(
+        "98765432-1234-4567-89ab-0123456789ab",
+    );
+    let (signer, mut store) = open_store(&db.path);
+    let prepared = prepared_snapshot(
+        store.prepare(&binding).unwrap_or_else(|error| unreachable!("{error}")),
+    );
+    assert_eq!(prepared.state, TransactionState::Prepared);
+    assert_eq!(prepared.principal.as_str(), "unix:uid:1000");
+    let reserved = signer
+        .authorize_handoff(&prepared, digest("backlight-dispatch-once"), 1, u64::MAX)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let consumed = store
+        .handoff(&reserved)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(consumed.transaction_id, prepared.transaction_id);
+    drop(store); // Simulate loss of Control process state after dispatch reservation.
+
+    let (_, mut restarted) = open_store(&db.path);
+    let retained = restarted
+        .snapshot(&prepared.transaction_id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(retained.state, TransactionState::Indeterminate);
+    assert_eq!(retained.state_version, consumed.state_version);
+    assert_eq!(retained.current_generation, prepared.current_generation);
+    assert_eq!(retained.binding_digest, *binding.digest());
+    // Even a byte-for-byte replay of a genuine, previously signed handoff
+    // cannot dispatch a second time or roll the persisted attempt backward.
+    assert!(matches!(
+        restarted.handoff(&reserved),
+        Err(TransactionStoreError::StateConflict)
+    ));
+    assert!(matches!(
+        restarted.prepare(&binding),
+        Err(TransactionStoreError::IdempotencyConflict)
+    ));
+    assert_eq!(
+        restarted
+            .snapshot(&prepared.transaction_id)
+            .unwrap_or_else(|error| unreachable!("{error}")),
+        retained
+    );
+    restarted
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
+}
+
+#[test]
+fn s21_backlight_sqlite_indeterminate_recovery_remains_no_replay_after_restart() {
+    let db = TestDatabase::new();
+    let binding = s21_backlight_sqlite_binding(
+        "98765432-1234-4567-89ab-0123456789ab",
+    );
+    let (signer, mut store) = open_store(&db.path);
+    let prepared = prepared_snapshot(
+        store.prepare(&binding).unwrap_or_else(|error| unreachable!("{error}")),
+    );
+    let reserved = signer
+        .authorize_handoff(&prepared, digest("one-original-backlight-attempt"), 1, u64::MAX)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    store.handoff(&reserved).unwrap_or_else(|error| unreachable!("{error}"));
+    drop(store);
+
+    let (_, mut reopened) = open_store(&db.path);
+    let uncertain = reopened
+        .snapshot(&prepared.transaction_id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(uncertain.state, TransactionState::Indeterminate);
+    // The signed ambiguous resolution records an observation without claiming
+    // either a successful physical write or the absence of an earlier effect.
+    let ambiguous = signer
+        .authorize_recovery(
+            &uncertain,
+            RecoveryResolution::Ambiguous {
+                observation_digest: digest("unsettled-actual-brightness"),
+            },
+            1,
+            u64::MAX,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let recovered = reopened
+        .recover(&ambiguous)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let linura_transaction::RecoveryOutcome::StillIndeterminate(next) = recovered else {
+        unreachable!("ambiguous actual brightness cannot verify or reprepare an effect");
+    };
+    assert_eq!(next.state, TransactionState::Indeterminate);
+    assert_eq!(next.current_generation, uncertain.current_generation);
+    assert!(next.state_version > uncertain.state_version);
+    drop(reopened);
+
+    let (_, mut restarted_again) = open_store(&db.path);
+    assert_eq!(
+        restarted_again
+            .snapshot(&prepared.transaction_id)
+            .unwrap_or_else(|error| unreachable!("{error}")),
+        next
+    );
+    assert!(matches!(
+        restarted_again.handoff(&reserved),
+        Err(TransactionStoreError::StateConflict)
+    ));
+    // A different physical device generation under the *same* request must
+    // not silently reuse the retained authority or allocate an alternative
+    // attempt. Storage rejects changed binding material.
+    let replaced = s21_backlight_sqlite_binding(
+        "98765432-1234-4567-89ab-0123456789ac",
+    );
+    assert_ne!(binding.digest(), replaced.digest());
+    assert!(matches!(
+        restarted_again.prepare(&replaced),
+        Err(TransactionStoreError::IdempotencyConflict)
+    ));
+    restarted_again
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
+}
+
 #[test]
 fn qualified_sqlite_settings_are_enforced() {
     let db = TestDatabase::new();

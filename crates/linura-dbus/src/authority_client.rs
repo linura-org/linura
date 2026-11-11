@@ -17,7 +17,7 @@ use linura_protocol::{
 };
 
 use crate::authority::{
-    AuthorityReceiptWire, ProtectiveLockSettingWire, SessionLockStatusWire,
+    AuthorityReceiptWire, BacklightCandidateWire, ProtectiveLockSettingWire, SessionLockStatusWire,
     SessionTransitionStatusWire,
 };
 use crate::{
@@ -29,6 +29,55 @@ const MAX_REPLY_BYTES: usize = 16 * 1024;
 const REQUEST_PREFIX: &str = "request:v010:session-lock:";
 const TRANSITION_PREFIX: &str = "request:v010:session-transition:";
 const PROTECTIVE_SETTING_PREFIX: &str = "request:v010:protective-lock-setting:";
+
+/// Read-only physical-looking native backlight candidate bound to the
+/// caller's current session. Does not establish seat/panel hardware lineage,
+/// calibrated minimum or permission to change a physical device.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeBacklightCandidateStatus {
+    pub session: SessionEpoch,
+    pub device_name: String,
+    pub maximum: u32,
+    pub requested_brightness: u32,
+    pub actual_brightness: u32,
+}
+
+fn decode_native_backlight_candidate(
+    wire: BacklightCandidateWire,
+) -> Result<NativeBacklightCandidateStatus, TransportError> {
+    let (resource, device_name, maximum, requested, actual) = wire;
+    if resource.len() > 256
+        || device_name.is_empty()
+        || device_name.len() > 64
+        || matches!(device_name.as_str(), "." | "..")
+        || !device_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        || maximum == 0
+        || requested > maximum
+        || actual > maximum
+    {
+        return Err(TransportError::new(
+            "native backlight candidate has unsupported or malformed values",
+        ));
+    }
+    let resource =
+        ResourceId::new(resource).map_err(|error| TransportError::new(error.to_string()))?;
+    let session = SessionEpoch::from_resource(&resource)
+        .map_err(|error| TransportError::new(error.to_string()))?;
+    if session.uid() == 0 {
+        return Err(TransportError::new(
+            "root backlight candidate sessions are unsupported",
+        ));
+    }
+    Ok(NativeBacklightCandidateStatus {
+        session,
+        device_name,
+        maximum,
+        requested_brightness: requested,
+        actual_brightness: actual,
+    })
+}
 
 #[derive(Clone, Debug)]
 pub struct Authority1Client {
@@ -88,6 +137,19 @@ impl Authority1Client {
             return Err(TransportError::new("Authority1 reply exceeds its bound"));
         }
         Ok(reply)
+    }
+
+    /// Read native backlight values for the freshly authenticated own session.
+    /// Never returns a brightness approval or an executable effect. Missing or
+    /// ambiguous physical hardware is reported as unsupported by Authority1.
+    pub fn own_native_backlight_candidate(
+        &self,
+    ) -> Result<NativeBacklightCandidateStatus, TransportError> {
+        let (wire,): (BacklightCandidateWire,) = self
+            .call("GetOwnNativeBacklightCandidate", &())?
+            .body()
+            .deserialize()?;
+        decode_native_backlight_candidate(wire)
     }
 
     pub fn own_session_lock(&self) -> Result<SessionLockId, TransportError> {
@@ -720,6 +782,40 @@ fn validate_completion_wire(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn read_only_backlight_candidate_requires_exact_own_session_and_bounded_native_values() {
+        let epoch = "session:epoch:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42";
+        let wire = || (epoch.into(), "intel_backlight".into(), 100, 50, 50);
+        let observed = decode_native_backlight_candidate(wire())
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(observed.session.uid(), 1000);
+        assert_eq!(observed.device_name, "intel_backlight");
+        assert_eq!(observed.maximum, 100);
+        assert_eq!(observed.actual_brightness, 50);
+        for device in ["", ".", "..", "../panel", "dev/panel", "x\n", "x y"] {
+            let mut altered = wire();
+            altered.1 = device.into();
+            assert!(decode_native_backlight_candidate(altered).is_err());
+        }
+        for invalid in [
+            epoch.replace(":1000:", ":0:"),
+            epoch.replace(":42", ":0"),
+            format!("{epoch}:extra"),
+            "x".repeat(300),
+        ] {
+            let mut altered = wire();
+            altered.0 = invalid;
+            assert!(decode_native_backlight_candidate(altered).is_err());
+        }
+        for (max, requested, actual) in [(0, 0, 0), (100, 101, 30), (100, 30, 101)] {
+            let mut altered = wire();
+            altered.2 = max;
+            altered.3 = requested;
+            altered.4 = actual;
+            assert!(decode_native_backlight_candidate(altered).is_err());
+        }
+    }
+
     #[test]
     fn native_sleep_diagnostics_decode_only_canonical_bounded_login_and_closed_states() {
         let epoch = "session:epoch:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42";

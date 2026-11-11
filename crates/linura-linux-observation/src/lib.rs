@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod backlight;
 mod logind;
 pub mod platform_discovery;
 pub use logind::{

@@ -2407,6 +2407,27 @@ mod tests {
     }
 
     #[test]
+    fn proposed_backlight_cannot_enter_the_live_managed_effect_factory() {
+        let mut request = request("systemd:unit:linura-managed-example.service", "active");
+        request.provider = ProviderId::new(crate::backlight_contract::PROVIDER)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        request.observation_capability = CapabilityId::new(crate::backlight_contract::OBSERVATION)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        request.resource = ResourceId::new(
+            "backlight:physical:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42:98765432-1234-4567-89ab-0123456789ab"
+        ).unwrap_or_else(|e| unreachable!("{e}"));
+        request.desired_state = BTreeMap::from([("native_value".into(), "50".into())]);
+        assert!(matches!(
+            effect_from_request(&request),
+            Err(ManagedLifecycleError::UnsupportedEffect(_))
+        ));
+        assert!(matches!(
+            effect_from_parts(request.provider, request.resource, &request.desired_state),
+            Err(ManagedLifecycleError::UnsupportedEffect(_))
+        ));
+    }
+
+    #[test]
     fn public_effect_is_exactly_one_reserved_systemd_active_state() {
         let effect = effect_from_request(&request(
             "systemd:unit:linura-managed-example.service",

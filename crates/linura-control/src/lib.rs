@@ -17,6 +17,9 @@ mod agent_interpretation;
 mod approval;
 mod approval_review;
 mod authority_clock;
+pub mod backlight_contract;
+#[cfg(test)]
+mod backlight_recovery_tests;
 mod durable_authority;
 mod managed_lifecycle;
 mod operation_registry;

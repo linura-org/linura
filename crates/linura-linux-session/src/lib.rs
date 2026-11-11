@@ -15,7 +15,7 @@ mod sleep_gate;
 mod sleep_helper;
 mod sleep_observer;
 
-pub use bus::{NativeSessionChannel, NativeSessionRole};
+pub use bus::{NativeSessionChannel, NativeSessionRole, connect_original_user_system_bus};
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
     NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject, NativeOwnerIdentity,

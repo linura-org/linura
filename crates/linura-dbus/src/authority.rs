@@ -50,6 +50,7 @@ pub type AuthorityReceiptWire = (
     bool,
     Vec<String>,
 );
+pub type BacklightCandidateWire = (String, String, u32, u32, u32);
 pub type SessionLockStatusWire = (String, String, String, bool, String);
 pub type SessionTransitionStatusWire = (String, String, String, String);
 pub(crate) type ProtectiveLockSettingWire = (String, String, bool, String, String, u64, bool);
@@ -115,6 +116,49 @@ pub struct Authority1ManagedRequest {
     pub reason: String,
 }
 
+/// Transport-authenticated identity for the read-only backlight query.
+/// The sender and PID are never decoded from Actor provenance or client input.
+#[derive(Debug)]
+pub struct Authority1BacklightContext {
+    bus_guid: String,
+    principal: AuthenticatedPrincipal,
+    sender: String,
+    pid: u32,
+}
+
+impl Authority1BacklightContext {
+    fn from_caller(caller: &super::CallerIdentity, bus_guid: &str) -> zbus::fdo::Result<Self> {
+        if bus_guid.len() != 32
+            || !bus_guid.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || caller.uid == 0
+            || caller.pid == 0
+            || caller.pid > i32::MAX as u32
+            || zbus::names::UniqueName::try_from(caller.unique_bus_name.as_str()).is_err()
+        {
+            return Err(fdo_failed("backlight caller identity is unsupported"));
+        }
+        Ok(Self {
+            bus_guid: bus_guid.into(),
+            principal: principal_from_caller(caller)?,
+            sender: caller.unique_bus_name.clone(),
+            pid: caller.pid,
+        })
+    }
+
+    pub fn principal(&self) -> &AuthenticatedPrincipal {
+        &self.principal
+    }
+    pub fn bus_guid(&self) -> &str {
+        &self.bus_guid
+    }
+    pub fn sender(&self) -> &str {
+        &self.sender
+    }
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Authority1SessionContext {
     pub principal: AuthenticatedPrincipal,
@@ -122,6 +166,10 @@ pub struct Authority1SessionContext {
 }
 
 pub trait Authority1Handler: Send + 'static {
+    fn own_native_backlight_candidate(
+        &mut self,
+        context: Authority1BacklightContext,
+    ) -> Result<BacklightCandidateWire, String>;
     fn own_native_sleep_gate_status(
         &mut self,
         context: Authority1SessionContext,
@@ -279,6 +327,32 @@ async fn session_context(
 
 #[zbus::interface(name = "org.linura.Authority1")]
 impl Authority1Service {
+    /// Read-only own-session native backlight sample; no authority to write.
+    /// Return unsupported/unavailable when hardware or identity is ambiguous.
+    #[zbus(out_args("candidate"))]
+    async fn get_own_native_backlight_candidate(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(BacklightCandidateWire,)> {
+        let caller = authenticated_caller(connection, &header).await?;
+        let context =
+            Authority1BacklightContext::from_caller(&caller, connection.server_guid().as_str())?;
+        let handler = self.handler.clone();
+        // A diagnostic must never queue behind human approval, durable
+        // commits or native power transitions. No cached success on busy.
+        blocking::unblock(move || {
+            let mut handler = handler
+                .try_lock()
+                .map_err(|_| fdo_failed("backlight observation busy or unavailable"))?;
+            handler
+                .own_native_backlight_candidate(context)
+                .map(|candidate| (candidate,))
+                .map_err(fdo_failed)
+        })
+        .await
+    }
+
     #[zbus(out_args("status"))]
     async fn get_own_native_sleep_gate_status(
         &self,
@@ -903,10 +977,55 @@ mod tests {
     use super::*;
     use zbus::object_server::Interface;
 
+    #[test]
+    fn backlight_context_retains_transport_identity_independently_of_actor() {
+        let mut caller = super::super::actor_from_credentials(":1.42", 1000, 51)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        // Actor remains untrusted provenance even when it resembles a sender.
+        caller.actor.id =
+            ActorId::new("dbus:forged:uid:0:pid:1").unwrap_or_else(|error| unreachable!("{error}"));
+        let context =
+            Authority1BacklightContext::from_caller(&caller, "0123456789abcdef0123456789abcdef")
+                .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(context.principal().as_str(), "unix:uid:1000");
+        assert_eq!(context.sender(), ":1.42");
+        assert_eq!(context.bus_guid(), "0123456789abcdef0123456789abcdef");
+        assert_eq!(context.pid(), 51);
+    }
+
+    #[test]
+    fn backlight_context_rejects_root_missing_pid_and_nonunique_sender() {
+        for (name, uid, pid) in [
+            (":1.42", 0, 51),
+            (":1.42", 1000, 0),
+            (":1.42", 1000, u32::MAX),
+            ("org.linura.Caller", 1000, 51),
+            ("", 1000, 51),
+            (":bad\n", 1000, 51),
+        ] {
+            let mut caller = super::super::actor_from_credentials(":1.42", uid, pid)
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            caller.unique_bus_name = name.into();
+            assert!(
+                Authority1BacklightContext::from_caller(
+                    &caller,
+                    "0123456789abcdef0123456789abcdef"
+                )
+                .is_err()
+            );
+        }
+    }
+
     #[derive(Debug)]
     struct NeverCalled;
 
     impl Authority1Handler for NeverCalled {
+        fn own_native_backlight_candidate(
+            &mut self,
+            _: Authority1BacklightContext,
+        ) -> Result<BacklightCandidateWire, String> {
+            Err("introspection must not query native backlight".into())
+        }
         fn own_native_sleep_gate_status(
             &mut self,
             _: Authority1SessionContext,
@@ -1100,6 +1219,7 @@ mod tests {
         assert_eq!(live.matches(receipt).count(), 5, "live receipts");
         for method in [
             "GetOwnNativeSleepGateStatus",
+            "GetOwnNativeBacklightCandidate",
             "ConfigureProtectiveLock",
             "GetProtectiveLockSetting",
             "GetProtectiveLockSettingRequestStatus",
@@ -1118,6 +1238,7 @@ mod tests {
         }
         for (method, shape) in [
             ("GetOwnNativeSleepGateStatus", "(ss)"),
+            ("GetOwnNativeBacklightCandidate", "(ssuuu)"),
             ("ConfigureProtectiveLock", "(ssbsstb)"),
             ("GetProtectiveLockSetting", "a(ssbsstb)"),
             ("GetProtectiveLockSettingRequestStatus", "(ssbsstb)"),
@@ -1135,7 +1256,10 @@ mod tests {
                     method_xml.contains(&format!("type=\"{shape}\" direction=\"out\"")),
                     "{label} {method}"
                 );
-                if method == "GetOwnNativeSleepGateStatus" {
+                if matches!(
+                    method,
+                    "GetOwnNativeSleepGateStatus" | "GetOwnNativeBacklightCandidate"
+                ) {
                     assert!(
                         !method_xml.contains("direction=\"in\""),
                         "{label} diagnostic identity is transport-derived"
