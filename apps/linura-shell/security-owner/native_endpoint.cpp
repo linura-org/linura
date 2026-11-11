@@ -351,6 +351,22 @@ QString NativeEndpoint::ObserveOriginalDisplayPresentation()
     return {};
 }
 
+QString NativeEndpoint::ObserveNativeDisplayHandoff()
+{
+    if (calledFromDBus()) {
+        const auto sampled = bootMilliseconds();
+        const auto result = runtime_.observeNativeDisplayHandoff(message());
+        const auto completed = bootMilliseconds();
+        if (sampled && completed && result &&
+            NativeLockObservationWire{runtime_.identity().resource, false, *sampled}.freshAtBootMs(
+                *completed))
+            return *result;
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native first ordinary-frame evidence unavailable"));
+    }
+    return {};
+}
+
 NativeDisplayAttemptObservationWire
 NativeEndpoint::ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &query)
 {

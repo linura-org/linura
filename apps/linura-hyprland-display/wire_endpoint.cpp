@@ -192,7 +192,8 @@ class WireEndpoint::Impl final
             !scalar(identity.upstreamCommit.c_str(), 40, true) ||
             !scalar(identity.integrationDigest.c_str(), 64, true) || !outputName || !admitOwner ||
             !startup.phase || !startup.admit || !originalRestoration.dispatch ||
-            !originalRestoration.status || !originalRestoration.presentation)
+            !originalRestoration.status || !originalRestoration.presentation ||
+            !originalRestoration.handoffPresentation)
             return;
         global = wl_global_create(&display, &linura_display_manager_v1_interface, 1, this, bind);
     }
@@ -317,13 +318,16 @@ class WireEndpoint::Impl final
             const auto at = self.backend.clock();
             const auto sample = self.backend.snapshot();
             const auto presentation = self.originalRestoration.presentation();
+            const auto handoff = self.originalRestoration.handoffPresentation();
             const auto completed = self.backend.clock();
             if (!at || !sample || !completed || sample->heads.empty() ||
                 sample->heads.size() > DisplayTransaction::MaxHeads ||
                 manager.client->snapshots >= MaxSnapshots || completed->unixMs < at->unixMs ||
                 completed->bootMs < at->bootMs || completed->unixMs - at->unixMs >= 2000 ||
                 completed->bootMs - at->bootMs >= 2000 ||
-                (presentation && (presentation->empty() || presentation->size() > 16 * 1024))) {
+                (presentation && (presentation->empty() || presentation->size() > 16 * 1024)) ||
+                (handoff && (handoff->empty() || handoff->size() > 16 * 1024)) ||
+                (presentation && handoff)) {
                 linura_display_snapshot_v1_send_unavailable(result->native);
                 return;
             }
@@ -374,6 +378,9 @@ class WireEndpoint::Impl final
             if (presentation)
                 linura_display_snapshot_v1_send_original_restoration_presentation(
                     result->native, presentation->c_str());
+            if (handoff)
+                linura_display_snapshot_v1_send_native_handoff_presentation(result->native,
+                                                                            handoff->c_str());
             linura_display_snapshot_v1_send_done(result->native);
         } catch (...) {
             wl_client_post_no_memory(client);

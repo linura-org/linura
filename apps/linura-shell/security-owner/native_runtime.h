@@ -76,6 +76,7 @@ class NativeRuntime final : public QObject
     observePreparedDisplay(const QDBusMessage &received);
     [[nodiscard]] std::optional<QString>
     observeOriginalDisplayPresentation(const QDBusMessage &received);
+    [[nodiscard]] std::optional<QString> observeNativeDisplayHandoff(const QDBusMessage &received);
     [[nodiscard]] std::optional<quint32>
     dispatchPreparedDisplay(const QDBusMessage &, const NativeDisplayIntent &,
                             const NativeDisplayCorrelation &, const QString &sampleDigest,
@@ -130,6 +131,8 @@ class NativeRuntime final : public QObject
     void approvalInteractionCompleted();
 
   private:
+    [[nodiscard]] std::optional<QString> observeDisplayPresentation(const QDBusMessage &received,
+                                                                    bool handoff);
     NativeRuntime();
     [[nodiscard]] bool initialize(NativeStartup startup);
     void requestNativeUnlock();

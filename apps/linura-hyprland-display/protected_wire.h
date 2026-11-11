@@ -41,8 +41,9 @@ class ProtectedScene
     [[nodiscard]] virtual bool quiesceFinalization(OwnedNativeFd, const Correlation &,
                                                    std::uint64_t sampledBootMs) = 0;
     // One original supervised Root spend, after terminal quiescence,
-    // against the same retained actual native scene. Success is ONLY LNRX
-    // and a spent comparison gate, never a release/unlock/terminal commit.
+    // against the same retained actual native scene. Success acknowledges
+    // LNRX and scheduling the first ordinary frames with all input, S17,
+    // power and Root admission fences held. It is not terminal completion.
     [[nodiscard]] virtual bool spendNativeRelease(OwnedNativeFd, const Correlation &,
                                                   std::uint64_t sampledBootMs,
                                                   std::uint64_t controlVersion,

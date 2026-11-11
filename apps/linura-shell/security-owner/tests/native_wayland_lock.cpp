@@ -975,6 +975,7 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
                 return std::nullopt; // No original Root lifetime in this fixture.
             },
             [](const Correlation &) -> std::optional<std::uint32_t> { return std::nullopt; },
+            []() -> std::optional<std::string> { return std::nullopt; },
             []() -> std::optional<std::string> { return std::nullopt; }});
     assert(layout->available());
     class Scene final : public ProtectedScene

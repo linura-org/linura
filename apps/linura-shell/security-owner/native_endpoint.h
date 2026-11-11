@@ -160,6 +160,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"out\"/></method>"
         "<method name=\"ObserveOriginalDisplayPresentation\"><arg name=\"facts\" type=\"s\" "
         "direction=\"out\"/></method>"
+        "<method name=\"ObserveNativeDisplayHandoff\"><arg name=\"facts\" type=\"s\" "
+        "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplayAttempt\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"observation\" type=\"(sssttub)\" "
         "direction=\"out\"/></method>"
@@ -257,6 +259,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     NativeDisplayObservationWire ObserveDisplay();
     NativePreparedDisplayObservationWire ObservePreparedDisplay();
     QString ObserveOriginalDisplayPresentation();
+    QString ObserveNativeDisplayHandoff();
     NativeDisplayAttemptObservationWire
     ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &);
     quint32 DispatchPreparedDisplay(const NativeDisplayAttemptQueryWire &,

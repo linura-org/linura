@@ -250,3 +250,65 @@ fn unprepared_foreign_or_substituted_dispatch_history_never_enters_verification_
         );
     }
 }
+
+#[test]
+fn ordinary_handoff_source_proof_uses_original_ownership_and_complete_restored_mapping() {
+    let (fixture, request, _, _, sources) = fixture();
+    let material = value(DisplayRestorationMaterial::decode(
+        &request.desired_state["restore_original"],
+    ));
+    let current = value(DisplayObservationFacts::from_envelope(
+        &sources[1],
+        material.replacement().topology(),
+        value(now_ms()),
+    ));
+    let (restored, guard) = value(fixture.source.verify_handoff_source(
+        &material,
+        &fixture.protection,
+        &current,
+    ));
+    assert_eq!(restored.desired(), current.layout());
+    assert_eq!(
+        value(linura_provider_sdk::display_baseline_guard(&current)),
+        guard
+    );
+    for (key, changed) in [
+        ("output.0.linura_owned", ObservedValue::Bool(false)),
+        (
+            "output.0.base_configuration_digest",
+            ObservedValue::Text("c".repeat(64)),
+        ),
+        (
+            "output.0.native_identity_digest",
+            ObservedValue::Text("f".repeat(64)),
+        ),
+    ] {
+        let mut source = sources[1].clone();
+        source.attributes.insert(key.into(), changed);
+        let changed = value(DisplayObservationFacts::from_envelope(
+            &source,
+            material.replacement().topology(),
+            value(now_ms()),
+        ));
+        assert!(
+            fixture
+                .source
+                .verify_handoff_source(&material, &fixture.protection, &changed)
+                .is_err(),
+            "{key}"
+        );
+    }
+    // An independent probe from before restoration cannot become the expected
+    // postcondition simply by omitting opaque safety-frame evidence.
+    let before = value(DisplayObservationFacts::from_envelope(
+        &fixture.sources()[1],
+        material.replacement().topology(),
+        value(now_ms()),
+    ));
+    assert!(
+        fixture
+            .source
+            .verify_handoff_source(&material, &fixture.protection, &before)
+            .is_err()
+    );
+}

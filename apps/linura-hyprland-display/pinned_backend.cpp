@@ -1008,6 +1008,25 @@ bool originalRestorationPresented(const Correlation &bound)
            backend->originalPresentation().has_value();
 }
 
+std::optional<std::uint32_t> nativeHandoffFramebuffer(OutputKey key,
+                                                      const SP<Aquamarine::IBuffer> &buffer)
+{
+    if (!backend || !buffer)
+        return std::nullopt;
+    const auto monitor = backend->monitorFor(key);
+    auto *output = monitor && monitor->m_output
+                       ? dynamic_cast<Aquamarine::CDRMOutput *>(monitor->m_output.get())
+                       : nullptr;
+    const auto implementation = output ? output->getBackend() : nullptr;
+    auto *drm = dynamic_cast<Aquamarine::CDRMBackend *>(implementation.get());
+    const auto attachment = buffer->attachments.get<Aquamarine::CDRMBufferAttachment>();
+    if (!drm || !attachment || !attachment->fb || attachment->fb->dead ||
+        attachment->fb->backend.lock().get() != drm || attachment->fb->buffer.lock() != buffer ||
+        !attachment->fb->id)
+        return std::nullopt;
+    return attachment->fb->id;
+}
+
 std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
 nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
 {
@@ -1051,8 +1070,7 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected)
         auto *output = dynamic_cast<Aquamarine::CDRMOutput *>(monitor->m_output.get());
         const auto implementation = output ? output->getBackend() : nullptr;
         auto *drm = dynamic_cast<Aquamarine::CDRMBackend *>(implementation.get());
-        if (!drm || output->getConnectorID() == 0 ||
-            output->getConnectorID() > std::numeric_limits<std::uint32_t>::max())
+        if (!drm || output->getConnectorID() <= 0)
             return std::nullopt;
         const auto kernel = readNativeKernelScanout(
             drm->drmFD(), static_cast<std::uint32_t>(output->getConnectorID()), budget);
@@ -1214,7 +1232,8 @@ void initialize(wl_display &display, wl_event_loop &loop)
                 return true; // Ownership transferred, even if event setup failed.
             }},
         NativeOriginalRestorationPort{restoreOriginalNative, originalNativeStatus,
-                                      [] { return backend->originalPresentation(); }});
+                                      [] { return backend->originalPresentation(); },
+                                      readNativeHandoffPresentation});
     initializeProtectedDisplay(display);
 }
 void shutdown()

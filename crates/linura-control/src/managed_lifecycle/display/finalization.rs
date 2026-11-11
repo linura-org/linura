@@ -14,6 +14,8 @@ use linura_observation::{
     DisplayOriginalFinalizationFacts,
 };
 use linura_transaction::TransactionSnapshot;
+mod handoff;
+pub use handoff::OriginalDisplayNativeHandoffInspection;
 
 /// The caller identifies existing restoration history and supplies provenance.
 /// Original sources, current proof and terminal material come only from Control.
@@ -225,8 +227,9 @@ pub trait OriginalDisplayNativeReleaseReservationPort: Debug + Send {
 
 /// A separately durably spent Control intent for the one-use ORIGINAL Root
 /// LNRS/LNRW channel. Its exact terminal ancestry was reloaded from Control
-/// before this object was minted. Not a physical output permit or a terminal
-/// completion, and cannot be reused after an uncertain reply.
+/// before this object was minted. Permits only the one-use initial physical
+/// presentation handoff, with input/Root/power fences held. It is not a
+/// terminal completion and cannot be reused after an uncertain reply.
 pub struct AuthorizedOriginalDisplayNativeReleaseSpend {
     material: String,
     terminal: TransactionSnapshot,
@@ -265,7 +268,8 @@ impl AuthorizedOriginalDisplayNativeReleaseSpend {
     }
 }
 /// Private typed effect port; only Control may mint this after durable
-/// before-effect spend. A successful response means LNRX, not physical release.
+/// before-effect handoff reservation. A successful response acknowledges only
+/// the attempt; independent physical proof and durable completion are separate.
 pub trait OriginalDisplayNativeReleaseSpendPort: Debug + Send {
     fn spend_native_release(
         &mut self,
@@ -1370,21 +1374,25 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        Ok(()) // The native physical-release grant/consumer remains unsupported.
+        Ok(()) // Reservation only; no presentation or final fence retirement.
     }
 
     /// Privately dispatch one Root/native spent-before-effect protocol only
     /// after another immutable Control journal entry, distinct from the prior
     /// LNRN reservation. The exact original terminal, independent sources,
     /// Root identity and earlier Control reservation must remain unchanged.
-    /// This stage never authorizes first ordinary output or fence retirement.
+    /// Only the initial first-ordinary-frame handoff is permitted. Input, S17,
+    /// power and Root admission retirement require independent completion.
+    /// A successful return contains fresh comparison evidence only; the signed
+    /// terminal state remains Indeterminate. Missing ACK/frame proof permits
+    /// only the read-only handoff inspection, never a second spend.
     pub fn spend_original_display_native_release<P: OriginalDisplayNativeReleaseSpendPort>(
         &mut self,
         principal: AuthenticatedPrincipal,
         actor: Actor,
         terminal_request: &RequestId,
         port: &mut P,
-    ) -> Result<(), ManagedLifecycleError> {
+    ) -> Result<OriginalDisplayNativeHandoffInspection, ManagedLifecycleError> {
         if actor.kind != ActorKind::Human || !actor.interactive {
             return Err(ManagedLifecycleError::ApprovalBoundary(
                 "native Root release spend requires authenticated interactive ownership".into(),
@@ -1527,19 +1535,22 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "native Root release grant spend outcome uncertain; no retry".into(),
             )
         })?;
-        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
-        let after = self.inspect_native_release_spent_original_display_finalization(
-            principal.clone(),
-            actor,
-            terminal_request,
-        )?;
-        if after.terminal != terminal.snapshot
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || now_ms()? >= record.expiry()
-        {
-            return Err(invalid());
-        }
-        Ok(()) // Root LNRX spent, not an independently committed physical release.
+        // The physical attempt replaces opaque frames. The pre-effect
+        // restoration/safety-frame recipe cannot be reused as post-effect
+        // first-ordinary-frame evidence. Join the distinct fresh post-effect
+        // proof without committing terminal state or releasing another fence.
+        record
+            .require_readback(self.display_journal()?, &principal_id, terminal_request)
+            .map_err(|_| {
+                ManagedLifecycleError::Indeterminate(
+                    "native physical handoff attempted; durable readback unavailable; no retry"
+                        .into(),
+                )
+            })?;
+        self.inspect_native_handoff_original_display_finalization(principal, terminal_request)
+            .map_err(|_| ManagedLifecycleError::Indeterminate(
+                "native handoff attempted; first ordinary frame not independently proven; read-only inspection only, no retry".into(),
+            ))
     }
 
     fn terminal_inspection_context(

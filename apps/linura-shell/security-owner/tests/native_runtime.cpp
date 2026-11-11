@@ -557,13 +557,17 @@ int main(int argc, char **argv)
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeOriginalDisplayPresentation()") ==
            -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("observeNativeDisplayHandoff()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("restoreOriginalDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("quiesceOriginalDisplayFinalization()") ==
            -1);
-    for (int method = 0; method < NativeRuntime::staticMetaObject.methodCount(); ++method)
+    for (int method = 0; method < NativeRuntime::staticMetaObject.methodCount(); ++method) {
         assert(NativeRuntime::staticMetaObject.method(method).name() !=
                QByteArrayLiteral("quiesceOriginalDisplayFinalization"));
+        assert(NativeRuntime::staticMetaObject.method(method).name() !=
+               QByteArrayLiteral("observeNativeDisplayHandoff"));
+    }
     assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
     for (const char *method :
          {"armDisplayApproval()", "displayApprovalReady()", "consumeDisplayApproval()",
@@ -592,7 +596,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 31 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 32 && signals == 1 && annotations == 3);
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
           "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",
@@ -602,6 +606,7 @@ int main(int argc, char **argv)
     assert(introspection.contains(QStringLiteral("RestoreOriginalDisplay")));
     assert(introspection.contains(QStringLiteral("QuiesceOriginalDisplayFinalization")));
     assert(introspection.contains(QStringLiteral("SpendOriginalDisplayNativeRelease")));
+    assert(introspection.contains(QStringLiteral("ObserveNativeDisplayHandoff")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));

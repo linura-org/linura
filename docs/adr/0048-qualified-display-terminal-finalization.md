@@ -225,9 +225,13 @@ spent journal/Root/native held facts in a read-only lost-ack query.
 This phase is **not** native consumption or release and cannot be confused
 with `released-current` (wire 4). The original Control one-use spend decision,
 authenticated Root `LNRX:1` native grant consumption, and pinned compositor
-comparison-gate spending are now connected. These before-effect steps still
-retain all fences and are **not a physical-release effect or Control/Root
-completion**. A lost reservation/spend acknowledgement cannot authorize a
+comparison-gate spending are now connected. After this separately authenticated
+one-use spend and fresh native/KMS checks, the retained scene can schedule its
+first ordinary presentation while **retaining input, S17, power, original Root
+and startup fences**. Enabled heads retain the exact immutable submitted buffer;
+disabled heads need their own fresh disable completion. Unrelated pending native
+writes fail closed. This initial presentation is **not final fence retirement or
+Control/Root completion**. A lost reservation/spend acknowledgement cannot authorize a
 second grant. Neither `LNRN:1` nor `LNRX:1` means `ReleasedCurrent`.
 The pinned-native `NativeFirstFrameGate` remains comparison-only: it requires
 one spent attempt, original-clock freshness, exact topology/source continuity,
@@ -246,8 +250,37 @@ the retained first completed commits, spend high-water marks, exact native
 trackers and immutable buffer identities. It never reissues the original
 observation or spends a grant. Missing evidence or drift permanently faults the
 gate, including either clock moving backward within the original window.
-The original deadline remains fixed. This mechanism does not implement the
-physical handoff, its independent Control verification or durable completion.
+The original deadline remains fixed. The sampler performs no effect. The
+separately authenticated presentation attempt feeds its actual retained frames,
+fresh same-output KMS and independent output-wide commit-result observations.
+
+A distinct bounded `native_handoff_presentation` observation travels over the
+same exact-source private Wayland connection and attested protected owner to
+`display.native-handoff.observe`. It cannot be relabelled as opaque restoration
+presentation. Its closed typed projection retains the original absolute wall
+and BOOTTIME deadlines, full original/restoration/terminal lineage, source and
+post-write/security epochs, connector/CRTC/plane/framebuffer identities and
+spend/completion counters. Unknown fields, partial inventories, stale clocks and
+non-recovery owner state refuse. Readback never renews the producer's window.
+
+Control has a separate read-only post-effect inspection. It authenticates the
+actual terminal, linked committed restoration and all three immutable Control
+retirement/reservation/spend anchors before probing. It independently joins fresh
+Root and original protection, current native source/layout, logind, S17 coverage
+and first ordinary-frame observations. Original ownership, complete mapping and
+restored source are derived from authenticated original history. A second native
+read must reconcile the same first frames and original deadlines; fresh Root,
+original protection and every durable anchor are rechecked afterward. The report
+intersects the original source expiries and retained spend deadline. It cannot
+create approval, commit completion, release any remaining fence or become a permit.
+Actual native/adversarial qualification remains outstanding.
+
+The initial spend method directly invokes that distinct post-effect inspection
+after the sole Root/native port call and durable readback. Its typed successful
+result is only the expiring inspection; the signed terminal snapshot stays
+Indeterminate and no remaining fence is retired. A missing ACK or unproven first
+frame returns Indeterminate. Subsequent work may inspect read-only, never repeat
+the spent port or interpret a successful comparison as final completion.
 
 An ordinary frame now has its own native tracker kind, distinct from opaque
 safety frames and protected owner review/PAM content. Protected owner content
@@ -261,8 +294,8 @@ live original administrator approval. It removes the retained review before
 durable spend and revalidates again immediately before dispatch. A restart,
 revocation, expiry or lost review refuses this continuation; durable records
 cannot reconstruct approval. This adds refusal checks to the existing
-before-effect protocol. It does not connect the physical release or supply its
-independent completion proof.
+initial presentation protocol. It does not supply final input/power/admission
+retirement authority or independently durable completion.
 
 The remaining requirements below are an acceptance contract, not currently
 implemented effect authority. The original-restoration terminal and ordinary

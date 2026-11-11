@@ -257,6 +257,35 @@ impl OriginalDisplayPlanningContext {
             .map_err(fail)
     }
 
+    // Read-only post-handoff source comparison. Reuses the original projection
+    // and complete mapping, without requiring opaque safety pixels that the
+    // separately authorized ordinary handoff has replaced. Never creates a plan,
+    // approval, effect permit or new restoration source.
+    pub(crate) fn verify_handoff_source(
+        &self,
+        material: &DisplayRestorationMaterial<'_>,
+        protection: &DisplayOriginalProtectionFacts,
+        current: &DisplayObservationFacts,
+    ) -> Result<(DisplayLayoutIntent, ComponentDigest), PlanPreviewControlError> {
+        let (restored, mapping) =
+            self.derive_restoration(protection, current, material.replacement().lock().clone())?;
+        let guard = self.restored_source_guard(material, protection, current)?;
+        let expected = material
+            .replacement()
+            .validate_native(current.inventory(), current.capabilities())
+            .map_err(fail)?;
+        if mapping.outputs() != material.mapping().outputs()
+            || current.layout() != restored.desired()
+            || current.layout() != expected.desired()
+            || linura_provider_sdk::display_baseline_guard(current).map_err(fail)? != guard
+        {
+            return Err(fail(
+                "post-handoff original source, complete mapping or restored layout changed",
+            ));
+        }
+        Ok((restored, guard))
+    }
+
     pub(crate) fn form_request(
         &self,
         request_id: RequestId,

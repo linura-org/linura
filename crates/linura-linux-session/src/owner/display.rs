@@ -34,6 +34,7 @@ mod preimage;
 mod startup;
 pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
 mod finalization;
+mod handoff;
 mod original;
 mod prepared;
 mod presentation;

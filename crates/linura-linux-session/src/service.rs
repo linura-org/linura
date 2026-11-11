@@ -742,7 +742,7 @@ impl NativeSessionChannel {
         {
             return Err("native Root spend lacks fresh exact original ancestry".into());
         }
-        Ok(()) // LNRX only. Physical and independently committed release remain fenced.
+        Ok(()) // Attempt ACK only; physical proof and final retirement remain independent.
     }
 
     pub fn verify_display_protection(&self, dispatch: &ComponentDigest) -> Result<(), String> {

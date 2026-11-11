@@ -41,6 +41,9 @@ struct NativeOriginalRestorationPort final
     // Fresh actual KMS/post-write frame facts only. Not acknowledgement,
     // commit authority, startup release or a cached desired layout.
     std::function<std::optional<std::string>()> presentation;
+    // Distinct first ordinary-frame comparison after authenticated native spend.
+    // It cannot be substituted for opaque restoration presentation.
+    std::function<std::optional<std::string>()> handoffPresentation;
 };
 
 // Adapter-private Wayland mechanism. Its native session scoping and ownership

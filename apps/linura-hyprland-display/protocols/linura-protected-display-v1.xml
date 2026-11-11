@@ -115,14 +115,17 @@
       <arg name="sampled_boot_lo" type="uint"/>
     </request>
     <request name="spend_native_release">
-      <description summary="spend the original Root release grant without retiring protection">
+      <description summary="spend the original Root grant for a held first-frame handoff">
         This private original-owner request uses a distinct authenticated
         LNRS/LNRW Root channel and the exact Control version/digests in its
         immutable LNRN ancestry. On a successful spend the original Root
-        records LNRX before acknowledgement. The compositor remains covered:
-        no ordinary frame, S17/input unlock, power release, Root admission or
-        Control completion is authorized by this request or its status event.
-        It is single-use even on a failed or missing acknowledgement.
+        records LNRX before acknowledgement. With the same live prepared
+        terminal scene and fresh native/KMS guards, the compositor may then
+        expose its first ordinary frames while retaining S17/input, power,
+        original Root and startup admission fences. A status event acknowledges
+        the attempt only: it is not physical proof or Control completion.
+        No fence retirement is authorized here. This is single-use even on a
+        failed or missing acknowledgement.
       </description>
       <arg name="grant" type="fd"/>
       <arg name="transaction" type="string"/>

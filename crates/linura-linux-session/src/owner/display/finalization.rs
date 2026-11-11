@@ -182,7 +182,7 @@ impl NativeSessionChannel {
         if phase != 6 {
             return Err("native Root grant spend not confirmed; no replay".into());
         }
-        Ok(phase) // LNRX only. Physical output and Control commit still fenced.
+        Ok(phase) // Attempt ACK only, never independent physical or terminal completion.
     }
 
     pub fn dispatch_original_display_finalization(

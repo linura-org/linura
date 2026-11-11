@@ -309,9 +309,9 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
         text,
         "    endRender();\n\n    TRACY_GPU_COLLECT;",
         "    SP<Aquamarine::IBuffer> linuraRenderedBuffer;\n"
-        "    if (linuraProtected) linuraRenderedBuffer = m_currentBuffer;\n"
+        "    if (Linura::HyprlandDisplay::protectedDisplayActive()) linuraRenderedBuffer = m_currentBuffer;\n"
         "    endRender();\n"
-        "    if (linuraProtected)\n"
+        "    if (Linura::HyprlandDisplay::protectedDisplayActive())\n"
         "        Linura::HyprlandDisplay::protectedFrameRendered(pMonitor.get(), linuraRenderedBuffer.get());\n\n"
         "    TRACY_GPU_COLLECT;",
     )

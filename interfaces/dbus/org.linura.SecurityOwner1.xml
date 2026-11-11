@@ -122,6 +122,12 @@
     <method name="ObserveOriginalDisplayPresentation">
       <arg name="facts" type="s" direction="out"/>
     </method>
+    <!-- Read-only; supervised Control only. Distinct first ordinary-frame
+         comparison after one-use terminal spend, retaining original absolute
+         wall/BOOTTIME deadlines and all input/lock/power/startup fences. -->
+    <method name="ObserveNativeDisplayHandoff">
+      <arg name="facts" type="s" direction="out"/>
+    </method>
     <!-- Read-only; supervised Control only. Complete canonical intent and
          immutable native correlation scope this get_status probe. Phases are
          native facts, never verified layout, approval or replay permission. -->

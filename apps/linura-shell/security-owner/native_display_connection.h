@@ -23,6 +23,7 @@ struct NativePinnedDisplaySample final
     // Private native comparison facts. Never serialized into public topology,
     // interpreted as an effect acknowledgement or treated as release authority.
     QByteArray originalRestorationPresentation;
+    QByteArray nativeHandoffPresentation;
 };
 struct NativeDisplayCorrelation final
 {

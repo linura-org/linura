@@ -15,11 +15,11 @@ pub use display::{
     OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
     OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
     OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
-    OriginalDisplayNativeReleaseReservationPort, OriginalDisplayNativeReleaseSpendPort,
-    OriginalDisplayQuiescenceInspection, OriginalDisplayRestorationPort,
-    OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,
-    OriginalDisplayRestorationTerminalReceipt, OriginalDisplayRetirementPreparationPort,
-    TrustedDisplayDecision,
+    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQuiescenceInspection,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    OriginalDisplayRetirementPreparationPort, TrustedDisplayDecision,
 };
 
 use linura_core::{

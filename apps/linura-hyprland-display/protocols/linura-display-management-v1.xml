@@ -85,6 +85,18 @@
       </description>
       <arg name="facts" type="string"/>
     </event>
+    <event name="native_handoff_presentation">
+      <description summary="first ordinary-frame comparison with original deadlines">
+        At most one bounded private JSON object before done, mutually exclusive
+        with opaque original_restoration_presentation. Requires the same retained
+        scene, authenticated one-use terminal spend, actual immutable ordinary
+        frames, per-output spend/completion counters and current native KMS.
+        Original absolute wall and BOOTTIME deadlines are preserved. Read-only
+        reconciliation cannot replay a spend, adopt another frame, renew time,
+        complete durable history or retire input, lock, power or startup fences.
+      </description>
+      <arg name="facts" type="string"/>
+    </event>
   </interface>
   <interface name="linura_display_head_v1" version="1">
     <description summary="native output lifetime in one snapshot">

@@ -104,8 +104,10 @@ class Harness final
     std::atomic<bool> stopped{false};
     std::thread worker;
     enum class BuildMismatch { None, Upstream, SourceRecipe };
+    enum class PresentationFixture { None, Handoff, Opaque, Both, Empty, Oversized, Ordinary };
     explicit Harness(BuildMismatch mismatch = BuildMismatch::None, bool publishIntegration = true,
-                     const char *instance = Instance)
+                     const char *instance = Instance,
+                     PresentationFixture presentation = PresentationFixture::None)
     {
         assert(display);
         auto *loop = wl_display_get_event_loop(display);
@@ -133,7 +135,12 @@ class Harness final
                     invocation[0] = 1;
                     return invocation;
                 },
-                NativeStartupPort{[] { return 1U; },
+                NativeStartupPort{[presentation] {
+                                      return presentation == PresentationFixture::None ||
+                                                     presentation == PresentationFixture::Ordinary
+                                                 ? 1U
+                                                 : 2U;
+                                  },
                                   [](int, bool, std::uint32_t) { return false; }},
                 NativeOriginalRestorationPort{
                     [](OwnedNativeFd, const Correlation &, const Layout &, const Snapshot &,
@@ -142,7 +149,23 @@ class Harness final
                     [](const Correlation &) -> std::optional<std::uint32_t> {
                         return std::nullopt;
                     },
-                    []() -> std::optional<std::string> { return std::nullopt; }});
+                    [presentation]() -> std::optional<std::string> {
+                        return presentation == PresentationFixture::Opaque ||
+                                       presentation == PresentationFixture::Both
+                                   ? std::optional<std::string>("{\"fixture\":\"opaque\"}")
+                                   : std::nullopt;
+                    },
+                    [presentation]() -> std::optional<std::string> {
+                        if (presentation == PresentationFixture::Empty)
+                            return std::string{};
+                        if (presentation == PresentationFixture::Oversized)
+                            return std::string(16 * 1024 + 1, 'x');
+                        return presentation == PresentationFixture::Handoff ||
+                                       presentation == PresentationFixture::Both ||
+                                       presentation == PresentationFixture::Ordinary
+                                   ? std::optional<std::string>("{\"fixture\":\"ordinary\"}")
+                                   : std::nullopt;
+                    }});
         assert(!publishIntegration || (endpoint && endpoint->available()));
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
             *display,
@@ -696,6 +719,27 @@ void securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence()
     assert(harness.backend.writes == 1); // Admission reads never compensate/replay.
 }
 } // namespace
+void firstOrdinaryFrameObservationStaysDistinctAndCannotReleaseFences()
+{
+    using F = Harness::PresentationFixture;
+    for (const auto kind : {F::Handoff, F::Opaque, F::Both, F::Empty, F::Oversized, F::Ordinary}) {
+        Harness harness(Harness::BuildMismatch::None, true, Instance, kind);
+        Client owner(harness.descriptors[0]);
+        const auto sample = owner.connection->sample();
+        if (kind == F::Handoff || kind == F::Opaque) {
+            assert(sample && sample->fenced && sample->startupPhase == 2);
+            assert(sample->nativeHandoffPresentation ==
+                   (kind == F::Handoff ? QByteArray("{\"fixture\":\"ordinary\"}") : QByteArray{}));
+            assert(sample->originalRestorationPresentation ==
+                   (kind == F::Opaque ? QByteArray("{\"fixture\":\"opaque\"}") : QByteArray{}));
+            assert(!owner.connection->securityTransitionAllowed(false));
+        } else {
+            assert(!sample); // Conflicting, unbounded or non-recovery evidence.
+        }
+        assert(harness.backend.writes == 0);
+    }
+}
+
 int main()
 {
     const NativeDisplayCorrelation window{QStringLiteral("transaction:prepared-window"),
@@ -736,6 +780,7 @@ int main()
         assert(!changed.valid());
     }
     identityAndContinuationOwnership();
+    firstOrdinaryFrameObservationStaysDistinctAndCannotReleaseFences();
     clientLossDoesNotDisarmNativeRecovery();
     explicitRevertCannotBecomeAnotherApplyOrDecision();
     expiredDecisionLeavesTheIndependentNativeTimerResponsible();

@@ -7,6 +7,7 @@ use linura_core::{CapabilityId, ProviderId, ResourceId};
 
 mod display;
 mod display_finalization;
+mod display_handoff;
 mod display_presentation;
 mod display_recovery;
 pub use display::{
@@ -17,6 +18,10 @@ pub use display::{
 pub use display_finalization::{
     DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DisplayFinalizationPhase,
     DisplayFinalizationReservationFacts, DisplayOriginalFinalizationFacts,
+};
+pub use display_handoff::{
+    DISPLAY_NATIVE_HANDOFF_CAPABILITY, DisplayNativeHandoffFacts, DisplayNativeHandoffLineage,
+    DisplayNativeHandoffOutput, DisplayNativeHandoffWindow,
 };
 pub use display_presentation::{
     DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY, DisplayOriginalPresentationFacts,

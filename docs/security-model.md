@@ -913,6 +913,34 @@ never-dispatched Prepared authority remains intact; this API refuses to revive i
 Returned indeterminate receipts remain uncertainty;
 no reply commits terminal completion or becomes native/Root release authority.
 
+The initial ordinary-presentation attempt is separate from final fence retirement.
+Only after the authenticated one-use Root/native spend and fresh native/KMS
+checks may the retained scene render ordinary frames. It freezes the actual
+submitted buffer identity and output-wide commit counters while retaining input,
+S17, power, original Root and ordinary-startup fences. No later ordinary write,
+buffer replacement or unrelated pending native state may satisfy the first-frame
+comparison. Loss retains protection; a spent grant cannot be rearmed.
+
+Its read-only `display.native-handoff.observe` capability is distinct from opaque
+restoration presentation. The original absolute wall/BOOTTIME deadlines survive
+Wayland, the attested native owner, private D-Bus and canonical projection. Closed
+fields bind the original dispatch, checkpoint, complete restoration/terminal
+correlations, source and epochs, and per-output connector/CRTC/plane/framebuffer
+plus spend/completion counters. Unknown, truncated, duplicate, oversized, stale,
+cross-scope or partial facts refuse; a read cannot mint another two-second window.
+
+Control's separate post-effect inspection first authenticates all durable linked
+history and original retirement/reservation/spend anchors. Fresh Root/protection,
+native source/layout, logind, S17 coverage and ordinary-frame observations must
+agree with the original ownership-derived restored source and complete mapping.
+It reconciles a second independently sampled read of the same first frame,
+rechecks Root/protection and durable anchors, and intersects all original
+expiries. Opaque safety-frame evidence cannot replace ordinary presentation and
+an ACK cannot replace either proof. The result is comparison only: durable
+completion, final fence retirement, ordinary release, committed adoption,
+authorized succession and reference-aware cleanup remain unimplemented. The
+public production mutation prohibition and physical release gates remain intact.
+
 Control's separate read-only held-quiescence inspection loads the actual terminal
 request, immutable complete intent/claim and prepared/dispatched history, requiring
 its current Indeterminate snapshot before provider access. It matches Root's

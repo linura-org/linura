@@ -1015,6 +1015,17 @@ NativeRuntime::observePreparedDisplay(const QDBusMessage &received)
 std::optional<QString>
 NativeRuntime::observeOriginalDisplayPresentation(const QDBusMessage &received)
 {
+    return observeDisplayPresentation(received, false);
+}
+
+std::optional<QString> NativeRuntime::observeNativeDisplayHandoff(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, true);
+}
+
+std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMessage &received,
+                                                                 bool handoff)
+{
     NativeDeadline deadline(std::chrono::milliseconds(2000),
                             NativeDeadline::Stage::DisplayDispatch);
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
@@ -1022,9 +1033,14 @@ NativeRuntime::observeOriginalDisplayPresentation(const QDBusMessage &received)
         return std::nullopt;
     const auto sample = impl_->backend->displayStartupSample();
     const auto independent = impl_->independentState();
-    if (!sample || !independent || !sample->fenced || sample->startupPhase != 2 ||
-        sample->originalRestorationPresentation.isEmpty() ||
-        sample->originalRestorationPresentation.size() > 16 * 1024 ||
+    if (!sample)
+        return std::nullopt;
+    const auto &presentation =
+        handoff ? sample->nativeHandoffPresentation : sample->originalRestorationPresentation;
+    if (!independent || !sample->fenced || sample->startupPhase != 2 || presentation.isEmpty() ||
+        presentation.size() > 16 * 1024 ||
+        (!sample->originalRestorationPresentation.isEmpty() &&
+         !sample->nativeHandoffPresentation.isEmpty()) ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
@@ -1036,9 +1052,8 @@ NativeRuntime::observeOriginalDisplayPresentation(const QDBusMessage &received)
          *settled != NativeObservedLockState::Unlocked) ||
         sample->coverage != (*settled == NativeObservedLockState::Secure ? 1U : 0U))
         return std::nullopt;
-    const auto text = QString::fromUtf8(sample->originalRestorationPresentation);
-    return text.toUtf8() == sample->originalRestorationPresentation ? std::optional{text}
-                                                                    : std::nullopt;
+    const auto text = QString::fromUtf8(presentation);
+    return text.toUtf8() == presentation ? std::optional{text} : std::nullopt;
 }
 
 QString NativeDisplaySample::correlationDigest() const

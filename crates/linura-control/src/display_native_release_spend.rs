@@ -1,4 +1,4 @@
-//! Original Control's separately durable, irreversible release-SPEND intent.
+//! Original Control's separately durable, irreversible first-frame handoff intent.
 //! The earlier NativeReleasePrepared reserves LNRN, not the later Root LNRX
 //! use. This record must be durable BEFORE the sole authenticated Root/native
 //! grant request. An ACK, absent ACK, or this record never proves physical
@@ -15,7 +15,9 @@ use linura_transaction::{
 use crate::ManagedLifecycleError;
 use crate::display_native_release_reservation::NativeReleasePrepared;
 
-const DOMAIN: &str = "linura.display.original-native-release-spend.v1";
+// Keep the key unchanged: a historical spend-only entry must still prevent
+// redelivery. Its old payload is not upgraded into a physical handoff permit.
+const DOMAIN: &str = "linura.display.original-native-handoff-attempt.v1";
 const KEY_DOMAIN: &str = "linura.display.original-native-release-spend-key.v1";
 const INTENT_DOMAIN: &str = "linura.display.original-native-release-intent.v1";
 const MAX_BYTES: usize = 2 * 1024;
@@ -348,5 +350,41 @@ mod tests {
         valid(NativeReleaseSpendPrepared::require_absent(
             &journal, &other, &request,
         ));
+    }
+
+    #[test]
+    fn historical_spend_only_record_cannot_be_upgraded_into_a_physical_handoff() {
+        let principal = valid(PrincipalId::new("unix:uid:1000"));
+        let request = valid(RequestId::new("request:v010:display-finalization:legacy"));
+        let mut bytes = Vec::new();
+        let domain = b"linura.display.original-native-release-spend.v1";
+        bytes.extend_from_slice(&(domain.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(domain);
+        let mut journal = Journal::default();
+        let old = valid(RetainedRequest::new(
+            principal.clone(),
+            valid(NativeReleaseSpendPrepared::key(&request)),
+            bytes,
+        ));
+        valid(journal.retain(&old));
+        assert!(
+            NativeReleaseSpendPrepared::require_absent(&journal, &principal, &request,).is_err()
+        );
+        let physical = NativeReleaseSpendPrepared {
+            canonical: vec![1, 2, 3],
+            expiry: 20_000,
+        };
+        assert!(
+            physical
+                .append(&mut journal, principal.clone(), &request)
+                .is_err()
+        );
+        assert_eq!(
+            valid(journal.load(
+                &principal,
+                &valid(NativeReleaseSpendPrepared::key(&request))
+            )),
+            old,
+        );
     }
 }
