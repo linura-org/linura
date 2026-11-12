@@ -1026,6 +1026,10 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             return false; // Simulated transport has no Root LNRX or physical release authority.
         }
+        bool transferCompletion(OwnedNativeFd, std::string_view) override
+        {
+            return false; // No actual original Root lifetime in this fixture.
+        }
         bool beginDecision(const ProtectedInteraction::Scope &) override
         {
             return false;

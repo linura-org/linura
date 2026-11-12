@@ -30,6 +30,9 @@ struct NativeDisplayCorrelation final
     QString transaction, effectDigest, dispatchDigest;
     quint64 deadlineUnixMs = 0;
     [[nodiscard]] bool valid() const;
+    // Comparison only: a continuation keeps the original dispatch and may
+    // shorten its deadline. Original execution equality remains unchanged.
+    [[nodiscard]] bool continues(const NativeDisplayCorrelation &original) const;
     [[nodiscard]] bool dispatchWindow(quint64 sampledBootMs, quint64 nowBootMs,
                                       quint64 nowUnixMs) const;
     [[nodiscard]] bool decisionWindow(quint64 startedUnixMs, quint64 startedBootMs,

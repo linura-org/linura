@@ -33,6 +33,7 @@ mod power;
 mod preimage;
 mod startup;
 pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
+mod completion;
 mod finalization;
 mod handoff;
 mod original;

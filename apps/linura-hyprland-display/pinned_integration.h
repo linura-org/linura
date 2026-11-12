@@ -20,6 +20,7 @@ class CMonitorRule;
 
 namespace Linura::HyprlandDisplay {
 class OriginalFinalizationGrant;
+class OriginalCompletionGrant;
 class OwnedNativeFd;
 [[nodiscard]] std::unique_ptr<OriginalFinalizationGrant>
 receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string_view material,
@@ -27,12 +28,15 @@ receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string
 [[nodiscard]] bool originalRestorationPresented(const Correlation &);
 // Consume ONE actual supervised Root LNRS/LNRW grant on the compositor thread.
 // This only durably spends LNRX; it does not release or unlock protection.
-[[nodiscard]] bool consumeOriginalNativeReleaseGrant(OwnedNativeFd, const Correlation &terminal,
+[[nodiscard]] std::optional<std::string> consumeOriginalNativeReleaseGrant(OwnedNativeFd, const Correlation &terminal,
                                                      std::string_view material,
                                                      std::uint64_t sampledBootMs,
                                                      std::uint64_t controlVersion,
                                                      std::string_view controlBinding,
                                                      std::string_view controlObservation);
+[[nodiscard]] std::unique_ptr<OriginalCompletionGrant>
+receiveOriginalCompletionGrant(OwnedNativeFd, std::string_view digest, std::string_view parent,
+                                const Correlation &restoration, const NativeFirstFrameGate::Receipt &);
 // Read-only actual DRM/KMS connector observations from the SAME pinned
 // compositor, original supervised Root channel and unchanged output inventory.
 // This is NOT a native release attempt, grant, frame-completion receipt, or

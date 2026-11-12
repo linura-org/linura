@@ -8,8 +8,9 @@ use std::os::fd::OwnedFd;
 use std::path::Component;
 
 use linura_linux_session::{
-    NativeDisplayFinalizationReservation, NativeDisplayRecoveryCheckpoint,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
+    NativeDisplayCompletionPreparation, NativeDisplayFinalizationReservation,
+    NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
@@ -26,6 +27,8 @@ const NATIVE_RELEASE_RESERVED_MAGIC: &[u8] = b"LNRN:1\n";
 // Distinct irreversible before-effect marker. It is NEVER a release receipt,
 // a completed framebuffer, a Root admission permit or Control terminal commit.
 const NATIVE_RELEASE_SPENT_MAGIC: &[u8] = b"LNRX:1\n";
+const COMPLETION_PREPARED_MAGIC: &[u8] = b"LNCP:1\n";
+const COMPLETION_SPENT_MAGIC: &[u8] = b"LNCS:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
@@ -40,6 +43,8 @@ enum Kind {
     RootRetiredHeld,
     NativeReleaseReserved,
     NativeReleaseSpent,
+    CompletionPrepared,
+    CompletionSpent,
 }
 impl Kind {
     fn prefix(self) -> &'static str {
@@ -52,6 +57,8 @@ impl Kind {
             Self::RootRetiredHeld => "root-retired-held-",
             Self::NativeReleaseReserved => "native-release-reserved-",
             Self::NativeReleaseSpent => "native-release-spent-",
+            Self::CompletionPrepared => "completion-prepared-",
+            Self::CompletionSpent => "completion-spent-",
         }
     }
     fn magic(self) -> &'static [u8] {
@@ -64,10 +71,19 @@ impl Kind {
             Self::RootRetiredHeld => ROOT_RETIRED_HELD_MAGIC,
             Self::NativeReleaseReserved => NATIVE_RELEASE_RESERVED_MAGIC,
             Self::NativeReleaseSpent => NATIVE_RELEASE_SPENT_MAGIC,
+            Self::CompletionPrepared => COMPLETION_PREPARED_MAGIC,
+            Self::CompletionSpent => COMPLETION_SPENT_MAGIC,
         }
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
         match self {
+            Self::CompletionPrepared | Self::CompletionSpent => {
+                Ok(NativeDisplayCompletionPreparation::decode(payload)?
+                    .parent()
+                    .terminal()
+                    .binding()
+                    .dispatch_digest)
+            }
             Self::Original => NativeDisplayRecoveryCheckpoint::stored_dispatch(payload),
             Self::Restoration => Ok(NativeDisplayRestorationReservation::decode(payload)?
                 .binding()
@@ -104,11 +120,35 @@ struct TerminalLineage {
     root_held: BTreeMap<String, NativeDisplayRetirementPreparation>,
     release_reservations: BTreeMap<String, NativeDisplayRetirementPreparation>,
     release_spent: BTreeMap<String, NativeDisplayRetirementPreparation>,
+    completion_prepared: BTreeMap<String, NativeDisplayCompletionPreparation>,
+    completion_spent: BTreeMap<String, NativeDisplayCompletionPreparation>,
 }
 
 impl TerminalLineage {
     fn observe(&mut self, kind: Kind, bytes: &[u8]) -> Result<(), String> {
         match kind {
+            Kind::CompletionPrepared | Kind::CompletionSpent => {
+                let record = NativeDisplayCompletionPreparation::decode(bytes)?;
+                let scope = record
+                    .parent()
+                    .terminal()
+                    .decoded_material()?
+                    .recovery_scope()
+                    .map_err(|_| unavailable())?
+                    .resource_id()
+                    .map_err(|_| unavailable())?
+                    .as_str()
+                    .to_owned();
+                let table = if kind == Kind::CompletionPrepared {
+                    &mut self.completion_prepared
+                } else {
+                    &mut self.completion_spent
+                };
+                if table.insert(scope, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
             Kind::Original => Ok(()),
             Kind::Restoration => {
                 let record = NativeDisplayRestorationReservation::decode(bytes)?;
@@ -222,6 +262,22 @@ impl TerminalLineage {
                 return Err(unavailable());
             }
         }
+        for (scope, record) in &self.completion_prepared {
+            let spent = self.release_spent.get(scope).ok_or_else(unavailable)?;
+            if record.parent().canonical_bytes() != spent.canonical_bytes() {
+                return Err(unavailable());
+            }
+            record.validate_restoration(self.restorations.get(scope).ok_or_else(unavailable)?)?;
+        }
+        for (scope, record) in &self.completion_spent {
+            let prepared = self
+                .completion_prepared
+                .get(scope)
+                .ok_or_else(unavailable)?;
+            if record.canonical_bytes() != prepared.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
         Ok(())
     }
 }
@@ -236,6 +292,8 @@ fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
         Kind::RootRetiredHeld,
         Kind::NativeReleaseReserved,
         Kind::NativeReleaseSpent,
+        Kind::CompletionPrepared,
+        Kind::CompletionSpent,
     ] {
         let prefix = kind.prefix().as_bytes();
         if name.len() == prefix.len() + 64 + 11
@@ -597,6 +655,10 @@ fn reserve_kind_at(
                 }
             }
         }
+        // Validate the prospective complete lineage under the SAME exclusive
+        // publication lock. New completion records cannot be published as
+        // orphan markers, and an existing exact entry never permits replay.
+        lineage.observe(kind, payload)?;
         lineage.verify()?;
         if terminal.is_some()
             && (!parent_seen
@@ -763,6 +825,86 @@ pub(super) fn spend_native_release(
         &record.canonical_bytes(),
         Kind::NativeReleaseSpent,
     )
+}
+
+pub(super) fn reserve_completion(
+    record: &NativeDisplayCompletionPreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.parent().terminal().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::CompletionPrepared,
+    )
+}
+pub(super) fn spend_completion(record: &NativeDisplayCompletionPreparation) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.parent().terminal().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::CompletionSpent,
+    )
+}
+
+fn read_completion_at(
+    fd: &OwnedFd,
+    uid: u32,
+    retained: &NativeDisplayRestorationReservation,
+    spent: bool,
+) -> Result<Option<NativeDisplayCompletionPreparation>, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let scope = retained
+            .decoded_material()?
+            .recovery_scope()
+            .map_err(|_| unavailable())?
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        if lineage
+            .restorations
+            .get(&scope)
+            .is_none_or(|old| old.canonical_bytes() != retained.canonical_bytes())
+        {
+            return Err(unavailable());
+        }
+        Ok(if spent {
+            lineage.completion_spent.remove(&scope)
+        } else {
+            lineage.completion_prepared.remove(&scope)
+        })
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        _ => Err(unavailable()),
+    }
+}
+
+pub(super) fn read_completion(
+    retained: &NativeDisplayRestorationReservation,
+    spent: bool,
+) -> Result<Option<NativeDisplayCompletionPreparation>, String> {
+    read_completion_at(&open()?, 0, retained, spent)
 }
 
 fn read_retirement_phase_at(

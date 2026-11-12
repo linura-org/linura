@@ -487,6 +487,26 @@ quint32 NativeEndpoint::SpendOriginalDisplayNativeRelease(
     return 7; // No retry or physical release on missing Root ACK.
 }
 
+quint32 NativeEndpoint::TransferOriginalDisplayCompletion(
+    const NativeDisplayAttemptQueryWire &query, const QString &digest,
+    const QDBusUnixFileDescriptor &grant)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        digest.size() == 64 && grant.isValid()) {
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto intent = NativeDisplayFinalizationIntent::parse(query.intent);
+        const auto result = intent ? runtime_.transferOriginalDisplayCompletion(message(), *intent,
+            bound, digest, grant.fileDescriptor()) : std::nullopt;
+        if (result) return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Original display completion transfer unavailable"));
+    return 7;
+}
+
 quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &query,
                                                 const QString &decisionDigest,
                                                 const QString &protectedDecisionDigest,

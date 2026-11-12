@@ -92,6 +92,29 @@ int main()
     const auto before = baseline(held);
     const auto scanout = kernel(held);
 
+    // Original Control wall/BOOTTIME bounds can only shorten the first-frame
+    // gate. In particular receipt reconciliation cannot restore the old cap.
+    for (const auto deadline : {ClockSample{10'000, 5'000}, ClockSample{10'500, 0},
+                                ClockSample{10'500, 5'001}, ClockSample{10'500, 3'000}}) {
+        auto narrowed = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(narrowed && !narrowed->narrowWindow(deadline));
+        assert(narrowed->phase() == Phase::Faulted);
+        assert(!narrowed->spend(held, later, before, scanout));
+    }
+    {
+        auto narrowed = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(narrowed && narrowed->narrowWindow({10'500, 4'000}));
+        // A subsequent larger cap cannot extend either prior clock bound.
+        assert(narrowed->narrowWindow({11'000, 5'000}));
+        assert(!narrowed->spend(held, {10'500, 5'100}, before, scanout));
+        assert(narrowed->phase() == Phase::Faulted);
+    }
+    {
+        auto narrowed = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(narrowed && narrowed->narrowWindow({11'500, 4'000}));
+        assert(!narrowed->spend(held, {10'100, 6'000}, before, scanout));
+    }
+
     // The exact native output inventory, source ownership and a surviving
     // powered root are mandatory even to construct comparison state.
     assert(!NativeFirstFrameGate::arm({held, 0, start, before, scanout}));

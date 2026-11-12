@@ -340,6 +340,15 @@ bool NativeDisplayFlow::redeemFinalization(const NativeDisplayFinalizationIntent
     dispatched_ = correlation;
     return true;
 }
+bool NativeDisplayFlow::continuesFinalization(const NativeDisplayFinalizationIntent &intent,
+                                              const NativeDisplayCorrelation &bound,
+                                              const NativePeerIdentity &peer)
+{
+    return !failed_ && scope_.purpose == ApprovalPurpose::FinalizeOriginalDisplay &&
+           consumed_ && spent_ && dispatched_ && control_ == peer &&
+           scope_.display && scope_.display->material == intent.encode() &&
+           bound.continues(*dispatched_) && window() && revalidate_();
+}
 bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
                                const NativeDisplayCorrelation &correlation)
 {

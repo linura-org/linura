@@ -1230,11 +1230,32 @@ std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
     const auto finished = NativeDisplayClock::sample();
     if (!finished || !bound.dispatchWindow(sampledBootMs, finished->bootMs, finished->unixMs) ||
         !impl_->display || !impl_->backend ||
+        !impl_->display->continuesFinalization(intent, bound, *peer) ||
         !impl_->backend->heldOriginalDisplayFinalization(bound))
         return std::nullopt;
     return impl_->backend->spendOriginalDisplayNativeRelease(intent, bound, sampledBootMs,
                                                              controlVersion, controlBinding,
                                                              controlObservation, nativeGrant);
+}
+
+std::optional<quint32> NativeRuntime::transferOriginalDisplayCompletion(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound,
+    const QString &digest, int grant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000), NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || grant < 0 || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||
+        bound.deadlineUnixMs - clock->unixMs > 2000 || intent.currentLock != identity() ||
+        !impl_->currentSession() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest || !impl_->backend || !impl_->display ||
+        !impl_->display->continuesFinalization(intent, bound, *peer) ||
+        !impl_->backend->heldOriginalDisplayFinalization(bound) ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    return impl_->backend->transferOriginalDisplayCompletion(bound, digest, grant);
 }
 
 // This narrow effect is reachable only from the current supervised executor.

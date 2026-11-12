@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 const RESERVED: u8 = 1;
 const QUIESCED: u8 = 2;
+const TRANSFERRED: u8 = 3;
 const FRAME_BYTES: usize = 48;
 const BUDGET: Duration = Duration::from_secs(1);
 
@@ -36,6 +37,33 @@ impl ChannelState {
             .map(|_| ())
             .map_err(|_| unavailable())
     }
+    /// Only the separately prepared completion worker can take the live
+    /// quiescence anchor. Disk bytes and a replacement channel cannot mint it.
+    pub(super) fn transfer(self: &Arc<Self>) -> zbus::fdo::Result<Transferred> {
+        self.0
+            .compare_exchange(QUIESCED, TRANSFERRED, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| unavailable())?;
+        Ok(Transferred(self.clone()))
+    }
+    pub(super) fn transferred(&self) -> bool {
+        self.0.load(Ordering::Acquire) == TRANSFERRED
+    }
+}
+
+pub(super) struct Transferred(Arc<ChannelState>);
+impl Transferred {
+    pub(super) fn live(&self) -> zbus::fdo::Result<()> {
+        if self.0.transferred() {
+            Ok(())
+        } else {
+            Err(unavailable())
+        }
+    }
+}
+impl Drop for Transferred {
+    fn drop(&mut self) {
+        self.0.0.store(0, Ordering::Release);
+    }
 }
 
 /// Created immediately after memory reservation, before any fallible storage or
@@ -49,7 +77,14 @@ impl Lifetime {
 }
 impl Drop for Lifetime {
     fn drop(&mut self) {
-        self.0.0.store(0, Ordering::Release);
+        // Atomic conditional invalidation closes the transfer/drop race. The
+        // new non-cloneable anchor owns invalidation after a successful CAS.
+        let _previous = self
+            .0
+            .0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |phase| {
+                if phase == TRANSFERRED { None } else { Some(0) }
+            });
     }
 }
 
@@ -68,6 +103,9 @@ pub(super) fn serve(
     stream.set_nonblocking(false).map_err(|_| unavailable())?;
     let mut sequence = 1_u64;
     loop {
+        if lifetime.0.transferred() {
+            return Ok(());
+        }
         let mut request = [0; FRAME_BYTES];
         let mut read = 0;
         let mut pending: Option<Instant> = None;

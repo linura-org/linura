@@ -140,6 +140,20 @@
       <arg name="control_binding" type="string"/>
       <arg name="control_observation" type="string"/>
     </request>
+    <request name="transfer_completion">
+      <description summary="transfer the original live Root lifetime once">
+        The authenticated original Root channel carries bounded LNCP material
+        whose exact parent is this scene's previously spent LNRX. Its digest
+        must equal Control's separately prepared completion. Fresh native/KMS
+        evidence must still match every first-frame output and original clock
+        bound. Root durably records LNCS and moves the live quiescence anchor
+        before its one-use acknowledgement. This does not retire input, S17,
+        power or startup protection and is not ReleasedCurrent. A failed or
+        missing acknowledgement cannot permit another transfer.
+      </description>
+      <arg name="grant" type="fd"/>
+      <arg name="preparation_digest" type="string"/>
+    </request>
     <event name="status">
       <arg name="compositor_instance" type="string"/>
       <arg name="topology_hi" type="uint"/>

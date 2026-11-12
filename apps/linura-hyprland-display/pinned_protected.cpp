@@ -3,6 +3,8 @@
 #include "protected_wire.h"
 #include "original_finalization_intent.h"
 #include "original_finalization_grant.h"
+#include "original_native_release_grant.h"
+#include "original_completion_grant.h"
 #include "protected_input_retirement.h"
 #include "protected_key_delivery.h"
 #include "protected_frame.h"
@@ -228,6 +230,9 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     bool terminalQuiescenceAttempted = false;
     std::string terminalMaterial;
     std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
+    std::unique_ptr<OriginalCompletionGrant> completionGrant;
+    std::string nativeReleaseParent;
+    bool completionAttempted = false;
     std::optional<Correlation> terminalBound;
     bool nativeReleaseAttempted = false, nativeReleaseSpent = false;
     bool nativeHandoffActive = false;
@@ -284,7 +289,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         }
         if (mutation) {
             if (originalRestoration &&
-                (!originalAlive || !originalAlive() || (terminalGrant && !terminalGrant->live()))) {
+                (!originalAlive || !originalAlive() ||
+                 (completionGrant ? !completionGrant->live() : terminalGrant && !terminalGrant->live()))) {
                 mutationFault = true;
                 interaction.cancel();
                 return false;
@@ -830,7 +836,8 @@ class PinnedScene final : public ProtectedScene
         // Permanently consume this original scene's chance BEFORE a possible
         // Root/Unix send, even when the FD or independent sample is missing.
         data->nativeReleaseAttempted = true;
-        if (!data->terminalBound || *data->terminalBound != terminal)
+        if (!data->terminalBound ||
+            !OriginalNativeReleaseGrantCodec::continues(*data->terminalBound, terminal))
             return refuse();
         if (!data->originalRestoration || !data->mutation)
             return refuse();
@@ -849,16 +856,20 @@ class PinnedScene final : public ProtectedScene
             return refuse();
         const auto held = data->stableInventory;
         auto gate = nativeFirstFrameArm(data->bound, held);
+        if (!gate || !gate->narrowWindow({terminal.deadlineUnixMs, sampledBootMs}))
+            return refuse();
         if (!gate || !data->refresh() || data->ownerLost || data->mutationFault ||
             !data->terminalGrant->verify() || heldInput().any)
             return refuse();
         // Root authenticates the current original compositor peer and writes
         // LNRX:1 durably BEFORE returning this one-use ACK. There is no
         // recovery-by-retrying after a missing or refused ACK.
-        if (!consumeOriginalNativeReleaseGrant(std::move(descriptor), terminal,
+        const auto parent = consumeOriginalNativeReleaseGrant(std::move(descriptor), terminal,
                                                data->terminalMaterial, sampledBootMs,
-                                               controlVersion, controlBinding, controlObservation))
+                                               controlVersion, controlBinding, controlObservation);
+        if (!parent)
             return refuse();
+        data->nativeReleaseParent = *parent;
         const auto current = nativeBackend()->snapshot();
         const auto clock = compositorClock();
         const auto history = nativeOutputHighWater(data->bound, held);
@@ -899,6 +910,33 @@ class PinnedScene final : public ProtectedScene
         }
         data->damage();
         return true;
+    }
+    bool transferCompletion(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] { data->mutationFault = true; data->damage(); return false; };
+        if (data->completionAttempted)
+            return refuse();
+        data->completionAttempted = true; // Consume before reading or sending.
+        if (!data->terminalBound || !data->terminalGrant || data->completionGrant ||
+            !data->nativeReleaseSpent || data->nativeReleaseParent.empty() ||
+            !OriginalGrantCodec::digest(digest) || data->writing || heldInput().any)
+            return refuse();
+        const auto physical = readNativeHandoffComparison(*data->terminalBound);
+        if (!physical || !data->refresh() || data->mutationFault || data->ownerLost)
+            return refuse();
+        auto grant = receiveOriginalCompletionGrant(std::move(descriptor), digest,
+            data->nativeReleaseParent, data->bound, *physical);
+        if (!grant || !readNativeHandoffComparison(*data->terminalBound) ||
+            !data->refresh() || data->mutationFault || data->ownerLost || heldInput().any ||
+            !grant->transferLifetime())
+            return refuse();
+        // The original Root moves, rather than reconstructs, its live anchor
+        // before ACK. Replace the local watcher atomically on the compositor
+        // thread before the old channel's expected EOF is observed.
+        data->completionGrant = std::move(grant);
+        data->terminalGrant.reset();
+        return data->completionGrant->verify() && data->refresh() &&
+               !data->mutationFault && !data->ownerLost ? true : refuse();
     }
     bool reconfigureReview()
     {
@@ -1464,8 +1502,9 @@ readNativeHandoffComparison(const Correlation &terminal)
     if (!data || !backend || !data->nativeHandoffActive || !data->nativeReleaseSpent ||
         !data->nativeReleaseGate || !data->terminalBound || *data->terminalBound != terminal ||
         data->writing || data->ownerLost || data->mutationFault || heldInput().any ||
-        !data->refresh() || data->ownerLost || data->mutationFault || !data->terminalGrant ||
-        !data->terminalGrant->verify())
+        !data->refresh() || data->ownerLost || data->mutationFault ||
+        (data->completionGrant ? !data->completionGrant->verify() :
+            !data->terminalGrant || !data->terminalGrant->verify()))
         return std::nullopt;
     const auto refuse = [&]() -> std::optional<NativeFirstFrameGate::Receipt> {
         data->mutationFault = true;
@@ -1507,7 +1546,8 @@ readNativeHandoffComparison(const Correlation &terminal)
     }
     const auto after = backend->snapshot();
     if (!after || *after != held || !data->refresh() || data->ownerLost || data->mutationFault ||
-        heldInput().any || !data->terminalGrant->verify())
+        heldInput().any || (data->completionGrant ? !data->completionGrant->verify() :
+            !data->terminalGrant || !data->terminalGrant->verify()))
         return refuse();
     const auto clock = compositorClock();
     if (!clock)

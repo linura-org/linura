@@ -49,6 +49,10 @@ class ProtectedScene
                                                   std::uint64_t controlVersion,
                                                   std::string_view controlBinding,
                                                   std::string_view controlObservation) = 0;
+    // Transfer the original live Root quiescence anchor only after separately
+    // prepared Control completion and a fresh comparison of the first frames.
+    // This ACK still retires no input, lock, power or startup fence.
+    [[nodiscard]] virtual bool transferCompletion(OwnedNativeFd, std::string_view digest) = 0;
     [[nodiscard]] virtual std::shared_ptr<MutationProtection>
     reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
                     const Snapshot &, ClockSample captured) = 0;

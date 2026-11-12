@@ -610,6 +610,7 @@ dependencies = [
  "blocking",
  "linura-core",
  "linura-linux-session",
+ "linura-observation",
  "linura-provider-sdk",
  "rustix",
  "sha2",

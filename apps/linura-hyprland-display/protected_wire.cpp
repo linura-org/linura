@@ -486,6 +486,26 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void transferCompletion(wl_client *, wl_resource *resource, std::int32_t descriptor,
+                                   const char *preparation)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!digest(preparation) || !state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) ||
+                !state->scene->transferCompletion(std::move(owned), preparation)) {
+                if (state) state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+                return;
+            }
+            status(nullptr, resource); // Lifetime ACK only; all physical fences held.
+        } catch (...) {
+            if (interaction.state) interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static const struct linura_protected_display_manager_v1_interface managerImpl;
     static const struct linura_protected_display_interaction_v1_interface interactionImpl;
     static const struct linura_protected_display_surface_v1_interface surfaceImpl;
@@ -498,7 +518,7 @@ const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
     destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization,
-        quiesceFinalization, spendNativeRelease
+        quiesceFinalization, spendNativeRelease, transferCompletion
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {

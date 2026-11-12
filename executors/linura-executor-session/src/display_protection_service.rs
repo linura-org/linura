@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 
 use linura_linux_session::{
     MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION,
-    NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation,
-    NativeDisplayRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
-    NativeSessionChannel, NativeSessionRole,
+    NativeDisplayCompletionPreparation, NativeDisplayFinalizationReservation,
+    NativeDisplayKernelSubscription, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
+    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -26,6 +26,7 @@ const PATH: &str = "/org/linura/DisplayProtection1";
 const MAX_PENDING: usize = 32;
 const ORIGINAL_PROBE: Duration = Duration::from_secs(2);
 const MAX_STARTUPS: usize = 64;
+mod completion;
 
 fn valid_dispatch_deadline(deadline: u64, now: u64) -> zbus::fdo::Result<()> {
     if now == 0 || deadline <= now || deadline - now > 15_000 {
@@ -105,6 +106,9 @@ struct Admission {
     // Reserve in memory before any synced preparation write; even disk errors
     // cannot make this original live Control attempt look unused.
     retirements: BTreeMap<String, ComponentDigest>,
+    // Exact admitted transport owner of the original prepared continuation.
+    // A replacement Control may inspect history, never adopt its release grant.
+    retirement_owners: BTreeMap<String, String>,
     // A separate Root-held barrier, spent before publication. Files cannot
     // reconstruct the original retained invocation or its live native owner.
     root_retirements: BTreeMap<String, ComponentDigest>,
@@ -113,6 +117,13 @@ struct Admission {
     // Exclusively reserved in Root memory before a fallible native grant
     // transfer; a lost descriptor cannot be recreated from the LNRN file.
     native_release_grants: BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
+    completions: BTreeMap<String, CompletionReservation>,
+}
+
+struct CompletionReservation {
+    scope: linura_core::DisplayRecoveryScope,
+    digest: ComponentDigest,
+    channel: Arc<super::display_completion_grant::ChannelState>,
 }
 
 struct FinalizationReservation {
@@ -305,6 +316,16 @@ fn retire_unused_startups<T>(
 }
 
 trait ProtectionPort: Clone + Send + Sync + 'static {
+    fn reserve_completion_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayCompletionPreparation,
+    ) -> zbus::fdo::Result<OwnedFd>;
+    fn read_completion(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
     fn reserve_restoration(
         &self,
         sender: &str,
@@ -604,6 +625,20 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn reserve_completion_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayCompletionPreparation,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        self.reserve_completion_mechanism(sender, record)
+    }
+    fn read_completion(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        self.read_completion_mechanism(sender, scope)
+    }
     fn reserve_native_release(
         &self,
         sender: &str,
@@ -656,6 +691,7 @@ impl ProtectionPort for NativeProtection {
         if held.canonical_bytes() != record.canonical_bytes()
             || admission.retirements.get(&key) != Some(&digest)
             || admission.root_retirements.get(&key) != Some(&digest)
+            || admission.retirement_owners.get(&key).map(String::as_str) != Some(sender)
             || admission.native_release_reservations.contains_key(&key)
             || admission.native_release_reservations.len() >= MAX_STARTUPS
         {
@@ -755,6 +791,7 @@ impl ProtectionPort for NativeProtection {
         let digest: [u8; 32] = sha2::Sha256::digest(&encoded).into();
         let fingerprint = ComponentDigest::from_bytes(digest);
         if admission.retirements.get(&key) != Some(&fingerprint)
+            || admission.retirement_owners.get(&key).map(String::as_str) != Some(sender)
             || admission.root_retirements.get(&key) != Some(&fingerprint)
             || admission.native_release_reservations.get(&key) != Some(&fingerprint)
             || admission.native_release_grants.contains_key(&key)
@@ -984,6 +1021,7 @@ impl ProtectionPort for NativeProtection {
         let digest =
             ComponentDigest::from_bytes(sha2::Sha256::digest(record.canonical_bytes()).into());
         if admission.retirements.get(&key) != Some(&digest)
+            || admission.retirement_owners.get(&key).map(String::as_str) != Some(sender)
             || admission.root_retirements.len() >= MAX_STARTUPS
             || admission.root_retirements.contains_key(&key)
         {
@@ -1070,6 +1108,9 @@ impl ProtectionPort for NativeProtection {
         let digest =
             ComponentDigest::from_bytes(sha2::Sha256::digest(record.canonical_bytes()).into());
         admission.retirements.insert(key.clone(), digest);
+        admission
+            .retirement_owners
+            .insert(key.clone(), sender.to_owned());
         super::display_checkpoint::reserve_retirement_preparation(&record)
             .map_err(|_| unavailable())?;
         let readback = super::display_checkpoint::read_retirement_preparation(&restoration)
@@ -1629,6 +1670,45 @@ impl ProtectionPort for NativeProtection {
 #[zbus::interface(name = "org.linura.DisplayProtection1")]
 impl<P: ProtectionPort> ProtectionService<P> {
     #[zbus(out_args("grant"))]
+    async fn reserve_completion_grant(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        let sender = sender(&header)?;
+        let record =
+            NativeDisplayCompletionPreparation::decode(preparation).map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_completion_grant(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "phase"))]
+    async fn read_completion(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_completion(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("grant"))]
     async fn reserve_restoration(
         &self,
         reservation: &[u8],
@@ -1922,6 +2002,20 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn reserve_completion_grant(
+            &self,
+            _: &str,
+            _: NativeDisplayCompletionPreparation,
+        ) -> zbus::fdo::Result<OwnedFd> {
+            Err(unavailable())
+        }
+        fn read_completion(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+            Err(unavailable())
+        }
         fn reserve_native_release(
             &self,
             _: &str,
@@ -2011,7 +2105,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 12);
+            assert_eq!(text.matches("<method ").count(), 14);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2041,6 +2135,8 @@ mod tests {
             "Verify",
             "ReadOriginal",
             "ReadFinalization",
+            "ReadCompletion",
+            "ReserveCompletionGrant",
             "ReserveRestoration",
             "ReserveFinalization",
             "ReserveNativeReleaseGrant",
@@ -2451,6 +2547,54 @@ mod tests {
         // The Root method accepts canonical preparation bytes, never the
         // private envelope magic, physical-release grant or a client boolean.
         assert!(NativeDisplayRetirementPreparation::decode(&bytes).is_ok());
+    }
+
+    #[test]
+    fn completion_transfer_rejects_anonymous_malformed_and_untrusted_requests() {
+        let (parent, terminal) =
+            super::super::display_checkpoint::tests::terminal(1, 2, 3, "seat0");
+        let retirement = NativeDisplayRetirementPreparation::new(
+            &terminal,
+            7,
+            ComponentDigest::from_bytes([3; 32]),
+            ComponentDigest::from_bytes([4; 32]),
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let record = super::super::display_checkpoint::tests::completion(&parent, &retirement);
+        let bytes = record.canonical_bytes();
+        let service = ProtectionService::new(DenyProtection);
+        let anonymous = zbus::Message::method_call(PATH, "ReserveCompletionGrant")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(matches!(
+            async_io::block_on(service.reserve_completion_grant(&bytes, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let sender = zbus::Message::method_call(PATH, "ReserveCompletionGrant")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .sender(":1.7")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        for bytes in [
+            &bytes[..],
+            b"LNCP:1\n",
+            &vec![0; linura_linux_session::MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION + 1][..],
+        ] {
+            assert!(
+                async_io::block_on(service.reserve_completion_grant(bytes, sender.header()))
+                    .is_err()
+            );
+        }
+        let scope = terminal
+            .decoded_material()
+            .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
+            .and_then(|s| s.resource_id().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            async_io::block_on(service.read_completion(scope.as_str(), sender.header())).is_err()
+        );
     }
 
     #[test]

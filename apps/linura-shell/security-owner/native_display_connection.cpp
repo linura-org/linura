@@ -692,6 +692,12 @@ bool NativeDisplayCorrelation::valid() const
 {
     return correlation(*this);
 }
+bool NativeDisplayCorrelation::continues(const NativeDisplayCorrelation &original) const
+{
+    return valid() && original.valid() && transaction == original.transaction &&
+           effectDigest == original.effectDigest && dispatchDigest == original.dispatchDigest &&
+           deadlineUnixMs <= original.deadlineUnixMs;
+}
 std::optional<quint64>
 NativeDisplayConnection::restorationBootDeadline(const NativeDisplayCorrelation &bound) const
 {

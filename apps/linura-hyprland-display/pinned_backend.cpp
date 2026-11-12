@@ -14,6 +14,7 @@
 #include "original_restoration_grant.h"
 #include "original_finalization_grant.h"
 #include "original_native_release_grant.h"
+#include "original_completion_grant.h"
 #include "native_baseline_guard.h"
 #include "native_kernel_scanout.h"
 #include "protected_wire.h"
@@ -977,7 +978,7 @@ receiveOriginalFinalizationGrant(OwnedNativeFd descriptor, const Correlation &bo
     return OriginalFinalizationGrant::receive(startupFence, std::move(descriptor), bound, material,
                                               sampledBootMs);
 }
-bool consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlation &terminal,
+std::optional<std::string> consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlation &terminal,
                                        std::string_view material, std::uint64_t sampledBootMs,
                                        std::uint64_t controlVersion, std::string_view binding,
                                        std::string_view observation)
@@ -986,20 +987,37 @@ bool consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlati
         backend->originalRecovery->failed || !backend->originalRecovery->grant ||
         !backend->originalRecovery->protection || !backend->powerInhibitor.held() ||
         !startupFence.recoveryAvailable())
-        return false;
+        return std::nullopt;
     auto grant =
         OriginalNativeReleaseGrant::receive(startupFence, std::move(descriptor), terminal, material,
                                             {controlVersion, binding, observation}, sampledBootMs);
     if (!grant || !backend->originalRecovery->grant->verify() ||
         !backend->originalRecovery->protection->healthy())
-        return false;
+        return std::nullopt;
     if (!grant->spend())
-        return false;
+        return std::nullopt;
     // Root LNRX has now irreversibly spent the grant. Keep ALL protection
     // retained pending the independent physical-first-frame and Control
     // durable-completion protocol. Never treat this ACK as output release.
-    return backend->originalRecovery->grant->verify() &&
-           backend->originalRecovery->protection->healthy() && backend->powerInhibitor.held();
+    if (!backend->originalRecovery->grant->verify() ||
+        !backend->originalRecovery->protection->healthy() || !backend->powerInhibitor.held())
+        return std::nullopt;
+    return grant->reservation();
+}
+
+std::unique_ptr<OriginalCompletionGrant>
+receiveOriginalCompletionGrant(OwnedNativeFd descriptor, std::string_view digest,
+                                std::string_view parent, const Correlation &restoration,
+                                const NativeFirstFrameGate::Receipt &physical)
+{
+    if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
+        backend->originalRecovery->failed || !backend->originalRecovery->grant ||
+        !backend->originalRecovery->protection || !backend->powerInhibitor.held() ||
+        !startupFence.recoveryAvailable() || !backend->originalRecovery->grant->verify() ||
+        !backend->originalRecovery->protection->healthy())
+        return {};
+    return OriginalCompletionGrant::receive(startupFence, std::move(descriptor), digest, parent,
+                                             restoration, physical);
 }
 
 bool originalRestorationPresented(const Correlation &bound)

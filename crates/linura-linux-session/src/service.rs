@@ -13,10 +13,10 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use crate::{NativeSessionChannel, NativeSessionRole};
 
 #[derive(Debug, Eq, PartialEq)]
-struct Identity {
-    sender: String,
+pub(crate) struct Identity {
+    pub(crate) sender: String,
     uid: u32,
-    pid: u32,
+    pub(crate) pid: u32,
     invocation: Vec<u8>,
 }
 
@@ -788,7 +788,7 @@ impl NativeSessionChannel {
         Ok(phase)
     }
 
-    fn trusted_service(
+    pub(crate) fn trusted_service(
         &self,
         role: NativeSessionRole,
         started: Instant,
@@ -949,8 +949,8 @@ impl NativeSessionChannel {
         Ok(())
     }
 
-    /// Read-only original-protection observation admits the exact supervised
-    /// Control invocation, never an arbitrary root or same-account process.
+    /// Private original-protection queries and prepared continuations admit
+    /// the exact supervised Control invocation, never account identity alone.
     pub fn require_trusted_display_control_sender(&self, sender: &str) -> Result<(), String> {
         self.require_role(NativeSessionRole::DisplayProtection)?;
         if !crate::owner::unique_name(sender)

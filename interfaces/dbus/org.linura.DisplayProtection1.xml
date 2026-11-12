@@ -23,6 +23,23 @@
       <arg name="phase" type="u" direction="out"/>
       <arg name="terminal" type="ay" direction="out"/>
     </method>
+    <method name="ReadCompletion">
+      <!-- Live original Root only. Prepared (1) or transferred lifetime (2)
+           comparison; neither phase proves input/power retirement or
+           ReleasedCurrent. Durable history alone cannot reconstruct either. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
+    <method name="ReserveCompletionGrant">
+      <!-- Supervised Control only, after its durable one-use completion
+           preparation and independent first-frame join. Exact original
+           native credentials are checked on every fragment. Root syncs LNCP
+           and LNCS before handing over the existing quiescence lifetime.
+           The grant cannot be recreated after uncertainty or restart. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
     <method name="ReserveRestoration">
       <!-- Exact supervised executor only, following a fresh Control prepare.
            Synced one-use reservation precedes the original-root-created

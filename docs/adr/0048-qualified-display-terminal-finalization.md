@@ -360,11 +360,46 @@ rollback also refuses. Removing the review precedes persistence and dispatch,
 so storage ambiguity, a lost completion reply or a restart cannot rearm it.
 Read-only handoff reconciliation never creates this continuation. Its receipt
 records only the attempt: an adapter ACK leaves Control Indeterminate and every
-unimplemented native/Root retirement gate outstanding. The native completion
-adapter, ordered fence retirement and final independent commit are still required.
+unimplemented native/Root retirement gate outstanding. The private completion
+adapter now transfers the original live Root lifetime through `LNCP:1` and
+`LNCS:1`; ordered fence retirement and final independent commit are still required.
 In particular, RootRetiredHeld, native Confirmed/Restored and a physical ACK
 are never aliases for ReleasedCurrent. An unknown, mismatched or unrecognized
 state must remain fenced.
+
+The completion adapter uses a distinct `LNCG:1` grant, bound to the exact original
+`LNRX:1` parent, immutable Control preparation/verification digests, every native
+first-frame/KMS tuple and both original clock bounds. The native recipient matches
+the grant's kernel peer against its continuously retained original Root startup
+lease. It compares the complete material against a fresh observation of the same
+retained first frames before sending one credential-bearing `LNCH:1` request.
+Root synchronizes the exact spent record and moves the actual original live
+quiescence anchor before acknowledgement. It never reconstructs that anchor from
+files. Only the new non-cloneable lifetime owns invalidation after transfer; closing
+the old channel cannot invalidate its new owner, and closing the new channel cannot
+restore the old one. Subsequent `LNCV:1` probes require the original native process,
+strict sequencing and fresh Root continuity. Publication, storage, identity,
+clock, partial-message or acknowledgement failure cannot regrant or replay.
+
+The original admitted Control transport owner remains bound across retirement
+preparation, native-release reservation/spend and completion transfer. A replacement
+Control process may inspect retained comparison records but cannot inherit that
+continuation. The native owner also rechecks the original consumed finalization
+flow, complete intent, lock and Control invocation. A shortened continuation deadline
+must preserve the exact transaction/effect/dispatch and stay within the original
+deadline; it cannot extend either native first-frame clock bound. Original execution
+correlation equality remains exact.
+
+This transfer is still a held state, not `ReleasedCurrent`: native input, S17,
+Root/native power protection, the original proof window and ordinary startup
+exclusion remain in force. Its wire phase is private comparison/liveness only.
+Independent post-retirement observations, durable final Control completion and
+ordered retirement remain required before source completion. Native grant and
+output-history headers are included in the live source identity; changing either
+invalidates the compositor/owner source match. The member-specific bus allowlist
+permits the private continuation RPCs, while each requires the actual supervised
+Control process rather than account or root identity alone. Public production
+display mutation remains prohibited.
 
 Before either Root retirement preparation or native-release reservation, Control
 requires the retained review of this exact original canonical finalization and

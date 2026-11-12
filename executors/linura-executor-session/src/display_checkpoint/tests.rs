@@ -1036,6 +1036,211 @@ fn native_release_spent_requires_exact_parent_is_synced_and_cannot_replay() {
     );
 }
 
+pub(crate) fn completion(
+    parent: &NativeDisplayRestorationReservation,
+    retirement: &NativeDisplayRetirementPreparation,
+) -> NativeDisplayCompletionPreparation {
+    use linura_observation::{
+        DisplayNativeHandoffFacts, DisplayNativeHandoffLineage, DisplayNativeHandoffOutput,
+        DisplayNativeHandoffWindow,
+    };
+    let material = retirement
+        .terminal()
+        .decoded_material()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = retirement.terminal().binding();
+    let scope = material
+        .recovery_scope()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let outputs = material
+        .restoration()
+        .mapping()
+        .replacement()
+        .outputs()
+        .iter()
+        .enumerate()
+        .map(|(index, output)| {
+            let n = u32::try_from(index).unwrap_or_else(|_| unreachable!());
+            (
+                output.clone(),
+                DisplayNativeHandoffOutput {
+                    enabled: true,
+                    connector: n + 1,
+                    crtc: n + 11,
+                    plane: n + 21,
+                    framebuffer: n + 31,
+                    spend_high_water: 5,
+                    completed_commit: 6,
+                },
+            )
+        })
+        .collect();
+    let frames = DisplayNativeHandoffFacts::new(
+        scope,
+        DisplayNativeHandoffLineage {
+            checkpoint: material.restoration().original_checkpoint().into(),
+            restoration_transaction: parent.binding().transaction_id.clone(),
+            restoration_effect: parent.binding().effect_digest.to_hex(),
+            restoration_dispatch: parent.binding().dispatch_digest.to_hex(),
+            terminal_transaction: binding.transaction_id.clone(),
+            terminal_effect: binding.effect_digest.to_hex(),
+            terminal_dispatch: binding.dispatch_digest.to_hex(),
+            terminal_link: material.terminal_link().into(),
+            source_guard: material.restored_source_guard().into(),
+            post_write_epoch: material.post_write_epoch(),
+            security_epoch: 7,
+        },
+        DisplayNativeHandoffWindow {
+            observed_unix_ms: 1001,
+            observed_boot_ms: 101,
+            deadline_unix_ms: 1200,
+            deadline_boot_ms: 300,
+        },
+        outputs,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    NativeDisplayCompletionPreparation::new(
+        retirement,
+        ComponentDigest::from_bytes([5; 32]),
+        ComponentDigest::from_bytes([6; 32]),
+        &frames,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"))
+}
+
+#[test]
+fn completion_preparation_and_spend_need_exact_ancestry_and_never_allow_replay() {
+    let fixture = Fixture::new();
+    let (parent, terminal) = terminal(1, 2, 3, "seat0");
+    let retirement = NativeDisplayRetirementPreparation::new(
+        &terminal,
+        7,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([4; 32]),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let record = completion(&parent, &retirement);
+    let publish = |kind, bytes: &[u8]| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &terminal.binding().dispatch_digest,
+            bytes,
+            kind,
+        )
+    };
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve_terminal(&fixture, &terminal).is_ok());
+    assert!(publish(Kind::Quiescence, &terminal.canonical_bytes()).is_ok());
+    for kind in [
+        Kind::RetirementPreparation,
+        Kind::RootRetiredHeld,
+        Kind::NativeReleaseReserved,
+        Kind::NativeReleaseSpent,
+    ] {
+        // Every earlier phase is insufficient for either completion record.
+        assert!(publish(Kind::CompletionPrepared, &record.canonical_bytes()).is_err());
+        assert!(publish(Kind::CompletionSpent, &record.canonical_bytes()).is_err());
+        assert!(publish(kind, &retirement.canonical_bytes()).is_ok());
+    }
+    assert!(publish(Kind::CompletionSpent, &record.canonical_bytes()).is_err());
+    assert!(publish(Kind::CompletionPrepared, &record.canonical_bytes()).is_ok());
+    assert!(publish(Kind::CompletionPrepared, &record.canonical_bytes()).is_err());
+    let observed = read_completion_at(&fixture.fd, fixture.uid, &parent, false)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("synced preparation missing"));
+    assert_eq!(observed.canonical_bytes(), record.canonical_bytes());
+    assert!(
+        read_completion_at(&fixture.fd, fixture.uid, &parent, true)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .is_none()
+    );
+    let different = NativeDisplayCompletionPreparation::new(
+        &retirement,
+        ComponentDigest::from_bytes([7; 32]),
+        *record.verification_digest(),
+        record.frames(),
+        record.expires_at_unix_ms(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::CompletionSpent, &different.canonical_bytes()).is_err());
+    assert!(publish(Kind::CompletionSpent, &record.canonical_bytes()).is_ok());
+    assert!(publish(Kind::CompletionSpent, &record.canonical_bytes()).is_err());
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        read_completion_at(&reopened, fixture.uid, &parent, true)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!("synced spend missing"))
+            .canonical_bytes(),
+        record.canonical_bytes()
+    );
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    assert!(read_completion_at(&fixture.fd, fixture.uid + 1, &parent, true).is_err());
+}
+
+#[test]
+fn missing_torn_or_repermissioned_completion_ancestry_quarantines_other_scopes() {
+    for fault in 0..4 {
+        let fixture = Fixture::new();
+        let (parent, terminal) = terminal(1, 2, 3, "seat0");
+        let (other, _) = self::terminal(11, 12, 13, "seat12");
+        let retirement = NativeDisplayRetirementPreparation::new(
+            &terminal,
+            7,
+            ComponentDigest::from_bytes([3; 32]),
+            ComponentDigest::from_bytes([4; 32]),
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let record = completion(&parent, &retirement);
+        assert!(reserve_recovery(&fixture, &parent).is_ok());
+        assert!(reserve_recovery(&fixture, &other).is_ok());
+        assert!(reserve_terminal(&fixture, &terminal).is_ok());
+        for (kind, bytes) in [
+            (Kind::Quiescence, terminal.canonical_bytes()),
+            (Kind::RetirementPreparation, retirement.canonical_bytes()),
+            (Kind::RootRetiredHeld, retirement.canonical_bytes()),
+            (Kind::NativeReleaseReserved, retirement.canonical_bytes()),
+            (Kind::NativeReleaseSpent, retirement.canonical_bytes()),
+            (Kind::CompletionPrepared, record.canonical_bytes()),
+            (Kind::CompletionSpent, record.canonical_bytes()),
+        ] {
+            assert!(
+                reserve_kind_at(
+                    &fixture.fd,
+                    fixture.uid,
+                    &terminal.binding().dispatch_digest,
+                    &bytes,
+                    kind
+                )
+                .is_ok()
+            );
+        }
+        let path = fixture.path.join(if fault == 0 {
+            Kind::NativeReleaseSpent.name(&terminal.binding().dispatch_digest)
+        } else {
+            Kind::CompletionPrepared.name(&terminal.binding().dispatch_digest)
+        });
+        match fault {
+            0 | 1 => std::fs::remove_file(&path),
+            2 => std::fs::write(&path, b"torn completion preparation"),
+            _ => std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)),
+        }
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(read_completion_at(&fixture.fd, fixture.uid, &parent, true).is_err());
+        assert!(read_finalization_at(&fixture.fd, fixture.uid, &other).is_err());
+        assert!(read_native_release_spent_at(&fixture.fd, fixture.uid, &other).is_err());
+        assert!(
+            !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+        );
+    }
+}
+
 #[test]
 fn missing_parent_torn_or_repermissioned_spent_marker_quarantines_every_scope() {
     for fault in 0..3 {

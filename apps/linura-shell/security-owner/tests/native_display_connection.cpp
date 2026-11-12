@@ -746,6 +746,25 @@ int main()
                                           QString(64, QLatin1Char('a')),
                                           QString(64, QLatin1Char('b')), 25'000};
     assert(window.dispatchWindow(1000, 1000, 10'000));
+    auto continuation = window;
+    assert(continuation.continues(window));
+    continuation.deadlineUnixMs -= 1000;
+    assert(continuation.continues(window));
+    assert(continuation != window);
+    continuation.deadlineUnixMs = window.deadlineUnixMs + 1;
+    assert(!continuation.continues(window));
+    continuation.deadlineUnixMs = 0;
+    assert(!continuation.continues(window));
+    for (unsigned field = 0; field < 3; ++field) {
+        continuation = window;
+        if (field == 0)
+            continuation.transaction += QLatin1Char('x');
+        else if (field == 1)
+            continuation.effectDigest[0] = QLatin1Char('e');
+        else
+            continuation.dispatchDigest[0] = QLatin1Char('f');
+        assert(!continuation.continues(window));
+    }
     assert(window.dispatchWindow(1000, 2999, 24'999));
     assert(!window.dispatchWindow(1000, 3000, 10'000));
     assert(!window.dispatchWindow(1000, 999, 10'000));

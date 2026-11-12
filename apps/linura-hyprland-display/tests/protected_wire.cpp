@@ -24,7 +24,7 @@ struct Counts final
     std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0}, refresh{0};
     std::atomic<bool> throwAttach{false};
     std::atomic<unsigned> terminal{0};
-    std::atomic<unsigned> quiesce{0}, nativeSpends{0};
+    std::atomic<unsigned> quiesce{0}, nativeSpends{0}, completionTransfers{0};
     std::atomic<unsigned> purpose{99};
 };
 class Scene final : public ProtectedScene
@@ -116,6 +116,11 @@ class Scene final : public ProtectedScene
     {
         ++counts.nativeSpends;
         return false; // The fixture cannot authenticate or spend a native Root grant.
+    }
+    bool transferCompletion(OwnedNativeFd, std::string_view) override
+    {
+        ++counts.completionTransfers;
+        return false; // Transport fixtures cannot transfer a live Root anchor.
     }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
@@ -336,7 +341,7 @@ void ownerReplacement()
 {
     // Every retained mutation/read step reattests the original supervised
     // invocation; same PID/UID cannot migrate a conversation to its successor.
-    for (unsigned operation = 0; operation != 8; ++operation) {
+    for (unsigned operation = 0; operation != 9; ++operation) {
         Harness h;
         Client c(h.descriptor);
         c.begin();
@@ -381,10 +386,19 @@ void ownerReplacement()
             spendSyntheticRootGrant(c, sockets[0]);
             assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
         }
+        if (operation == 8) {
+            int sockets[2]{};
+            assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+            linura_protected_display_interaction_v1_transfer_completion(
+                c.interaction, sockets[0], std::string(64, 'b').c_str());
+            c.roundtrip();
+            assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
+        }
         c.status();
         assert(h.counts.terminal == 0);
         assert(h.counts.quiesce == 0);
         assert(h.counts.nativeSpends == 0);
+        assert(h.counts.completionTransfers == 0);
         assert(c.denied >= 1 && h.counts.close == 1 && h.counts.acknowledge == 0 &&
                h.counts.consume == 0 && h.counts.refresh == 0);
     }

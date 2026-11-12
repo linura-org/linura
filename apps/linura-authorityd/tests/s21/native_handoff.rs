@@ -196,10 +196,6 @@ impl OriginalDisplayRetirementPreparationPort for RootPort {
             machine.finalization_material.as_deref()
         );
         assert!(preparation.expires_at_unix_ms() > now_unix_ms());
-        eprintln!(
-            "simulated Root retirement remaining={}ms",
-            preparation.expires_at_unix_ms() - now_unix_ms()
-        );
         machine.retirement_preparations += 1;
         machine.finalization_native_phase = if self.2 == 3 { 5 } else { 3 };
         Ok(())
@@ -220,10 +216,6 @@ impl OriginalDisplayNativeReleaseReservationPort for RootPort {
             machine.finalization_material.as_deref()
         );
         assert!(reservation.expires_at_unix_ms() > now_unix_ms());
-        eprintln!(
-            "simulated Root reservation remaining={}ms",
-            reservation.expires_at_unix_ms() - now_unix_ms()
-        );
         machine.native_release_reservations += 1;
         machine.finalization_native_phase = if self.2 == 5 { 3 } else { 5 };
         Ok(())
@@ -245,10 +237,6 @@ impl OriginalDisplayNativeReleaseSpendPort for RootPort {
         );
         let now = now_unix_ms();
         assert!(attempt.expires_at_unix_ms() > now);
-        eprintln!(
-            "simulated native spend remaining={}ms",
-            attempt.expires_at_unix_ms() - now
-        );
         machine.native_release_spends += 1;
         machine.finalization_native_phase = 6;
         machine.native_handoff_window = Some((now, attempt.expires_at_unix_ms().min(now + 2000)));

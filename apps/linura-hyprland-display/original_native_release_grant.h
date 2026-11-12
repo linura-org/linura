@@ -14,6 +14,16 @@ struct ControlAnchor final
     std::string_view binding, observation;
 };
 using Text = std::string_view;
+// A separately prepared continuation may shorten the original execution
+// window. It may never retarget the dispatch or extend that window. Keep
+// Correlation's full equality for all original execution/observation callers.
+inline bool continues(const Correlation &original, const Correlation &next)
+{
+    return next.transaction == original.transaction &&
+           next.effectDigest == original.effectDigest &&
+           next.dispatchDigest == original.dispatchDigest && original.deadlineUnixMs &&
+           next.deadlineUnixMs && next.deadlineUnixMs <= original.deadlineUnixMs;
+}
 inline bool matches(Text bytes, const Correlation &terminal, Text material, ControlAnchor anchor)
 {
     if (bytes.empty() || bytes.size() > MaxReservation || !anchor.version ||
@@ -89,9 +99,11 @@ class OriginalNativeReleaseGrant final
         if (!digest || !finished || !OriginalGrantCodec::freshSample(sampledBootMs, *finished))
             return {};
         result->digest_ = *digest;
+        result->reservation_ = std::move(reservation);
         result->sampledBootMs_ = sampledBootMs;
         return result;
     }
+    [[nodiscard]] const std::string &reservation() const noexcept { return reservation_; }
 
     // Root fsyncs LNRX before its one-use ACK. This ACK never proves physical
     // release or permits a second grant after loss/timeout.
@@ -188,7 +200,7 @@ class OriginalNativeReleaseGrant final
     }
     StartupFence &fence_;
     OwnedNativeFd descriptor_;
-    std::string digest_;
+    std::string digest_, reservation_;
     std::uint64_t sampledBootMs_ = 0, lastBootMs_ = 0;
     bool failed_ = false, attempted_ = false;
 };

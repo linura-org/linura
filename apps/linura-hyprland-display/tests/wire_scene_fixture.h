@@ -65,6 +65,10 @@ class WireSceneFixture final : public ProtectedScene
     {
         return false; // No original Root or Control authority in this fixture.
     }
+    bool transferCompletion(OwnedNativeFd, std::string_view) override
+    {
+        return false; // No authenticated Root completion in this fixture.
+    }
     bool beginDecision(const ProtectedInteraction::Scope &) override
     {
         return false;

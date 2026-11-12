@@ -99,6 +99,27 @@ impl linura_control::OriginalDisplayNativeReleaseSpendPort for SessionExecutorCl
     }
 }
 
+impl linura_control::OriginalDisplayCompletionPort for SessionExecutorClient {
+    fn dispatch_completion(
+        &mut self,
+        completion: linura_control::AuthorizedOriginalDisplayCompletion,
+    ) -> Result<(), String> {
+        let terminal = completion.terminal();
+        self.channel.transfer_original_display_completion(
+            completion.material(),
+            terminal.transaction_id.as_str(),
+            completion.dispatch_digest(),
+            terminal.state_version,
+            terminal.binding_digest.as_str(),
+            completion.retirement_observation().as_str(),
+            completion.preparation_digest().as_str(),
+            completion.verification_digest().as_str(),
+            completion.frames(),
+            completion.expires_at_unix_ms(),
+        )
+    }
+}
+
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(
         &mut self,

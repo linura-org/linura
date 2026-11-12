@@ -22,6 +22,10 @@ mod display_retirement_preparation;
 pub use display_retirement_preparation::{
     MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION, NativeDisplayRetirementPreparation,
 };
+mod display_completion_preparation;
+pub use display_completion_preparation::{
+    MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION, NativeDisplayCompletionPreparation,
+};
 mod original_display_observer;
 pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;

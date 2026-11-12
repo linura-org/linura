@@ -973,6 +973,10 @@ jobs:
                     good + f"test {expected[0]} ... ok\n",
                     good.replace(expected[0], expected[1]),
                     good.replace(
+                        f"test {expected[0]} ... ok",
+                        f"test {expected[0]} ... diagnostic before result\nok",
+                    ),
+                    good.replace(
                         f"test {expected[0]} ... ok", f"test {expected[0]} ... ignored"
                     ),
                 ]
