@@ -496,13 +496,15 @@ class ProtectedWireEndpoint::Impl final
             if (!digest(preparation) || !state || !state->scene || state->closed ||
                 !interaction.owner.current(interaction) ||
                 !state->scene->transferCompletion(std::move(owned), preparation)) {
-                if (state) state->close();
+                if (state)
+                    state->close();
                 linura_protected_display_interaction_v1_send_denied(resource);
                 return;
             }
             status(nullptr, resource); // Lifetime ACK only; all physical fences held.
         } catch (...) {
-            if (interaction.state) interaction.state->close();
+            if (interaction.state)
+                interaction.state->close();
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }

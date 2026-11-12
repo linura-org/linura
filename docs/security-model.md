@@ -1000,6 +1000,18 @@ they cannot replay execution, renew old proof or change the Indeterminate
 terminal. Power/global-admission retirement, ReleasedCurrent and later ordinary
 release/adoption/cleanup remain separate source requirements.
 
+Control's separate current-verification route retains the independently joined
+current-state checkpoint under a purpose-separated immutable journal key. The
+bounded record binds the complete current KMS/output inventory, original
+Root/preparation/first-frame ancestry, signed terminal binding and all fresh
+contributors. Storage ambiguity cannot yield a successful report; later fresh
+inspection may reconcile the same persisted checkpoint without an effect call.
+Advancing native frames cannot overwrite history or renew its original clocks.
+Historical proof validity is separate from the new inspection's validity.
+Synthetic, partial, stale, conflicting, rolled-back or corrupt evidence refuses.
+This writes only Linura-owned evidence: no policy decision, recovered approval,
+executor handle, final power/startup retirement or terminal commit is supplied.
+
 Both earlier Root reservation writes also revalidate the original full canonical
 finalization review, current registered risk/policy and live administrator
 approval before journal preparation and immediately before the Root call. An

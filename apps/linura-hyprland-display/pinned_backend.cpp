@@ -978,10 +978,11 @@ receiveOriginalFinalizationGrant(OwnedNativeFd descriptor, const Correlation &bo
     return OriginalFinalizationGrant::receive(startupFence, std::move(descriptor), bound, material,
                                               sampledBootMs);
 }
-std::optional<std::string> consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlation &terminal,
-                                       std::string_view material, std::uint64_t sampledBootMs,
-                                       std::uint64_t controlVersion, std::string_view binding,
-                                       std::string_view observation)
+std::optional<std::string>
+consumeOriginalNativeReleaseGrant(OwnedNativeFd descriptor, const Correlation &terminal,
+                                  std::string_view material, std::uint64_t sampledBootMs,
+                                  std::uint64_t controlVersion, std::string_view binding,
+                                  std::string_view observation)
 {
     if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
         backend->originalRecovery->failed || !backend->originalRecovery->grant ||
@@ -1007,8 +1008,8 @@ std::optional<std::string> consumeOriginalNativeReleaseGrant(OwnedNativeFd descr
 
 std::unique_ptr<OriginalCompletionGrant>
 receiveOriginalCompletionGrant(OwnedNativeFd descriptor, std::string_view digest,
-                                std::string_view parent, const Correlation &restoration,
-                                const NativeFirstFrameGate::Receipt &physical)
+                               std::string_view parent, const Correlation &restoration,
+                               const NativeFirstFrameGate::Receipt &physical)
 {
     if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
         backend->originalRecovery->failed || !backend->originalRecovery->grant ||
@@ -1017,7 +1018,7 @@ receiveOriginalCompletionGrant(OwnedNativeFd descriptor, std::string_view digest
         !backend->originalRecovery->protection->healthy())
         return {};
     return OriginalCompletionGrant::receive(startupFence, std::move(descriptor), digest, parent,
-                                             restoration, physical);
+                                            restoration, physical);
 }
 
 bool originalRestorationPresented(const Correlation &bound)
@@ -1131,7 +1132,7 @@ frameKernel(const Correlation &original, const Snapshot &expected, FrameScope sc
 }
 
 NativeOutputCommits frameHighWater(const Correlation &original, const Snapshot &expected,
-                                  FrameScope scope)
+                                   FrameScope scope)
 {
     if (!backend || !backend->originalRecovery)
         return std::nullopt;
@@ -1195,7 +1196,8 @@ nativeCurrentFrameKernel(const Correlation &original, const Snapshot &expected)
 {
     return frameKernel(original, expected, FrameScope::Current);
 }
-NativeOutputCommits nativeCurrentOutputHighWater(const Correlation &original, const Snapshot &expected)
+NativeOutputCommits nativeCurrentOutputHighWater(const Correlation &original,
+                                                 const Snapshot &expected)
 {
     return frameHighWater(original, expected, FrameScope::Current);
 }

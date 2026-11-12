@@ -44,7 +44,8 @@ class OriginalFinalizationGrant final
         auto result = std::unique_ptr<OriginalFinalizationGrant>(
             new OriginalFinalizationGrant(fence, std::move(descriptor)));
         const auto now = result->clock();
-        if (!now || !fence.recoveryAvailable() || *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
+        if (!now || !fence.recoveryAvailable() ||
+            *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
             !OriginalGrantCodec::freshSample(expectedSampleBootMs, *now) ||
             !fence.authenticatesGrantPeer(result->descriptor_.get()))
             return {};

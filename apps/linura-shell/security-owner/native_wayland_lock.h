@@ -89,7 +89,7 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                       const QString &controlObservation, int nativeGrant);
     [[nodiscard]] std::optional<quint32>
     transferOriginalDisplayCompletion(const NativeDisplayCorrelation &, const QString &digest,
-                                       int completionGrant);
+                                      int completionGrant);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &,
                                                                  quint64 originalSampledBootMs);

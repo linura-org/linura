@@ -38,8 +38,10 @@ class NativeCurrentFrameGate final
             first.deadlineBootMs <= first.observedBootMs ||
             first.deadlineUnixMs - first.observedUnixMs > 2000 ||
             first.deadlineBootMs - first.observedBootMs > 2000 ||
-            request.now.unixMs < first.observedUnixMs || request.now.bootMs < first.observedBootMs ||
-            request.now.unixMs >= first.deadlineUnixMs || request.now.bootMs >= first.deadlineBootMs)
+            request.now.unixMs < first.observedUnixMs ||
+            request.now.bootMs < first.observedBootMs ||
+            request.now.unixMs >= first.deadlineUnixMs ||
+            request.now.bootMs >= first.deadlineBootMs)
             return {};
         bool visible = false;
         Layout actual;
@@ -55,7 +57,8 @@ class NativeCurrentFrameGate final
                 physical != row.kernel || request.commits[i].key != head.key ||
                 request.commits[i].previousCommit != row.completedCommit ||
                 physical.active != head.current.enabled || head.outputIdentityWitness.empty() ||
-                head.baseRuleWitness.empty() || (i && held.heads[i - 1].key.handle >= head.key.handle))
+                head.baseRuleWitness.empty() ||
+                (i && held.heads[i - 1].key.handle >= head.key.handle))
                 return {};
             if (physical.active) {
                 if (!head.powered || !physical.crtc || !physical.plane || !physical.framebuffer)
@@ -84,8 +87,8 @@ class NativeCurrentFrameGate final
     // Called at the actual native input/startup handoff boundary, under the
     // separate one-use Root grant. A missing ACK cannot activate this later.
     [[nodiscard]] bool activate(const Snapshot &held, ClockSample now,
-                                 const std::vector<Output> &commits,
-                                 const std::vector<Kernel> &kernel) noexcept
+                                const std::vector<Output> &commits,
+                                const std::vector<Kernel> &kernel) noexcept
     {
         if (phase_ != Phase::Armed)
             return false;
@@ -117,11 +120,15 @@ class NativeCurrentFrameGate final
     {
         if (phase_ != Phase::Active)
             return {};
-        const auto fail = [&]() -> std::optional<Receipt> { phase_ = Phase::Faulted; return {}; };
+        const auto fail = [&]() -> std::optional<Receipt> {
+            phase_ = Phase::Faulted;
+            return {};
+        };
         if (sample.held != held_ || !clock(sample.started) || !clock(sample.finished) ||
             sample.finished.unixMs - sample.started.unixMs >= 2000 ||
             sample.finished.bootMs - sample.started.bootMs >= 2000 ||
-            sample.frames.size() != held_.heads.size() || sample.kernel.size() != held_.heads.size() ||
+            sample.frames.size() != held_.heads.size() ||
+            sample.kernel.size() != held_.heads.size() ||
             sample.commits.size() != held_.heads.size())
             return fail();
         Receipt receipt{};
@@ -143,7 +150,8 @@ class NativeCurrentFrameGate final
             if (physical.key != baseline.kernel.key || frame.key != physical.key ||
                 commit.key != physical.key || physical.connector != baseline.kernel.connector ||
                 physical.crtc != baseline.kernel.crtc || physical.plane != baseline.kernel.plane ||
-                physical.active != baseline.kernel.active || commit.previousCommit < lastCommits_[i] ||
+                physical.active != baseline.kernel.active ||
+                commit.previousCommit < lastCommits_[i] ||
                 commit.previousCommit == std::numeric_limits<std::uint64_t>::max())
                 return fail();
             lastCommits_[i] = commit.previousCommit;
@@ -166,19 +174,22 @@ class NativeCurrentFrameGate final
                         sample.frames[prior].retainedBuffer == frame.retainedBuffer)
                         return fail();
             } else if (physical.crtc || physical.plane || physical.framebuffer || frame.frame ||
-                       frame.retainedBuffer || frame.retainedFramebuffer || !frame.disableSubmitted ||
-                       frame.disableCommit != baseline.completedCommit ||
+                       frame.retainedBuffer || frame.retainedFramebuffer ||
+                       !frame.disableSubmitted || frame.disableCommit != baseline.completedCommit ||
                        commit.previousCommit != baseline.completedCommit) {
                 return fail();
             }
-            receipt.completed[receipt.completedCount++] = {
-                physical, baseline.completedCommit, commit.previousCommit};
+            receipt.completed[receipt.completedCount++] = {physical, baseline.completedCommit,
+                                                           commit.previousCommit};
         }
         if (pending)
             return {};
         return receipt;
     }
-    [[nodiscard]] Phase phase() const noexcept { return phase_; }
+    [[nodiscard]] Phase phase() const noexcept
+    {
+        return phase_;
+    }
 
   private:
     NativeCurrentFrameGate(const Snapshot &held, const Receipt &first, ClockSample now)

@@ -6,13 +6,14 @@
 
 namespace Linura::HyprlandDisplay {
 namespace OriginalCompletionGrantCodec {
-inline constexpr std::size_t MaxPreparation = OriginalNativeReleaseGrantCodec::MaxReservation + 8 * 1024;
+inline constexpr std::size_t MaxPreparation =
+    OriginalNativeReleaseGrantCodec::MaxReservation + 8 * 1024;
 
 // Complete comparison against the original authenticated LNRX parent and a
 // newly sampled physical receipt. Parsing cannot mint a live Root lifetime.
 inline std::optional<ClockSample> matches(std::string_view bytes, std::string_view parent,
-                                         const Correlation &restoration,
-                                         const NativeFirstFrameGate::Receipt &physical)
+                                          const Correlation &restoration,
+                                          const NativeFirstFrameGate::Receipt &physical)
 {
     if (bytes.empty() || bytes.size() > MaxPreparation || parent.empty() ||
         !physical.completedCount || physical.completedCount > DisplayTransaction::MaxHeads)
@@ -21,8 +22,8 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     const auto domain = next(64), retained = next(OriginalNativeReleaseGrantCodec::MaxReservation);
     const auto preparation = next(64), verification = next(64);
     const auto transaction = next(256), effect = next(64);
-    if (!domain || *domain != "linura.native-display.completion-preparation.v1" ||
-        !retained || *retained != parent || !preparation || !verification ||
+    if (!domain || *domain != "linura.native-display.completion-preparation.v1" || !retained ||
+        *retained != parent || !preparation || !verification ||
         !OriginalGrantCodec::digest(*preparation) || !OriginalGrantCodec::digest(*verification) ||
         *preparation == *verification || !transaction || *transaction != restoration.transaction ||
         !effect || *effect != restoration.effectDigest)
@@ -33,8 +34,8 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     };
     const auto wall = number(), boot = number(), wallEnd = number(), bootEnd = number();
     const auto security = number(), expires = number(), count = number();
-    if (!wall || !boot || !wallEnd || !bootEnd || !security || !expires || !count ||
-        !*wall || !*boot || *wall > physical.observedUnixMs || *boot > physical.observedBootMs ||
+    if (!wall || !boot || !wallEnd || !bootEnd || !security || !expires || !count || !*wall ||
+        !*boot || *wall > physical.observedUnixMs || *boot > physical.observedBootMs ||
         *wallEnd != physical.deadlineUnixMs || *bootEnd != physical.deadlineBootMs ||
         *wall >= *wallEnd || *boot >= *bootEnd || *wallEnd - *wall > 2000 ||
         *bootEnd - *boot > 2000 || *security != physical.securityEpoch ||
@@ -44,13 +45,11 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     for (std::size_t i = 0; i < physical.completedCount; ++i) {
         const auto &row = physical.completed[i];
         const auto &kms = row.kernel;
-        for (const auto expected : {kms.key.handle, kms.key.generation,
-                                   static_cast<std::uint64_t>(kms.active),
-                                   static_cast<std::uint64_t>(kms.connector),
-                                   static_cast<std::uint64_t>(kms.crtc),
-                                   static_cast<std::uint64_t>(kms.plane),
-                                   static_cast<std::uint64_t>(kms.framebuffer),
-                                   row.spendHighWater, row.completedCommit}) {
+        for (const auto expected :
+             {kms.key.handle, kms.key.generation, static_cast<std::uint64_t>(kms.active),
+              static_cast<std::uint64_t>(kms.connector), static_cast<std::uint64_t>(kms.crtc),
+              static_cast<std::uint64_t>(kms.plane), static_cast<std::uint64_t>(kms.framebuffer),
+              row.spendHighWater, row.completedCommit}) {
             if (number() != std::optional{expected})
                 return {};
         }
@@ -95,10 +94,12 @@ class OriginalCompletionGrant final
         if (!size || !*size || *size > OriginalCompletionGrantCodec::MaxPreparation)
             return {};
         std::string record(static_cast<std::size_t>(*size), '\0'), end(11, '\0');
-        if (!result->read(record, deadline) || !result->read(end, deadline) || end != "LNCG-END:1\n")
+        if (!result->read(record, deadline) || !result->read(end, deadline) ||
+            end != "LNCG-END:1\n")
             return {};
         const auto digest = nativeSha256(record);
-        const auto bound = OriginalCompletionGrantCodec::matches(record, parent, restoration, physical);
+        const auto bound =
+            OriginalCompletionGrantCodec::matches(record, parent, restoration, physical);
         if (!digest || *digest != expectedDigest || !bound)
             return {};
         result->digest_ = *digest;
@@ -126,7 +127,10 @@ class OriginalCompletionGrant final
         pollfd event{descriptor_.get(), POLLIN, 0};
         return poll(&event, 1, 0) == 0 && event.revents == 0 ? true : fail();
     }
-    [[nodiscard]] const std::string &comparisonDigest() const noexcept { return digest_; }
+    [[nodiscard]] const std::string &comparisonDigest() const noexcept
+    {
+        return digest_;
+    }
     [[nodiscard]] bool handoffWindowCurrent()
     {
         const auto now = clock();
@@ -157,28 +161,40 @@ class OriginalCompletionGrant final
         });
         return admitted ? true : fail();
     }
-    void invalidate() noexcept { (void)fail(); }
+    void invalidate() noexcept
+    {
+        (void)fail();
+    }
 
   private:
-    struct Liveness final { OriginalCompletionGrant *owner; };
+    struct Liveness final
+    {
+        OriginalCompletionGrant *owner;
+    };
     OriginalCompletionGrant(StartupFence &fence, OwnedNativeFd descriptor)
         : fence_(fence), descriptor_(std::move(descriptor)),
           liveness_(std::make_shared<Liveness>(this))
     {}
-    bool fail() noexcept { failed_ = true; return false; }
+    bool fail() noexcept
+    {
+        failed_ = true;
+        return false;
+    }
     std::optional<ClockSample> clock()
     {
         const auto milliseconds = [](clockid_t id) -> std::optional<std::uint64_t> {
             timespec sample{};
             if (clock_gettime(id, &sample) != 0 || sample.tv_sec < 0 || sample.tv_nsec < 0 ||
-                sample.tv_nsec >= 1'000'000'000 || static_cast<std::uint64_t>(sample.tv_sec) >
+                sample.tv_nsec >= 1'000'000'000 ||
+                static_cast<std::uint64_t>(sample.tv_sec) >
                     (std::numeric_limits<std::uint64_t>::max() - 999) / 1000)
                 return {};
             return static_cast<std::uint64_t>(sample.tv_sec) * 1000 +
                    static_cast<std::uint64_t>(sample.tv_nsec) / 1'000'000;
         };
         const auto wall = milliseconds(CLOCK_REALTIME), boot = milliseconds(CLOCK_BOOTTIME);
-        if (failed_ || !wall || !boot || !*wall || !*boot || *wall < last_.unixMs || *boot < last_.bootMs) {
+        if (failed_ || !wall || !boot || !*wall || !*boot || *wall < last_.unixMs ||
+            *boot < last_.bootMs) {
             fail();
             return {};
         }
@@ -189,23 +205,33 @@ class OriginalCompletionGrant final
     {
         while (size) {
             const auto now = clock();
-            if (!now || now->bootMs >= deadline || !fence_.authenticatesGrantPeer(descriptor_.get()))
+            if (!now || now->bootMs >= deadline ||
+                !fence_.authenticatesGrantPeer(descriptor_.get()))
                 return fail();
-            const auto count = write ? send(descriptor_.get(), bytes, size, MSG_DONTWAIT | MSG_NOSIGNAL)
-                                     : recv(descriptor_.get(), bytes, size, MSG_DONTWAIT);
+            const auto count =
+                write ? send(descriptor_.get(), bytes, size, MSG_DONTWAIT | MSG_NOSIGNAL)
+                      : recv(descriptor_.get(), bytes, size, MSG_DONTWAIT);
             if (count > 0) {
                 bytes += count;
                 size -= static_cast<std::size_t>(count);
             } else if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                 pollfd event{descriptor_.get(), static_cast<short>(write ? POLLOUT : POLLIN), 0};
-                if (poll(&event, 1, static_cast<int>(deadline - now->bootMs)) != 1 || event.revents != event.events)
+                if (poll(&event, 1, static_cast<int>(deadline - now->bootMs)) != 1 ||
+                    event.revents != event.events)
                     return fail();
-            } else { return fail(); }
+            } else {
+                return fail();
+            }
         }
         const auto end = clock();
-        return end && end->bootMs < deadline && fence_.authenticatesGrantPeer(descriptor_.get()) ? true : fail();
+        return end && end->bootMs < deadline && fence_.authenticatesGrantPeer(descriptor_.get())
+                   ? true
+                   : fail();
     }
-    bool read(std::string &bytes, std::uint64_t deadline) { return transfer(bytes.data(), bytes.size(), deadline, false); }
+    bool read(std::string &bytes, std::uint64_t deadline)
+    {
+        return transfer(bytes.data(), bytes.size(), deadline, false);
+    }
     bool probe(bool initial)
     {
         const auto now = clock();
@@ -214,7 +240,8 @@ class OriginalCompletionGrant final
             (initial && (now->unixMs >= expires_.unixMs || now->bootMs >= expires_.bootMs)))
             return fail();
         auto deadline = now->bootMs + 1000;
-        if (initial) deadline = std::min(deadline, expires_.bootMs);
+        if (initial)
+            deadline = std::min(deadline, expires_.bootMs);
         std::string request = initial ? "LNCH:1\n" : "LNCV:1\n";
         request += '\0';
         for (unsigned shift = 64; shift; shift -= 8)
@@ -228,7 +255,8 @@ class OriginalCompletionGrant final
             !read(response, deadline) || response != request)
             return fail();
         const auto finished = clock();
-        if (!finished || (initial && (finished->unixMs >= expires_.unixMs || finished->bootMs >= expires_.bootMs)))
+        if (!finished || (initial && (finished->unixMs >= expires_.unixMs ||
+                                      finished->bootMs >= expires_.bootMs)))
             return fail();
         ++sequence_;
         return true;

@@ -603,3 +603,12 @@ repeat the spend or treat an expired proof as current. All in-repository Rust
 consumers move together; there is no compatibility shim or public SDK/D-Bus
 mutation activation. Final Root/Control ReleasedCurrent completion and ordered
 fence retirement remain a separate unfinished protocol.
+
+The internal Experimental current-verification API returns a separately fresh
+inspection and the immutable `original-current-verified.v1` checkpoint's digest,
+first verification time and original expiry. Every re-observation independently
+joins current native/Root state; advancing ordinary commits do not overwrite
+the retained checkpoint or relabel its historical validity as fresh. All Rust
+exports/consumers move together. The new Linura-owned evidence record invokes
+no external effect, changes no existing journal payload, creates no Stable
+compatibility shim and enables no public display mutation or terminal commit.

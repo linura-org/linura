@@ -18,7 +18,8 @@ mod handoff;
 pub use handoff::{
     AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
     OriginalDisplayCompletionReceipt, OriginalDisplayCurrentInspection,
-    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeHandoffVerification,
+    OriginalDisplayCurrentVerification, OriginalDisplayNativeHandoffInspection,
+    OriginalDisplayNativeHandoffVerification,
 };
 
 /// The caller identifies existing restoration history and supplies provenance.

@@ -105,8 +105,19 @@ class Harness final
     std::thread worker;
     enum class BuildMismatch { None, Upstream, SourceRecipe };
     enum class PresentationFixture {
-        None, Handoff, Opaque, Both, Empty, Oversized, Ordinary,
-        Current, CurrentRecovery, CurrentOrdinary, CurrentBoth, CurrentEmpty, CurrentOversized
+        None,
+        Handoff,
+        Opaque,
+        Both,
+        Empty,
+        Oversized,
+        Ordinary,
+        Current,
+        CurrentRecovery,
+        CurrentOrdinary,
+        CurrentBoth,
+        CurrentEmpty,
+        CurrentOversized
     };
     explicit Harness(BuildMismatch mismatch = BuildMismatch::None, bool publishIntegration = true,
                      const char *instance = Instance,
@@ -145,8 +156,10 @@ class Harness final
                                           presentation == PresentationFixture::CurrentOversized)
                                           return 4U;
                                       return presentation == PresentationFixture::None ||
-                                                     presentation == PresentationFixture::Ordinary ||
-                                                     presentation == PresentationFixture::CurrentOrdinary
+                                                     presentation ==
+                                                         PresentationFixture::Ordinary ||
+                                                     presentation ==
+                                                         PresentationFixture::CurrentOrdinary
                                                  ? 1U
                                                  : 2U;
                                   },
@@ -765,8 +778,8 @@ void firstOrdinaryFrameObservationStaysDistinctAndCannotReleaseFences()
 void currentScanoutRequiresDistinctCurrentAdmission()
 {
     using F = Harness::PresentationFixture;
-    for (const auto kind : {F::Current, F::CurrentRecovery, F::CurrentOrdinary,
-                            F::CurrentBoth, F::CurrentEmpty, F::CurrentOversized}) {
+    for (const auto kind : {F::Current, F::CurrentRecovery, F::CurrentOrdinary, F::CurrentBoth,
+                            F::CurrentEmpty, F::CurrentOversized}) {
         Harness harness(Harness::BuildMismatch::None, true, Instance, kind);
         Client owner(harness.descriptors[0]);
         const auto sample = owner.connection->sample();

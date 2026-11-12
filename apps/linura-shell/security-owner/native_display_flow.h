@@ -47,8 +47,8 @@ class NativeDisplayFlow final : public QObject
     [[nodiscard]] bool redeemFinalization(const NativeDisplayFinalizationIntent &,
                                           const NativeDisplayCorrelation &);
     [[nodiscard]] bool continuesFinalization(const NativeDisplayFinalizationIntent &,
-                                              const NativeDisplayCorrelation &,
-                                              const NativePeerIdentity &);
+                                             const NativeDisplayCorrelation &,
+                                             const NativePeerIdentity &);
     // Relinquish only this already-spent UI flow after observing the real
     // current native lifetime. Native resources remain owned by the backend;
     // retiring old Control/UI approval must not destroy that Root lifetime.

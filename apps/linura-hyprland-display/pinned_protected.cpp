@@ -273,7 +273,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             const auto keyboard = keyboards[i].device.lock();
             if (!keyboard || keyboard != g_pInputManager->m_keyboards[i] ||
                 keyboard->m_xkbKeymap != keyboards[i].keymap.get() ||
-                keyboard->m_enabled != keyboards[i].enabled || keyboard->m_allowed != keyboards[i].allowed)
+                keyboard->m_enabled != keyboards[i].enabled ||
+                keyboard->m_allowed != keyboards[i].allowed)
                 return false;
         }
         for (std::size_t i = 0; i < pointers.size(); ++i)
@@ -287,16 +288,17 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         const auto facts = backend ? backend->snapshot() : std::nullopt;
         const auto clock = compositorClock();
         const bool valid = currentMode && !closed && !ownerLost && !mutationFault &&
-            completionGrant && completionGrant->live() && currentFrames &&
-            currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
-            originalAlive && originalAlive() && devicesCurrent() && facts && clock &&
-            *facts == stableInventory && clock->unixMs >= mutationClock.unixMs &&
-            clock->bootMs >= mutationClock.bootMs &&
-            clock->unixMs < interaction.scope().deadlineUnixMs &&
-            clock->bootMs < interaction.scope().deadlineBootMs;
+                           completionGrant && completionGrant->live() && currentFrames &&
+                           currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
+                           originalAlive && originalAlive() && devicesCurrent() && facts && clock &&
+                           *facts == stableInventory && clock->unixMs >= mutationClock.unixMs &&
+                           clock->bootMs >= mutationClock.bootMs &&
+                           clock->unixMs < interaction.scope().deadlineUnixMs &&
+                           clock->bootMs < interaction.scope().deadlineBootMs;
         if (!valid) {
             mutationFault = true;
-            if (completionGrant) completionGrant->invalidate();
+            if (completionGrant)
+                completionGrant->invalidate();
             return false;
         }
         mutationClock = *clock;
@@ -320,7 +322,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         if (mutation) {
             if (originalRestoration &&
                 (!originalAlive || !originalAlive() ||
-                 (completionGrant ? !completionGrant->live() : terminalGrant && !terminalGrant->live()))) {
+                 (completionGrant ? !completionGrant->live()
+                                  : terminalGrant && !terminalGrant->live()))) {
                 mutationFault = true;
                 interaction.cancel();
                 return false;
@@ -894,9 +897,9 @@ class PinnedScene final : public ProtectedScene
         // Root authenticates the current original compositor peer and writes
         // LNRX:1 durably BEFORE returning this one-use ACK. There is no
         // recovery-by-retrying after a missing or refused ACK.
-        const auto parent = consumeOriginalNativeReleaseGrant(std::move(descriptor), terminal,
-                                               data->terminalMaterial, sampledBootMs,
-                                               controlVersion, controlBinding, controlObservation);
+        const auto parent = consumeOriginalNativeReleaseGrant(
+            std::move(descriptor), terminal, data->terminalMaterial, sampledBootMs, controlVersion,
+            controlBinding, controlObservation);
         if (!parent)
             return refuse();
         data->nativeReleaseParent = *parent;
@@ -943,7 +946,11 @@ class PinnedScene final : public ProtectedScene
     }
     bool transferCompletion(OwnedNativeFd descriptor, std::string_view digest) override
     {
-        const auto refuse = [&] { data->mutationFault = true; data->damage(); return false; };
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
         if (data->completionAttempted)
             return refuse();
         data->completionAttempted = true; // Consume before reading or sending.
@@ -954,16 +961,19 @@ class PinnedScene final : public ProtectedScene
         const auto physical = readNativeHandoffComparison(*data->terminalBound);
         if (!physical || !data->refresh() || data->mutationFault || data->ownerLost)
             return refuse();
-        auto grant = receiveOriginalCompletionGrant(std::move(descriptor), digest,
-            data->nativeReleaseParent, data->bound, *physical);
-        const auto before = grant ? readNativeHandoffComparison(*data->terminalBound) : std::nullopt;
+        auto grant = receiveOriginalCompletionGrant(
+            std::move(descriptor), digest, data->nativeReleaseParent, data->bound, *physical);
+        const auto before =
+            grant ? readNativeHandoffComparison(*data->terminalBound) : std::nullopt;
         const auto clock = compositorClock();
         const auto history = nativeOutputHighWater(data->bound, data->stableInventory);
         const auto kernel = nativeFirstFrameKernel(data->bound, data->stableInventory);
         auto current = before && clock && history && kernel
-            ? NativeCurrentFrameGate::arm({data->stableInventory, *before, *clock, *history, *kernel})
-            : std::nullopt;
-        if (!grant || !current || inputRetirement.phase() != ProtectedInputRetirement::Phase::Private ||
+                           ? NativeCurrentFrameGate::arm(
+                                 {data->stableInventory, *before, *clock, *history, *kernel})
+                           : std::nullopt;
+        if (!grant || !current ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Private ||
             !data->refresh() || data->mutationFault || data->ownerLost || heldInput().any ||
             !grant->transferLifetime())
             return refuse();
@@ -986,9 +996,9 @@ class PinnedScene final : public ProtectedScene
         inputRetirement.close(false, heldInput());
         std::weak_ptr<NativeData> retained = data;
         if (!data->completionGrant->admitCurrent([retained] {
-            const auto live = retained.lock();
-            return live && live->refreshCurrent();
-        }))
+                const auto live = retained.lock();
+                return live && live->refreshCurrent();
+            }))
             return refuse();
         if (activeNative != data.get() || active.lock() != data)
             return refuse();
@@ -1341,8 +1351,7 @@ bool startupBlocksProtectedScene()
 } // namespace
 bool protectedDisplayActive()
 {
-    return startupBlocked() || !active.expired() ||
-           (mutationFence && mutationFence->currentMode);
+    return startupBlocked() || !active.expired() || (mutationFence && mutationFence->currentMode);
 }
 void startupAdmissionChanged()
 {
@@ -1410,8 +1419,9 @@ bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &n
 void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buffer)
 {
     const auto activeData = active.lock();
-    const auto data = activeData ? activeData :
-        mutationFence && mutationFence->currentMode ? mutationFence : nullptr;
+    const auto data = activeData                                    ? activeData
+                      : mutationFence && mutationFence->currentMode ? mutationFence
+                                                                    : nullptr;
     if (!data || !monitor || !monitor->m_output || !buffer || !data->refresh())
         return;
     auto *surface = data->forMonitor(monitor);
@@ -1420,9 +1430,10 @@ void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buf
         return;
     if (data->nativeHandoffActive && !data->currentMode && surface->frame.queuedCommit() != 0)
         return; // A later render cannot replace the retained first-frame tracker.
-    const auto kind = data->currentMode || surface->selectedOrdinaryFrame ? ProtectedFrame::Kind::Ordinary
-                      : surface->selectedFrame       ? ProtectedFrame::Kind::Content
-                                                     : ProtectedFrame::Kind::Safety;
+    const auto kind = data->currentMode || surface->selectedOrdinaryFrame
+                          ? ProtectedFrame::Kind::Ordinary
+                      : surface->selectedFrame ? ProtectedFrame::Kind::Content
+                                               : ProtectedFrame::Kind::Safety;
     if (!surface->frame.rendered(buffer, kind)) {
         data->cancelInput();
         return;
@@ -1446,8 +1457,9 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
         return submitted.id != 0 && submitted.error == 0;
     }
     const auto activeData = active.lock();
-    const auto data = activeData ? activeData :
-        mutationFence && mutationFence->currentMode ? mutationFence : nullptr;
+    const auto data = activeData                                    ? activeData
+                      : mutationFence && mutationFence->currentMode ? mutationFence
+                                                                    : nullptr;
     if (!data)
         return std::nullopt;
     auto *surface = data->forMonitor(monitor);
@@ -1566,12 +1578,13 @@ readNativeHandoffComparison(const Correlation &terminal)
 {
     const auto data = mutationFence;
     auto *backend = nativeBackend();
-    if (!data || data->currentMode || !backend || !data->nativeHandoffActive || !data->nativeReleaseSpent ||
-        !data->nativeReleaseGate || !data->terminalBound || *data->terminalBound != terminal ||
-        data->writing || data->ownerLost || data->mutationFault || heldInput().any ||
-        !data->refresh() || data->ownerLost || data->mutationFault ||
-        (data->completionGrant ? !data->completionGrant->verify() :
-            !data->terminalGrant || !data->terminalGrant->verify()))
+    if (!data || data->currentMode || !backend || !data->nativeHandoffActive ||
+        !data->nativeReleaseSpent || !data->nativeReleaseGate || !data->terminalBound ||
+        *data->terminalBound != terminal || data->writing || data->ownerLost ||
+        data->mutationFault || heldInput().any || !data->refresh() || data->ownerLost ||
+        data->mutationFault ||
+        (data->completionGrant ? !data->completionGrant->verify()
+                               : !data->terminalGrant || !data->terminalGrant->verify()))
         return std::nullopt;
     const auto refuse = [&]() -> std::optional<NativeFirstFrameGate::Receipt> {
         data->mutationFault = true;
@@ -1613,8 +1626,9 @@ readNativeHandoffComparison(const Correlation &terminal)
     }
     const auto after = backend->snapshot();
     if (!after || *after != held || !data->refresh() || data->ownerLost || data->mutationFault ||
-        heldInput().any || (data->completionGrant ? !data->completionGrant->verify() :
-            !data->terminalGrant || !data->terminalGrant->verify()))
+        heldInput().any ||
+        (data->completionGrant ? !data->completionGrant->verify()
+                               : !data->terminalGrant || !data->terminalGrant->verify()))
         return refuse();
     const auto clock = compositorClock();
     if (!clock)
@@ -1635,8 +1649,8 @@ std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
 {
     const auto data = mutationFence;
     auto *backend = nativeBackend();
-    if (!data || !data->currentMode || !backend || !data->terminalBound ||
-        !data->currentFrames || !data->completionGrant || !data->refreshCurrent())
+    if (!data || !data->currentMode || !backend || !data->terminalBound || !data->currentFrames ||
+        !data->completionGrant || !data->refreshCurrent())
         return std::nullopt;
     const auto refuse = [&]() -> std::optional<NativeCurrentFrameGate::Receipt> {
         data->mutationFault = true;
@@ -1661,8 +1675,8 @@ std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
             return refuse();
         const auto &surface = found->second;
         if (!head.current.enabled) {
-            frames.push_back({head.key, nullptr, nullptr, surface.disableCommit,
-                              surface.disableSubmitted, 0});
+            frames.push_back(
+                {head.key, nullptr, nullptr, surface.disableCommit, surface.disableSubmitted, 0});
         } else if (!surface.submittedBuffer) {
             frames.push_back({head.key, nullptr, nullptr, 0, false, 0});
         } else {
@@ -1670,8 +1684,8 @@ std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
             const auto framebuffer = nativeHandoffFramebuffer(head.key, buffer);
             if (!framebuffer && surface.frame.completed())
                 return refuse();
-            frames.push_back({head.key, &surface.frame, buffer.get(), 0, false,
-                              framebuffer.value_or(0)});
+            frames.push_back(
+                {head.key, &surface.frame, buffer.get(), 0, false, framebuffer.value_or(0)});
         }
     }
     const auto after = backend->snapshot();
@@ -1679,8 +1693,8 @@ std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
     if (!after || !finished || *after != held || !data->refreshCurrent() ||
         !data->completionGrant->verify())
         return refuse();
-    const auto result = data->currentFrames->observe({held, *started, *finished, frames,
-                                                     *kernel, *commits});
+    const auto result =
+        data->currentFrames->observe({held, *started, *finished, frames, *kernel, *commits});
     if (data->currentFrames->phase() != NativeCurrentFrameGate::Phase::Active)
         return refuse();
     const auto end = compositorClock();
@@ -1712,8 +1726,8 @@ std::optional<std::string> framePresentation(bool current)
         !OriginalGrantCodec::digest(data->terminalBound->effectDigest) ||
         !OriginalGrantCodec::digest(data->terminalBound->dispatchDigest))
         return std::nullopt;
-    const auto receipt = current ? readNativeCurrentComparison()
-                                 : readNativeHandoffComparison(*data->terminalBound);
+    const auto receipt =
+        current ? readNativeCurrentComparison() : readNativeHandoffComparison(*data->terminalBound);
     if (!receipt || receipt->postWriteEpoch != terminal->postWriteEpoch ||
         receipt->completedCount != data->stableInventory.heads.size())
         return std::nullopt;
@@ -1731,36 +1745,38 @@ std::optional<std::string> framePresentation(bool current)
                  ",\"plane\":" + std::to_string(kernel.plane) +
                  ",\"framebuffer\":" + std::to_string(kernel.framebuffer) +
                  (current ? ",\"handoff_commit\":\"" : ",\"spend_high_water\":\"") +
-                 std::to_string(row.spendHighWater) +
-                 "\",\"completed_commit\":\"" + std::to_string(row.completedCommit) + "\"}";
+                 std::to_string(row.spendHighWater) + "\",\"completed_commit\":\"" +
+                 std::to_string(row.completedCommit) + "\"}";
     }
-    std::string proof =
-        "{\"schema\":1,\"topology\":\"" + std::string(restored->topology) +
-        "\",\"original_dispatch\":\"" + std::string((*original)[1]) + "\",\"checkpoint\":\"" +
-        std::string((*original)[2]) + "\",\"restoration_transaction\":\"" +
-        data->bound.transaction + "\",\"restoration_effect\":\"" + data->bound.effectDigest +
-        "\",\"restoration_dispatch\":\"" + data->bound.dispatchDigest +
-        "\",\"terminal_transaction\":\"" + data->terminalBound->transaction +
-        "\",\"terminal_effect\":\"" + data->terminalBound->effectDigest +
-        "\",\"terminal_dispatch\":\"" + data->terminalBound->dispatchDigest +
-        "\",\"terminal_link\":\"" + std::string(terminal->terminalLink) + "\",\"source_guard\":\"" +
-        std::string(terminal->sourceGuard) + "\",\"sampled_unix_ms\":\"" +
-        std::to_string(receipt->observedUnixMs) + "\",\"sampled_boot_ms\":\"" +
-        std::to_string(receipt->observedBootMs) + "\",\"deadline_unix_ms\":\"" +
-        std::to_string(receipt->deadlineUnixMs) + "\",\"deadline_boot_ms\":\"" +
-        std::to_string(receipt->deadlineBootMs) + "\",\"post_write_epoch\":\"" +
-        std::to_string(receipt->postWriteEpoch) + "\",\"security_epoch\":\"" +
-        std::to_string(receipt->securityEpoch) + "\"";
+    std::string proof = "{\"schema\":1,\"topology\":\"" + std::string(restored->topology) +
+                        "\",\"original_dispatch\":\"" + std::string((*original)[1]) +
+                        "\",\"checkpoint\":\"" + std::string((*original)[2]) +
+                        "\",\"restoration_transaction\":\"" + data->bound.transaction +
+                        "\",\"restoration_effect\":\"" + data->bound.effectDigest +
+                        "\",\"restoration_dispatch\":\"" + data->bound.dispatchDigest +
+                        "\",\"terminal_transaction\":\"" + data->terminalBound->transaction +
+                        "\",\"terminal_effect\":\"" + data->terminalBound->effectDigest +
+                        "\",\"terminal_dispatch\":\"" + data->terminalBound->dispatchDigest +
+                        "\",\"terminal_link\":\"" + std::string(terminal->terminalLink) +
+                        "\",\"source_guard\":\"" + std::string(terminal->sourceGuard) +
+                        "\",\"sampled_unix_ms\":\"" + std::to_string(receipt->observedUnixMs) +
+                        "\",\"sampled_boot_ms\":\"" + std::to_string(receipt->observedBootMs) +
+                        "\",\"deadline_unix_ms\":\"" + std::to_string(receipt->deadlineUnixMs) +
+                        "\",\"deadline_boot_ms\":\"" + std::to_string(receipt->deadlineBootMs) +
+                        "\",\"post_write_epoch\":\"" + std::to_string(receipt->postWriteEpoch) +
+                        "\",\"security_epoch\":\"" + std::to_string(receipt->securityEpoch) + "\"";
     if (current) {
         if (!data->completionGrant || !data->completionGrant->live())
             return std::nullopt;
         // Frame sampling above independently observed the held native power
         // fence. Input state comes only from native physical retirement.
-        proof += ",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
-                 "\",\"input_retired\":" +
-                 (inputRetirement.phase() == ProtectedInputRetirement::Phase::Open &&
-                          !heldInput().any ? "true" : "false") +
-                 ",\"power_fence_held\":true";
+        proof +=
+            ",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
+            "\",\"input_retired\":" +
+            (inputRetirement.phase() == ProtectedInputRetirement::Phase::Open && !heldInput().any
+                 ? "true"
+                 : "false") +
+            ",\"power_fence_held\":true";
     }
     proof += ",\"heads\":[" + heads + "]}";
     return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;

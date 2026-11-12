@@ -1040,16 +1040,17 @@ std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMess
     const auto independent = impl_->independentState();
     if (!sample)
         return std::nullopt;
-    const auto &presentation = kind == DisplayPresentation::Restoration
-        ? sample->originalRestorationPresentation : kind == DisplayPresentation::First
-        ? sample->nativeHandoffPresentation : sample->nativeCurrentPresentation;
+    const auto &presentation =
+        kind == DisplayPresentation::Restoration ? sample->originalRestorationPresentation
+        : kind == DisplayPresentation::First     ? sample->nativeHandoffPresentation
+                                                 : sample->nativeCurrentPresentation;
     const auto expectedPhase = kind == DisplayPresentation::Current ? 4U : 2U;
-    const auto presentationCount = static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
+    const auto presentationCount =
+        static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty());
-    if (!independent || !sample->fenced || sample->startupPhase != expectedPhase || presentation.isEmpty() ||
-        presentation.size() > 16 * 1024 ||
-        presentationCount != 1 ||
+    if (!independent || !sample->fenced || sample->startupPhase != expectedPhase ||
+        presentation.isEmpty() || presentation.size() > 16 * 1024 || presentationCount != 1 ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
@@ -1249,17 +1250,17 @@ std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
 
 std::optional<quint32> NativeRuntime::transferOriginalDisplayCompletion(
     const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
-    const NativeDisplayCorrelation &bound,
-    const QString &digest, int grant)
+    const NativeDisplayCorrelation &bound, const QString &digest, int grant)
 {
-    NativeDeadline deadline(std::chrono::milliseconds(2000), NativeDeadline::Stage::DisplayDispatch);
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
     const auto clock = NativeDisplayClock::sample();
     if (!peer || !clock || grant < 0 || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||
         bound.deadlineUnixMs - clock->unixMs > 2000 || intent.currentLock != identity() ||
-        !impl_->currentSession() ||
-        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
-        impl_->unlockRequestLock || impl_->transitionRequest || !impl_->backend || !impl_->display ||
+        !impl_->currentSession() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest ||
+        !impl_->backend || !impl_->display ||
         !impl_->display->continuesFinalization(intent, bound, *peer) ||
         !impl_->backend->heldOriginalDisplayFinalization(bound) ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))

@@ -16,7 +16,7 @@ pub use completion::{
     AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
     OriginalDisplayCompletionReceipt,
 };
-pub use current::OriginalDisplayCurrentInspection;
+pub use current::{OriginalDisplayCurrentInspection, OriginalDisplayCurrentVerification};
 
 fn unavailable_at(stage: &'static str) -> ManagedLifecycleError {
     ManagedLifecycleError::Verification(format!("original display handoff unavailable at {stage}"))

@@ -344,10 +344,10 @@ bool NativeDisplayFlow::continuesFinalization(const NativeDisplayFinalizationInt
                                               const NativeDisplayCorrelation &bound,
                                               const NativePeerIdentity &peer)
 {
-    return !failed_ && scope_.purpose == ApprovalPurpose::FinalizeOriginalDisplay &&
-           consumed_ && spent_ && dispatched_ && control_ == peer &&
-           scope_.display && scope_.display->material == intent.encode() &&
-           bound.continues(*dispatched_) && window() && revalidate_();
+    return !failed_ && scope_.purpose == ApprovalPurpose::FinalizeOriginalDisplay && consumed_ &&
+           spent_ && dispatched_ && control_ == peer && scope_.display &&
+           scope_.display->material == intent.encode() && bound.continues(*dispatched_) &&
+           window() && revalidate_();
 }
 bool NativeDisplayFlow::retireAfterCurrentHandoff(const NativeDisplayCorrelation &bound)
 {

@@ -1135,9 +1135,8 @@ bool NativeWaylandLock::beginProtectedDisplayFinalization(const NativeDisplayPro
 bool NativeWaylandLock::heldOriginalDisplayFinalization(const NativeDisplayCorrelation &bound)
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
-        impl_->pumping || !impl_->finalizationAccepted ||
-        !impl_->finalizationDispatched || !bound.continues(*impl_->finalizationDispatched) ||
-        !impl_->heldRestoration ||
+        impl_->pumping || !impl_->finalizationAccepted || !impl_->finalizationDispatched ||
+        !bound.continues(*impl_->finalizationDispatched) || !impl_->heldRestoration ||
         !impl_->protectedConsumed || !impl_->protectedScope ||
         impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Finalization)
         return false;
@@ -1223,9 +1222,8 @@ std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     if (nativeGrant < 0 || !controlVersion || thread() != QThread::currentThread() ||
         !impl_->initialized || impl_->painting || impl_->pumping || impl_->nativeReleaseAttempted ||
         !impl_->finalizationAccepted || !impl_->finalizationDispatched ||
-        !bound.continues(*impl_->finalizationDispatched) ||
-        !impl_->heldRestoration || !impl_->protectedInteraction || !impl_->protectedConsumed ||
-        !impl_->protectedScope ||
+        !bound.continues(*impl_->finalizationDispatched) || !impl_->heldRestoration ||
+        !impl_->protectedInteraction || !impl_->protectedConsumed || !impl_->protectedScope ||
         impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Finalization ||
         impl_->heldFinalizationMaterial != intent.encode() ||
         impl_->heldRestoration->dispatchDigest != intent.restorationDispatch ||
@@ -1285,16 +1283,19 @@ std::optional<quint32> NativeWaylandLock::spendOriginalDisplayNativeRelease(
     return 6; // One Root LNRX spend. Not first-frame or Control terminal completion.
 }
 
-std::optional<quint32> NativeWaylandLock::transferOriginalDisplayCompletion(
-    const NativeDisplayCorrelation &bound, const QString &digest, int grant)
+std::optional<quint32>
+NativeWaylandLock::transferOriginalDisplayCompletion(const NativeDisplayCorrelation &bound,
+                                                     const QString &digest, int grant)
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
         impl_->pumping || impl_->completionAttempted || !impl_->nativeReleaseAttempted ||
         grant < 0 || digest.size() != 64 || digest == QString(64, QLatin1Char('0')) ||
-        !std::all_of(digest.begin(), digest.end(), [](QChar character) {
-            return (character >= QLatin1Char('0') && character <= QLatin1Char('9')) ||
-                   (character >= QLatin1Char('a') && character <= QLatin1Char('f'));
-        }) || !heldOriginalDisplayFinalization(bound) || requestedSecure() != secureCoverage())
+        !std::all_of(digest.begin(), digest.end(),
+                     [](QChar character) {
+                         return (character >= QLatin1Char('0') && character <= QLatin1Char('9')) ||
+                                (character >= QLatin1Char('a') && character <= QLatin1Char('f'));
+                     }) ||
+        !heldOriginalDisplayFinalization(bound) || requestedSecure() != secureCoverage())
         return std::nullopt;
     const auto clock = NativeDisplayClock::sample();
     if (!clock || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||
@@ -1306,8 +1307,8 @@ std::optional<quint32> NativeWaylandLock::transferOriginalDisplayCompletion(
     impl_->completionAttempted = true; // No regrant/retry after any wire ambiguity.
     impl_->protectedStatus.reset();
     const auto fingerprint = digest.toLatin1();
-    linura_protected_display_interaction_v1_transfer_completion(
-        impl_->protectedInteraction, grant, fingerprint.constData());
+    linura_protected_display_interaction_v1_transfer_completion(impl_->protectedInteraction, grant,
+                                                                fingerprint.constData());
     impl_->flush();
     if (!waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(1000)) ||
         !impl_->protectedInteraction || !impl_->protectedWindow() || !impl_->protectedStatus ||

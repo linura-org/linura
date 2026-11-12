@@ -19,8 +19,7 @@ using Text = std::string_view;
 // Correlation's full equality for all original execution/observation callers.
 inline bool continues(const Correlation &original, const Correlation &next)
 {
-    return next.transaction == original.transaction &&
-           next.effectDigest == original.effectDigest &&
+    return next.transaction == original.transaction && next.effectDigest == original.effectDigest &&
            next.dispatchDigest == original.dispatchDigest && original.deadlineUnixMs &&
            next.deadlineUnixMs && next.deadlineUnixMs <= original.deadlineUnixMs;
 }
@@ -66,7 +65,8 @@ class OriginalNativeReleaseGrant final
         auto result = std::unique_ptr<OriginalNativeReleaseGrant>(
             new OriginalNativeReleaseGrant(fence, std::move(descriptor)));
         const auto now = result->clock();
-        if (!now || !fence.recoveryAvailable() || *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
+        if (!now || !fence.recoveryAvailable() ||
+            *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
             !OriginalGrantCodec::freshSample(sampledBootMs, *now) ||
             !fence.authenticatesGrantPeer(result->descriptor_.get()))
             return {};
@@ -103,7 +103,10 @@ class OriginalNativeReleaseGrant final
         result->sampledBootMs_ = sampledBootMs;
         return result;
     }
-    [[nodiscard]] const std::string &reservation() const noexcept { return reservation_; }
+    [[nodiscard]] const std::string &reservation() const noexcept
+    {
+        return reservation_;
+    }
 
     // Root fsyncs LNRX before its one-use ACK. This ACK never proves physical
     // release or permits a second grant after loss/timeout.

@@ -3,6 +3,7 @@
 //! retires input, power, admission or retained evidence.
 use super::*;
 use crate::display_native_release_spend::verification::completion::NativeCompletionPrepared;
+use crate::display_native_release_spend::verification::current::NativeCurrentVerified;
 use linura_observation::{
     DISPLAY_NATIVE_CURRENT_CAPABILITY, DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
     DisplayNativeCurrentFacts, DisplayOriginalCompletionFacts,
@@ -14,6 +15,11 @@ pub struct OriginalDisplayCurrentInspection {
     frames: DisplayNativeCurrentFacts,
     terminal: TransactionSnapshot,
     preparation: linura_transaction::ContentDigest,
+    prepared: NativeCompletionPrepared,
+    root: DisplayOriginalCompletionFacts,
+    context: TerminalInspectionContext,
+    anchors: HandoffAnchors,
+    history: LinkedHistory,
 }
 impl OriginalDisplayCurrentInspection {
     #[must_use]
@@ -34,7 +40,102 @@ impl OriginalDisplayCurrentInspection {
     }
 }
 
+/// Immutable first current-state checkpoint plus a separate fresh inspection.
+/// Neither historical proof nor its digest is a retirement credential. The
+/// expiry below belongs only to the new inspection; the retained proof keeps
+/// its own original verification time and expiry across restart/re-observation.
+#[derive(Debug)]
+pub struct OriginalDisplayCurrentVerification {
+    inspection: OriginalDisplayCurrentInspection,
+    record_digest: linura_transaction::ContentDigest,
+    first_verified_unix_ms: u64,
+    first_proof_valid_until_unix_ms: u64,
+    valid_until_unix_ms: u64,
+}
+impl OriginalDisplayCurrentVerification {
+    #[must_use]
+    pub const fn inspection(&self) -> &OriginalDisplayCurrentInspection {
+        &self.inspection
+    }
+    #[must_use]
+    pub const fn record_digest(&self) -> &linura_transaction::ContentDigest {
+        &self.record_digest
+    }
+    #[must_use]
+    pub const fn first_verified_unix_ms(&self) -> u64 {
+        self.first_verified_unix_ms
+    }
+    #[must_use]
+    pub const fn first_proof_valid_until_unix_ms(&self) -> u64 {
+        self.first_proof_valid_until_unix_ms
+    }
+    #[must_use]
+    pub const fn valid_until_unix_ms(&self) -> u64 {
+        self.valid_until_unix_ms
+    }
+}
+
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
+    /// Retain independent current-state evidence without changing terminal
+    /// state or invoking an effect. A prior checkpoint is compared, never
+    /// overwritten; after restart every source must still be read afresh.
+    pub fn verify_current_original_display_completion(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayCurrentVerification, ManagedLifecycleError> {
+        let inspection =
+            self.inspect_current_original_display_completion(principal.clone(), terminal_request)?;
+        let context = &inspection.context;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let proof = NativeCurrentVerified::capture(
+            &principal_id,
+            &context.request,
+            &context.snapshot,
+            context
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?,
+            &inspection.prepared,
+            &inspection.root,
+            &inspection.observation,
+            &inspection.frames,
+            now_ms()?,
+        )?;
+        let retained =
+            proof.retain_or_reconcile(self.request_journal.as_deref_mut().ok_or_else(invalid)?)?;
+        inspection
+            .prepared
+            .require_readback(self.display_journal()?)?;
+        if self.terminal_inspection_context(&principal, terminal_request)? != *context
+            || self.native_handoff_anchors(&principal_id, context)? != inspection.anchors
+            || self.finalization_history(
+                &principal,
+                DisplayFinalizationMaterial::decode(context.intent.material())
+                    .map_err(|_| invalid())?
+                    .restoration_request(),
+            )? != inspection.history
+        {
+            return Err(invalid());
+        }
+        let finished = now_ms()?;
+        inspection
+            .observation
+            .require_current(finished)
+            .map_err(|_| invalid())?;
+        if finished < proof.verified_at() || finished >= proof.expiry() {
+            return Err(invalid());
+        }
+        Ok(OriginalDisplayCurrentVerification {
+            record_digest: retained.digest(),
+            first_verified_unix_ms: retained.verified_at(),
+            first_proof_valid_until_unix_ms: retained.expiry(),
+            valid_until_unix_ms: proof.expiry(),
+            inspection,
+        })
+    }
+
     /// Lost acknowledgements and Control restart may inspect the actual live
     /// Root/native lifetime, but cannot redeliver any spent grant. This joins
     /// current native frames with immutable old proof without relabelling the
@@ -240,8 +341,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         Ok(OriginalDisplayCurrentInspection {
             observation: root,
             frames: checked,
-            terminal: terminal.snapshot,
+            terminal: terminal.snapshot.clone(),
             preparation: prepared.digest(),
+            prepared,
+            root: root_facts,
+            context: terminal,
+            anchors,
+            history,
         })
     }
 }

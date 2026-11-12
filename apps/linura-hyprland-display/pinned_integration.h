@@ -28,15 +28,15 @@ receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string
 [[nodiscard]] bool originalRestorationPresented(const Correlation &);
 // Consume ONE actual supervised Root LNRS/LNRW grant on the compositor thread.
 // This only durably spends LNRX; it does not release or unlock protection.
-[[nodiscard]] std::optional<std::string> consumeOriginalNativeReleaseGrant(OwnedNativeFd, const Correlation &terminal,
-                                                     std::string_view material,
-                                                     std::uint64_t sampledBootMs,
-                                                     std::uint64_t controlVersion,
-                                                     std::string_view controlBinding,
-                                                     std::string_view controlObservation);
+[[nodiscard]] std::optional<std::string>
+consumeOriginalNativeReleaseGrant(OwnedNativeFd, const Correlation &terminal,
+                                  std::string_view material, std::uint64_t sampledBootMs,
+                                  std::uint64_t controlVersion, std::string_view controlBinding,
+                                  std::string_view controlObservation);
 [[nodiscard]] std::unique_ptr<OriginalCompletionGrant>
 receiveOriginalCompletionGrant(OwnedNativeFd, std::string_view digest, std::string_view parent,
-                                const Correlation &restoration, const NativeFirstFrameGate::Receipt &);
+                               const Correlation &restoration,
+                               const NativeFirstFrameGate::Receipt &);
 // Read-only actual DRM/KMS connector observations from the SAME pinned
 // compositor, original supervised Root channel and unchanged output inventory.
 // This is NOT a native release attempt, grant, frame-completion receipt, or
@@ -52,7 +52,8 @@ using NativeOutputCommits = std::optional<std::vector<NativeFirstFrameGate::Outp
 [[nodiscard]] NativeOutputCommits nativeOutputHighWater(const Correlation &, const Snapshot &);
 // Read-only sampling after the separately authenticated handoff, under the
 // same live Root completion lifetime. Never eligible in recovery admission.
-[[nodiscard]] NativeOutputCommits nativeCurrentOutputHighWater(const Correlation &, const Snapshot &);
+[[nodiscard]] NativeOutputCommits nativeCurrentOutputHighWater(const Correlation &,
+                                                               const Snapshot &);
 [[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
 nativeCurrentFrameKernel(const Correlation &, const Snapshot &);
 [[nodiscard]] NativeFirstFrameArm nativeFirstFrameArm(const Correlation &, const Snapshot &);

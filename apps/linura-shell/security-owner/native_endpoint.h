@@ -191,7 +191,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<arg name=\"native_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"TransferOriginalDisplayCompletion\"><arg name=\"query\" "
-        "type=\"(sssst)\" direction=\"in\"/><arg name=\"preparation_digest\" type=\"s\" direction=\"in\"/>"
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"preparation_digest\" type=\"s\" "
+        "direction=\"in\"/>"
         "<arg name=\"completion_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"ContinuePreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
@@ -286,8 +287,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                               const QString &control_observation,
                                               const QDBusUnixFileDescriptor &native_grant);
     quint32 TransferOriginalDisplayCompletion(const NativeDisplayAttemptQueryWire &,
-                                               const QString &preparationDigest,
-                                               const QDBusUnixFileDescriptor &completionGrant);
+                                              const QString &preparationDigest,
+                                              const QDBusUnixFileDescriptor &completionGrant);
     quint32 ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &,
                                     const QString &decision_digest,
                                     const QString &protected_decision_digest, bool confirm);

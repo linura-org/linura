@@ -374,8 +374,8 @@ class NativeDisplayConnection::Impl final
             if (!capture.identityReceived || capture.done ||
                 !capture.sample.originalRestorationPresentation.isEmpty() ||
                 !capture.sample.nativeHandoffPresentation.isEmpty() || size == 0 ||
-                !capture.sample.nativeCurrentPresentation.isEmpty() ||
-                size > 16 * 1024 || capture.sample.startupPhase != 2 || !capture.sample.fenced) {
+                !capture.sample.nativeCurrentPresentation.isEmpty() || size > 16 * 1024 ||
+                capture.sample.startupPhase != 2 || !capture.sample.fenced) {
                 capture.invalid = true;
                 return;
             }
@@ -392,8 +392,8 @@ class NativeDisplayConnection::Impl final
             if (!capture.identityReceived || capture.done ||
                 !capture.sample.nativeHandoffPresentation.isEmpty() ||
                 !capture.sample.originalRestorationPresentation.isEmpty() || size == 0 ||
-                !capture.sample.nativeCurrentPresentation.isEmpty() ||
-                size > 16 * 1024 || capture.sample.startupPhase != 2 || !capture.sample.fenced) {
+                !capture.sample.nativeCurrentPresentation.isEmpty() || size > 16 * 1024 ||
+                capture.sample.startupPhase != 2 || !capture.sample.fenced) {
                 capture.invalid = true;
                 return;
             }
@@ -401,7 +401,8 @@ class NativeDisplayConnection::Impl final
                 QByteArray(facts, static_cast<qsizetype>(size));
         });
     }
-    static void nativeCurrentPresentation(void *data, linura_display_snapshot_v1 *, const char *facts)
+    static void nativeCurrentPresentation(void *data, linura_display_snapshot_v1 *,
+                                          const char *facts)
     {
         auto &capture = *static_cast<Capture *>(data);
         callback(capture, [&] {
@@ -414,7 +415,8 @@ class NativeDisplayConnection::Impl final
                 capture.invalid = true;
                 return;
             }
-            capture.sample.nativeCurrentPresentation = QByteArray(facts, static_cast<qsizetype>(size));
+            capture.sample.nativeCurrentPresentation =
+                QByteArray(facts, static_cast<qsizetype>(size));
         });
     }
     static void done(void *data, linura_display_snapshot_v1 *)

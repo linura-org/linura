@@ -149,10 +149,10 @@ class NativeFirstFrameGate final
     NativeFirstFrameGate &operator=(const NativeFirstFrameGate &) = delete;
     NativeFirstFrameGate(NativeFirstFrameGate &&other) noexcept
         : held_(std::move(other.held_)), epoch_(other.epoch_), sampled_(other.sampled_),
-          lastSample_(other.lastSample_), deadline_(other.deadline_), before_(std::move(other.before_)),
-          baselineKernel_(std::move(other.baselineKernel_)), spentCommit_(other.spentCommit_),
-          accepted_(std::move(other.accepted_)), acceptedFrames_(other.acceptedFrames_),
-          acceptedBuffers_(other.acceptedBuffers_),
+          lastSample_(other.lastSample_), deadline_(other.deadline_),
+          before_(std::move(other.before_)), baselineKernel_(std::move(other.baselineKernel_)),
+          spentCommit_(other.spentCommit_), accepted_(std::move(other.accepted_)),
+          acceptedFrames_(other.acceptedFrames_), acceptedBuffers_(other.acceptedBuffers_),
           phase_(std::exchange(other.phase_, Phase::Faulted))
     {}
     NativeFirstFrameGate &operator=(NativeFirstFrameGate &&) = delete;
@@ -162,8 +162,8 @@ class NativeFirstFrameGate final
     // clock is reconstructed from the remaining budget of the other clock.
     [[nodiscard]] bool narrowWindow(ClockSample original) noexcept
     {
-        if (phase_ != Phase::Held || original.unixMs <= lastSample_.unixMs ||
-            !original.bootMs || original.bootMs > lastSample_.bootMs ||
+        if (phase_ != Phase::Held || original.unixMs <= lastSample_.unixMs || !original.bootMs ||
+            original.bootMs > lastSample_.bootMs ||
             original.bootMs > std::numeric_limits<std::uint64_t>::max() - MaxProofWindowMs ||
             original.bootMs + MaxProofWindowMs <= lastSample_.bootMs) {
             phase_ = Phase::Faulted;
@@ -447,8 +447,8 @@ class NativeFirstFrameGate final
                          const std::vector<Output> &before,
                          const std::vector<NativeScanout> &kernel)
         : held_(held), epoch_(epoch), sampled_(sampled), lastSample_(sampled),
-          deadline_{sampled.unixMs + MaxProofWindowMs, sampled.bootMs + MaxProofWindowMs}, before_(before),
-          baselineKernel_(kernel)
+          deadline_{sampled.unixMs + MaxProofWindowMs, sampled.bootMs + MaxProofWindowMs},
+          before_(before), baselineKernel_(kernel)
     {}
     [[nodiscard]] bool currentSample(const Snapshot &current, ClockSample now) noexcept
     {

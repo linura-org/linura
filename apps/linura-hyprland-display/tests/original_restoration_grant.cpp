@@ -206,7 +206,7 @@ void terminalComparison(const std::string &material)
         // The completion parent is the exact previously authenticated native
         // spend. Its frame comparison must match a FRESH native/KMS sample.
         const Correlation restoration{"transaction:restored", std::string(64, '9'),
-                                       std::string(64, 'a'), 15'000};
+                                      std::string(64, 'a'), 15'000};
         NativeFirstFrameGate::Receipt actual{};
         actual.generation = 81;
         actual.securityEpoch = 19;
@@ -218,10 +218,28 @@ void terminalComparison(const std::string &material)
         actual.completedCount = 1;
         actual.completed[0] = {{{2, 3}, 4, 5, 6, 7, true}, 8, 9};
         std::vector<std::string> fields{
-            "linura.native-display.completion-preparation.v1", releaseBytes,
-            std::string(64, '1'), std::string(64, '2'), restoration.transaction,
-            restoration.effectDigest, "1001", "101", "1200", "300", "19", "1150", "1",
-            "2", "3", "1", "4", "5", "7", "6", "8", "9",
+            "linura.native-display.completion-preparation.v1",
+            releaseBytes,
+            std::string(64, '1'),
+            std::string(64, '2'),
+            restoration.transaction,
+            restoration.effectDigest,
+            "1001",
+            "101",
+            "1200",
+            "300",
+            "19",
+            "1150",
+            "1",
+            "2",
+            "3",
+            "1",
+            "4",
+            "5",
+            "7",
+            "6",
+            "8",
+            "9",
         };
         const auto original = framed(fields);
         const auto match = [&](std::string_view bytes) {
@@ -233,14 +251,34 @@ void terminalComparison(const std::string &material)
             assert(!match(std::string_view(original).substr(0, size)));
         assert(!match(original + 'x'));
         assert(!match(std::string(OriginalCompletionGrantCodec::MaxPreparation + 1, 'x')));
-        for (const auto &[index, bad] : std::vector<std::pair<std::size_t, std::string>>{
-            {0, "other-purpose"}, {1, releaseBytes + 'x'}, {2, std::string(64, '0')},
-            {3, std::string(64, '1')}, {4, "transaction:foreign"}, {5, std::string(64, '8')},
-            {6, "01001"}, {6, "1011"}, {7, "111"}, {8, "1201"}, {9, "301"},
-            {10, "20"}, {11, "1010"}, {11, "1201"}, {12, "0"}, {12, "2"},
-            {13, "1"}, {14, "4"}, {15, "0"}, {16, "5"}, {17, "6"},
-            {18, "8"}, {19, "9"}, {20, "7"}, {21, "10"}}) {
-            auto changed = fields; changed[index] = bad;
+        for (const auto &[index, bad] :
+             std::vector<std::pair<std::size_t, std::string>>{{0, "other-purpose"},
+                                                              {1, releaseBytes + 'x'},
+                                                              {2, std::string(64, '0')},
+                                                              {3, std::string(64, '1')},
+                                                              {4, "transaction:foreign"},
+                                                              {5, std::string(64, '8')},
+                                                              {6, "01001"},
+                                                              {6, "1011"},
+                                                              {7, "111"},
+                                                              {8, "1201"},
+                                                              {9, "301"},
+                                                              {10, "20"},
+                                                              {11, "1010"},
+                                                              {11, "1201"},
+                                                              {12, "0"},
+                                                              {12, "2"},
+                                                              {13, "1"},
+                                                              {14, "4"},
+                                                              {15, "0"},
+                                                              {16, "5"},
+                                                              {17, "6"},
+                                                              {18, "8"},
+                                                              {19, "9"},
+                                                              {20, "7"},
+                                                              {21, "10"}}) {
+            auto changed = fields;
+            changed[index] = bad;
             assert(!match(framed(changed)));
         }
         auto other = actual;

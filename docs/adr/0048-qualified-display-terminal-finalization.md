@@ -426,6 +426,19 @@ It rechecks Root/native/protection and durable anchors after that join. Missing
 ACKs and restart can inspect an already performed handoff without recreating
 approval or effect authority. The result leaves the signed terminal Indeterminate
 and cannot retire power, global startup or any retained evidence.
+The separate `verify_current_original_display_completion` route retains an
+immutable, bounded `original-current-verified.v1` checkpoint only after that
+independent join. It binds the signed terminal generation/version/binding,
+canonical request and dispatch, original preparation, Root lifetime record,
+first-frame history, every contributor digest and complete current KMS/commit
+inventory. Storage integrity/readback and linked history are checked again.
+Re-observation may compare advancing ordinary frames, but cannot change the
+first checkpoint, its verification time or either historical clock. A changed
+buffer at the same commit, rollback, foreign lineage or corrupt checkpoint
+refuses. The fresh inspection's expiry and the first proof's original expiry
+are reported separately. This Linura-owned evidence write invokes no effect,
+does not reconstruct a review after restart and is not final retirement
+authority. `ReleasedCurrent` and final fence retirement remain outstanding.
 Once the native owner independently observes the same invocation's actual
 current handoff phase, it retires only the already-spent UI/approval flow and
 leaves the native endpoint with the backend. It does this even when the transfer

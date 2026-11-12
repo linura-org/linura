@@ -293,6 +293,10 @@ impl DisplayNativeCurrentFacts {
     }
 
     #[must_use]
+    pub const fn scope(&self) -> &DisplayRecoveryScope {
+        &self.scope
+    }
+    #[must_use]
     pub fn lineage(&self) -> &DisplayNativeHandoffLineage {
         &self.lineage
     }

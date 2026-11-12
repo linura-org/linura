@@ -23,7 +23,9 @@ pub(super) fn observe_current(
         ProviderError::Unavailable("no simulated current Root/native handoff".into())
     })?;
     machine.current_reads += 1;
-    let boot = 200_000 + machine.current_reads;
+    // Fault-pair counters may reset, but the producer clock cannot. Derive
+    // BOOTTIME from the fixture's monotonic observation sequence instead.
+    let boot = 200_000 + sample.sequence;
     let current = value(DisplayNativeCurrentFacts::new(
         scope.clone(),
         root.first().lineage().clone(),
@@ -546,11 +548,20 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
         assert_eq!(completion.calls, usize::from(!lost_reply));
         // A completion ACK cannot retire a fence or sign terminal completion.
         assert_eq!(snapshot(&database, &transaction), before);
+        let mut current_checkpoint = None;
         if !lost_reply {
             let current =
                 value(control.inspect_current_original_display_completion(principal(), &request));
             assert_eq!(current.terminal(), &before);
             assert!(current.frames().input_retired() && current.frames().power_fence_held());
+            let proof =
+                value(control.verify_current_original_display_completion(principal(), &request));
+            assert_eq!(proof.inspection().terminal(), &before);
+            current_checkpoint = Some((
+                proof.record_digest().clone(),
+                proof.first_verified_unix_ms(),
+                proof.first_proof_valid_until_unix_ms(),
+            ));
             for fault in 1..=12 {
                 {
                     let mut state = machine
@@ -561,7 +572,7 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
                 }
                 assert!(
                     control
-                        .inspect_current_original_display_completion(principal(), &request)
+                        .verify_current_original_display_completion(principal(), &request)
                         .is_err(),
                     "fault {fault}"
                 );
@@ -574,7 +585,7 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
         } else {
             assert!(
                 control
-                    .inspect_current_original_display_completion(principal(), &request)
+                    .verify_current_original_display_completion(principal(), &request)
                     .is_err()
             );
         }
@@ -633,6 +644,16 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
             let current =
                 value(restarted.inspect_current_original_display_completion(principal(), &request));
             assert_eq!(current.terminal(), &before);
+            let proof =
+                value(restarted.verify_current_original_display_completion(principal(), &request));
+            let retained = current_checkpoint
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("first checkpoint"));
+            assert_eq!(proof.record_digest(), &retained.0);
+            assert_eq!(proof.first_verified_unix_ms(), retained.1);
+            assert_eq!(proof.first_proof_valid_until_unix_ms(), retained.2);
+            assert!(proof.valid_until_unix_ms() > now_unix_ms());
+            assert_eq!(proof.inspection().terminal(), &before);
             assert_eq!(completion.calls, 1);
         }
         assert!(

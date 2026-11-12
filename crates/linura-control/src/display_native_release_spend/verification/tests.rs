@@ -650,3 +650,337 @@ fn completion_storage_failure_ambiguity_or_substituted_readback_never_rearms() {
     journal.integrity_failure = true;
     assert!(prepared.require_readback(&journal).is_err());
 }
+
+struct CurrentFixture {
+    base: Fixture,
+    prepared: completion::NativeCompletionPrepared,
+    root: linura_observation::DisplayOriginalCompletionFacts,
+    frames: linura_observation::DisplayNativeCurrentFacts,
+    observation: ObservationEnvelope,
+}
+impl CurrentFixture {
+    fn new() -> Self {
+        let base = Fixture::new();
+        let proof = value(base.capture(1002));
+        let prepared = value(completion(&base, &proof, 1003));
+        let root = value(linura_observation::DisplayOriginalCompletionFacts::new(
+            linura_observation::DisplayCompletionLineage {
+                record: "7".repeat(64),
+                preparation: prepared.digest().hex().into(),
+                verification: proof.digest().hex().into(),
+                material: base.material.clone(),
+            },
+            base.frames.clone(),
+        ));
+        let frames = value(linura_observation::DisplayNativeCurrentFacts::new(
+            base.frames.scope().clone(),
+            base.frames.lineage().clone(),
+            DisplayNativeHandoffWindow {
+                observed_unix_ms: 2000,
+                observed_boot_ms: 1000,
+                deadline_unix_ms: 2200,
+                deadline_boot_ms: 1200,
+            },
+            base.frames
+                .outputs()
+                .iter()
+                .map(|(id, first)| {
+                    (
+                        id.clone(),
+                        linura_observation::DisplayNativeCurrentOutput {
+                            enabled: first.enabled,
+                            connector: first.connector,
+                            crtc: first.crtc,
+                            plane: first.plane,
+                            framebuffer: first.framebuffer + u32::from(first.enabled),
+                            handoff_commit: first.completed_commit,
+                            completed_commit: first.completed_commit + u64::from(first.enabled),
+                        },
+                    )
+                })
+                .collect(),
+            root.lineage().record.clone(),
+            true,
+            true,
+        ));
+        let mut observation = base.observation.clone();
+        observation.capability = value(CapabilityId::new(
+            linura_observation::DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
+        ));
+        observation.observed_at_unix_ms = 2000;
+        observation.valid_for_ms = 150;
+        observation.attributes = root.attributes();
+        for name in [
+            "protection",
+            "display",
+            "session",
+            "coverage",
+            "current",
+            "rechecked_current",
+            "rechecked_root",
+            "rechecked_protection",
+        ] {
+            observation.attributes.insert(
+                format!("control.current.{name}_digest"),
+                ObservedValue::Text(
+                    digest_bytes("synthetic-current-test", name.as_bytes())
+                        .as_str()
+                        .into(),
+                ),
+            );
+        }
+        Self {
+            base,
+            prepared,
+            root,
+            frames,
+            observation,
+        }
+    }
+    fn capture(&self, now: u64) -> Result<current::NativeCurrentVerified, ManagedLifecycleError> {
+        current::NativeCurrentVerified::capture(
+            &self.base.principal,
+            &self.base.request,
+            &self.base.snapshot,
+            &self.base.dispatch,
+            &self.prepared,
+            &self.root,
+            &self.observation,
+            &self.frames,
+            now,
+        )
+    }
+    fn advance(&mut self, wall: u64, boot: u64, commits: u64) {
+        let outputs = self
+            .frames
+            .outputs()
+            .iter()
+            .map(|(id, output)| {
+                let mut output = *output;
+                if output.enabled {
+                    output.completed_commit += commits;
+                    output.framebuffer += commits as u32;
+                }
+                (id.clone(), output)
+            })
+            .collect();
+        self.frames = value(linura_observation::DisplayNativeCurrentFacts::new(
+            self.frames.scope().clone(),
+            self.frames.lineage().clone(),
+            DisplayNativeHandoffWindow {
+                observed_unix_ms: wall,
+                observed_boot_ms: boot,
+                deadline_unix_ms: wall + 200,
+                deadline_boot_ms: boot + 200,
+            },
+            outputs,
+            self.frames.completion_digest().into(),
+            true,
+            true,
+        ));
+        self.observation.sequence += 1;
+        self.observation.observed_at_unix_ms = wall;
+    }
+}
+
+#[test]
+fn current_checkpoint_preserves_first_proof_while_new_scanout_advances_after_expiry() {
+    let mut fixture = CurrentFixture::new();
+    let first = value(fixture.capture(2001));
+    let mut journal = Journal::default();
+    assert_eq!(value(first.retain_or_reconcile(&mut journal)), first);
+    assert_eq!(first.expiry(), 2150);
+    // This is comparison with new native observations, never renewal of the
+    // expired first-frame execution window or the immutable checkpoint.
+    fixture.advance(3000, 2000, 5);
+    let fresh = value(fixture.capture(3001));
+    assert_ne!(fresh.digest(), first.digest());
+    let retained = value(fresh.retain_or_reconcile(&mut journal));
+    assert_eq!(retained, first);
+    assert_eq!(retained.verified_at(), 2001);
+    assert_eq!(retained.expiry(), 2150);
+    assert_eq!(fresh.expiry(), 3150);
+    assert_eq!(journal.records.len(), 1);
+    assert_eq!(fixture.base.snapshot.state, TransactionState::Indeterminate);
+    // Detached heads keep their actual detach boundary; no extra commit is
+    // fabricated to admit an advancing ordinary frame on the enabled heads.
+    assert!(
+        fixture
+            .frames
+            .outputs()
+            .values()
+            .filter(|head| !head.enabled)
+            .all(|head| head.completed_commit == head.handoff_commit)
+    );
+}
+
+#[test]
+fn current_checkpoint_uses_the_tighter_native_boot_clock_without_renewal() {
+    let mut fixture = CurrentFixture::new();
+    let mut window = fixture.frames.window();
+    window.deadline_boot_ms = window.observed_boot_ms + 50;
+    fixture.frames = value(linura_observation::DisplayNativeCurrentFacts::new(
+        fixture.frames.scope().clone(),
+        fixture.frames.lineage().clone(),
+        window,
+        fixture.frames.outputs().clone(),
+        fixture.frames.completion_digest().into(),
+        true,
+        true,
+    ));
+    let first = value(fixture.capture(2001));
+    assert_eq!(first.expiry(), 2050);
+    let mut journal = Journal::default();
+    value(first.retain_or_reconcile(&mut journal));
+    assert!(fixture.capture(2050).is_err());
+    fixture.advance(3000, 2000, 1);
+    let fresh = value(fixture.capture(3001));
+    assert_eq!(value(fresh.retain_or_reconcile(&mut journal)), first);
+}
+
+#[test]
+fn current_checkpoint_rejects_partial_synthetic_stale_or_unbound_joins() {
+    for fault in 0..15 {
+        let mut fixture = CurrentFixture::new();
+        let key = "control.current.current_digest";
+        match fault {
+            0 => {
+                fixture.observation.attributes.remove(key);
+            }
+            1 => {
+                fixture.observation.attributes.insert(
+                    key.into(),
+                    ObservedValue::Text(ContentDigest::zero().as_str().into()),
+                );
+            }
+            2 => {
+                let duplicate =
+                    fixture.observation.attributes["control.current.protection_digest"].clone();
+                fixture.observation.attributes.insert(key.into(), duplicate);
+            }
+            3 => fixture.observation.authority = ObservationAuthority::SyntheticTest,
+            4 => fixture.observation.valid_for_ms = 2001,
+            5 => fixture.observation.sequence = 0,
+            6 => fixture.base.snapshot.state = TransactionState::Committed,
+            7 => fixture.base.snapshot.principal = value(PrincipalId::new("unix:uid:1001")),
+            8 => {
+                fixture.base.snapshot.transaction_id =
+                    value(TransactionId::new("transaction:foreign"))
+            }
+            9 => fixture.base.dispatch = "9".repeat(64),
+            10 => fixture.base.request.desired_state.clear(),
+            11 => {
+                fixture.base.request.observation_capability = value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
+                ))
+            }
+            12 => {
+                fixture
+                    .observation
+                    .attributes
+                    .insert("unexpected".into(), ObservedValue::Bool(true));
+            }
+            13 => {
+                fixture.observation.capability = value(CapabilityId::new(
+                    linura_observation::DISPLAY_NATIVE_CURRENT_CAPABILITY,
+                ))
+            }
+            _ => fixture.base.snapshot.binding_digest = ContentDigest::zero(),
+        }
+        assert!(fixture.capture(2001).is_err(), "fault {fault}");
+    }
+    let fixture = CurrentFixture::new();
+    for now in [0, 1999, 2150, 2200, u64::MAX] {
+        assert!(fixture.capture(now).is_err(), "clock {now}");
+    }
+}
+
+#[test]
+fn current_checkpoint_rejects_foreign_binding_rollback_and_same_commit_buffer_change() {
+    let fixture = CurrentFixture::new();
+    let first = value(fixture.capture(2001));
+    let mut journal = Journal::default();
+    value(first.retain_or_reconcile(&mut journal));
+    for fault in 0..7 {
+        let mut changed = CurrentFixture::new();
+        changed.advance(2010, 1010, 0);
+        match fault {
+            0 => changed.base.snapshot.current_generation += 1,
+            1 => changed.base.snapshot.state_version += 1,
+            2 => changed.base.snapshot.binding_digest = digest_bytes("foreign", b"binding"),
+            3 => changed.advance(2010, 999, 0),
+            4 => changed.advance(1990, 1010, 0),
+            5 => {
+                let mut outputs = changed.frames.outputs().clone();
+                outputs
+                    .values_mut()
+                    .find(|output| output.enabled)
+                    .unwrap_or_else(|| unreachable!())
+                    .framebuffer += 1;
+                changed.frames = value(linura_observation::DisplayNativeCurrentFacts::new(
+                    changed.frames.scope().clone(),
+                    changed.frames.lineage().clone(),
+                    changed.frames.window(),
+                    outputs,
+                    changed.frames.completion_digest().into(),
+                    true,
+                    true,
+                ));
+            }
+            _ => {
+                let mut lineage = changed.root.lineage().clone();
+                lineage.record = "8".repeat(64);
+                changed.root = value(linura_observation::DisplayOriginalCompletionFacts::new(
+                    lineage,
+                    changed.root.first().clone(),
+                ));
+            }
+        }
+        assert!(
+            changed
+                .capture(2011)
+                .and_then(|current| current.retain_or_reconcile(&mut journal))
+                .is_err(),
+            "fault {fault}"
+        );
+        assert_eq!(value(first.retain_or_reconcile(&mut journal)), first);
+    }
+}
+
+#[test]
+fn current_checkpoint_ambiguous_storage_and_corruption_never_overwrite_or_complete() {
+    let fixture = CurrentFixture::new();
+    let first = value(fixture.capture(2001));
+    let mut journal = Journal {
+        write_failure: true,
+        ..Journal::default()
+    };
+    assert!(first.retain_or_reconcile(&mut journal).is_err());
+    assert_eq!(journal.records.len(), 1); // The write may already be durable.
+    journal.write_failure = false;
+    assert_eq!(value(first.retain_or_reconcile(&mut journal)), first);
+    let (key, record) = journal
+        .records
+        .first_key_value()
+        .map(|(key, record)| (key.clone(), record.clone()))
+        .unwrap_or_else(|| unreachable!());
+    for fault in 0..4 {
+        let mut bytes = record.canonical().to_vec();
+        match fault {
+            0 => bytes.push(0),
+            1 => {
+                bytes.pop();
+            }
+            2 => bytes[20] ^= 1,
+            _ => bytes.resize(8193, 0),
+        }
+        let corrupt = value(RetainedRequest::new(key.0.clone(), key.1.clone(), bytes));
+        journal.records.insert(key.clone(), corrupt.clone());
+        assert!(first.retain_or_reconcile(&mut journal).is_err());
+        assert_eq!(value(journal.load(&key.0, &key.1)), corrupt);
+    }
+    journal.records.insert(key, record);
+    journal.integrity_failure = true;
+    assert!(first.retain_or_reconcile(&mut journal).is_err());
+    assert_eq!(fixture.base.snapshot.state, TransactionState::Indeterminate);
+}
