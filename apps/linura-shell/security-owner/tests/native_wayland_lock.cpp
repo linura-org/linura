@@ -976,6 +976,7 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
             },
             [](const Correlation &) -> std::optional<std::uint32_t> { return std::nullopt; },
             []() -> std::optional<std::string> { return std::nullopt; },
+            []() -> std::optional<std::string> { return std::nullopt; },
             []() -> std::optional<std::string> { return std::nullopt; }});
     assert(layout->available());
     class Scene final : public ProtectedScene
@@ -1251,6 +1252,7 @@ void client(Case scenario, int descriptor, int commands)
             terminal.purpose = NativeDisplayPromptScope::Purpose::Finalization;
             assert(!backend.showProtectedDisplay(terminal, NativeDisplayIntent{}));
             assert(!backend.heldOriginalDisplayRestoration(NativeDisplayCorrelation{}));
+            assert(!backend.currentOriginalDisplayHandoff(NativeDisplayCorrelation{}));
             assert(!backend.beginProtectedDisplayFinalization(terminal, QString{},
                                                               NativeDisplayCorrelation{}));
             assert(!backend.protectedDisplayStatus());

@@ -65,6 +65,9 @@ struct Machine {
     native_handoff_fault: u8,
     native_handoff_window: Option<(u64, u64)>,
     native_verification_write_fault: u8,
+    current_completion: Option<linura_observation::DisplayOriginalCompletionFacts>,
+    current_reads: u64,
+    current_fault: u8,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -234,6 +237,14 @@ impl Observer for LiveFixtureObserver {
                 provider: Some(self.template.provider.clone()),
                 reason: None,
             });
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
+                )),
+                support: SupportLevel::Supported,
+                provider: Some(self.template.provider.clone()),
+                reason: None,
+            });
         }
         capabilities
     }
@@ -255,8 +266,11 @@ impl Observer for LiveFixtureObserver {
         let finalization = self.template.provider.as_str()
             == linura_observation::DISPLAY_RECOVERY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY;
+        let completion = self.template.provider.as_str()
+            == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_ORIGINAL_COMPLETION_CAPABILITY;
         if resource != &self.template.resource
-            || (capability != &self.template.capability && !finalization)
+            || (capability != &self.template.capability && !finalization && !completion)
         {
             return Err(ProviderError::Unsupported("fixture route mismatch".into()));
         }
@@ -275,6 +289,20 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if completion {
+            let root = machine.current_completion.as_ref().ok_or_else(|| {
+                ProviderError::Unavailable("no simulated transferred Root lifetime".into())
+            })?;
+            sample.capability = capability.clone();
+            sample.attributes = root.attributes();
+            if machine.current_fault == 9 {
+                sample.attributes.insert(
+                    "phase".into(),
+                    ObservedValue::Text("released-current".into()),
+                );
+            }
+            return Ok(sample);
+        }
         if finalization {
             machine.restoration_root_reads += 1;
             let binding = machine.restoration_binding.as_ref().ok_or_else(|| {

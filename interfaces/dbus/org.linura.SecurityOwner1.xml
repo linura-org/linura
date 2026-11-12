@@ -128,6 +128,12 @@
     <method name="ObserveNativeDisplayHandoff">
       <arg name="facts" type="s" direction="out"/>
     </method>
+    <!-- Read-only; supervised Control only. Fresh actual current KMS, ordinary
+         frames and physical input retirement after the original Root handoff.
+         Cannot substitute first-frame evidence or authorize fence retirement. -->
+    <method name="ObserveNativeDisplayCurrent">
+      <arg name="facts" type="s" direction="out"/>
+    </method>
     <!-- Read-only; supervised Control only. Complete canonical intent and
          immutable native correlation scope this get_status probe. Phases are
          native facts, never verified layout, approval or replay permission. -->

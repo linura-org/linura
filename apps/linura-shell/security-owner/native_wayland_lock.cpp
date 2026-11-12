@@ -1145,6 +1145,14 @@ bool NativeWaylandLock::heldOriginalDisplayFinalization(const NativeDisplayCorre
     return status && status->phase == NativeDisplayPromptStatus::Phase::Consumed &&
            impl_->displayConnection->status(*impl_->heldRestoration) == 3;
 }
+bool NativeWaylandLock::currentOriginalDisplayHandoff(const NativeDisplayCorrelation &bound)
+{
+    if (!impl_->completionAttempted || !heldOriginalDisplayFinalization(bound))
+        return false;
+    const auto sample = displayStartupSample();
+    return sample && sample->fenced && sample->startupPhase == 4 &&
+           sample->compositor == displayInvocation();
+}
 std::optional<quint32> NativeWaylandLock::quiesceOriginalDisplayFinalization(
     const NativeDisplayFinalizationIntent &intent, const NativeDisplayCorrelation &bound,
     quint64 validatedSampledBootMs, int terminalGrant)
@@ -1310,7 +1318,7 @@ std::optional<quint32> NativeWaylandLock::transferOriginalDisplayCompletion(
     if (!finished || finished->unixMs < clock->unixMs || finished->bootMs < clock->bootMs ||
         finished->unixMs >= bound.deadlineUnixMs || finished->bootMs - clock->bootMs >= 1000)
         return std::nullopt;
-    return 8; // Original lifetime transfer only, not ReleasedCurrent.
+    return 8; // Attempt ACK only; current frames and durable completion are independent.
 }
 
 bool NativeWaylandLock::beginProtectedDisplayDecision(const NativeDisplayPromptScope &scope,

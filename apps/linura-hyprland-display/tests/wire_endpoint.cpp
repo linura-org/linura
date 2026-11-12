@@ -123,6 +123,7 @@ class Harness final
                 },
                 [](const Correlation &) -> std::optional<std::uint32_t> { return std::nullopt; },
                 []() -> std::optional<std::string> { return std::nullopt; },
+                []() -> std::optional<std::string> { return std::nullopt; },
                 []() -> std::optional<std::string> { return std::nullopt; }});
         assert(endpoint->available());
         protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
@@ -327,6 +328,9 @@ class Client final
             },
             [](void *, linura_display_snapshot_v1 *, const char *) {
                 assert(false && "portable fixture cannot attest native handoff");
+            },
+            [](void *, linura_display_snapshot_v1 *, const char *) {
+                assert(false && "portable fixture cannot attest current scanout");
             }};
         linura_display_snapshot_v1_add_listener(sample->wire, &listener, sample.get());
         snapshots.push_back(std::move(sample));

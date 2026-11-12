@@ -13,6 +13,106 @@ use linura_observation::{
 };
 use linura_transaction::TransactionState;
 
+pub(super) fn observe_current(
+    machine: &mut Machine,
+    mut sample: ObservationEnvelope,
+    scope: &DisplayRecoveryScope,
+) -> Result<ObservationEnvelope, ProviderError> {
+    use linura_observation::{DisplayNativeCurrentFacts, DisplayNativeCurrentOutput};
+    let root = machine.current_completion.as_ref().ok_or_else(|| {
+        ProviderError::Unavailable("no simulated current Root/native handoff".into())
+    })?;
+    machine.current_reads += 1;
+    let boot = 200_000 + machine.current_reads;
+    let current = value(DisplayNativeCurrentFacts::new(
+        scope.clone(),
+        root.first().lineage().clone(),
+        DisplayNativeHandoffWindow {
+            observed_unix_ms: sample.observed_at_unix_ms,
+            observed_boot_ms: boot,
+            deadline_unix_ms: sample.observed_at_unix_ms + 2000,
+            deadline_boot_ms: boot + 2000,
+        },
+        root.first()
+            .outputs()
+            .iter()
+            .map(|(id, output)| {
+                (
+                    id.clone(),
+                    DisplayNativeCurrentOutput {
+                        enabled: output.enabled,
+                        connector: output.connector,
+                        crtc: output.crtc,
+                        plane: output.plane,
+                        framebuffer: output.framebuffer + u32::from(output.enabled),
+                        handoff_commit: output.completed_commit,
+                        completed_commit: output.completed_commit + u64::from(output.enabled),
+                    },
+                )
+            })
+            .collect(),
+        root.lineage().record.clone(),
+        true,
+        true,
+    ));
+    sample.resource = value(scope.resource_id());
+    sample.capability = value(CapabilityId::new(
+        linura_observation::DISPLAY_NATIVE_CURRENT_CAPABILITY,
+    ));
+    sample.valid_for_ms = 2000;
+    sample.attributes = current.attributes();
+    match machine.current_fault {
+        1 => {
+            sample
+                .attributes
+                .insert("input_retired".into(), ObservedValue::Bool(false));
+        }
+        2 => {
+            sample
+                .attributes
+                .insert("power_fence_held".into(), ObservedValue::Bool(false));
+        }
+        3 => {
+            sample.attributes.insert(
+                "completion_digest".into(),
+                ObservedValue::Text("8".repeat(64)),
+            );
+        }
+        4 => {
+            sample
+                .attributes
+                .insert("source_guard".into(), ObservedValue::Text("8".repeat(64)));
+        }
+        5 => {
+            sample
+                .attributes
+                .insert("output.0.handoff_commit".into(), ObservedValue::U64(99));
+        }
+        6 => {
+            sample
+                .attributes
+                .insert("output.0.completed_commit".into(), ObservedValue::U64(100));
+        }
+        7 if machine.current_reads.is_multiple_of(2) => {
+            sample
+                .attributes
+                .insert("output.0.framebuffer".into(), ObservedValue::U64(99));
+        }
+        8 => sample.authority = ObservationAuthority::SyntheticTest,
+        10 => sample.observed_at_unix_ms -= 2001,
+        11 => {
+            sample.attributes.remove("input_retired");
+        }
+        12 => {
+            sample.capability = value(CapabilityId::new(
+                linura_observation::DISPLAY_NATIVE_HANDOFF_CAPABILITY,
+            ))
+        }
+        _ => (),
+    }
+    Ok(sample)
+}
+
 pub(super) fn observe(
     machine: &mut Machine,
     mut sample: ObservationEnvelope,
@@ -153,6 +253,7 @@ struct RootPort(Arc<Mutex<Machine>>, bool, u8);
 struct CompletionPort {
     calls: usize,
     lose_reply: bool,
+    machine: Option<Arc<Mutex<Machine>>>,
 }
 impl OriginalDisplayCompletionPort for CompletionPort {
     fn dispatch_completion(
@@ -174,6 +275,22 @@ impl OriginalDisplayCompletionPort for CompletionPort {
             completion.preparation_digest(),
             completion.verification_digest()
         );
+        if let Some(machine) = &self.machine {
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .current_completion = Some(value(
+                linura_observation::DisplayOriginalCompletionFacts::new(
+                    linura_observation::DisplayCompletionLineage {
+                        record: "7".repeat(64),
+                        preparation: completion.preparation_digest().hex().into(),
+                        verification: completion.verification_digest().hex().into(),
+                        material: completion.material().into(),
+                    },
+                    completion.frames().clone(),
+                ),
+            ));
+        }
         if self.lose_reply {
             Err("simulated missing completion acknowledgement".into())
         } else {
@@ -394,6 +511,7 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
         assert_eq!(snapshot(&database, &transaction), before);
         let mut completion = CompletionPort {
             lose_reply: lost_completion_reply,
+            machine: Some(machine.clone()),
             ..CompletionPort::default()
         };
         let attempted = control.dispatch_original_display_completion(
@@ -428,6 +546,38 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
         assert_eq!(completion.calls, usize::from(!lost_reply));
         // A completion ACK cannot retire a fence or sign terminal completion.
         assert_eq!(snapshot(&database, &transaction), before);
+        if !lost_reply {
+            let current =
+                value(control.inspect_current_original_display_completion(principal(), &request));
+            assert_eq!(current.terminal(), &before);
+            assert!(current.frames().input_retired() && current.frames().power_fence_held());
+            for fault in 1..=12 {
+                {
+                    let mut state = machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                    state.current_fault = fault;
+                    state.current_reads = 0;
+                }
+                assert!(
+                    control
+                        .inspect_current_original_display_completion(principal(), &request)
+                        .is_err(),
+                    "fault {fault}"
+                );
+                assert_eq!(snapshot(&database, &transaction), before);
+            }
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .current_fault = 0;
+        } else {
+            assert!(
+                control
+                    .inspect_current_original_display_completion(principal(), &request)
+                    .is_err()
+            );
+        }
         drop(control);
         let journal = value(
             linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
@@ -476,6 +626,15 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
                 .verify_native_handoff_original_display_finalization(principal(), &request)
                 .is_err()
         );
+        if !lost_reply {
+            // Old immutable proof is comparison history, never renewed first-
+            // frame evidence. A fresh current Root/native read may still be
+            // inspected after restart and lost ACK, without any effect replay.
+            let current =
+                value(restarted.inspect_current_original_display_completion(principal(), &request));
+            assert_eq!(current.terminal(), &before);
+            assert_eq!(completion.calls, 1);
+        }
         assert!(
             restarted
                 .spend_original_display_native_release(

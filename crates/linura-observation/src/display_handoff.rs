@@ -231,7 +231,30 @@ impl DisplayNativeHandoffFacts {
         {
             return Err(DisplayEvidenceError::Identity);
         }
-        let attrs = &observation.attributes;
+        let facts = Self::from_comparison_attributes(
+            &observation.attributes,
+            scope,
+            observation.observed_at_unix_ms,
+        )?;
+        if observation.valid_for_ms != facts.window.valid_for_ms()?
+            || now
+                .checked_sub(observation.observed_at_unix_ms)
+                .is_none_or(|age| age >= observation.valid_for_ms)
+        {
+            return Err(DisplayEvidenceError::Freshness);
+        }
+        Ok(facts)
+    }
+
+    /// Decode historical comparison material only. This does not authenticate
+    /// an observation or make old first frames current. Fresh native consumers
+    /// must use from_envelope; Root's separate completion observation retains
+    /// this tuple solely to compare the exact spent handoff boundary.
+    pub fn from_comparison_attributes(
+        attrs: &BTreeMap<String, ObservedValue>,
+        scope: &DisplayRecoveryScope,
+        observed_unix_ms: u64,
+    ) -> Result<Self, DisplayEvidenceError> {
         if attrs.len() > 161
             || attrs.iter().any(|(key, value)| {
                 key.len() > 64 || matches!(value, ObservedValue::Text(text) if text.len() > 256)
@@ -246,18 +269,11 @@ impl DisplayNativeHandoffFacts {
             return Err(DisplayEvidenceError::Shape);
         }
         let window = DisplayNativeHandoffWindow {
-            observed_unix_ms: observation.observed_at_unix_ms,
+            observed_unix_ms,
             observed_boot_ms: number(attrs, "sampled_boot_ms")?,
             deadline_unix_ms: number(attrs, "deadline_unix_ms")?,
             deadline_boot_ms: number(attrs, "deadline_boot_ms")?,
         };
-        if observation.valid_for_ms != window.valid_for_ms()?
-            || now
-                .checked_sub(observation.observed_at_unix_ms)
-                .is_none_or(|age| age >= observation.valid_for_ms)
-        {
-            return Err(DisplayEvidenceError::Freshness);
-        }
         let mut outputs = BTreeMap::new();
         for index in 0..count {
             let prefix = format!("output.{index}");
@@ -302,6 +318,10 @@ impl DisplayNativeHandoffFacts {
     #[must_use]
     pub fn lineage(&self) -> &DisplayNativeHandoffLineage {
         &self.lineage
+    }
+    #[must_use]
+    pub const fn scope(&self) -> &DisplayRecoveryScope {
+        &self.scope
     }
     #[must_use]
     pub const fn window(&self) -> DisplayNativeHandoffWindow {

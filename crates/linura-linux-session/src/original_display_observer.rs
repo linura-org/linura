@@ -6,8 +6,9 @@ use linura_core::{
     Capability, CapabilityId, DisplayRecoveryScope, ProviderId, ResourceId, SupportLevel,
 };
 use linura_observation::{
-    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
-    DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope, ProviderAvailability, ProviderHealth,
+    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope,
+    ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 
@@ -36,6 +37,7 @@ impl Observer for NativeOriginalDisplayObserver {
         [
             DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
             DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
         ]
         .into_iter()
         .map(|capability| Capability {
@@ -50,7 +52,9 @@ impl Observer for NativeOriginalDisplayObserver {
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
         matches!(
             capability.as_str(),
-            DISPLAY_ORIGINAL_PROTECTION_CAPABILITY | DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+            DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+                | DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+                | DISPLAY_ORIGINAL_COMPLETION_CAPABILITY
         )
     }
     fn requires_live_health_preflight(&self) -> bool {
@@ -93,7 +97,10 @@ impl Observer for NativeOriginalDisplayObserver {
             .map_err(|_| {
                 ProviderError::Unavailable("original display protection sequence exhausted".into())
             })?;
-        let result = if capability.as_str() == DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY {
+        let result = if capability.as_str() == DISPLAY_ORIGINAL_COMPLETION_CAPABILITY {
+            self.channel
+                .observe_original_display_completion(&scope, sequence + 1)
+        } else if capability.as_str() == DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY {
             self.channel
                 .observe_original_display_finalization(&scope, sequence + 1)
         } else {

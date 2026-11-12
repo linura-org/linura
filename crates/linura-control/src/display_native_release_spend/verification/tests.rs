@@ -1,8 +1,6 @@
 //! Synthetic journal/fault fixtures; no native execution or qualification claim.
 use super::*;
-use linura_core::{
-    CapabilityId, DisplayOutputId, DisplayRestorationMaterial, ProviderId, SemanticReason,
-};
+use linura_core::{CapabilityId, DisplayRestorationMaterial, ProviderId, SemanticReason};
 use linura_observation::{
     DisplayFinalizationPhase, DisplayFinalizationReservationFacts, DisplayNativeHandoffLineage,
     DisplayNativeHandoffOutput, DisplayNativeHandoffWindow, DisplayOriginalFinalizationFacts,
@@ -86,18 +84,30 @@ impl Fixture {
                 deadline_unix_ms: 1200,
                 deadline_boot_ms: 300,
             },
-            BTreeMap::from([(
-                value(DisplayOutputId::new(scope.replacement().clone(), 10, 1)),
-                DisplayNativeHandoffOutput {
-                    enabled: true,
-                    connector: 5,
-                    crtc: 7,
-                    plane: 8,
-                    framebuffer: 42,
-                    spend_high_water: 90,
-                    completed_commit: 99,
-                },
-            )]),
+            restoration
+                .mapping()
+                .replacement()
+                .outputs()
+                .iter()
+                .enumerate()
+                .map(|(index, id)| {
+                    // Complete inventory from the canonical three-head fixture;
+                    // its middle replacement head is detached.
+                    let enabled = id.handle() != 8;
+                    (
+                        id.clone(),
+                        DisplayNativeHandoffOutput {
+                            enabled,
+                            connector: index as u32 + 5,
+                            crtc: if enabled { index as u32 + 7 } else { 0 },
+                            plane: if enabled { index as u32 + 8 } else { 0 },
+                            framebuffer: if enabled { index as u32 + 42 } else { 0 },
+                            spend_high_water: 90,
+                            completed_commit: 99,
+                        },
+                    )
+                })
+                .collect(),
         ));
         let mut attributes = root.attributes();
         for name in [
@@ -451,6 +461,125 @@ fn completion_preparation_is_separate_durable_once_and_preserves_original_expiry
         .is_err()
     );
     assert_eq!(journal.records.len(), 1);
+    assert_eq!(fixture.snapshot.state, TransactionState::Indeterminate);
+}
+
+#[test]
+fn transferred_root_comparison_loads_history_without_renewing_execution() {
+    let fixture = Fixture::new();
+    let proof = value(fixture.capture(1002));
+    let prepared = value(completion(&fixture, &proof, 1003));
+    let mut journal = Journal::default();
+    value(proof.retain_or_reconcile(&mut journal));
+    value(prepared.retain_once(&mut journal));
+    let root = value(linura_observation::DisplayOriginalCompletionFacts::new(
+        linura_observation::DisplayCompletionLineage {
+            record: "7".repeat(64),
+            preparation: prepared.digest().hex().into(),
+            verification: proof.digest().hex().into(),
+            material: fixture.material.clone(),
+        },
+        fixture.frames.clone(),
+    ));
+    let load = |journal: &Journal, root: &linura_observation::DisplayOriginalCompletionFacts| {
+        completion::NativeCompletionPrepared::load_comparison(
+            journal,
+            &fixture.principal,
+            &fixture.request,
+            &fixture.snapshot,
+            &fixture.dispatch,
+            &fixture.parent,
+            root,
+        )
+    };
+    assert_eq!(
+        value(NativeHandoffVerified::load_comparison(
+            &journal,
+            &fixture.principal,
+            &fixture.request,
+            &fixture.snapshot,
+            &fixture.dispatch,
+            &fixture.parent,
+            root.first()
+        )),
+        proof
+    );
+    assert_eq!(value(load(&journal, &root)), prepared);
+    assert!(value(load(&journal, &root)).require_current(5000).is_err());
+    assert!(
+        completion::NativeCompletionPrepared::require_absent(
+            &journal,
+            &fixture.principal,
+            &fixture.request.request_id
+        )
+        .is_err()
+    );
+    journal.integrity_failure = true;
+    assert!(load(&journal, &root).is_err());
+    journal.integrity_failure = false;
+    for preparation in [true, false] {
+        let key = if preparation {
+            value(completion::NativeCompletionPrepared::key(
+                &fixture.request.request_id,
+            ))
+        } else {
+            value(NativeHandoffVerified::key(&fixture.request.request_id))
+        };
+        let saved = value(journal.load(&fixture.principal, &key));
+        for case in 0..3 {
+            let mut corrupt = saved.canonical().to_vec();
+            match case {
+                0 => corrupt.push(0),
+                1 => corrupt[20] ^= 1,
+                _ => {
+                    corrupt.truncate(corrupt.len() - 1);
+                }
+            }
+            journal.records.insert(
+                (fixture.principal.clone(), key.clone()),
+                value(RetainedRequest::new(
+                    fixture.principal.clone(),
+                    key.clone(),
+                    corrupt,
+                )),
+            );
+            assert!(load(&journal, &root).is_err());
+        }
+        journal
+            .records
+            .insert((fixture.principal.clone(), key), saved);
+    }
+    for changed in 0..3 {
+        let mut lineage = root.lineage().clone();
+        match changed {
+            0 => lineage.preparation = "8".repeat(64),
+            1 => lineage.verification = "9".repeat(64),
+            _ => lineage.material = fixture.material.replace("29", "30"),
+        }
+        if let Ok(foreign) =
+            linura_observation::DisplayOriginalCompletionFacts::new(lineage, fixture.frames.clone())
+        {
+            assert!(load(&journal, &foreign).is_err());
+        }
+    }
+    let mut outputs = fixture.frames.outputs().clone();
+    outputs
+        .values_mut()
+        .next()
+        .unwrap_or_else(|| unreachable!("head"))
+        .framebuffer += 1;
+    let foreign_first = value(DisplayNativeHandoffFacts::new(
+        fixture.frames.scope().clone(),
+        fixture.frames.lineage().clone(),
+        fixture.frames.window(),
+        outputs,
+    ));
+    let foreign_root = value(linura_observation::DisplayOriginalCompletionFacts::new(
+        root.lineage().clone(),
+        foreign_first,
+    ));
+    assert!(load(&journal, &foreign_root).is_err());
+    assert_eq!(journal.records.len(), 2);
     assert_eq!(fixture.snapshot.state, TransactionState::Indeterminate);
 }
 

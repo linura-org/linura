@@ -66,7 +66,7 @@ class OriginalNativeReleaseGrant final
         auto result = std::unique_ptr<OriginalNativeReleaseGrant>(
             new OriginalNativeReleaseGrant(fence, std::move(descriptor)));
         const auto now = result->clock();
-        if (!now || *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
+        if (!now || !fence.recoveryAvailable() || *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
             !OriginalGrantCodec::freshSample(sampledBootMs, *now) ||
             !fence.authenticatesGrantPeer(result->descriptor_.get()))
             return {};

@@ -11,10 +11,12 @@ use linura_observation::{
 use linura_protocol::ObservationRequest;
 
 mod completion;
+mod current;
 pub use completion::{
     AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
     OriginalDisplayCompletionReceipt,
 };
+pub use current::OriginalDisplayCurrentInspection;
 
 fn unavailable_at(stage: &'static str) -> ManagedLifecycleError {
     ManagedLifecycleError::Verification(format!("original display handoff unavailable at {stage}"))

@@ -410,7 +410,7 @@ class OriginalRestorationGrant final
             new OriginalRestorationGrant(fence, std::move(descriptor)));
         const auto now = bootMs();
         if (!now || *now > std::numeric_limits<std::uint64_t>::max() - 2000 ||
-            !fence.authenticatesGrantPeer(grant->descriptor_.get()))
+            !fence.recoveryAvailable() || !fence.authenticatesGrantPeer(grant->descriptor_.get()))
             return {};
         const auto deadline = *now + 2000;
         std::string header(7, '\0'), end(11, '\0');

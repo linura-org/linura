@@ -976,6 +976,30 @@ reconciliation recreates the continuation. An ACK-only adapter cannot commit the
 terminal or retire protection. Actual authenticated Root/native completion,
 post-retirement verification and ordered fence retirement remain required.
 
+The original Root completion transfer now permits the native recipient's narrow
+same-invocation protected-to-current handoff after its fresh first-frame/KMS and
+output-history comparison. Current admission retains that same original Root
+lifetime; it cannot admit a future compositor or fall back to recovery after
+loss. Private input is quarantined until a fresh physical Escape and complete
+native drain. S17 and Root/native power protection and Root's global barrier for
+new startups remain held. The original terminal-review clocks are not extended.
+Public production mutations remain disabled.
+
+Current native scanout has a separate closed capability and actual producer;
+it cannot be supplied by relabelling a first-frame receipt. Each enabled frame
+must complete after the handoff boundary and match the actual retained ordinary
+buffer, latest output commit and fresh KMS state. Disabled heads retain their
+real detach boundary without a fabricated follow-up modeset. Counter rollback,
+source/epoch drift, changed framebuffer at the same completed commit, stale
+clocks, input ambiguity and lost Root continuity fail closed. The fresh Root
+completion observation retains old first-frame data as comparison history only.
+Control independently matches that history to its durable preparation and
+verification, joins current Root/native/protection/source/logind/S17 facts, and
+rechecks them afterward. Missing ACKs and restart permit read-only inspection;
+they cannot replay execution, renew old proof or change the Indeterminate
+terminal. Power/global-admission retirement, ReleasedCurrent and later ordinary
+release/adoption/cleanup remain separate source requirements.
+
 Both earlier Root reservation writes also revalidate the original full canonical
 finalization review, current registered risk/policy and live administrator
 approval before journal preparation and immediately before the Root call. An
@@ -1008,5 +1032,7 @@ native/Root continuity, original connection, monotonic clocks and bounded status
 probes still govern that held lifetime. Loss never reconstructs or renews authority.
 The typed Control finalization authorizer recomputes material's SDK payload and
 resource, checks the exact principal/administrator class, and consumes that separate
-native proof. Generic approval cannot substitute. Root/native prepared release,
-current admission and final completion verification remain unimplemented.
+native proof. Generic approval cannot substitute. Final Root/native power and
+global-admission retirement and durable completion remain unimplemented; the
+same-invocation pending handoff and its read-only current inspection cannot
+substitute for those requirements.

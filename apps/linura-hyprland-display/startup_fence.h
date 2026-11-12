@@ -4,8 +4,10 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <functional>
 
 namespace Linura::HyprlandDisplay {
+class OriginalCompletionGrant;
 
 // Compositor-thread mechanism only. The native startup adapter authenticates
 // the supervised root peer before transferring its original socket here.
@@ -56,11 +58,17 @@ class StartupFence final
     }
     [[nodiscard]] bool ordinaryAllowed() const noexcept
     {
-        return guardAlive() && ordinary_;
+        return guardAlive() && (ordinary_ || currentAvailable());
     }
     [[nodiscard]] bool recoveryAvailable() const noexcept
     {
-        return !ordinary_ && guardAlive();
+        return !ordinary_ && !currentAttempted_ && guardAlive();
+    }
+    // Admission of this SAME invocation only, under the live transferred Root
+    // lifetime. Root's separate global barrier for future startups stays held.
+    [[nodiscard]] bool currentAvailable() const noexcept
+    {
+        return currentAttempted_ && guardAlive() && currentAlive_ && currentAlive_();
     }
     // Private kernel-peer comparison only, never restoration permission. The
     // caller must separately consume the exact fresh protected Recovery scope,
@@ -97,7 +105,13 @@ class StartupFence final
     {
         if (!attempted_)
             return 0;
-        return !guardAlive() ? 3U : ordinary_ ? 1U : 2U;
+        if (!guardAlive())
+            return 3U;
+        if (ordinary_)
+            return 1U;
+        if (currentAttempted_)
+            return currentAvailable() ? 4U : 3U;
+        return 2U;
     }
     [[nodiscard]] int descriptor() const noexcept
     {
@@ -109,8 +123,23 @@ class StartupFence final
     }
 
   private:
+    friend class OriginalCompletionGrant;
+    // Only the authenticated, non-cloneable completion grant can publish a
+    // current lifetime. Unknown loss never falls back into recovery admission.
+    [[nodiscard]] bool admitCurrent(std::function<bool()> alive)
+    {
+        if (ordinary_ || currentAttempted_ || !guardAlive())
+            return false;
+        currentAttempted_ = true;
+        if (!alive || !alive())
+            return false;
+        currentAlive_ = std::move(alive);
+        return currentAvailable();
+    }
     int descriptor_ = -1;
     bool attempted_ = false, ordinary_ = false;
+    bool currentAttempted_ = false;
+    std::function<bool()> currentAlive_;
     mutable bool lost_ = false;
 };
 

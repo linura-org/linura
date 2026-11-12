@@ -188,6 +188,12 @@ if(BUILD_TESTING)
     add_test(NAME hyprland-native-first-frame-release-barrier
         COMMAND linura-hyprland-first-frame-gate-tests)
     set_tests_properties(hyprland-native-first-frame-release-barrier PROPERTIES TIMEOUT 5)
+    add_executable(linura-hyprland-current-frame-tests tests/native_current_frame.cpp)
+    target_link_libraries(linura-hyprland-current-frame-tests PRIVATE linura-hyprland-display-mechanism)
+    target_compile_options(linura-hyprland-current-frame-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-native-current-frame-comparison COMMAND linura-hyprland-current-frame-tests)
+    set_tests_properties(hyprland-native-current-frame-comparison PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-protected-retirement-tests tests/protected_input_retirement.cpp)
     target_link_libraries(linura-hyprland-protected-retirement-tests PRIVATE linura-hyprland-display-mechanism)
     target_compile_options(linura-hyprland-protected-retirement-tests PRIVATE

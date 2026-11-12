@@ -49,6 +49,10 @@ class NativeDisplayFlow final : public QObject
     [[nodiscard]] bool continuesFinalization(const NativeDisplayFinalizationIntent &,
                                               const NativeDisplayCorrelation &,
                                               const NativePeerIdentity &);
+    // Relinquish only this already-spent UI flow after observing the real
+    // current native lifetime. Native resources remain owned by the backend;
+    // retiring old Control/UI approval must not destroy that Root lifetime.
+    [[nodiscard]] bool retireAfterCurrentHandoff(const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginDecision(const NativeDisplayChoiceChallenge &);
     [[nodiscard]] bool matchesDecision(const NativeDisplayChoiceChallenge &) const;
     [[nodiscard]] bool decisionReady(const NativeDisplayChoiceChallenge &);

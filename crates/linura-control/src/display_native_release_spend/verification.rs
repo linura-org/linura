@@ -63,6 +63,89 @@ fn frame_bytes(facts: &DisplayNativeHandoffFacts) -> Result<Vec<u8>, ManagedLife
 }
 
 impl NativeHandoffVerified {
+    /// Historical comparison only, against a fresh independently authenticated
+    /// Root lifetime. Expired first-frame history cannot become current native
+    /// evidence, reconstruct approval or rearm any execution continuation.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn load_comparison(
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+        snapshot: &TransactionSnapshot,
+        dispatch: &str,
+        parent: &NativeReleaseSpendPrepared,
+        first: &DisplayNativeHandoffFacts,
+    ) -> Result<Self, ManagedLifecycleError> {
+        if snapshot.principal != *principal
+            || snapshot.request_id != request.request_id
+            || snapshot.state != TransactionState::Indeterminate
+            || snapshot.transaction_id
+                != linura_transaction::TransactionId::for_namespace(principal, &request.request_id)
+            || first.lineage().terminal_transaction != snapshot.transaction_id.as_str()
+            || first.lineage().terminal_dispatch != dispatch
+        {
+            return Err(invalid());
+        }
+        journal.integrity_check().map_err(|_| invalid())?;
+        let key = Self::key(&request.request_id)?;
+        let retained = journal.load(principal, &key).map_err(|_| invalid())?;
+        if retained.principal() != principal
+            || retained.request_id() != &key
+            || retained.canonical().len() > MAX_BYTES
+        {
+            return Err(invalid());
+        }
+        let mut rest = retained.canonical();
+        let expected = [
+            DOMAIN.into(),
+            principal.as_str().into(),
+            request.request_id.as_str().into(),
+            snapshot.transaction_id.as_str().into(),
+            crate::durable_authority::digest_request(request)?
+                .as_str()
+                .into(),
+            snapshot.current_generation.to_string(),
+            snapshot.state_version.to_string(),
+            snapshot.binding_digest.as_str().into(),
+            dispatch.into(),
+            parent.digest().as_str().into(),
+        ];
+        for value in expected {
+            if field(&mut rest, 256)? != value {
+                return Err(invalid());
+            }
+        }
+        if ContentDigest::new(field(&mut rest, 256)?).map_err(|_| invalid())?
+            == ContentDigest::zero()
+        {
+            return Err(invalid());
+        }
+        let wall = number(field(&mut rest, 20)?)?;
+        let boot = number(field(&mut rest, 20)?)?;
+        let observed_at = number(field(&mut rest, 20)?)?;
+        let expiry = number(field(&mut rest, 20)?)?;
+        let bytes = frame_bytes(first)?;
+        if field(&mut rest, 256)? != digest_bytes(FRAME_DOMAIN, &bytes).as_str()
+            || rest != bytes
+            || wall > observed_at
+            || observed_at >= expiry
+            || expiry > parent.expiry()
+            || expiry - wall > 2000
+            || wall > first.window().observed_unix_ms
+            || boot > first.window().observed_boot_ms
+            || expiry > first.window().deadline_unix_ms
+        {
+            return Err(invalid());
+        }
+        Ok(Self {
+            principal: principal.clone(),
+            request: request.request_id.clone(),
+            canonical: retained.canonical().to_vec(),
+            observed_at,
+            expiry,
+        })
+    }
+
     fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
         RequestId::new(format!(
             "request:v010:display-physical-verified:{}",

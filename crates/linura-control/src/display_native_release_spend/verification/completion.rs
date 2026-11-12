@@ -16,6 +16,102 @@ pub(crate) struct NativeCompletionPrepared {
 }
 
 impl NativeCompletionPrepared {
+    /// Compare the immutable before-effect decision to the original Root's
+    /// current transferred lifetime. This deliberately returns no effect permit
+    /// and does not extend the original preparation's expired execution window.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn load_comparison(
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+        snapshot: &TransactionSnapshot,
+        dispatch: &str,
+        spend: &NativeReleaseSpendPrepared,
+        root: &linura_observation::DisplayOriginalCompletionFacts,
+    ) -> Result<Self, ManagedLifecycleError> {
+        let effect = linura_provider_sdk::display_finalization_effect(&root.lineage().material)
+            .map_err(|_| invalid())?;
+        if request.provider != effect.provider
+            || request.resource != effect.resource
+            || request.desired_state.len() != 1
+            || request
+                .desired_state
+                .get("finalize_original")
+                .map(String::as_bytes)
+                != Some(effect.canonical_payload.as_slice())
+        {
+            return Err(invalid());
+        }
+        let verified = NativeHandoffVerified::load_comparison(
+            journal,
+            principal,
+            request,
+            snapshot,
+            dispatch,
+            spend,
+            root.first(),
+        )?;
+        journal.integrity_check().map_err(|_| invalid())?;
+        let key = Self::key(&request.request_id)?;
+        let retained = journal.load(principal, &key).map_err(|_| invalid())?;
+        if retained.principal() != principal
+            || retained.request_id() != &key
+            || retained.canonical().len() > MAX_COMPLETION_BYTES
+        {
+            return Err(invalid());
+        }
+        let mut rest = retained.canonical();
+        let expected = [
+            DOMAIN.into(),
+            principal.as_str().into(),
+            request.request_id.as_str().into(),
+            snapshot.transaction_id.as_str().into(),
+            crate::durable_authority::digest_request(request)?
+                .as_str()
+                .into(),
+            snapshot.current_generation.to_string(),
+            snapshot.state_version.to_string(),
+            snapshot.binding_digest.as_str().into(),
+            dispatch.into(),
+            spend.digest().as_str().into(),
+            verified.digest().as_str().into(),
+        ];
+        for value in expected {
+            if field(&mut rest, 256)? != value {
+                return Err(invalid());
+            }
+        }
+        if ContentDigest::new(field(&mut rest, 256)?).map_err(|_| invalid())?
+            == ContentDigest::zero()
+            || field(&mut rest, 256)?
+                != digest_bytes(FRAME_DOMAIN, &frame_bytes(root.first())?).as_str()
+        {
+            return Err(invalid());
+        }
+        let prepared_at = number(field(&mut rest, 20)?)?;
+        let expiry = number(field(&mut rest, 20)?)?;
+        if !rest.is_empty()
+            || prepared_at < root.first().window().observed_unix_ms
+            || prepared_at < verified.observed_at()
+            || prepared_at >= expiry
+            || expiry > verified.expiry()
+            || root.lineage().verification != verified.digest().hex()
+        {
+            return Err(invalid());
+        }
+        let result = Self {
+            principal: principal.clone(),
+            request: request.request_id.clone(),
+            canonical: retained.canonical().to_vec(),
+            prepared_at,
+            expiry,
+        };
+        if result.digest().hex() != root.lineage().preparation {
+            return Err(invalid());
+        }
+        Ok(result)
+    }
+
     pub(crate) fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
         RequestId::new(format!(
             "request:v010:display-completion-prepared:{}",

@@ -107,6 +107,9 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // probes the actual retained native attempt and its original Root witness.
     [[nodiscard]] bool heldOriginalDisplayRestoration(const NativeDisplayCorrelation &);
     [[nodiscard]] bool heldOriginalDisplayFinalization(const NativeDisplayCorrelation &);
+    // Read-only exact native phase after the spent completion attempt. It
+    // cannot admit another invocation or prove post-effect durable completion.
+    [[nodiscard]] bool currentOriginalDisplayHandoff(const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,
                                                          const QString &material,
                                                          const NativeDisplayCorrelation &);

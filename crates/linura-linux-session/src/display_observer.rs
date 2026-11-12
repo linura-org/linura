@@ -4,9 +4,9 @@ use linura_core::{
     SupportLevel,
 };
 use linura_observation::{
-    DISPLAY_NATIVE_HANDOFF_CAPABILITY, DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY,
-    DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER, ObservationEnvelope, ProviderAvailability,
-    ProviderHealth,
+    DISPLAY_NATIVE_CURRENT_CAPABILITY, DISPLAY_NATIVE_HANDOFF_CAPABILITY,
+    DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
+    ObservationEnvelope, ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -44,6 +44,10 @@ impl Observer for NativeDisplayObserver {
             id: CapabilityId::new(DISPLAY_NATIVE_HANDOFF_CAPABILITY).unwrap_or_else(|e| unreachable!("fixed capability: {e}")),
             provider: Some(self.observer_id()), support: SupportLevel::Supported,
             reason: Some("read-only first ordinary-frame comparison with original deadlines; no release authority".into()),
+        }, Capability {
+            id: CapabilityId::new(DISPLAY_NATIVE_CURRENT_CAPABILITY).unwrap_or_else(|e| unreachable!("fixed capability: {e}")),
+            provider: Some(self.observer_id()), support: SupportLevel::Supported,
+            reason: Some("read-only current KMS/frames under the original live completion lifetime; no release authority".into()),
         }]
     }
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
@@ -52,6 +56,7 @@ impl Observer for NativeDisplayObserver {
             DISPLAY_OUTPUTS_CAPABILITY
                 | DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY
                 | DISPLAY_NATIVE_HANDOFF_CAPABILITY
+                | DISPLAY_NATIVE_CURRENT_CAPABILITY
         )
     }
     fn requires_live_health_preflight(&self) -> bool {
@@ -96,6 +101,14 @@ impl Observer for NativeDisplayObserver {
             return self
                 .channel
                 .observe_original_display_presentation(&scope, sequence + 1)
+                .map_err(ProviderError::Unavailable);
+        }
+        if capability.as_str() == DISPLAY_NATIVE_CURRENT_CAPABILITY {
+            let scope = DisplayRecoveryScope::from_resource(resource)
+                .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
+            return self
+                .channel
+                .observe_native_display_current(&scope, sequence + 1)
                 .map_err(ProviderError::Unavailable);
         }
         if capability.as_str() == DISPLAY_NATIVE_HANDOFF_CAPABILITY {

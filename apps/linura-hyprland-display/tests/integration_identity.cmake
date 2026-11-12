@@ -31,7 +31,7 @@ endif()
 
 # A separately invoked CMake process must fail closed on an absent/substituted
 # recipe. All mutations below affect only this fresh generated fixture.
-foreach(header IN ITEMS original_native_release_grant.h original_completion_grant.h native_output_commit_history.h)
+foreach(header IN ITEMS original_native_release_grant.h original_completion_grant.h native_output_commit_history.h native_current_frame_gate.h)
     file(READ "${source}/${header}" original_header)
     file(APPEND "${source}/${header}" "\n// Grant/history edit must change the live source identity.\n")
     linura_display_integration_identity("${source}" "${output}")

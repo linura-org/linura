@@ -24,6 +24,7 @@ struct NativePinnedDisplaySample final
     // interpreted as an effect acknowledgement or treated as release authority.
     QByteArray originalRestorationPresentation;
     QByteArray nativeHandoffPresentation;
+    QByteArray nativeCurrentPresentation;
 };
 struct NativeDisplayCorrelation final
 {

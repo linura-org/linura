@@ -1,5 +1,7 @@
 //! One Control-prepared transfer of the original Root lifetime. No retries,
-//! privileged executor handle, physical-completion inference or fence release.
+//! privileged executor handle or physical-completion inference. The native
+//! recipient alone performs the narrowly scoped same-invocation handoff; this
+//! acknowledgement cannot retire power or commit terminal state.
 use super::*;
 use crate::{
     NativeDisplayCompletionPreparation, NativeDisplayFinalizationReservation,

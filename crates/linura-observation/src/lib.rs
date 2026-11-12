@@ -6,6 +6,8 @@ use std::fmt::{Display, Formatter};
 use linura_core::{CapabilityId, ProviderId, ResourceId};
 
 mod display;
+mod display_completion;
+mod display_current;
 mod display_finalization;
 mod display_handoff;
 mod display_presentation;
@@ -14,6 +16,13 @@ pub use display::{
     DISPLAY_COVERAGE_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
     DisplayEvidenceError, DisplayObservationFacts, DisplayRecoveryMetadata,
     display_observation_attributes, display_recovery_observation_attributes,
+};
+pub use display_completion::{
+    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DisplayCompletionLineage,
+    DisplayOriginalCompletionFacts,
+};
+pub use display_current::{
+    DISPLAY_NATIVE_CURRENT_CAPABILITY, DisplayNativeCurrentFacts, DisplayNativeCurrentOutput,
 };
 pub use display_finalization::{
     DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DisplayFinalizationPhase,

@@ -44,6 +44,9 @@ struct NativeOriginalRestorationPort final
     // Distinct first ordinary-frame comparison after authenticated native spend.
     // It cannot be substituted for opaque restoration presentation.
     std::function<std::optional<std::string>()> handoffPresentation;
+    // Post-handoff current KMS/frames and actual input retirement. It is never
+    // interchangeable with first-frame comparison or a release credential.
+    std::function<std::optional<std::string>()> currentPresentation;
 };
 
 // Adapter-private Wayland mechanism. Its native session scoping and ownership

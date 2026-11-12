@@ -69,6 +69,92 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    pub(crate) fn observe_original_display_completion(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::{DisplayCompletionLineage, DisplayOriginalCompletionFacts};
+        use sha2::Digest;
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "original completion lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadCompletion",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayu"
+            || reply.body().len() > crate::MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION + 32
+        {
+            return Err(invalid());
+        }
+        let (bytes, phase): (Vec<u8>, u32) = reply.body().deserialize().map_err(|_| invalid())?;
+        if phase != 2 {
+            return Err(invalid());
+        }
+        let record = crate::NativeDisplayCompletionPreparation::decode(&bytes)?;
+        let facts = DisplayOriginalCompletionFacts::new(
+            DisplayCompletionLineage {
+                record: ComponentDigest::from_bytes(sha2::Sha256::digest(&bytes).into()).to_hex(),
+                preparation: record.preparation_digest().to_hex(),
+                verification: record.verification_digest().to_hex(),
+                material: record.parent().terminal().material().into(),
+            },
+            record.frames().clone(),
+        )
+        .map_err(|_| invalid())?;
+        if facts.first().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayOriginalCompletionFacts::from_envelope(&observation, scope, now)
+            .map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_original_display_finalization(
         &self,
         scope: &linura_core::DisplayRecoveryScope,

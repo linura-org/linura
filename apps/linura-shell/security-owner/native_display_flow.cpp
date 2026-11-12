@@ -349,6 +349,19 @@ bool NativeDisplayFlow::continuesFinalization(const NativeDisplayFinalizationInt
            scope_.display && scope_.display->material == intent.encode() &&
            bound.continues(*dispatched_) && window() && revalidate_();
 }
+bool NativeDisplayFlow::retireAfterCurrentHandoff(const NativeDisplayCorrelation &bound)
+{
+    if (failed_ || scope_.purpose != ApprovalPurpose::FinalizeOriginalDisplay || !consumed_ ||
+        !spent_ || !dispatched_ || !bound.continues(*dispatched_) ||
+        !backend_.currentOriginalDisplayHandoff(bound))
+        return false;
+    // No further receipt/continuation survives. cancel() retires authentication
+    // and the UI timer but must not destroy the native endpoint now owned by
+    // the live transferred Root lifetime. Owner-process loss still closes it.
+    ownsPresentation_ = false;
+    cancel();
+    return true;
+}
 bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
                                const NativeDisplayCorrelation &correlation)
 {

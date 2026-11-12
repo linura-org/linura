@@ -1015,16 +1015,21 @@ NativeRuntime::observePreparedDisplay(const QDBusMessage &received)
 std::optional<QString>
 NativeRuntime::observeOriginalDisplayPresentation(const QDBusMessage &received)
 {
-    return observeDisplayPresentation(received, false);
+    return observeDisplayPresentation(received, DisplayPresentation::Restoration);
 }
 
 std::optional<QString> NativeRuntime::observeNativeDisplayHandoff(const QDBusMessage &received)
 {
-    return observeDisplayPresentation(received, true);
+    return observeDisplayPresentation(received, DisplayPresentation::First);
+}
+
+std::optional<QString> NativeRuntime::observeNativeDisplayCurrent(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::Current);
 }
 
 std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMessage &received,
-                                                                 bool handoff)
+                                                                 DisplayPresentation kind)
 {
     NativeDeadline deadline(std::chrono::milliseconds(2000),
                             NativeDeadline::Stage::DisplayDispatch);
@@ -1035,12 +1040,16 @@ std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMess
     const auto independent = impl_->independentState();
     if (!sample)
         return std::nullopt;
-    const auto &presentation =
-        handoff ? sample->nativeHandoffPresentation : sample->originalRestorationPresentation;
-    if (!independent || !sample->fenced || sample->startupPhase != 2 || presentation.isEmpty() ||
+    const auto &presentation = kind == DisplayPresentation::Restoration
+        ? sample->originalRestorationPresentation : kind == DisplayPresentation::First
+        ? sample->nativeHandoffPresentation : sample->nativeCurrentPresentation;
+    const auto expectedPhase = kind == DisplayPresentation::Current ? 4U : 2U;
+    const auto presentationCount = static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty());
+    if (!independent || !sample->fenced || sample->startupPhase != expectedPhase || presentation.isEmpty() ||
         presentation.size() > 16 * 1024 ||
-        (!sample->originalRestorationPresentation.isEmpty() &&
-         !sample->nativeHandoffPresentation.isEmpty()) ||
+        presentationCount != 1 ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
@@ -1255,7 +1264,13 @@ std::optional<quint32> NativeRuntime::transferOriginalDisplayCompletion(
         !impl_->backend->heldOriginalDisplayFinalization(bound) ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
-    return impl_->backend->transferOriginalDisplayCompletion(bound, digest, grant);
+    const auto phase = impl_->backend->transferOriginalDisplayCompletion(bound, digest, grant);
+    // A missing transfer reply may still have performed the handoff. Observe
+    // the exact native lifetime once; never retry the effect or infer Control
+    // completion from phase 8. Old Control retirement cannot destroy a lifetime
+    // that the actual native compositor has already handed off to Root.
+    const bool observed = impl_->display->retireAfterCurrentHandoff(bound);
+    return observed ? phase : std::nullopt;
 }
 
 // This narrow effect is reachable only from the current supervised executor.

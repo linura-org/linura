@@ -9,6 +9,7 @@ function(linura_display_integration_identity source_dir output_dir)
         protected_input_retirement.cpp protected_input_retirement.h
         protected_key_delivery.h
         protected_frame.h native_first_frame_gate.h
+        native_current_frame_gate.h
         protected_scope_history.h
         protected_opaque_buffer.h
         protected_wire.cpp protected_wire.h

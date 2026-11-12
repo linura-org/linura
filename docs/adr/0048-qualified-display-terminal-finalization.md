@@ -390,13 +390,55 @@ must preserve the exact transaction/effect/dispatch and stay within the original
 deadline; it cannot extend either native first-frame clock bound. Original execution
 correlation equality remains exact.
 
-This transfer is still a held state, not `ReleasedCurrent`: native input, S17,
-Root/native power protection, the original proof window and ordinary startup
-exclusion remain in force. Its wire phase is private comparison/liveness only.
+After this separately prepared one-use transfer, the native recipient now
+performs the protected-to-current handoff for this **same compositor invocation**.
+Before admitting ordinary input routing it rechecks the exact first-frame tuple,
+actual KMS and output-owned commit history within both original clock bounds.
+It retains the Root lifetime and output observers, clears the active private
+scene without treating that intentional handoff as owner loss, and quarantines
+input until a **fresh physical Escape and complete native drain**. No supplied
+boolean or queued typing can acknowledge that exit. The same-invocation startup
+phase is 4; it cannot admit a future compositor. Root's global startup barrier,
+S17 lock coverage and Root/native power protection remain held. Loss of the
+original Root, native source, device inventory or pending original terminal
+review permanently revokes current admission; there is no recovery fallback or
+new grant. This is still not `ReleasedCurrent` or durable Control completion.
+
+`NativeCurrentFrameGate` independently samples frames completed **after** that
+handoff boundary. Enabled ordinary buffers may advance with their exact current
+hardware-completed output counters and KMS framebuffer identities. Disabled
+heads retain the actual detach boundary, without inventing another modeset.
+Counter rollback, framebuffer substitution without an advancing completed
+commit, source/security changes and either clock moving backward fail closed.
+The distinct `display.native-current.observe` capability travels through the
+same attested native owner and requires the live current startup phase. It
+reports actual input retirement and held native power. Its two-second read
+budget cannot renew the original execution or administrator-review deadlines.
+Old first-frame queries refuse harmlessly after the current handoff.
+
+Root's distinct `display.original-completion.observe` probe requires the actual
+live transferred channel, matching LNCP/LNCS readback and the original complete
+ancestry. Its nested first-frame tuple is **historical comparison**, never a fresh
+native observation. Control's new read-only current inspection compares it to
+the immutable original verification and completion preparation, then joins fresh
+native current frames, original protection, source/layout, logind and S17 state.
+It rechecks Root/native/protection and durable anchors after that join. Missing
+ACKs and restart can inspect an already performed handoff without recreating
+approval or effect authority. The result leaves the signed terminal Indeterminate
+and cannot retire power, global startup or any retained evidence.
+Once the native owner independently observes the same invocation's actual
+current handoff phase, it retires only the already-spent UI/approval flow and
+leaves the native endpoint with the backend. It does this even when the transfer
+reply was missing, using observation rather than redelivery. Later loss of the
+old Control sender cannot destroy that transferred Root lifetime through an
+obsolete UI-flow cancellation. Native owner-process, Root, source and original
+pending-window loss still fence the compositor independently.
+
 Independent post-retirement observations, durable final Control completion and
-ordered retirement remain required before source completion. Native grant and
-output-history headers are included in the live source identity; changing either
-invalidates the compositor/owner source match. The member-specific bus allowlist
+ordered power/global-admission retirement remain required before source
+completion. Native grant, current-frame and output-history headers are included
+in the live source identity; changing them invalidates the compositor/owner
+source match. The member-specific bus allowlist
 permits the private continuation RPCs, while each requires the actual supervised
 Control process rather than account or root identity alone. Public production
 display mutation remains prohibited.

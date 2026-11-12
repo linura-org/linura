@@ -147,9 +147,13 @@
         must equal Control's separately prepared completion. Fresh native/KMS
         evidence must still match every first-frame output and original clock
         bound. Root durably records LNCS and moves the live quiescence anchor
-        before its one-use acknowledgement. This does not retire input, S17,
-        power or startup protection and is not ReleasedCurrent. A failed or
-        missing acknowledgement cannot permit another transfer.
+        before its one-use acknowledgement. The native recipient then admits
+        only this same compositor invocation under that retained live Root
+        lifetime, and quarantines input until fresh physical Escape and drain.
+        S17, Root/native power and the global barrier for future startups stay
+        held. Fresh post-effect verification and durable completion remain
+        separate; this is not ReleasedCurrent. A failed or missing
+        acknowledgement cannot permit another transfer.
       </description>
       <arg name="grant" type="fd"/>
       <arg name="preparation_digest" type="string"/>

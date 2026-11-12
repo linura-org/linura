@@ -60,11 +60,16 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
 } // namespace OriginalCompletionGrantCodec
 
 // Non-cloneable lifetime received from the SAME continuously held original
-// supervised Root peer. Its one-use transfer ACK is NOT physical completion,
-// permission to drop a power/input/startup fence, or a ReleasedCurrent receipt.
+// supervised Root peer. This exact prepared continuation permits only the
+// same-invocation native handoff after all original comparisons. Its transfer
+// ACK cannot prove the post-effect state, retire power or complete Control.
 class OriginalCompletionGrant final
 {
   public:
+    ~OriginalCompletionGrant()
+    {
+        liveness_->owner = nullptr;
+    }
     OriginalCompletionGrant(const OriginalCompletionGrant &) = delete;
     OriginalCompletionGrant &operator=(const OriginalCompletionGrant &) = delete;
     [[nodiscard]] static std::unique_ptr<OriginalCompletionGrant>
@@ -75,7 +80,7 @@ class OriginalCompletionGrant final
         auto result = std::unique_ptr<OriginalCompletionGrant>(
             new OriginalCompletionGrant(fence, std::move(descriptor)));
         const auto now = result->clock();
-        if (!now || !OriginalGrantCodec::digest(expectedDigest) ||
+        if (!now || !fence.recoveryAvailable() || !OriginalGrantCodec::digest(expectedDigest) ||
             now->bootMs > std::numeric_limits<std::uint64_t>::max() - 2000 ||
             !fence.authenticatesGrantPeer(result->descriptor_.get()) ||
             now->unixMs < physical.observedUnixMs || now->bootMs < physical.observedBootMs ||
@@ -121,10 +126,44 @@ class OriginalCompletionGrant final
         pollfd event{descriptor_.get(), POLLIN, 0};
         return poll(&event, 1, 0) == 0 && event.revents == 0 ? true : fail();
     }
+    [[nodiscard]] const std::string &comparisonDigest() const noexcept { return digest_; }
+    [[nodiscard]] bool handoffWindowCurrent()
+    {
+        const auto now = clock();
+        return now && now->unixMs < expires_.unixMs && now->bootMs < expires_.bootMs && live();
+    }
+    // Called only at the actual compositor-thread handoff, after independent
+    // first-frame comparison and input quarantine. It cannot admit a future
+    // compositor or replace the continuously retained original Root endpoint.
+    [[nodiscard]] bool admitCurrent(std::function<bool()> scopeAlive)
+    {
+        if (currentAttempted_ || !scopeAlive || !scopeAlive() || !handoffWindowCurrent() ||
+            !verify() || !handoffWindowCurrent())
+            return fail();
+        currentAttempted_ = true;
+        std::weak_ptr<Liveness> weak = liveness_;
+        const bool admitted = fence_.admitCurrent([weak, scopeAlive = std::move(scopeAlive)] {
+            const auto retained = weak.lock();
+            if (!retained || !retained->owner || !retained->owner->live())
+                return false;
+            try {
+                if (scopeAlive())
+                    return true;
+            } catch (...) {
+                // Unsupported native state/observation failure is permanent.
+            }
+            retained->owner->invalidate();
+            return false;
+        });
+        return admitted ? true : fail();
+    }
+    void invalidate() noexcept { (void)fail(); }
 
   private:
+    struct Liveness final { OriginalCompletionGrant *owner; };
     OriginalCompletionGrant(StartupFence &fence, OwnedNativeFd descriptor)
-        : fence_(fence), descriptor_(std::move(descriptor))
+        : fence_(fence), descriptor_(std::move(descriptor)),
+          liveness_(std::make_shared<Liveness>(this))
     {}
     bool fail() noexcept { failed_ = true; return false; }
     std::optional<ClockSample> clock()
@@ -197,8 +236,9 @@ class OriginalCompletionGrant final
     StartupFence &fence_;
     OwnedNativeFd descriptor_;
     std::string digest_;
+    std::shared_ptr<Liveness> liveness_;
     ClockSample last_{}, expires_{};
     std::uint64_t sequence_ = 1;
-    bool failed_ = false, attempted_ = false;
+    bool failed_ = false, attempted_ = false, currentAttempted_ = false;
 };
 } // namespace Linura::HyprlandDisplay

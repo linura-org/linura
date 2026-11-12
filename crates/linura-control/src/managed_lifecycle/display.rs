@@ -78,13 +78,13 @@ pub use finalization::{
     AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayFinalization,
     AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
     AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayCompletionPort,
-    OriginalDisplayCompletionReceipt, OriginalDisplayFinalizationAuthorizer,
-    OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
-    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
-    OriginalDisplayFinalizationRequest, OriginalDisplayNativeHandoffInspection,
-    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativeReleaseReservationPort,
-    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQuiescenceInspection,
-    OriginalDisplayRetirementPreparationPort,
+    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentInspection,
+    OriginalDisplayFinalizationAuthorizer, OriginalDisplayFinalizationChallenge,
+    OriginalDisplayFinalizationInspection, OriginalDisplayFinalizationPort,
+    OriginalDisplayFinalizationReceipt, OriginalDisplayFinalizationRequest,
+    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeHandoffVerification,
+    OriginalDisplayNativeReleaseReservationPort, OriginalDisplayNativeReleaseSpendPort,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
 };
 pub use release::OrdinaryDisplayReleaseInspection;
 pub use restoration::{

@@ -208,6 +208,7 @@ impl Observer for RestorationObserver {
             linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
             linura_observation::DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY,
             linura_observation::DISPLAY_NATIVE_HANDOFF_CAPABILITY,
+            linura_observation::DISPLAY_NATIVE_CURRENT_CAPABILITY,
         ]
         .into_iter()
         .map(|id| Capability {
@@ -280,6 +281,11 @@ impl Observer for RestorationObserver {
             && resource == &sample.resource
         {
             return Ok(sample);
+        }
+        if capability.as_str() == linura_observation::DISPLAY_NATIVE_CURRENT_CAPABILITY
+            && resource == &value(self.scope.resource_id())
+        {
+            return native_handoff::observe_current(&mut m, sample, &self.scope);
         }
         if capability.as_str() == linura_observation::DISPLAY_NATIVE_HANDOFF_CAPABILITY
             && resource == &value(self.scope.resource_id())

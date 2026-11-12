@@ -5,6 +5,7 @@
 #include "original_finalization_grant.h"
 #include "original_native_release_grant.h"
 #include "original_completion_grant.h"
+#include "native_current_frame_gate.h"
 #include "protected_input_retirement.h"
 #include "protected_key_delivery.h"
 #include "protected_frame.h"
@@ -233,6 +234,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::unique_ptr<OriginalCompletionGrant> completionGrant;
     std::string nativeReleaseParent;
     bool completionAttempted = false;
+    bool currentMode = false;
+    std::optional<NativeCurrentFrameGate> currentFrames;
     std::optional<Correlation> terminalBound;
     bool nativeReleaseAttempted = false, nativeReleaseSpent = false;
     bool nativeHandoffActive = false;
@@ -261,8 +264,48 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         for (const auto &pointer : g_pInputManager->m_pointers)
             pointers.emplace_back(pointer);
     }
+    bool devicesCurrent() const
+    {
+        if (!g_pInputManager || keyboards.size() != g_pInputManager->m_keyboards.size() ||
+            pointers.size() != g_pInputManager->m_pointers.size())
+            return false;
+        for (std::size_t i = 0; i < keyboards.size(); ++i) {
+            const auto keyboard = keyboards[i].device.lock();
+            if (!keyboard || keyboard != g_pInputManager->m_keyboards[i] ||
+                keyboard->m_xkbKeymap != keyboards[i].keymap.get() ||
+                keyboard->m_enabled != keyboards[i].enabled || keyboard->m_allowed != keyboards[i].allowed)
+                return false;
+        }
+        for (std::size_t i = 0; i < pointers.size(); ++i)
+            if (!pointers[i].lock() || pointers[i].lock() != g_pInputManager->m_pointers[i])
+                return false;
+        return true;
+    }
+    bool refreshCurrent()
+    {
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        const bool valid = currentMode && !closed && !ownerLost && !mutationFault &&
+            completionGrant && completionGrant->live() && currentFrames &&
+            currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
+            originalAlive && originalAlive() && devicesCurrent() && facts && clock &&
+            *facts == stableInventory && clock->unixMs >= mutationClock.unixMs &&
+            clock->bootMs >= mutationClock.bootMs &&
+            clock->unixMs < interaction.scope().deadlineUnixMs &&
+            clock->bootMs < interaction.scope().deadlineBootMs;
+        if (!valid) {
+            mutationFault = true;
+            if (completionGrant) completionGrant->invalidate();
+            return false;
+        }
+        mutationClock = *clock;
+        return true;
+    }
     bool refresh()
     {
+        if (currentMode)
+            return refreshCurrent();
         if (((originalRestoration ||
               interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery)
                  ? !startupRecoveryAvailable()
@@ -273,20 +316,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         auto *backend = nativeBackend();
         const auto facts = backend ? backend->snapshot() : std::nullopt;
         const auto clock = compositorClock();
-        bool devices = g_pInputManager && keyboards.size() == g_pInputManager->m_keyboards.size() &&
-                       pointers.size() == g_pInputManager->m_pointers.size();
-        if (devices) {
-            for (std::size_t i = 0; i < keyboards.size(); ++i) {
-                const auto keyboard = keyboards[i].device.lock();
-                devices = devices && keyboard && keyboard == g_pInputManager->m_keyboards[i] &&
-                          keyboard->m_xkbKeymap == keyboards[i].keymap.get() &&
-                          keyboard->m_enabled == keyboards[i].enabled &&
-                          keyboard->m_allowed == keyboards[i].allowed;
-            }
-            for (std::size_t i = 0; i < pointers.size(); ++i)
-                devices = devices && pointers[i].lock() &&
-                          pointers[i].lock() == g_pInputManager->m_pointers[i];
-        }
+        const bool devices = devicesCurrent();
         if (mutation) {
             if (originalRestoration &&
                 (!originalAlive || !originalAlive() ||
@@ -926,7 +956,14 @@ class PinnedScene final : public ProtectedScene
             return refuse();
         auto grant = receiveOriginalCompletionGrant(std::move(descriptor), digest,
             data->nativeReleaseParent, data->bound, *physical);
-        if (!grant || !readNativeHandoffComparison(*data->terminalBound) ||
+        const auto before = grant ? readNativeHandoffComparison(*data->terminalBound) : std::nullopt;
+        const auto clock = compositorClock();
+        const auto history = nativeOutputHighWater(data->bound, data->stableInventory);
+        const auto kernel = nativeFirstFrameKernel(data->bound, data->stableInventory);
+        auto current = before && clock && history && kernel
+            ? NativeCurrentFrameGate::arm({data->stableInventory, *before, *clock, *history, *kernel})
+            : std::nullopt;
+        if (!grant || !current || inputRetirement.phase() != ProtectedInputRetirement::Phase::Private ||
             !data->refresh() || data->mutationFault || data->ownerLost || heldInput().any ||
             !grant->transferLifetime())
             return refuse();
@@ -935,8 +972,33 @@ class PinnedScene final : public ProtectedScene
         // thread before the old channel's expected EOF is observed.
         data->completionGrant = std::move(grant);
         data->terminalGrant.reset();
-        return data->completionGrant->verify() && data->refresh() &&
-               !data->mutationFault && !data->ownerLost ? true : refuse();
+        const auto activated = compositorClock();
+        const auto afterCommits = nativeOutputHighWater(data->bound, data->stableInventory);
+        const auto afterKernel = nativeFirstFrameKernel(data->bound, data->stableInventory);
+        if (!activated || !afterCommits || !afterKernel || heldInput().any ||
+            !data->completionGrant->handoffWindowCurrent() ||
+            !current->activate(data->stableInventory, *activated, *afterCommits, *afterKernel))
+            return refuse();
+        data->currentFrames.emplace(std::move(*current));
+        data->currentMode = true;
+        // No synthetic "physical exit" boolean: pending and newly queued
+        // typing remains quarantined until a fresh native Escape/drain edge.
+        inputRetirement.close(false, heldInput());
+        std::weak_ptr<NativeData> retained = data;
+        if (!data->completionGrant->admitCurrent([retained] {
+            const auto live = retained.lock();
+            return live && live->refreshCurrent();
+        }))
+            return refuse();
+        if (activeNative != data.get() || active.lock() != data)
+            return refuse();
+        activeNative = nullptr;
+        active.reset();
+        // Native output observers and the original Root lifetime remain in
+        // mutationFence; this is intentional handoff, never owner-loss close.
+        startupAdmissionChanged();
+        data->damage();
+        return data->refreshCurrent() ? true : refuse();
     }
     bool reconfigureReview()
     {
@@ -1279,7 +1341,8 @@ bool startupBlocksProtectedScene()
 } // namespace
 bool protectedDisplayActive()
 {
-    return startupBlocked() || !active.expired();
+    return startupBlocked() || !active.expired() ||
+           (mutationFence && mutationFence->currentMode);
 }
 void startupAdmissionChanged()
 {
@@ -1346,16 +1409,18 @@ bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &n
 }
 void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buffer)
 {
-    const auto data = active.lock();
+    const auto activeData = active.lock();
+    const auto data = activeData ? activeData :
+        mutationFence && mutationFence->currentMode ? mutationFence : nullptr;
     if (!data || !monitor || !monitor->m_output || !buffer || !data->refresh())
         return;
     auto *surface = data->forMonitor(monitor);
     const auto current = monitor->m_output->state->state().buffer;
     if (!surface || !current || current.get() != buffer)
         return;
-    if (data->nativeHandoffActive && surface->frame.queuedCommit() != 0)
+    if (data->nativeHandoffActive && !data->currentMode && surface->frame.queuedCommit() != 0)
         return; // A later render cannot replace the retained first-frame tracker.
-    const auto kind = surface->selectedOrdinaryFrame ? ProtectedFrame::Kind::Ordinary
+    const auto kind = data->currentMode || surface->selectedOrdinaryFrame ? ProtectedFrame::Kind::Ordinary
                       : surface->selectedFrame       ? ProtectedFrame::Kind::Content
                                                      : ProtectedFrame::Kind::Safety;
     if (!surface->frame.rendered(buffer, kind)) {
@@ -1380,7 +1445,9 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
         const auto submitted = monitor->m_output->commitAsync({});
         return submitted.id != 0 && submitted.error == 0;
     }
-    const auto data = active.lock();
+    const auto activeData = active.lock();
+    const auto data = activeData ? activeData :
+        mutationFence && mutationFence->currentMode ? mutationFence : nullptr;
     if (!data)
         return std::nullopt;
     auto *surface = data->forMonitor(monitor);
@@ -1440,7 +1507,7 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     const auto buffer = monitor->m_output->state->state().buffer;
     if (!buffer)
         return false;
-    if (data->nativeHandoffActive && surface->frame.queuedCommit() != 0)
+    if (data->nativeHandoffActive && !data->currentMode && surface->frame.queuedCommit() != 0)
         return false; // Freeze the immutable first buffer until durable completion.
     if (surface->renderedBuffer != buffer || !surface->frame.prepared(buffer.get())) {
         // Native-owned opaque initialization replaces the former unrendered
@@ -1499,7 +1566,7 @@ readNativeHandoffComparison(const Correlation &terminal)
 {
     const auto data = mutationFence;
     auto *backend = nativeBackend();
-    if (!data || !backend || !data->nativeHandoffActive || !data->nativeReleaseSpent ||
+    if (!data || data->currentMode || !backend || !data->nativeHandoffActive || !data->nativeReleaseSpent ||
         !data->nativeReleaseGate || !data->terminalBound || *data->terminalBound != terminal ||
         data->writing || data->ownerLost || data->mutationFault || heldInput().any ||
         !data->refresh() || data->ownerLost || data->mutationFault ||
@@ -1563,10 +1630,71 @@ readNativeHandoffComparison(const Correlation &terminal)
     return result;
 }
 
-std::optional<std::string> readNativeHandoffPresentation()
+namespace {
+std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
 {
     const auto data = mutationFence;
-    if (!data || !data->terminalBound || !data->nativeHandoffActive)
+    auto *backend = nativeBackend();
+    if (!data || !data->currentMode || !backend || !data->terminalBound ||
+        !data->currentFrames || !data->completionGrant || !data->refreshCurrent())
+        return std::nullopt;
+    const auto refuse = [&]() -> std::optional<NativeCurrentFrameGate::Receipt> {
+        data->mutationFault = true;
+        data->completionGrant->invalidate();
+        data->damage();
+        return std::nullopt;
+    };
+    const auto started = compositorClock();
+    const auto held = data->stableInventory;
+    if (!started || !data->completionGrant->verify())
+        return refuse();
+    const auto kernel = nativeCurrentFrameKernel(data->bound, held);
+    const auto commits = nativeCurrentOutputHighWater(data->bound, held);
+    if (!kernel || !commits || data->surfaces.size() != held.heads.size())
+        return refuse();
+    std::vector<NativeCurrentFrameGate::Frame> frames;
+    frames.reserve(held.heads.size());
+    for (const auto &head : held.heads) {
+        const auto found = data->surfaces.find(head.key);
+        if (found == data->surfaces.end() ||
+            found->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return refuse();
+        const auto &surface = found->second;
+        if (!head.current.enabled) {
+            frames.push_back({head.key, nullptr, nullptr, surface.disableCommit,
+                              surface.disableSubmitted, 0});
+        } else if (!surface.submittedBuffer) {
+            frames.push_back({head.key, nullptr, nullptr, 0, false, 0});
+        } else {
+            const auto &buffer = surface.submittedBuffer->buffer;
+            const auto framebuffer = nativeHandoffFramebuffer(head.key, buffer);
+            if (!framebuffer && surface.frame.completed())
+                return refuse();
+            frames.push_back({head.key, &surface.frame, buffer.get(), 0, false,
+                              framebuffer.value_or(0)});
+        }
+    }
+    const auto after = backend->snapshot();
+    const auto finished = compositorClock();
+    if (!after || !finished || *after != held || !data->refreshCurrent() ||
+        !data->completionGrant->verify())
+        return refuse();
+    const auto result = data->currentFrames->observe({held, *started, *finished, frames,
+                                                     *kernel, *commits});
+    if (data->currentFrames->phase() != NativeCurrentFrameGate::Phase::Active)
+        return refuse();
+    const auto end = compositorClock();
+    if (!end || end->unixMs < finished->unixMs || end->bootMs < finished->bootMs ||
+        end->unixMs - started->unixMs >= 2000 || end->bootMs - started->bootMs >= 2000 ||
+        !data->refreshCurrent())
+        return refuse();
+    return result;
+}
+
+std::optional<std::string> framePresentation(bool current)
+{
+    const auto data = mutationFence;
+    if (!data || data->currentMode != current || !data->terminalBound || !data->nativeHandoffActive)
         return std::nullopt;
     const auto terminal = OriginalFinalizationCodec::decode(data->terminalMaterial);
     const auto original = OriginalGrantCodec::materialFields(data->originalMaterial);
@@ -1584,7 +1712,8 @@ std::optional<std::string> readNativeHandoffPresentation()
         !OriginalGrantCodec::digest(data->terminalBound->effectDigest) ||
         !OriginalGrantCodec::digest(data->terminalBound->dispatchDigest))
         return std::nullopt;
-    const auto receipt = readNativeHandoffComparison(*data->terminalBound);
+    const auto receipt = current ? readNativeCurrentComparison()
+                                 : readNativeHandoffComparison(*data->terminalBound);
     if (!receipt || receipt->postWriteEpoch != terminal->postWriteEpoch ||
         receipt->completedCount != data->stableInventory.heads.size())
         return std::nullopt;
@@ -1601,7 +1730,8 @@ std::optional<std::string> readNativeHandoffPresentation()
                  ",\"crtc\":" + std::to_string(kernel.crtc) +
                  ",\"plane\":" + std::to_string(kernel.plane) +
                  ",\"framebuffer\":" + std::to_string(kernel.framebuffer) +
-                 ",\"spend_high_water\":\"" + std::to_string(row.spendHighWater) +
+                 (current ? ",\"handoff_commit\":\"" : ",\"spend_high_water\":\"") +
+                 std::to_string(row.spendHighWater) +
                  "\",\"completed_commit\":\"" + std::to_string(row.completedCommit) + "\"}";
     }
     std::string proof =
@@ -1620,8 +1750,30 @@ std::optional<std::string> readNativeHandoffPresentation()
         std::to_string(receipt->deadlineUnixMs) + "\",\"deadline_boot_ms\":\"" +
         std::to_string(receipt->deadlineBootMs) + "\",\"post_write_epoch\":\"" +
         std::to_string(receipt->postWriteEpoch) + "\",\"security_epoch\":\"" +
-        std::to_string(receipt->securityEpoch) + "\",\"heads\":[" + heads + "]}";
+        std::to_string(receipt->securityEpoch) + "\"";
+    if (current) {
+        if (!data->completionGrant || !data->completionGrant->live())
+            return std::nullopt;
+        // Frame sampling above independently observed the held native power
+        // fence. Input state comes only from native physical retirement.
+        proof += ",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
+                 "\",\"input_retired\":" +
+                 (inputRetirement.phase() == ProtectedInputRetirement::Phase::Open &&
+                          !heldInput().any ? "true" : "false") +
+                 ",\"power_fence_held\":true";
+    }
+    proof += ",\"heads\":[" + heads + "]}";
     return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;
+}
+} // namespace
+
+std::optional<std::string> readNativeHandoffPresentation()
+{
+    return framePresentation(false);
+}
+std::optional<std::string> readNativeCurrentPresentation()
+{
+    return framePresentation(true);
 }
 
 NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Snapshot &expected)

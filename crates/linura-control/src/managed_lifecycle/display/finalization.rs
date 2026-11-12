@@ -17,8 +17,8 @@ use linura_transaction::TransactionSnapshot;
 mod handoff;
 pub use handoff::{
     AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
-    OriginalDisplayCompletionReceipt, OriginalDisplayNativeHandoffInspection,
-    OriginalDisplayNativeHandoffVerification,
+    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentInspection,
+    OriginalDisplayNativeHandoffInspection, OriginalDisplayNativeHandoffVerification,
 };
 
 /// The caller identifies existing restoration history and supplies provenance.

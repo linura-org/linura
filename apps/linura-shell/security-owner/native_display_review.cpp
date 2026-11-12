@@ -102,7 +102,9 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
                                         "independently checked. Fresh administrator authentication "
                                         "allows Linura to finish recovery. It cannot change the "
                                         "layout, unlock the session or authorize a power action. "
-                                        "Protection remains active until final checks complete.")});
+                                        "Protection remains active until final checks complete. "
+                                        "When the desktop returns, press Escape and release all "
+                                        "keys and pointer buttons to resume input.")});
     if (recovery)
         pages.push_back({QStringLiteral("Recover after an interrupted display change"),
                          QStringLiteral("Authorize restoring the original monitor rules, layout "

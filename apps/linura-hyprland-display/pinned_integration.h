@@ -50,6 +50,11 @@ nativeFirstFrameKernel(const Correlation &original, const Snapshot &expected);
 using NativeFirstFrameArm = std::optional<NativeFirstFrameGate>;
 using NativeOutputCommits = std::optional<std::vector<NativeFirstFrameGate::Output>>;
 [[nodiscard]] NativeOutputCommits nativeOutputHighWater(const Correlation &, const Snapshot &);
+// Read-only sampling after the separately authenticated handoff, under the
+// same live Root completion lifetime. Never eligible in recovery admission.
+[[nodiscard]] NativeOutputCommits nativeCurrentOutputHighWater(const Correlation &, const Snapshot &);
+[[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
+nativeCurrentFrameKernel(const Correlation &, const Snapshot &);
 [[nodiscard]] NativeFirstFrameArm nativeFirstFrameArm(const Correlation &, const Snapshot &);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
