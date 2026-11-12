@@ -1817,7 +1817,7 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
-    #[zbus(out_args("preparation", "preimage", "current_commit_digest", "retired"))]
+    #[zbus(out_args("preparation", "preimage", "current_commit_record", "retired"))]
     async fn read_root_power(
         &self,
         recovery_scope: &str,

@@ -614,21 +614,60 @@ class OperationSemanticsContractTests(unittest.TestCase):
     def test_display_keep_cannot_drop_original_policy_approval_revalidation(
         self,
     ) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self._copy_fixture(root)
-            path = root / "crates/linura-control/src/durable_authority.rs"
-            text = path.read_text(encoding="utf-8")
-            original = "original.revalidate(principal, floor, &self.approvals)"
-            self.assertEqual(text.count(original), 1)
-            path.write_text(text.replace(original, "Ok(())", 1), encoding="utf-8")
-            self.assertTrue(
-                any(
-                    "durable authority handoff boundary missing required fragment"
-                    in failure
-                    for failure in check_operation_semantics.validate(root)
+        original = "original.revalidate(principal, floor, &self.approvals)"
+        for method in (
+            "revalidate_display_review",
+            "revalidate_committed_display_review",
+        ):
+            with (
+                self.subTest(method=method),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / "crates/linura-control/src/durable_authority.rs"
+                text = path.read_text(encoding="utf-8")
+                marker = f"    pub(crate) fn {method}("
+                self.assertEqual(text.count(marker), 1)
+                prefix, tail = text.split(marker, 1)
+                body, suffix = tail.split("\n    }", 1)
+                self.assertEqual(body.count(original), 1)
+                # Keep the other path intact: a global substring check must
+                # not conceal removal from this particular authority boundary.
+                changed = body.replace(original, "Ok(())", 1)
+                path.write_text(
+                    prefix + marker + changed + "\n    }" + suffix, encoding="utf-8"
                 )
-            )
+                self.assertTrue(
+                    any(
+                        f"{method}: {original}" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+        for fragment in (
+            "current.state != TransactionState::Committed",
+            "before.state != TransactionState::Indeterminate",
+            "before.state_version.checked_add(2) != Some(current.state_version)",
+            "current.current_generation != before.current_generation",
+            "current.binding_digest != before.binding_digest",
+            "original.purpose != DisplayReviewPurpose::OriginalFinalization",
+        ):
+            with (
+                self.subTest(guard=fragment),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / "crates/linura-control/src/durable_authority.rs"
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(text.count(fragment), 1)
+                path.write_text(text.replace(fragment, "false", 1), encoding="utf-8")
+                self.assertTrue(
+                    any(
+                        f"revalidate_committed_display_review: {fragment}" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
 
     def test_display_continuations_cannot_drop_purpose_binding(self) -> None:
         for fragment in (

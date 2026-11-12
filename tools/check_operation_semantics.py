@@ -578,6 +578,50 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"durable authority handoff boundary missing required fragment: {fragment}"
                 )
+        # Each purpose/state boundary must retain its OWN live review call.
+        # A call in the committed continuation cannot mask its removal from
+        # ordinary Keep/original-finalization dispatch, or vice versa.
+        common_review_guards = (
+            "current.current_generation != original.generation",
+            "current.binding_digest != *original.binding.digest()",
+            "principal.as_str() != original.binding.principal().as_str()",
+            "current.principal != *original.binding.principal()",
+            "current.request_id != request.request_id",
+            "digest_request(request)? != *original.binding.request_digest()",
+            "original.risk_floor != floor",
+            "original.revalidate(principal, floor, &self.approvals)",
+        )
+        for method, guards in (
+            (
+                "revalidate_display_review",
+                (
+                    "current != *expected",
+                    "current.state != TransactionState::Indeterminate",
+                ),
+            ),
+            (
+                "revalidate_committed_display_review",
+                (
+                    "current != *committed",
+                    "current.state != TransactionState::Committed",
+                    "before.state != TransactionState::Indeterminate",
+                    "before.state_version.checked_add(2) != Some(current.state_version)",
+                    "current.current_generation != before.current_generation",
+                    "current.binding_digest != before.binding_digest",
+                    "original.purpose != DisplayReviewPurpose::OriginalFinalization",
+                ),
+            ),
+        ):
+            marker = f"    pub(crate) fn {method}("
+            body = ""
+            if durable_text.count(marker) == 1:
+                body = durable_text.split(marker, 1)[1].split("\n    }", 1)[0]
+            for fragment in (*common_review_guards, *guards):
+                if body.count(fragment) != 1:
+                    failures.append(
+                        "durable authority handoff boundary missing required fragment: "
+                        f"{method}: {fragment}"
+                    )
         # Candidate, recovery, prepared handoff and purpose-bound original
         # display review (shared by Keep and original finalization).
         expected_review_paths = 4
