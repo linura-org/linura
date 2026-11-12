@@ -22,6 +22,8 @@ namespace Linura::HyprlandDisplay {
 class OriginalFinalizationGrant;
 class OriginalCompletionGrant;
 class OwnedNativeFd;
+[[nodiscard]] bool nativePowerFenceHeld() noexcept;
+[[nodiscard]] bool retireNativePowerFence() noexcept;
 [[nodiscard]] std::unique_ptr<OriginalFinalizationGrant>
 receiveOriginalFinalizationGrant(OwnedNativeFd, const Correlation &, std::string_view material,
                                  std::uint64_t sampledBootMs);

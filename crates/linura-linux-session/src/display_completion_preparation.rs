@@ -11,6 +11,10 @@ use linura_provider_sdk::ComponentDigest;
 
 use crate::{NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation};
 
+pub(crate) mod current_commit;
+pub(crate) mod power;
+pub(crate) mod root_retirement;
+
 const DOMAIN: &[u8] = b"linura.native-display.completion-preparation.v1";
 pub const MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION: usize =
     crate::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION + 8 * 1024;
@@ -490,6 +494,208 @@ mod tests {
                 unsorted.swap(13 + index, 22 + index);
             }
             assert!(NativeDisplayCompletionPreparation::decode(&encoded(&unsorted)).is_err());
+        }
+    }
+    #[test]
+    fn power_preparation_binds_original_parent_complete_current_inventory_and_both_clocks() {
+        use linura_observation::{DisplayNativeCurrentFacts, DisplayNativeCurrentOutput};
+        use power::{
+            MAX_NATIVE_DISPLAY_POWER_RETIREMENT, NativeDisplayPowerRetirementPreparation as Power,
+        };
+        use sha2::{Digest, Sha256};
+        let parent = fixture();
+        let window = DisplayNativeHandoffWindow {
+            observed_unix_ms: 1100,
+            observed_boot_ms: 200,
+            deadline_unix_ms: 1400,
+            deadline_boot_ms: 250,
+        };
+        let frames = value(DisplayNativeCurrentFacts::new(
+            parent.frames().scope().clone(),
+            parent.frames().lineage().clone(),
+            window,
+            parent
+                .frames()
+                .outputs()
+                .iter()
+                .map(|(id, row)| {
+                    (
+                        id.clone(),
+                        DisplayNativeCurrentOutput {
+                            enabled: row.enabled,
+                            connector: row.connector,
+                            crtc: row.crtc,
+                            plane: row.plane,
+                            framebuffer: row.framebuffer,
+                            handoff_commit: row.completed_commit,
+                            completed_commit: row.completed_commit + 1,
+                        },
+                    )
+                })
+                .collect(),
+            ComponentDigest::from_bytes(Sha256::digest(parent.canonical_bytes()).into()).to_hex(),
+            true,
+            true,
+            None,
+        ));
+        let make = |frames: &DisplayNativeCurrentFacts, expiry| {
+            Power::new(
+                &parent,
+                ComponentDigest::from_bytes([7; 32]),
+                ComponentDigest::from_bytes([8; 32]),
+                frames,
+                expiry,
+            )
+        };
+        let record = value(make(&frames, 1149));
+        let bytes = record.canonical_bytes();
+        assert_eq!(value(Power::decode(&bytes)).canonical_bytes(), bytes);
+        assert!(NativeDisplayCompletionPreparation::decode(&bytes).is_err());
+        assert!(Power::decode(&parent.canonical_bytes()).is_err());
+        for length in 0..bytes.len() {
+            assert!(Power::decode(&bytes[..length]).is_err());
+        }
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert!(Power::decode(&trailing).is_err());
+        assert!(Power::decode(&vec![0; MAX_NATIVE_DISPLAY_POWER_RETIREMENT + 1]).is_err());
+        assert!(make(&frames, 1100).is_err());
+        assert!(make(&frames, 1151).is_err()); // tighter BOOTTIME, not wall-only
+        let original = parts(&bytes);
+        for (index, bad) in [
+            (0, b"wrong".as_slice()),
+            (1, b"wrong-parent"),
+            (2, b"0"),
+            (3, original[2].as_slice()),
+            (4, b"1151"),
+            (5, b"01100"),
+            (9, b"0"),
+            (12, b"2"),
+            (13, b"4294967296"),
+            (17, b"0"),
+            (18, b"0"),
+        ] {
+            let mut changed = original.clone();
+            changed[index] = bad.to_vec();
+            assert!(Power::decode(&encoded(&changed)).is_err(), "field {index}");
+        }
+        let absent = value(DisplayNativeCurrentFacts::new(
+            frames.scope().clone(),
+            frames.lineage().clone(),
+            window,
+            frames.outputs().clone(),
+            frames.completion_digest().into(),
+            true,
+            false,
+            None,
+        ));
+        let root = value(
+            root_retirement::NativeDisplayRootRetirementPreparation::new(
+                &record,
+                ComponentDigest::from_bytes([9; 32]),
+                ComponentDigest::from_bytes([10; 32]),
+                &absent,
+                1149,
+            ),
+        );
+        let root_bytes = root.canonical_bytes();
+        assert_eq!(
+            value(root_retirement::NativeDisplayRootRetirementPreparation::decode(&root_bytes))
+                .canonical_bytes(),
+            root_bytes
+        );
+        assert!(Power::decode(&root_bytes).is_err());
+        assert!(
+            root_retirement::NativeDisplayRootRetirementPreparation::new(
+                &record,
+                ComponentDigest::from_bytes([9; 32]),
+                ComponentDigest::from_bytes([10; 32]),
+                &frames,
+                1149
+            )
+            .is_err()
+        );
+        for end in 0..root_bytes.len() {
+            assert!(
+                root_retirement::NativeDisplayRootRetirementPreparation::decode(&root_bytes[..end])
+                    .is_err()
+            );
+        }
+        let mut wrong = root_bytes.clone();
+        wrong.push(0);
+        assert!(root_retirement::NativeDisplayRootRetirementPreparation::decode(&wrong).is_err());
+        assert!(
+            root_retirement::NativeDisplayRootRetirementPreparation::new(
+                &record,
+                ComponentDigest::from_bytes([9; 32]),
+                ComponentDigest::from_bytes([10; 32]),
+                &absent,
+                1151
+            )
+            .is_err()
+        );
+        let binding = *root.parent().parent().parent().control_binding();
+        let committed = value(current_commit::NativeDisplayCurrentCommitPreparation::new(
+            &root,
+            ComponentDigest::from_bytes([11; 32]),
+            ComponentDigest::from_bytes([12; 32]),
+            0,
+            9,
+            binding,
+            &absent,
+            1149,
+        ));
+        let committed_bytes = committed.canonical_bytes();
+        assert_eq!(
+            value(current_commit::NativeDisplayCurrentCommitPreparation::decode(&committed_bytes))
+                .canonical_bytes(),
+            committed_bytes
+        );
+        assert_eq!(committed.control_version(), 9);
+        for end in 0..committed_bytes.len() {
+            assert!(
+                current_commit::NativeDisplayCurrentCommitPreparation::decode(
+                    &committed_bytes[..end]
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            root_retirement::NativeDisplayRootRetirementPreparation::decode(&committed_bytes)
+                .is_err()
+        );
+        for (generation, version, binding) in [
+            (1, 9, binding),
+            (0, 8, binding),
+            (0, 10, binding),
+            (0, 9, ComponentDigest::from_bytes([1; 32])),
+        ] {
+            assert!(
+                current_commit::NativeDisplayCurrentCommitPreparation::new(
+                    &root,
+                    ComponentDigest::from_bytes([11; 32]),
+                    ComponentDigest::from_bytes([12; 32]),
+                    generation,
+                    version,
+                    binding,
+                    &absent,
+                    1149
+                )
+                .is_err()
+            );
+        }
+        for (input, power) in [(false, true), (true, false)] {
+            let wrong = value(DisplayNativeCurrentFacts::new(
+                frames.scope().clone(),
+                frames.lineage().clone(),
+                window,
+                frames.outputs().clone(),
+                frames.completion_digest().into(),
+                input,
+                power,
+                None,
+            ));
+            assert!(make(&wrong, 1149).is_err());
         }
     }
 }

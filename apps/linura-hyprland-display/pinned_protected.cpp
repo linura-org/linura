@@ -5,6 +5,9 @@
 #include "original_finalization_grant.h"
 #include "original_native_release_grant.h"
 #include "original_completion_grant.h"
+#include "original_power_retirement.h"
+#include "original_current_commit.h"
+#include "sealed_native_material.h"
 #include "native_current_frame_gate.h"
 #include "protected_input_retirement.h"
 #include "protected_key_delivery.h"
@@ -232,9 +235,12 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::string terminalMaterial;
     std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
     std::unique_ptr<OriginalCompletionGrant> completionGrant;
+    std::unique_ptr<OriginalCompletionGrant::CommittedCurrent> committedCurrent;
+    bool currentCommitAttempted = false;
     std::string nativeReleaseParent;
     bool completionAttempted = false;
     bool currentMode = false;
+    bool powerRetirementAttempted = false, nativePowerRetired = false;
     std::optional<NativeCurrentFrameGate> currentFrames;
     std::optional<Correlation> terminalBound;
     bool nativeReleaseAttempted = false, nativeReleaseSpent = false;
@@ -287,14 +293,17 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         auto *backend = nativeBackend();
         const auto facts = backend ? backend->snapshot() : std::nullopt;
         const auto clock = compositorClock();
-        const bool valid = currentMode && !closed && !ownerLost && !mutationFault &&
-                           completionGrant && completionGrant->live() && currentFrames &&
-                           currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
-                           originalAlive && originalAlive() && devicesCurrent() && facts && clock &&
-                           *facts == stableInventory && clock->unixMs >= mutationClock.unixMs &&
-                           clock->bootMs >= mutationClock.bootMs &&
-                           clock->unixMs < interaction.scope().deadlineUnixMs &&
-                           clock->bootMs < interaction.scope().deadlineBootMs;
+        const bool valid =
+            currentMode && !closed && !ownerLost && !mutationFault && completionGrant &&
+            completionGrant->live() &&
+            (nativePowerRetired ? !nativePowerFenceHeld() : nativePowerFenceHeld()) &&
+            currentFrames && currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
+            originalAlive && originalAlive() && devicesCurrent() && facts && clock &&
+            *facts == stableInventory && clock->unixMs >= mutationClock.unixMs &&
+            clock->bootMs >= mutationClock.bootMs &&
+            (committedCurrent ? committedCurrent->live()
+                              : (clock->unixMs < interaction.scope().deadlineUnixMs &&
+                                 clock->bootMs < interaction.scope().deadlineBootMs));
         if (!valid) {
             mutationFault = true;
             if (completionGrant)
@@ -675,6 +684,7 @@ class PinnedMutation final : public MutationProtection
     std::shared_ptr<NativeData> data_;
     bool wrote_ = false;
 };
+std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison();
 class PinnedScene final : public ProtectedScene
 {
   public:
@@ -943,6 +953,70 @@ class PinnedScene final : public ProtectedScene
         }
         data->damage();
         return true;
+    }
+    bool commitCurrent(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->currentCommitAttempted)
+            return refuse();
+        data->currentCommitAttempted = true;
+        const auto bytes = SealedNativeMaterial::read<OriginalCurrentCommitCodec::MaxPreparation>(
+            std::move(descriptor));
+        if (!bytes || nativeSha256(*bytes) != std::optional{std::string(digest)} ||
+            !data->refreshCurrent() || !data->nativePowerRetired || data->committedCurrent ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Open || heldInput().any)
+            return refuse();
+        const auto current = [&] {
+            const auto frame = readNativeCurrentComparison();
+            const auto now = compositorClock();
+            return frame && now &&
+                   OriginalCurrentCommitCodec::matches(
+                       *bytes, data->completionGrant->comparisonDigest(), *frame, *now)
+                       .has_value();
+        };
+        if (!current())
+            return refuse();
+        auto committed = data->completionGrant->commitCurrent(digest);
+        if (!committed || !committed->live() || !data->refreshCurrent() || heldInput().any ||
+            !current())
+            return refuse();
+        data->committedCurrent = std::move(committed);
+        return data->refreshCurrent() ? true : refuse();
+    }
+    bool retirePower(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->powerRetirementAttempted)
+            return refuse();
+        data->powerRetirementAttempted = true;
+        const auto bytes = SealedNativeMaterial::read<OriginalPowerRetirementCodec::MaxPreparation>(
+            std::move(descriptor));
+        if (!bytes || nativeSha256(*bytes) != std::optional{std::string(digest)} ||
+            !data->refreshCurrent() || data->nativePowerRetired ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Open || heldInput().any)
+            return refuse();
+        const auto current = [&]() {
+            const auto frame = readNativeCurrentComparison();
+            const auto now = compositorClock();
+            return frame && now &&
+                   OriginalPowerRetirementCodec::matches(
+                       *bytes, data->completionGrant->comparisonDigest(), *frame, *now)
+                       .has_value();
+        };
+        if (!current() || !data->completionGrant->retirePower(digest) || !data->refreshCurrent() ||
+            heldInput().any || !current() || !retireNativePowerFence())
+            return refuse();
+        data->nativePowerRetired = true;
+        data->damage();
+        return data->refreshCurrent() ? true : refuse();
     }
     bool transferCompletion(OwnedNativeFd descriptor, std::string_view digest) override
     {
@@ -1748,35 +1822,39 @@ std::optional<std::string> framePresentation(bool current)
                  std::to_string(row.spendHighWater) + "\",\"completed_commit\":\"" +
                  std::to_string(row.completedCommit) + "\"}";
     }
-    std::string proof = "{\"schema\":1,\"topology\":\"" + std::string(restored->topology) +
-                        "\",\"original_dispatch\":\"" + std::string((*original)[1]) +
-                        "\",\"checkpoint\":\"" + std::string((*original)[2]) +
-                        "\",\"restoration_transaction\":\"" + data->bound.transaction +
-                        "\",\"restoration_effect\":\"" + data->bound.effectDigest +
-                        "\",\"restoration_dispatch\":\"" + data->bound.dispatchDigest +
-                        "\",\"terminal_transaction\":\"" + data->terminalBound->transaction +
-                        "\",\"terminal_effect\":\"" + data->terminalBound->effectDigest +
-                        "\",\"terminal_dispatch\":\"" + data->terminalBound->dispatchDigest +
-                        "\",\"terminal_link\":\"" + std::string(terminal->terminalLink) +
-                        "\",\"source_guard\":\"" + std::string(terminal->sourceGuard) +
-                        "\",\"sampled_unix_ms\":\"" + std::to_string(receipt->observedUnixMs) +
-                        "\",\"sampled_boot_ms\":\"" + std::to_string(receipt->observedBootMs) +
-                        "\",\"deadline_unix_ms\":\"" + std::to_string(receipt->deadlineUnixMs) +
-                        "\",\"deadline_boot_ms\":\"" + std::to_string(receipt->deadlineBootMs) +
-                        "\",\"post_write_epoch\":\"" + std::to_string(receipt->postWriteEpoch) +
-                        "\",\"security_epoch\":\"" + std::to_string(receipt->securityEpoch) + "\"";
+    std::string proof =
+        std::string(current ? "{\"schema\":2,\"topology\":\"" : "{\"schema\":1,\"topology\":\"") +
+        std::string(restored->topology) + "\",\"original_dispatch\":\"" +
+        std::string((*original)[1]) + "\",\"checkpoint\":\"" + std::string((*original)[2]) +
+        "\",\"restoration_transaction\":\"" + data->bound.transaction +
+        "\",\"restoration_effect\":\"" + data->bound.effectDigest +
+        "\",\"restoration_dispatch\":\"" + data->bound.dispatchDigest +
+        "\",\"terminal_transaction\":\"" + data->terminalBound->transaction +
+        "\",\"terminal_effect\":\"" + data->terminalBound->effectDigest +
+        "\",\"terminal_dispatch\":\"" + data->terminalBound->dispatchDigest +
+        "\",\"terminal_link\":\"" + std::string(terminal->terminalLink) + "\",\"source_guard\":\"" +
+        std::string(terminal->sourceGuard) + "\",\"sampled_unix_ms\":\"" +
+        std::to_string(receipt->observedUnixMs) + "\",\"sampled_boot_ms\":\"" +
+        std::to_string(receipt->observedBootMs) + "\",\"deadline_unix_ms\":\"" +
+        std::to_string(receipt->deadlineUnixMs) + "\",\"deadline_boot_ms\":\"" +
+        std::to_string(receipt->deadlineBootMs) + "\",\"post_write_epoch\":\"" +
+        std::to_string(receipt->postWriteEpoch) + "\",\"security_epoch\":\"" +
+        std::to_string(receipt->securityEpoch) + "\"";
     if (current) {
         if (!data->completionGrant || !data->completionGrant->live())
             return std::nullopt;
         // Frame sampling above independently observed the held native power
         // fence. Input state comes only from native physical retirement.
         proof +=
-            ",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
+            ",\"current_commit_digest\":\"" +
+            (data->committedCurrent ? data->committedCurrent->comparisonDigest()
+                                    : std::string(64, '0')) +
+            "\",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
             "\",\"input_retired\":" +
             (inputRetirement.phase() == ProtectedInputRetirement::Phase::Open && !heldInput().any
                  ? "true"
                  : "false") +
-            ",\"power_fence_held\":true";
+            ",\"power_fence_held\":" + (nativePowerFenceHeld() ? "true" : "false");
     }
     proof += ",\"heads\":[" + heads + "]}";
     return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;

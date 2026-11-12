@@ -135,7 +135,17 @@ impl DisplayOriginalCompletionFacts {
         {
             return Err(DisplayEvidenceError::Freshness);
         }
-        let attrs = &observation.attributes;
+        Self::from_comparison_attributes(
+            &observation.attributes,
+            scope,
+            observation.observed_at_unix_ms,
+        )
+    }
+    pub(crate) fn from_comparison_attributes(
+        attrs: &BTreeMap<String, ObservedValue>,
+        scope: &DisplayRecoveryScope,
+        observed_at: u64,
+    ) -> Result<Self, DisplayEvidenceError> {
         if attrs.len() > 168
             || attrs.iter().any(|(key, value)| {
                 key.len() > 70
@@ -167,9 +177,7 @@ impl DisplayOriginalCompletionFacts {
                 number(attrs, "first_observed_unix_ms")?,
             )?,
         )?;
-        if facts.attributes() != *attrs
-            || facts.first.window().observed_unix_ms > observation.observed_at_unix_ms
-        {
+        if facts.attributes() != *attrs || facts.first.window().observed_unix_ms > observed_at {
             return Err(DisplayEvidenceError::Shape);
         }
         Ok(facts)

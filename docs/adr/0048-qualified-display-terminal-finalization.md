@@ -447,9 +447,62 @@ old Control sender cannot destroy that transferred Root lifetime through an
 obsolete UI-flow cancellation. Native owner-process, Root, source and original
 pending-window loss still fence the compositor independently.
 
-Independent post-retirement observations, durable final Control completion and
-ordered power/global-admission retirement remain required before source
-completion. Native grant, current-frame and output-history headers are included
+The next continuation separately retires **only the native power inhibitor**.
+It consumes the original live canonical review into a non-replay phase after a
+fresh independent current-state join and an exclusive immutable Control
+`original-native-power-prepared.v1` write/readback. The complete bounded native
+preparation binds the original completion bytes, new Control decision and
+current-checkpoint digests, complete current KMS/commit inventory and both
+producer clocks. Root exclusively retains `LNPP:1`, then spends `LNPS:1` on the
+original credential-checked completion channel (`LNPR:1`) before acknowledgement.
+The compositor receives those exact bytes in a sealed bounded descriptor,
+compares their digest and current physical inventory, and enforces both clock
+bounds again after the Root reply, immediately before its narrow native-only
+inhibitor release. This does not invoke the old compound inhibitor/checkpoint
+cleanup operation. Root power, S17, original checkpoint and future-startup
+admission remain held.
+
+A distinct fresh Root `display.original-power-retirement.observe` report exposes
+prepared/spent permission only. Control joins it before and after the independent
+current KMS/input/source/layout/logind/S17/Root-protection inspection with native
+power actually absent. A spent permission with native power still held is not a
+verified effect. Lost replies and Control restart permit inspection, never grant
+reconstruction or redelivery. The original completion review moves forward before
+its adapter call, so a lost completion ACK cannot replay that transfer; only the
+same original live review plus fresh independently observed current state may
+continue to the later power phase. Lost initial release-spend ACKs still cannot
+recreate that original review. Native adapter boundaries now take typed component
+digests; prefixed Control digest strings cannot accidentally reach raw native
+SHA-256 decoders.
+
+Root's own power close now has another exclusive Control preparation and
+`LNFP:1` Root record. It requires the exact original live Control owner,
+transferred native lifetime and durable native-power spend, independently
+observed native power absence, complete current scanout/input and unchanged
+source/lock history. It closes only that scope's original descriptor after
+readback and both-clock revalidation, retaining kernel/checkpoint provenance.
+Fresh Root `display.original-root-retirement.observe` evidence independently
+checks logind's processing of the scope-specific close. Its nested old source
+and first-frame data remain comparison history; they are never relabelled as
+held-power or current native presentation. Control joins this separate phase
+with new native KMS/input/power, layout/source, login and S17 observations.
+
+Control can now durably record `CurrentCommitted` after that independent join.
+The post-effect canonical deterministic planner must produce a non-executable
+NoChange plan; signed persistence advances through Verified and Committed.
+Before-CAS ancestry and the exact verified material are retained under distinct
+immutable keys, followed by a separate CurrentCommitted record. Storage failure,
+false ACK and persisted-before-error at each boundary recover by observing real
+current sources, never by re-executing an effect. The old pre-CAS snapshot is
+explicit comparison ancestry; public inspections report the actual current
+signed terminal state. First completion history is retained rather than renewed.
+A missing referenced current checkpoint, contradictory history or lost Root
+continuity still refuses. This bookkeeping does not grant a permanent native
+current lifetime or retire future-startup admission.
+
+The final authenticated native committed lifetime, Root ReleasedCurrent marker,
+ordered global-admission retirement, ordinary release and lifecycle management
+remain required before source completion. Native grant, current-frame and output-history headers are included
 in the live source identity; changing them invalidates the compositor/owner
 source match. The member-specific bus allowlist
 permits the private continuation RPCs, while each requires the actual supervised
@@ -528,3 +581,31 @@ No real display mutation is supported until this exact-source native
 matrix, plus canonical/security/CodeQL and independent full-PR review,
 passes on the final head. Physical Level C/Q11 and cross-domain support
 remain separate release decisions; portable tests do not substitute.
+
+### Separately authorized committed-current lifetime
+
+Signed Control `CurrentCommitted` records the independently verified restored
+state; it does not release global admission. The original process-local review
+may continue only for the same principal, canonical plan, risk, policy,
+approval, generation and binding, with exactly the two signed transitions from
+its original Indeterminate version. Its original deadline remains in force.
+No restart or retained comparison can recreate that review.
+
+Before native qualification, Control retains and reads back a distinct
+`original-native-current-prepared.v1` decision bound to its immutable committed
+record, actual Root power-retirement ancestry and fresh complete current proof.
+Root exclusively reserves `LNCQ:1`, then spends `LNCC:1` before acknowledging
+`LNCF:1` on the original credential-checked completion socket. Strict sequence
+and purpose separation prevent reuse of initial completion or power authority.
+
+The native compositor compares the sealed complete preparation against current
+KMS/frame/input/source state both before and after the grant acknowledgment,
+within both original producer clocks. Only that actual grant and local physical
+checks can construct its opaque committed-current lifetime. Fresh observations
+separately report Root permission and native qualification; Control requires
+matching exact grant, before-effect decision and committed-record lineage plus
+the independent current source, layout, login and S17 checks. A missing reply
+allows read-only verification, not grant replay. Historical verification retains
+its first timestamp. Root/kernel and checkpoint provenance remain retained.
+This transition still does not assert final `ReleasedCurrent`, retire global
+startup admission, authorize ordinary release, or qualify production operation.

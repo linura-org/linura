@@ -53,6 +53,8 @@ class ProtectedScene
     // prepared Control completion and a fresh comparison of the first frames.
     // This ACK still retires no input, lock, power or startup fence.
     [[nodiscard]] virtual bool transferCompletion(OwnedNativeFd, std::string_view digest) = 0;
+    [[nodiscard]] virtual bool commitCurrent(OwnedNativeFd, std::string_view digest) = 0;
+    [[nodiscard]] virtual bool retirePower(OwnedNativeFd, std::string_view digest) = 0;
     [[nodiscard]] virtual std::shared_ptr<MutationProtection>
     reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
                     const Snapshot &, ClockSample captured) = 0;

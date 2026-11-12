@@ -109,6 +109,14 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     [[nodiscard]] bool heldOriginalDisplayFinalization(const NativeDisplayCorrelation &);
     // Read-only exact native phase after the spent completion attempt. It
     // cannot admit another invocation or prove post-effect durable completion.
+    [[nodiscard]] std::optional<quint32>
+    commitOriginalDisplayCurrent(const NativeDisplayFinalizationIntent &intent,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayPower(const NativeDisplayFinalizationIntent &intent,
+                               const NativeDisplayCorrelation &, const QString &digest,
+                               const QByteArray &preparation);
     [[nodiscard]] bool currentOriginalDisplayHandoff(const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,
                                                          const QString &material,

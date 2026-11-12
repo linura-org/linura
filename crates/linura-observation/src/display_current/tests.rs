@@ -63,6 +63,7 @@ fn fixture() -> (DisplayNativeCurrentFacts, ObservationEnvelope) {
         "3".repeat(64),
         true,
         true,
+        None,
     ));
     let envelope = ObservationEnvelope {
         provider: value(ProviderId::new(DISPLAY_PROVIDER)),
@@ -210,4 +211,40 @@ fn current_facts_follow_the_exact_original_handoff_boundary() {
     let mut changed = current.clone();
     changed.lineage.restoration_dispatch = "4".repeat(64);
     assert!(!changed.follows_handoff(&first));
+}
+
+#[test]
+fn power_transition_comparison_never_weakens_same_phase_or_inventory_checks() {
+    let (held, _) = fixture();
+    let mut retired = held.clone();
+    retired.power_fence_held = false;
+    assert!(!retired.reconciles(&held));
+    assert!(retired.follows_native_power_retirement(&held));
+    assert!(!held.follows_native_power_retirement(&retired));
+    assert!(!retired.follows_native_power_retirement(&retired));
+    for fault in 0..5 {
+        let mut wrong = retired.clone();
+        match fault {
+            0 => wrong.input_retired = false,
+            1 => wrong.completion_digest = "4".repeat(64),
+            2 => wrong.window.observed_boot_ms -= 1,
+            3 => {
+                wrong
+                    .outputs
+                    .values_mut()
+                    .next()
+                    .unwrap_or_else(|| unreachable!())
+                    .completed_commit -= 1;
+            }
+            _ => {
+                wrong
+                    .outputs
+                    .values_mut()
+                    .next()
+                    .unwrap_or_else(|| unreachable!())
+                    .framebuffer += 1;
+            }
+        }
+        assert!(!wrong.follows_native_power_retirement(&held));
+    }
 }

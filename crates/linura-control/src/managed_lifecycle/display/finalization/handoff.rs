@@ -1,5 +1,5 @@
-//! Independent post-effect comparison and immutable verification history.
-//! No completion or release port; the signed terminal remains Indeterminate.
+//! Purpose-bound original continuations and independent post-effect comparison.
+//! Physical effects, immutable proofs, signed completion and admission are distinct.
 use super::*;
 use crate::display_native_release_spend::verification::NativeHandoffVerified;
 use linura_core::CapabilityId;
@@ -10,13 +10,30 @@ use linura_observation::{
 };
 use linura_protocol::ObservationRequest;
 
+mod completed;
 mod completion;
+pub use completed::OriginalDisplayCurrentCommit;
 mod current;
+mod current_commit;
+pub use current_commit::{
+    AuthorizedOriginalDisplayCurrentCommit, OriginalDisplayCurrentCommitPort,
+    OriginalDisplayQualifiedCurrent,
+};
+mod power;
+mod root_power;
 pub use completion::{
     AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
     OriginalDisplayCompletionReceipt,
 };
 pub use current::{OriginalDisplayCurrentInspection, OriginalDisplayCurrentVerification};
+pub use power::{
+    AuthorizedOriginalDisplayNativePowerRetirement, OriginalDisplayNativePowerInspection,
+    OriginalDisplayNativePowerRetirementPort,
+};
+pub use root_power::{
+    AuthorizedOriginalDisplayRootPowerRetirement, OriginalDisplayRootPowerInspection,
+    OriginalDisplayRootPowerRetirementPort,
+};
 
 fn unavailable_at(stage: &'static str) -> ManagedLifecycleError {
     ManagedLifecycleError::Verification(format!("original display handoff unavailable at {stage}"))

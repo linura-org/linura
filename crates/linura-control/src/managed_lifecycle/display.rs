@@ -55,6 +55,11 @@ pub(super) enum DisplayReviewStage {
         verification: linura_transaction::ContentDigest,
         expires_at_unix_ms: u64,
     },
+    PowerDispatched,
+    CurrentCommitDispatched,
+    RootPowerDispatched {
+        preparation: linura_transaction::ContentDigest,
+    },
     CompletionDispatched {
         preparation: linura_transaction::ContentDigest,
         verification: linura_transaction::ContentDigest,
@@ -75,17 +80,21 @@ mod release;
 mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
-    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayFinalization,
+    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativePowerRetirement,
     AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
-    AuthorizedOriginalDisplayRetirementPreparation, OriginalDisplayCompletionPort,
-    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentInspection,
+    AuthorizedOriginalDisplayRetirementPreparation, AuthorizedOriginalDisplayRootPowerRetirement,
+    OriginalDisplayCompletionPort, OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
+    OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
     OriginalDisplayCurrentVerification, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayNativeHandoffInspection,
-    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativeReleaseReservationPort,
-    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQuiescenceInspection,
-    OriginalDisplayRetirementPreparationPort,
+    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativePowerInspection,
+    OriginalDisplayNativePowerRetirementPort, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQualifiedCurrent,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
+    OriginalDisplayRootPowerInspection, OriginalDisplayRootPowerRetirementPort,
 };
 pub use release::OrdinaryDisplayReleaseInspection;
 pub use restoration::{

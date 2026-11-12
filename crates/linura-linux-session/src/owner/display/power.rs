@@ -63,6 +63,43 @@ pub struct NativeDisplayPowerFence {
     owner: String,
     boot: linura_core::BootId,
     lease: Lease,
+    dispatch: linura_provider_sdk::ComponentDigest,
+}
+/// Opaque evidence of closing the one original descriptor. It is not proof
+/// that logind has processed that close; fresh absence is checked separately.
+pub struct NativeDisplayRetiredPowerFence {
+    owner: String,
+    boot: linura_core::BootId,
+    dispatch: linura_provider_sdk::ComponentDigest,
+}
+impl std::fmt::Debug for NativeDisplayRetiredPowerFence {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativeDisplayRetiredPowerFence")
+            .finish_non_exhaustive()
+    }
+}
+impl NativeDisplayPowerFence {
+    /// Consume only after the original Root's separately authorized, durable
+    /// before-effect preparation and fresh revalidation. No descriptor escapes.
+    /// An error after this close is indeterminate; this lease cannot be reopened.
+    pub fn retire(self) -> NativeDisplayRetiredPowerFence {
+        let Self {
+            owner,
+            boot,
+            dispatch,
+            lease,
+        } = self;
+        drop(lease);
+        NativeDisplayRetiredPowerFence {
+            owner,
+            boot,
+            dispatch,
+        }
+    }
+}
+fn inhibitor_reason(dispatch: &linura_provider_sdk::ComponentDigest) -> String {
+    format!("Display recovery checkpoint {}", dispatch.to_hex())
 }
 impl std::fmt::Debug for NativeDisplayPowerFence {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,7 +121,13 @@ impl NativeSessionChannel {
     }
     /// Called only by independent protection during the fixed executor's original
     /// prepared-checkpoint callback. No caller-selected reason, scope, mode, peer or retry exists.
-    pub fn retain_display_recovery_power_fence(&self) -> Result<NativeDisplayPowerFence, String> {
+    pub fn retain_display_recovery_power_fence(
+        &self,
+        dispatch: linura_provider_sdk::ComponentDigest,
+    ) -> Result<NativeDisplayPowerFence, String> {
+        if dispatch == linura_provider_sdk::ComponentDigest::from_bytes([0; 32]) {
+            return Err(unavailable());
+        }
         self.require_role(NativeSessionRole::DisplayProtection)?;
         let started = Instant::now();
         let boot = current_boot()?;
@@ -98,7 +141,7 @@ impl NativeSessionChannel {
             &(
                 "sleep:shutdown",
                 "Linura",
-                "Display configuration recovery",
+                inhibitor_reason(&dispatch),
                 "block",
             ),
             started,
@@ -114,6 +157,7 @@ impl NativeSessionChannel {
         let (fd,): (zbus::zvariant::OwnedFd,) =
             reply.body().deserialize().map_err(|_| unavailable())?;
         let mut fence = NativeDisplayPowerFence {
+            dispatch,
             owner,
             boot,
             lease: Lease {
@@ -123,6 +167,61 @@ impl NativeSessionChannel {
         };
         self.verify_display_power_fence_at(&mut fence, started)?;
         Ok(fence)
+    }
+    /// Continuity of the original retired descriptor's service and boot. This
+    /// does not claim logind has processed its close; absence has its own probe.
+    pub fn verify_retired_display_power_lifetime(
+        &self,
+        fence: &NativeDisplayRetiredPowerFence,
+    ) -> Result<(), String> {
+        let started = Instant::now();
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
+            return Err(unavailable());
+        }
+        self.display_power_conditions(&fence.owner, started)?;
+        if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
+    /// Read-only independent logind processing of the original descriptor
+    /// close. Other scopes may retain their own blockers; they are not ours to
+    /// release. A same-PID unrelated scope cannot substitute for this identity.
+    pub fn verify_retired_display_recovery_power_fence(
+        &self,
+        fence: &NativeDisplayRetiredPowerFence,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        let started = Instant::now();
+        if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
+            return Err(unavailable());
+        }
+        self.display_power_conditions(&fence.owner, started)?;
+        let reply = self.call(
+            &fence.owner,
+            MANAGER,
+            INTERFACE,
+            "ListInhibitors",
+            &(),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != fence.owner)
+            || reply.body().signature().to_string() != "a(ssssuu)"
+            || reply.body().len() > 32 * 4096
+        {
+            return Err(unavailable());
+        }
+        let rows: Vec<(String, String, String, String, u32, u32)> =
+            reply.body().deserialize().map_err(|_| unavailable())?;
+        retired_inhibitor_absent(&rows, &fence.dispatch)?;
+        if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
+            return Err(unavailable());
+        }
+        self.display_power_conditions(&fence.owner, started)
     }
     fn verify_display_power_fence_at(
         &self,
@@ -154,6 +253,28 @@ impl NativeSessionChannel {
     ) -> Result<(), String> {
         self.verify_display_power_fence_at(fence, Instant::now())
     }
+}
+
+fn retired_inhibitor_absent(
+    rows: &[(String, String, String, String, u32, u32)],
+    dispatch: &linura_provider_sdk::ComponentDigest,
+) -> Result<(), String> {
+    if rows.len() > 32
+        || rows.iter().any(|(what, who, reason, mode, _, _)| {
+            [what, who, reason, mode]
+                .iter()
+                .any(|text| text.len() > 4096)
+        })
+    {
+        return Err(unavailable());
+    }
+    let reason = inhibitor_reason(dispatch);
+    // Any remaining exact scope, even with another UID/PID or malformed flags,
+    // is ambiguity. Do not remove other entries or infer absence from counts.
+    if rows.iter().any(|(_, _, why, _, _, _)| why == &reason) {
+        return Err(unavailable());
+    }
+    Ok(())
 }
 
 fn not_preparing(

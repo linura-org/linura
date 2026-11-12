@@ -208,9 +208,14 @@ class S17DeploymentTests(unittest.TestCase):
                     "send_member": method,
                 }
                 for method in (
+                    "ReserveCurrentCommit",
+                    "RetireRootPower",
+                    "ReadRootPower",
                     "ReadOriginal",
                     "ReadFinalization",
                     "ReadCompletion",
+                    "ReservePowerRetirement",
+                    "ReadPowerRetirement",
                     "PrepareRetirement",
                     "RetireHeld",
                     "ReserveNativeRelease",

@@ -702,6 +702,7 @@ impl CurrentFixture {
             root.lineage().record.clone(),
             true,
             true,
+            None,
         ));
         let mut observation = base.observation.clone();
         observation.capability = value(CapabilityId::new(
@@ -777,6 +778,7 @@ impl CurrentFixture {
             self.frames.completion_digest().into(),
             true,
             true,
+            None,
         ));
         self.observation.sequence += 1;
         self.observation.observed_at_unix_ms = wall;
@@ -827,6 +829,7 @@ fn current_checkpoint_uses_the_tighter_native_boot_clock_without_renewal() {
         fixture.frames.completion_digest().into(),
         true,
         true,
+        None,
     ));
     let first = value(fixture.capture(2001));
     assert_eq!(first.expiry(), 2050);
@@ -925,6 +928,7 @@ fn current_checkpoint_rejects_foreign_binding_rollback_and_same_commit_buffer_ch
                     changed.frames.completion_digest().into(),
                     true,
                     true,
+                    None,
                 ));
             }
             _ => {

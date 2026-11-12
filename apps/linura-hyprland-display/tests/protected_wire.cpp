@@ -117,6 +117,14 @@ class Scene final : public ProtectedScene
         ++counts.nativeSpends;
         return false; // The fixture cannot authenticate or spend a native Root grant.
     }
+    bool commitCurrent(OwnedNativeFd, std::string_view) override
+    {
+        return false;
+    } // No real Root grant in this fixture.
+    bool retirePower(OwnedNativeFd, std::string_view) override
+    {
+        return false;
+    }
     bool transferCompletion(OwnedNativeFd, std::string_view) override
     {
         ++counts.completionTransfers;

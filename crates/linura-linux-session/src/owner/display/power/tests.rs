@@ -156,6 +156,7 @@ fn preparation_missing_unknown_and_wrong_types_fail_closed() {
 fn protection_debug_never_exports_native_owner_boot_or_descriptor() {
     let pipe = Pipe::new("debug");
     let fence = NativeDisplayPowerFence {
+        dispatch: linura_provider_sdk::ComponentDigest::from_bytes([1; 32]),
         owner: ":1.42".into(),
         boot: value(linura_core::BootId::new(
             "11111111-1111-4111-8111-111111111111",
@@ -166,4 +167,51 @@ fn protection_debug_never_exports_native_owner_boot_or_descriptor() {
         },
     };
     assert_eq!(format!("{fence:?}"), "NativeDisplayPowerFence { .. }");
+}
+
+#[test]
+fn retired_power_absence_is_scope_bound_and_never_releases_another_owners_inhibitor() {
+    let dispatch = linura_provider_sdk::ComponentDigest::from_bytes([1; 32]);
+    let other = linura_provider_sdk::ComponentDigest::from_bytes([2; 32]);
+    let row = (
+        "sleep:shutdown".into(),
+        "Linura".into(),
+        inhibitor_reason(&dispatch),
+        "block".into(),
+        0,
+        17,
+    );
+    assert!(retired_inhibitor_absent(&[], &dispatch).is_ok());
+    assert!(retired_inhibitor_absent(std::slice::from_ref(&row), &dispatch).is_err());
+    assert!(retired_inhibitor_absent(std::slice::from_ref(&row), &other).is_ok());
+    let mut foreign_name = row.clone();
+    foreign_name.1 = "another caller".into();
+    assert!(retired_inhibitor_absent(&[foreign_name], &dispatch).is_err());
+    let mut foreign_pid = row.clone();
+    foreign_pid.5 += 1;
+    assert!(retired_inhibitor_absent(&[foreign_pid], &dispatch).is_err());
+    assert!(retired_inhibitor_absent(&vec![row.clone(); 33], &other).is_err());
+    let mut oversized = row;
+    oversized.0 = "a".repeat(4097);
+    assert!(retired_inhibitor_absent(&[oversized], &other).is_err());
+    let pipe = Pipe::new("retired");
+    let original = NativeDisplayPowerFence {
+        dispatch,
+        owner: ":1.42".into(),
+        boot: value(linura_core::BootId::new(
+            "11111111-1111-4111-8111-111111111111",
+        )),
+        lease: Lease {
+            fd: value(rustix::io::fcntl_dupfd_cloexec(&pipe.read, 3)),
+            valid: true,
+        },
+    };
+    let descriptor = rustix::fd::AsRawFd::as_raw_fd(&original.lease.fd);
+    let retired = original.retire();
+    assert_eq!(retired.dispatch, dispatch);
+    assert!(std::fs::read_link(format!("/proc/self/fd/{descriptor}")).is_err());
+    assert_eq!(
+        format!("{retired:?}"),
+        "NativeDisplayRetiredPowerFence { .. }"
+    );
 }

@@ -22,10 +22,10 @@ impl NativeSessionChannel {
         terminal_transaction: &str,
         terminal_dispatch: &str,
         control_version: u64,
-        control_binding: &str,
-        retirement_observation: &str,
-        preparation_digest: &str,
-        verification_digest: &str,
+        control_binding: ComponentDigest,
+        retirement_observation: ComponentDigest,
+        preparation_digest: ComponentDigest,
+        verification_digest: ComponentDigest,
         frames: &DisplayNativeHandoffFacts,
         expires_at_unix_ms: u64,
     ) -> Result<(), String> {
@@ -34,17 +34,10 @@ impl NativeSessionChannel {
             .map_err(|_| unavailable())?;
         let scope = intended.recovery_scope().map_err(|_| unavailable())?;
         let key = scope.resource_id().map_err(|_| unavailable())?;
-        let digest = |raw: &str| {
-            let value = ComponentDigest::parse_hex(raw).map_err(|_| unavailable())?;
-            if value.to_hex() != raw || value == ComponentDigest::from_bytes([0; 32]) {
-                return Err(unavailable());
-            }
-            Ok(value)
-        };
-        let binding = digest(control_binding)?;
-        let observation = digest(retirement_observation)?;
-        let preparation = digest(preparation_digest)?;
-        let verification = digest(verification_digest)?;
+        let binding = control_binding;
+        let observation = retirement_observation;
+        let preparation = preparation_digest;
+        let verification = verification_digest;
         let window = frames.window();
         let current = || {
             let wall = unix_ms()?;

@@ -193,7 +193,15 @@ impl DisplayOriginalProtectionFacts {
         {
             return Err(DisplayEvidenceError::Freshness);
         }
-        let attrs = &observation.attributes;
+        Self::from_comparison_attributes(&observation.attributes, scope)
+    }
+
+    // Comparison-only parser for a separately authenticated, phase-specific
+    // Root observation. It cannot manufacture a native held-power envelope.
+    pub(crate) fn from_comparison_attributes(
+        attrs: &BTreeMap<String, ObservedValue>,
+        scope: &DisplayRecoveryScope,
+    ) -> Result<Self, DisplayEvidenceError> {
         if attrs.len() > 106
             || number(attrs, "original_protection_schema")? != 2
             || text(attrs, "original_dispatch")? != scope.original_dispatch()

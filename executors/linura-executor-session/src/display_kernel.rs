@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use linura_linux_session::{
     NativeDisplayKernelSubscription, NativeDisplayKernelWitness, NativeDisplayPowerFence,
-    NativeDisplayRecoveryCheckpoint, NativeSessionChannel,
+    NativeDisplayRecoveryCheckpoint, NativeDisplayRetiredPowerFence, NativeSessionChannel,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::{Digest, Sha256};
@@ -19,7 +19,16 @@ struct Protection {
     dispatch: ComponentDigest,
     checkpoint_digest: ComponentDigest,
     kernel: NativeDisplayKernelWitness,
-    power: NativeDisplayPowerFence,
+    power: PowerWitness,
+}
+#[derive(Debug)]
+enum PowerWitness {
+    Held(NativeDisplayPowerFence),
+    Retired {
+        preparation: ComponentDigest,
+        original: NativeDisplayRetiredPowerFence,
+    },
+    Failed,
 }
 impl Witnesses {
     /// Ordinary startup must consider retained in-memory history even when a
@@ -54,7 +63,7 @@ impl Witnesses {
                 )?;
                 subscription.bind(&outputs)?
             },
-            power: channel.retain_display_recovery_power_fence()?,
+            power: PowerWitness::Held(channel.retain_display_recovery_power_fence(*dispatch)?),
         };
         super::display_checkpoint::reserve_stored(dispatch, payload)?;
         // Retain even failed post-sync protection alongside its durable record.
@@ -79,6 +88,9 @@ impl Witnesses {
         channel: &NativeSessionChannel,
     ) -> Result<Vec<u8>, String> {
         self.with_witness(dispatch, |protection| {
+            if !matches!(protection.power, PowerWitness::Held(_)) {
+                return Err("original power is no longer in the held phase".into());
+            }
             let result = (|| {
                 protection.verify(channel)?;
                 let payload = super::display_checkpoint::read_original(
@@ -92,6 +104,70 @@ impl Witnesses {
                 protection.valid = false;
             }
             result
+        })
+    }
+    /// Called under original Root admission only after the exact durable
+    /// exclusive preparation. This retains checkpoint/kernel provenance.
+    pub(super) fn retire_power(
+        &self,
+        dispatch: &ComponentDigest,
+        preparation: ComponentDigest,
+        channel: &NativeSessionChannel,
+        require_current: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        self.with_witness(dispatch, |protection| {
+            if preparation == ComponentDigest::from_bytes([0; 32]) {
+                return Err("root power preparation missing".into());
+            }
+            protection.verify(channel)?;
+            require_current()?; // both ORIGINAL effect clocks, after all I/O
+            let PowerWitness::Held(original) =
+                std::mem::replace(&mut protection.power, PowerWitness::Failed)
+            else {
+                return Err("root power already consumed".into());
+            };
+            protection.power = PowerWitness::Retired {
+                preparation,
+                original: original.retire(),
+            };
+            Ok(())
+        })
+    }
+    pub(super) fn read_retired_original(
+        &self,
+        dispatch: &ComponentDigest,
+        preparation: &ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<Vec<u8>, String> {
+        self.with_witness(dispatch, |protection| {
+            let result = (|| {
+                protection.verify_retired(preparation, channel)?;
+                let payload = super::display_checkpoint::read_original(
+                    dispatch,
+                    &protection.checkpoint_digest,
+                )?;
+                protection.verify_retired(preparation, channel)?;
+                Ok(payload)
+            })();
+            if result.is_err() {
+                protection.valid = false;
+            }
+            result
+        })
+    }
+    pub(super) fn verify_retired_power_absent(
+        &self,
+        dispatch: &ComponentDigest,
+        preparation: &ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<(), String> {
+        self.with_witness(dispatch, |protection| {
+            protection.verify_retired(preparation, channel)?;
+            let PowerWitness::Retired { original, .. } = &protection.power else {
+                return Err("original power not retired".into());
+            };
+            channel.verify_retired_display_recovery_power_fence(original)?;
+            protection.verify_retired(preparation, channel)
         })
     }
     fn with_witness<T>(
@@ -117,14 +193,52 @@ fn history_empty<T>(history: &Mutex<BTreeMap<String, T>>) -> Result<bool, String
 
 impl Protection {
     fn verify(&mut self, channel: &NativeSessionChannel) -> Result<(), String> {
+        if !matches!(self.power, PowerWitness::Held(_)) {
+            return Err("original power is no longer in the held phase".into());
+        }
         let result = (|| {
             if !self.valid {
                 return Err("original display protection was lost; no continuation".into());
             }
             super::display_checkpoint::validate(&self.dispatch, &self.checkpoint_digest)?;
             self.kernel.verify()?;
-            channel.verify_display_recovery_power_fence(&mut self.power)?;
+            let PowerWitness::Held(original) = &mut self.power else {
+                return Err("original power unavailable".into());
+            };
+            channel.verify_display_recovery_power_fence(original)?;
             // Bus probes consume time while kernel changes can queue independently.
+            self.kernel.verify()
+        })();
+        if result.is_err() {
+            self.valid = false;
+        }
+        result
+    }
+    fn verify_retired(
+        &mut self,
+        preparation: &ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<(), String> {
+        let PowerWitness::Retired {
+            preparation: expected,
+            ..
+        } = &self.power
+        else {
+            return Err("root power retirement unavailable".into());
+        };
+        if preparation != expected {
+            return Err("root power retirement has another preparation".into());
+        }
+        let result = (|| {
+            if !self.valid {
+                return Err("original kernel witness lost".into());
+            }
+            super::display_checkpoint::validate(&self.dispatch, &self.checkpoint_digest)?;
+            self.kernel.verify()?;
+            let PowerWitness::Retired { original, .. } = &self.power else {
+                return Err("root power retirement unavailable".into());
+            };
+            channel.verify_retired_display_power_lifetime(original)?;
             self.kernel.verify()
         })();
         if result.is_err() {

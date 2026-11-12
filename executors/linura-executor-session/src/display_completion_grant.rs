@@ -11,6 +11,8 @@ use super::display_finalization_grant::Transferred;
 
 const RESERVED: u8 = 1;
 const TRANSFER_SPENT: u8 = 2;
+const POWER_SPENT: u8 = 3;
+const CURRENT_SPENT: u8 = 4;
 const FRAME_BYTES: usize = 48;
 const BUDGET: Duration = Duration::from_secs(1);
 
@@ -28,7 +30,16 @@ impl ChannelState {
         self.0.load(Ordering::Acquire) == RESERVED
     }
     pub(super) fn transferred(&self) -> bool {
-        self.0.load(Ordering::Acquire) == TRANSFER_SPENT
+        matches!(
+            self.0.load(Ordering::Acquire),
+            TRANSFER_SPENT | POWER_SPENT | CURRENT_SPENT
+        )
+    }
+    pub(super) fn power_spent(&self) -> bool {
+        matches!(self.0.load(Ordering::Acquire), POWER_SPENT | CURRENT_SPENT)
+    }
+    pub(super) fn current_spent(&self) -> bool {
+        self.0.load(Ordering::Acquire) == CURRENT_SPENT
     }
     fn spend(&self) -> zbus::fdo::Result<()> {
         self.0
@@ -57,6 +68,7 @@ impl Drop for Lifetime {
 /// Every fragment is authenticated against the original admitted native PID,
 /// start identity and immutable executable. Idle continuity cannot renew the
 /// original first-effect window. Partial messages have one absolute budget.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn serve(
     stream: &mut UnixStream,
     digest: &[u8; 32],
@@ -64,6 +76,8 @@ pub(super) fn serve(
     mut authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     mut verify: impl FnMut(bool) -> zbus::fdo::Result<()>,
     mut spend_and_transfer: impl FnMut() -> zbus::fdo::Result<Transferred>,
+    mut retire_power: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+    mut commit_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     stream.set_nonblocking(false).map_err(|_| unavailable())?;
     let mut sequence = 1_u64;
@@ -114,7 +128,13 @@ pub(super) fn serve(
                 Err(_) => return Err(unavailable()),
             }
         }
-        let purpose = if sequence == 1 {
+        let power = sequence > 1 && &bytes[..8] == b"LNPR:1\n\0";
+        let current = sequence > 1 && &bytes[..8] == b"LNCF:1\n\0";
+        let purpose = if current {
+            b"LNCF:1\n\0"
+        } else if power {
+            b"LNPR:1\n\0"
+        } else if sequence == 1 {
             b"LNCH:1\n\0"
         } else {
             b"LNCV:1\n\0"
@@ -122,7 +142,7 @@ pub(super) fn serve(
         let end = deadline.ok_or_else(unavailable)?;
         if bytes[..8] != purpose[..]
             || bytes[8..16] != sequence.to_be_bytes()
-            || bytes[16..] != digest[..]
+            || (!power && !current && bytes[16..] != digest[..])
             || Instant::now() >= end
         {
             return Err(unavailable());
@@ -140,6 +160,38 @@ pub(super) fn serve(
             lifetime.0.spend()?;
         } else if !lifetime.0.transferred() {
             return Err(unavailable());
+        }
+        if power {
+            if lifetime.0.power_spent() {
+                return Err(unavailable());
+            }
+            retire_power(bytes[16..].try_into().map_err(|_| unavailable())?)?;
+            lifetime
+                .0
+                .0
+                .compare_exchange(
+                    TRANSFER_SPENT,
+                    POWER_SPENT,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .map_err(|_| unavailable())?;
+        }
+        if current {
+            if !lifetime.0.power_spent() || lifetime.0.current_spent() {
+                return Err(unavailable());
+            }
+            commit_current(bytes[16..].try_into().map_err(|_| unavailable())?)?;
+            lifetime
+                .0
+                .0
+                .compare_exchange(
+                    POWER_SPENT,
+                    CURRENT_SPENT,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .map_err(|_| unavailable())?;
         }
         let remaining = end
             .checked_duration_since(Instant::now())
@@ -234,7 +286,9 @@ mod tests {
                     || {
                         assert_eq!(worker_spends.fetch_add(1, Ordering::AcqRel), 0);
                         retained.transfer()
-                    }
+                    },
+                    |_| Err(unavailable()),
+                    |_| Err(unavailable()),
                 )
                 .is_err()
             );
@@ -289,7 +343,9 @@ mod tests {
                             }
                         },
                         |_| unreachable!("invalid frame cannot verify"),
-                        || unreachable!("invalid frame cannot spend")
+                        || unreachable!("invalid frame cannot spend"),
+                        |_| unreachable!("invalid frame cannot retire power"),
+                        |_| unreachable!("invalid frame cannot commit current"),
                     )
                     .is_err()
                 );
@@ -330,6 +386,8 @@ mod tests {
                             worker_spends.fetch_add(1, Ordering::AcqRel);
                             Err(unavailable())
                         },
+                        |_| Err(unavailable()),
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -343,6 +401,152 @@ mod tests {
             drop(old_native);
             value(old_worker.join());
             assert!(old.transfer().is_err());
+        }
+    }
+    #[test]
+    fn power_permission_is_a_separate_durable_one_use_spend_on_the_original_lifetime() {
+        // A failed publication, foreign digest, reused sequence and replay all
+        // close the lifetime without a power ACK or another transfer.
+        for fault in 0..5 {
+            let (old, old_native, old_worker) = quiesced();
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let retained = old.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let spent = calls.clone();
+            let worker = std::thread::spawn(move || {
+                assert!(
+                    serve(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        identity,
+                        |_| Ok(()),
+                        || retained.transfer(),
+                        |digest| {
+                            spent.fetch_add(1, Ordering::AcqRel);
+                            if fault == 1 || digest != &[8; 32] {
+                                return Err(unavailable());
+                            }
+                            Ok(())
+                        },
+                        |_| Err(unavailable()),
+                    )
+                    .is_err()
+                );
+            });
+            let mut response = [0; FRAME_BYTES];
+            value(native.write_all(&frame(b"LNCH:1\n\0", 1, [7; 32])));
+            value(native.read_exact(&mut response));
+            drop(old_native);
+            value(old_worker.join());
+            let request = frame(
+                b"LNPR:1\n\0",
+                if fault == 3 { 1 } else { 2 },
+                if fault == 2 { [9; 32] } else { [8; 32] },
+            );
+            value(native.write_all(&request));
+            if matches!(fault, 1..=3) {
+                assert!(native.read_exact(&mut response).is_err());
+            } else {
+                value(native.read_exact(&mut response));
+                assert_eq!(response, request);
+                assert!(state.power_spent());
+                // Ordinary continuity still uses the ORIGINAL completion digest.
+                let probe = frame(b"LNCV:1\n\0", 3, [7; 32]);
+                value(native.write_all(&probe));
+                value(native.read_exact(&mut response));
+                assert_eq!(response, probe);
+                value(native.write_all(&frame(
+                    b"LNPR:1\n\0",
+                    if fault == 4 { 2 } else { 4 },
+                    [8; 32],
+                )));
+                assert!(native.read_exact(&mut response).is_err());
+            }
+            value(worker.join());
+            assert!(!state.transferred());
+            assert!(!old.transferred());
+            assert_eq!(calls.load(Ordering::Acquire), usize::from(fault != 3));
+        }
+    }
+    #[test]
+    fn committed_current_requires_original_power_phase_and_durable_distinct_spend() {
+        // Actual credential-bearing socket: failure, out-of-order purpose,
+        // foreign digest, and replay must never acknowledge permanent lifetime.
+        for fault in 0..5 {
+            let (old, old_native, old_worker) = quiesced();
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let retained = old.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let spent = calls.clone();
+            let worker = std::thread::spawn(move || {
+                assert!(
+                    serve(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        identity,
+                        |_| Ok(()),
+                        || retained.transfer(),
+                        |digest| if digest == &[8; 32] {
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        },
+                        |digest| {
+                            spent.fetch_add(1, Ordering::AcqRel);
+                            if fault == 1 || digest != &[9; 32] {
+                                Err(unavailable())
+                            } else {
+                                Ok(())
+                            }
+                        },
+                    )
+                    .is_err()
+                );
+            });
+            let mut response = [0; FRAME_BYTES];
+            value(native.write_all(&frame(b"LNCH:1\n\0", 1, [7; 32])));
+            value(native.read_exact(&mut response));
+            drop(old_native);
+            value(old_worker.join());
+            if fault != 2 {
+                value(native.write_all(&frame(b"LNPR:1\n\0", 2, [8; 32])));
+                value(native.read_exact(&mut response));
+                assert!(state.power_spent());
+                assert!(!state.current_spent());
+            }
+            let request = frame(
+                b"LNCF:1\n\0",
+                if fault == 2 { 2 } else { 3 },
+                if fault == 3 { [6; 32] } else { [9; 32] },
+            );
+            value(native.write_all(&request));
+            if matches!(fault, 1..=3) {
+                assert!(native.read_exact(&mut response).is_err());
+            } else {
+                value(native.read_exact(&mut response));
+                assert_eq!(response, request);
+                assert!(state.current_spent());
+                let probe = frame(b"LNCV:1\n\0", 4, [7; 32]);
+                value(native.write_all(&probe));
+                value(native.read_exact(&mut response));
+                assert_eq!(response, probe);
+                value(native.write_all(&frame(
+                    b"LNCF:1\n\0",
+                    if fault == 4 { 3 } else { 5 },
+                    [9; 32],
+                )));
+                assert!(native.read_exact(&mut response).is_err());
+            }
+            value(worker.join());
+            assert!(!state.current_spent());
+            assert!(!old.transferred());
+            assert_eq!(calls.load(Ordering::Acquire), usize::from(fault != 2));
         }
     }
 }

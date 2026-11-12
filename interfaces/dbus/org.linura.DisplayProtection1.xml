@@ -23,6 +23,33 @@
       <arg name="phase" type="u" direction="out"/>
       <arg name="terminal" type="ay" direction="out"/>
     </method>
+    <method name="ReserveCurrentCommit">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="RetireRootPower">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadRootPower">
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="preimage" type="ay" direction="out"/>
+      <arg name="current_commit_record" type="ay" direction="out"/>
+      <arg name="retired" type="b" direction="out"/>
+    </method>
+    <method name="ReservePowerRetirement">
+      <!-- Exact original Control only. LNPP before a separately authenticated
+           LNPR spend. This retires no Root protection or startup barrier. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadPowerRetirement">
+      <!-- Prepared (1) or grant-spent (2), never physical retirement proof. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <method name="ReadCompletion">
       <!-- Live original Root only. Prepared (1) or transferred lifetime (2)
            comparison; neither phase proves input/power retirement or

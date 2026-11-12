@@ -155,6 +155,221 @@ impl NativeSessionChannel {
         Ok(observation)
     }
 
+    pub(crate) fn observe_original_display_power_retirement(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::DisplayOriginalPowerRetirementFacts;
+        use sha2::Digest;
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "original completion lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadPowerRetirement",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayu"
+            || reply.body().len() > crate::MAX_NATIVE_DISPLAY_POWER_RETIREMENT + 32
+        {
+            return Err(invalid());
+        }
+        let (bytes, phase): (Vec<u8>, u32) = reply.body().deserialize().map_err(|_| invalid())?;
+        if !matches!(phase, 1 | 2) {
+            return Err(invalid());
+        }
+        let record = crate::NativeDisplayPowerRetirementPreparation::decode(&bytes)?;
+        let facts = DisplayOriginalPowerRetirementFacts::new(
+            scope.clone(),
+            ComponentDigest::from_bytes(sha2::Sha256::digest(&bytes).into()).to_hex(),
+            ComponentDigest::from_bytes(
+                sha2::Sha256::digest(record.parent().canonical_bytes()).into(),
+            )
+            .to_hex(),
+            record.preparation_digest().to_hex(),
+            record.checkpoint_digest().to_hex(),
+            phase == 2,
+        )
+        .map_err(|_| invalid())?;
+        if record.parent().frames().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayOriginalPowerRetirementFacts::from_envelope(&observation, scope, now)
+            .map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
+    pub(crate) fn observe_original_display_root_retirement(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::DisplayOriginalRootRetirementFacts;
+        use sha2::Digest;
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "original completion lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadRootPower",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayayayb"
+            || reply.body().len()
+                > crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
+                    + crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT
+                    + 384 * 1024
+                    + 160
+        {
+            return Err(invalid());
+        }
+        let (bytes, preimage, current_grant, retired): (Vec<u8>, Vec<u8>, Vec<u8>, bool) =
+            reply.body().deserialize().map_err(|_| invalid())?;
+        if !retired {
+            return Err(invalid());
+        }
+        let record = crate::NativeDisplayRootRetirementPreparation::decode(&bytes)?;
+        let completion = record.parent().parent();
+        let facts = DisplayOriginalRootRetirementFacts::new(
+            linura_observation::DisplayRootRetirementLineage {
+                record: ComponentDigest::from_bytes(
+                    sha2::Sha256::digest(record.canonical_bytes()).into(),
+                )
+                .to_hex(),
+                preparation: record.preparation_digest().to_hex(),
+                verification: record.verification_digest().to_hex(),
+                power_record: ComponentDigest::from_bytes(
+                    sha2::Sha256::digest(record.parent().canonical_bytes()).into(),
+                )
+                .to_hex(),
+            },
+            crate::NativeDisplayRecoveryCheckpoint::original_protection_facts(&preimage, scope)?,
+            linura_observation::DisplayOriginalCompletionFacts::new(
+                linura_observation::DisplayCompletionLineage {
+                    record: ComponentDigest::from_bytes(
+                        sha2::Sha256::digest(completion.canonical_bytes()).into(),
+                    )
+                    .to_hex(),
+                    preparation: completion.preparation_digest().to_hex(),
+                    verification: completion.verification_digest().to_hex(),
+                    material: completion.parent().terminal().material().into(),
+                },
+                completion.frames().clone(),
+            )
+            .map_err(|_| invalid())?,
+            if current_grant.is_empty() {
+                None
+            } else {
+                let grant = crate::NativeDisplayCurrentCommitPreparation::decode(&current_grant)?;
+                if grant.parent().canonical_bytes() != bytes {
+                    return Err(invalid());
+                }
+                Some(linura_observation::DisplayCurrentGrantLineage {
+                    record: ComponentDigest::from_bytes(
+                        sha2::Sha256::digest(&current_grant).into(),
+                    )
+                    .to_hex(),
+                    preparation: grant.preparation_digest().to_hex(),
+                    committed_record: grant.committed_record_digest().to_hex(),
+                })
+            },
+        )
+        .map_err(|_| invalid())?;
+        if record.frames().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayOriginalRootRetirementFacts::from_envelope(&observation, scope, now)
+            .map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_original_display_finalization(
         &self,
         scope: &linura_core::DisplayRecoveryScope,
@@ -467,8 +682,8 @@ impl NativeSessionChannel {
         terminal_transaction: &str,
         terminal_dispatch: &str,
         control_state_version: u64,
-        control_binding: &str,
-        control_observation: &str,
+        control_binding: ComponentDigest,
+        control_observation: ComponentDigest,
         expires_at_unix_ms: u64,
     ) -> Result<(), String> {
         self.require_role(NativeSessionRole::Control)?;
@@ -480,10 +695,11 @@ impl NativeSessionChannel {
             .map_err(|_| "Root retirement terminal material is invalid")?;
         let scope = original.recovery_scope().map_err(|e| e.to_string())?;
         let key = scope.resource_id().map_err(|e| e.to_string())?;
-        let binding = ComponentDigest::parse_hex(control_binding).map_err(|e| e.to_string())?;
-        let observation =
-            ComponentDigest::parse_hex(control_observation).map_err(|e| e.to_string())?;
-        if binding.to_hex() != control_binding || observation.to_hex() != control_observation {
+        let binding = control_binding;
+        let observation = control_observation;
+        if binding == ComponentDigest::from_bytes([0; 32])
+            || observation == ComponentDigest::from_bytes([0; 32])
+        {
             return Err("Root retirement Control anchor is not canonical".into());
         }
         let started = Instant::now();
@@ -598,8 +814,8 @@ impl NativeSessionChannel {
         terminal_transaction: &str,
         terminal_dispatch: &str,
         control_state_version: u64,
-        control_binding: &str,
-        control_observation: &str,
+        control_binding: ComponentDigest,
+        control_observation: ComponentDigest,
         expires_at_unix_ms: u64,
     ) -> Result<(), String> {
         self.require_role(NativeSessionRole::Control)?;
@@ -613,11 +829,11 @@ impl NativeSessionChannel {
             .recovery_scope()
             .map_err(|error| error.to_string())?;
         let key = scope.resource_id().map_err(|error| error.to_string())?;
-        let binding =
-            ComponentDigest::parse_hex(control_binding).map_err(|error| error.to_string())?;
-        let observation =
-            ComponentDigest::parse_hex(control_observation).map_err(|error| error.to_string())?;
-        if binding.to_hex() != control_binding || observation.to_hex() != control_observation {
+        let binding = control_binding;
+        let observation = control_observation;
+        if binding == ComponentDigest::from_bytes([0; 32])
+            || observation == ComponentDigest::from_bytes([0; 32])
+        {
             return Err("native release Control anchor is not canonical".into());
         }
         let started = Instant::now();
@@ -727,8 +943,8 @@ impl NativeSessionChannel {
         terminal_transaction: &str,
         terminal_dispatch: &str,
         control_state_version: u64,
-        control_binding: &str,
-        control_observation: &str,
+        control_binding: ComponentDigest,
+        control_observation: ComponentDigest,
         expires_at_unix_ms: u64,
     ) -> Result<(), String> {
         self.require_role(NativeSessionRole::Control)?;
@@ -742,13 +958,11 @@ impl NativeSessionChannel {
             .recovery_scope()
             .map_err(|error| error.to_string())?;
         let key = scope.resource_id().map_err(|error| error.to_string())?;
-        let binding =
-            ComponentDigest::parse_hex(control_binding).map_err(|error| error.to_string())?;
-        let observation =
-            ComponentDigest::parse_hex(control_observation).map_err(|error| error.to_string())?;
+        let binding = control_binding;
+        let observation = control_observation;
         if control_state_version == 0
-            || binding.to_hex() != control_binding
-            || observation.to_hex() != control_observation
+            || binding == ComponentDigest::from_bytes([0; 32])
+            || observation == ComponentDigest::from_bytes([0; 32])
         {
             return Err("native Root release spend Control anchor noncanonical".into());
         }

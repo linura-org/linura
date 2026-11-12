@@ -3,6 +3,8 @@
 #include "original_finalization_grant.h"
 #include "original_native_release_grant.h"
 #include "original_completion_grant.h"
+#include "original_power_retirement.h"
+#include "original_current_commit.h"
 #include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
@@ -281,6 +283,128 @@ void terminalComparison(const std::string &material)
             changed[index] = bad;
             assert(!match(framed(changed)));
         }
+
+        // Native power uses the full separately prepared comparison, including
+        // the tighter original BOOTTIME bound, on this same Root lifetime.
+        auto current = actual;
+        current.observedUnixMs = 1100;
+        current.observedBootMs = 200;
+        current.completed[0].spendHighWater = 9;
+        current.completed[0].completedCommit = 10;
+        std::vector<std::string> powerFields{"linura.native-display.power-retirement.v1",
+                                             original,
+                                             std::string(64, '3'),
+                                             std::string(64, '4'),
+                                             "1149",
+                                             "1090",
+                                             "190",
+                                             "1290",
+                                             "250",
+                                             "1",
+                                             "2",
+                                             "3",
+                                             "1",
+                                             "4",
+                                             "5",
+                                             "7",
+                                             "6",
+                                             "9",
+                                             "10"};
+        const auto fingerprint = nativeSha256(original);
+        assert(fingerprint);
+        const auto powerMatches = [&](std::string_view bytes, ClockSample now = {1100, 200}) {
+            return OriginalPowerRetirementCodec::matches(bytes, *fingerprint, current, now);
+        };
+        const auto powerBytes = framed(powerFields);
+        assert(powerMatches(powerBytes));
+        assert(!powerMatches(powerBytes, {1149, 249}));
+        assert(!powerMatches(powerBytes, {1148, 250}));
+        assert(!powerMatches(powerBytes, {1089, 200}));
+        assert(!powerMatches(powerBytes, {1100, 189}));
+        for (std::size_t size = 0; size < powerBytes.size(); ++size)
+            assert(!powerMatches(std::string_view(powerBytes).substr(0, size)));
+        assert(!powerMatches(powerBytes + 'x'));
+        for (const auto &[index, bad] :
+             std::vector<std::pair<std::size_t, std::string>>{{0, "wrong-purpose"},
+                                                              {1, original + 'x'},
+                                                              {2, std::string(64, '0')},
+                                                              {3, std::string(64, '3')},
+                                                              {4, "1151"},
+                                                              {5, "01090"},
+                                                              {9, "0"},
+                                                              {10, "9"},
+                                                              {12, "0"},
+                                                              {16, "4294967296"},
+                                                              {17, "8"},
+                                                              {18, "11"}}) {
+            auto changed = powerFields;
+            changed[index] = bad;
+            assert(!powerMatches(framed(changed)));
+        }
+        // Full committed-current comparison remains powerless without LNCF.
+        auto rootFields = powerFields;
+        rootFields[0] = "linura.native-display.root-retirement.v1";
+        rootFields[1] = powerBytes;
+        rootFields[2] = std::string(64, '5');
+        rootFields[3] = std::string(64, '6');
+        std::vector<std::string> committedFields{"linura.native-display.current-commit.v1",
+                                                 framed(rootFields),
+                                                 std::string(64, '9'),
+                                                 std::string(64, 'a'),
+                                                 "0",
+                                                 "9",
+                                                 controlBinding,
+                                                 "1149",
+                                                 "1090",
+                                                 "190",
+                                                 "1290",
+                                                 "250",
+                                                 "1",
+                                                 "2",
+                                                 "3",
+                                                 "1",
+                                                 "4",
+                                                 "5",
+                                                 "7",
+                                                 "6",
+                                                 "9",
+                                                 "10"};
+        const auto committedBytes = framed(committedFields);
+        const auto committedMatches = [&](std::string_view bytes, ClockSample now = {1100, 200}) {
+            return OriginalCurrentCommitCodec::matches(bytes, *fingerprint, current, now);
+        };
+        assert(committedMatches(committedBytes));
+        assert(!committedMatches(committedBytes, {1149, 249}));
+        assert(!committedMatches(committedBytes, {1148, 250}));
+        for (std::size_t size = 0; size < committedBytes.size(); ++size)
+            assert(!committedMatches(std::string_view(committedBytes).substr(0, size)));
+        assert(!committedMatches(committedBytes + 'x'));
+        for (const auto &[index, bad] :
+             std::vector<std::pair<std::size_t, std::string>>{{0, "wrong-purpose"},
+                                                              {1, framed(powerFields)},
+                                                              {2, std::string(64, '0')},
+                                                              {3, std::string(64, '9')},
+                                                              {4, "1"},
+                                                              {5, "8"},
+                                                              {5, "09"},
+                                                              {6, std::string(64, '8')},
+                                                              {7, "1151"},
+                                                              {8, "01090"},
+                                                              {12, "0"},
+                                                              {13, "9"},
+                                                              {15, "0"},
+                                                              {19, "4294967296"},
+                                                              {20, "8"},
+                                                              {21, "11"}}) {
+            auto changed = committedFields;
+            changed[index] = bad;
+            assert(!committedMatches(framed(changed)));
+        }
+        ++current.completed[0].completedCommit;
+        ++current.completed[0].kernel.framebuffer;
+        assert(powerMatches(powerBytes)); // new buffer requires a newer commit
+        --current.completed[0].completedCommit;
+        assert(!powerMatches(powerBytes));
         auto other = actual;
         other.completed[0].completedCommit++;
         assert(!OriginalCompletionGrantCodec::matches(original, releaseBytes, restoration, other));

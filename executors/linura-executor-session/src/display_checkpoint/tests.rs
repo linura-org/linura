@@ -1721,3 +1721,178 @@ fn terminal_reservation_does_not_increase_or_evict_full_checkpoint_quota() {
         MAX_RECORDS
     );
 }
+
+#[test]
+fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reopen() {
+    use linura_observation::{DisplayNativeCurrentFacts, DisplayNativeCurrentOutput};
+    let fixture = Fixture::new();
+    let (parent, terminal) = terminal(1, 2, 3, "seat0");
+    let value = |result: Result<_, String>| result.unwrap_or_else(|e| unreachable!("{e}"));
+    let retirement = value(NativeDisplayRetirementPreparation::new(
+        &terminal,
+        7,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([4; 32]),
+    ));
+    let completion = completion(&parent, &retirement);
+    let frames = DisplayNativeCurrentFacts::new(
+        completion.frames().scope().clone(),
+        completion.frames().lineage().clone(),
+        completion.frames().window(),
+        completion
+            .frames()
+            .outputs()
+            .iter()
+            .map(|(id, row)| {
+                (
+                    id.clone(),
+                    DisplayNativeCurrentOutput {
+                        enabled: row.enabled,
+                        connector: row.connector,
+                        crtc: row.crtc,
+                        plane: row.plane,
+                        framebuffer: row.framebuffer,
+                        handoff_commit: row.completed_commit,
+                        completed_commit: row.completed_commit + 1,
+                    },
+                )
+            })
+            .collect(),
+        ComponentDigest::from_bytes(Sha256::digest(completion.canonical_bytes()).into()).to_hex(),
+        true,
+        true,
+        None,
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    let power = NativeDisplayPowerRetirementPreparation::new(
+        &completion,
+        ComponentDigest::from_bytes([7; 32]),
+        ComponentDigest::from_bytes([8; 32]),
+        &frames,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let absent = DisplayNativeCurrentFacts::new(
+        frames.scope().clone(),
+        frames.lineage().clone(),
+        frames.window(),
+        frames.outputs().clone(),
+        frames.completion_digest().into(),
+        true,
+        false,
+        None,
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    let root = NativeDisplayRootRetirementPreparation::new(
+        &power,
+        ComponentDigest::from_bytes([10; 32]),
+        ComponentDigest::from_bytes([11; 32]),
+        &absent,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let publish = |kind, bytes: &[u8]| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &terminal.binding().dispatch_digest,
+            bytes,
+            kind,
+        )
+    };
+    assert!(reserve_recovery(&fixture, &parent).is_ok());
+    assert!(reserve_terminal(&fixture, &terminal).is_ok());
+    for (kind, bytes) in [
+        (Kind::Quiescence, terminal.canonical_bytes()),
+        (Kind::RetirementPreparation, retirement.canonical_bytes()),
+        (Kind::RootRetiredHeld, retirement.canonical_bytes()),
+        (Kind::NativeReleaseReserved, retirement.canonical_bytes()),
+        (Kind::NativeReleaseSpent, retirement.canonical_bytes()),
+        (Kind::CompletionPrepared, completion.canonical_bytes()),
+        (Kind::CompletionSpent, completion.canonical_bytes()),
+    ] {
+        assert!(publish(Kind::PowerPrepared, &power.canonical_bytes()).is_err());
+        assert!(publish(Kind::RootPowerPrepared, &root.canonical_bytes()).is_err());
+        assert!(publish(Kind::PowerSpent, &power.canonical_bytes()).is_err());
+        assert!(publish(kind, &bytes).is_ok());
+    }
+    assert!(publish(Kind::PowerSpent, &power.canonical_bytes()).is_err());
+    assert!(publish(Kind::PowerPrepared, &power.canonical_bytes()).is_ok());
+    assert!(publish(Kind::PowerPrepared, &power.canonical_bytes()).is_err());
+    let other = NativeDisplayPowerRetirementPreparation::new(
+        &completion,
+        ComponentDigest::from_bytes([9; 32]),
+        ComponentDigest::from_bytes([8; 32]),
+        &frames,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::PowerSpent, &other.canonical_bytes()).is_err());
+    assert!(publish(Kind::PowerSpent, &power.canonical_bytes()).is_ok());
+    assert!(publish(Kind::PowerSpent, &power.canonical_bytes()).is_err());
+    assert!(publish(Kind::RootPowerPrepared, &root.canonical_bytes()).is_ok());
+    assert!(publish(Kind::RootPowerPrepared, &root.canonical_bytes()).is_err());
+    assert_eq!(
+        read_root_power_retirement_at(&fixture.fd, fixture.uid, &parent)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!("Root preparation"))
+            .canonical_bytes(),
+        root.canonical_bytes()
+    );
+    let committed = NativeDisplayCurrentCommitPreparation::new(
+        &root,
+        ComponentDigest::from_bytes([12; 32]),
+        ComponentDigest::from_bytes([13; 32]),
+        terminal.binding().generation,
+        9,
+        ComponentDigest::from_bytes([3; 32]),
+        &absent,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::CurrentCommitSpent, &committed.canonical_bytes()).is_err());
+    assert!(publish(Kind::CurrentCommitPrepared, &committed.canonical_bytes()).is_ok());
+    assert!(publish(Kind::CurrentCommitPrepared, &committed.canonical_bytes()).is_err());
+    let substituted = NativeDisplayCurrentCommitPreparation::new(
+        &root,
+        ComponentDigest::from_bytes([14; 32]),
+        ComponentDigest::from_bytes([13; 32]),
+        terminal.binding().generation,
+        9,
+        ComponentDigest::from_bytes([3; 32]),
+        &absent,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::CurrentCommitSpent, &substituted.canonical_bytes()).is_err());
+    assert!(publish(Kind::CurrentCommitSpent, &committed.canonical_bytes()).is_ok());
+    assert!(publish(Kind::CurrentCommitSpent, &committed.canonical_bytes()).is_err());
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        read_power_retirement_at(&reopened, fixture.uid, &parent, true)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!("spent record"))
+            .canonical_bytes(),
+        power.canonical_bytes()
+    );
+    assert!(!startup_clear_at(&reopened, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    // Losing a parent poisons observation and new publication. No cleanup or
+    // historical digest can reconstruct the missing original completion.
+    std::fs::remove_file(
+        fixture
+            .path
+            .join(Kind::CompletionSpent.name(&terminal.binding().dispatch_digest)),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_root_power_retirement_at(&reopened, fixture.uid, &parent).is_err());
+    assert!(read_power_retirement_at(&reopened, fixture.uid, &parent, true).is_err());
+    assert!(!matches!(
+        startup_clear_at(&reopened, fixture.uid),
+        Ok(true)
+    ));
+}

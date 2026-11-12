@@ -102,6 +102,14 @@ class NativeRuntime final : public QObject
     transferOriginalDisplayCompletion(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
                                       const NativeDisplayCorrelation &, const QString &digest,
                                       int completionGrant);
+    [[nodiscard]] std::optional<quint32>
+    commitOriginalDisplayCurrent(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayPower(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                               const NativeDisplayCorrelation &, const QString &digest,
+                               const QByteArray &preparation);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const QDBusMessage &,
                                                                  const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &);

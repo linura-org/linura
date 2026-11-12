@@ -125,6 +125,124 @@ impl PlanPreviewControl {
         })
     }
 
+    /// Canonical post-effect NoChange planning from Control's independently
+    /// joined, phase-specific current inspection. Historical nested first
+    /// frames remain comparison data; the actual Root/current/lock/input/power
+    /// contributors and their fixed deadlines are retained in this envelope.
+    /// This produces no policy allow, dispatch permit or native credential.
+    pub(crate) fn build_verified_original_display_current_plan(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        actor: Actor,
+        request: &PlanDesiredStateRequest,
+        inspection: &crate::OriginalDisplayRootPowerInspection,
+    ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        let current = inspection.current();
+        let root = inspection.root();
+        let observation = current.observation();
+        let now = now_ms()?;
+        observation.require_current(now).map_err(fail)?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(fail)?;
+        let effect = linura_provider_sdk::display_finalization_effect(
+            &root.completion_comparison().lineage().material,
+        )
+        .map_err(fail)?;
+        let material =
+            DisplayFinalizationMaterial::decode(&root.completion_comparison().lineage().material)
+                .map_err(fail)?;
+        let scope = material.recovery_scope().map_err(fail)?;
+        let mut expected = root.attributes();
+        let mut contributors = std::collections::BTreeSet::new();
+        for name in [
+            "protection",
+            "display",
+            "session",
+            "coverage",
+            "current",
+            "rechecked_current",
+            "rechecked_root",
+            "rechecked_protection",
+        ] {
+            let key = format!("control.current.{name}_digest");
+            let Some(ObservedValue::Text(raw)) = observation.attributes.get(&key) else {
+                return Err(fail("current postcondition contributor missing"));
+            };
+            let digest = ContentDigest::new(raw).map_err(fail)?;
+            if digest == ContentDigest::zero() || !contributors.insert(digest) {
+                return Err(fail("current postcondition contributors are ambiguous"));
+            }
+            expected.insert(key, ObservedValue::Text(raw.clone()));
+        }
+        if current.terminal().principal != principal_id
+            || current.terminal().request_id != request.request_id
+            || current.terminal().transaction_id
+                != TransactionId::for_namespace(&principal_id, &request.request_id)
+            || current.comparison_terminal().state != TransactionState::Indeterminate
+            || !request
+                .request_id
+                .as_str()
+                .starts_with("request:v010:display-finalization:")
+            || request.provider != effect.provider
+            || request.resource != effect.resource
+            || request.observation_capability.as_str() != DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
+            || request.desired_state.len() != 1
+            || request
+                .desired_state
+                .get("finalize_original")
+                .map(String::as_bytes)
+                != Some(effect.canonical_payload.as_slice())
+            || observation.provider.as_str() != DISPLAY_RECOVERY_PROVIDER
+            || observation.capability.as_str()
+                != linura_observation::DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
+            || observation.resource != request.resource
+            || observation.authority != linura_observation::ObservationAuthority::NativeApi
+            || observation.sequence == 0
+            || observation.valid_for_ms > 2000
+            || observation.attributes != expected
+            || current.frames().scope() != &scope
+            || !current
+                .frames()
+                .follows_handoff(root.completion_comparison().first())
+            || current.frames().completion_digest() != root.completion_comparison().lineage().record
+            || current.frames().power_fence_held()
+            || !current.frames().input_retired()
+        {
+            return Err(fail("canonical original-current completion proof changed"));
+        }
+        // The post-effect evidence capability is derived from the actual join,
+        // never selected by a client or substituted into the earlier review.
+        let observed = PlanningObservation {
+            provider: observation.provider.clone(),
+            resource: observation.resource.clone(),
+            observation_capability: observation.capability.clone(),
+            authority: observation.authority.as_str().into(),
+            evidence_id: observation.evidence_id(),
+            freshness: PlanningFreshness::Current,
+            attributes: request.desired_state.clone(),
+        };
+        let desired = DesiredResource {
+            provider: request.provider.clone(),
+            resource: request.resource.clone(),
+            observation_capability: observation.capability.clone(),
+            state: request.desired_state.clone(),
+            reason: request.reason.clone(),
+        };
+        let mut plan = DeterministicPlanner
+            .plan_resource(request.request_id.clone(), actor, desired, &observed)
+            .map_err(fail)?;
+        if plan.status != PlanStatus::NoChange
+            || !plan.changes.is_empty()
+            || plan.execution_authorized()
+        {
+            return Err(fail(
+                "original-current verification cannot authorize execution",
+            ));
+        }
+        plan.findings.push(PlanFinding{code:"display-original-current-postcondition".into(),level:PlanFindingLevel::Pass,message:"Independent original Root/kernel/power absence, current native scanout/input, source, login and S17 proof; future admission and provenance remain retained".into()});
+        observation.require_current(now_ms()?).map_err(fail)?;
+        Ok((plan, observation.clone()))
+    }
+
     pub(super) fn build_fresh_original_display_finalization_plan(
         &mut self,
         principal: &AuthenticatedPrincipal,

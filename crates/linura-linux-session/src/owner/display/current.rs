@@ -13,6 +13,7 @@ use linura_observation::{
 struct Current {
     schema: u32,
     completion_digest: String,
+    current_commit_digest: String,
     input_retired: bool,
     power_fence_held: bool,
     topology: String,
@@ -80,7 +81,7 @@ fn project(
         deadline_unix_ms: number(&saved.deadline_unix_ms)?,
         deadline_boot_ms: number(&saved.deadline_boot_ms)?,
     };
-    if saved.schema != 1
+    if saved.schema != 2
         || saved.topology
             != scope
                 .replacement()
@@ -146,6 +147,10 @@ fn project(
         saved.completion_digest,
         saved.input_retired,
         saved.power_fence_held,
+        match saved.current_commit_digest.as_str() {
+            raw if raw == "0".repeat(64) => None,
+            raw => Some(raw.into()),
+        },
     )
     .map_err(|_| invalid())?;
     let envelope = ObservationEnvelope {

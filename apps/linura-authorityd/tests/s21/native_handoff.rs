@@ -55,7 +55,8 @@ pub(super) fn observe_current(
             .collect(),
         root.lineage().record.clone(),
         true,
-        true,
+        !machine.native_power_retired,
+        machine.native_current_grant.clone(),
     ));
     sample.resource = value(scope.resource_id());
     sample.capability = value(CapabilityId::new(
@@ -300,6 +301,772 @@ impl OriginalDisplayCompletionPort for CompletionPort {
         }
     }
 }
+
+#[derive(Debug)]
+struct PowerPort {
+    machine: Arc<Mutex<Machine>>,
+    calls: usize,
+    lose_reply: bool,
+    effect: bool,
+}
+impl linura_control::OriginalDisplayNativePowerRetirementPort for PowerPort {
+    fn retire_native_power(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayNativePowerRetirement,
+    ) -> Result<(), String> {
+        self.calls += 1;
+        assert!(prepared.expires_at_unix_ms() > now_unix_ms());
+        assert!(prepared.frames().input_retired() && prepared.frames().power_fence_held());
+        assert_eq!(
+            prepared.frames().completion_digest(),
+            prepared.root().lineage().record
+        );
+        let mut state = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert!(state.power_grant.is_none());
+        state.power_grant = Some(value(
+            linura_observation::DisplayOriginalPowerRetirementFacts::new(
+                prepared.frames().scope().clone(),
+                "9".repeat(64),
+                prepared.root().lineage().record.clone(),
+                prepared.preparation().hex().into(),
+                prepared.checkpoint().hex().into(),
+                true,
+            ),
+        ));
+        state.native_power_retired = self.effect;
+        if self.lose_reply {
+            Err("simulated lost power ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RootPowerPort {
+    machine: Arc<Mutex<Machine>>,
+    calls: usize,
+    lose_reply: bool,
+    effect: bool,
+}
+impl linura_control::OriginalDisplayRootPowerRetirementPort for RootPowerPort {
+    fn retire_root_power(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayRootPowerRetirement,
+    ) -> Result<(), String> {
+        self.calls += 1;
+        assert!(prepared.expires_at_unix_ms() > now_unix_ms());
+        assert!(prepared.frames().input_retired() && !prepared.frames().power_fence_held());
+        assert_eq!(
+            prepared.power().completion_digest(),
+            prepared.root().lineage().record
+        );
+        let mut state = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert!(state.native_power_retired && !state.root_power_retired);
+        if self.effect {
+            state.root_retirement = Some(value(
+                linura_observation::DisplayOriginalRootRetirementFacts::new(
+                    linura_observation::DisplayRootRetirementLineage {
+                        record: "6".repeat(64),
+                        preparation: prepared.preparation().hex().into(),
+                        verification: prepared.verification().hex().into(),
+                        power_record: prepared.power().record_digest().into(),
+                    },
+                    state
+                        .last_original_protection
+                        .clone()
+                        .unwrap_or_else(|| unreachable!("original source comparison")),
+                    prepared.root().clone(),
+                    None,
+                ),
+            ));
+            state.root_power_retired = true;
+        }
+        if self.lose_reply {
+            Err("simulated lost Root power ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+fn root_power_requires_original_review_and_independent_retired_phase() {
+    for (lost_reply, effect, fault) in [
+        (false, true, 0),
+        (true, true, 0),
+        (false, false, 0),
+        (false, true, 1),
+        (false, true, 2),
+        (false, true, 3),
+    ] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = prepared(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        let before = snapshot(&database, &transaction);
+        value(control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false, 0),
+        ));
+        let mut completion = CompletionPort {
+            machine: Some(machine.clone()),
+            ..CompletionPort::default()
+        };
+        value(control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        ));
+        let mut native = PowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        value(control.dispatch_original_display_native_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut native,
+        ));
+        let mut port = RootPowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: lost_reply,
+            effect,
+        };
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .root_power_write_fault = fault;
+        assert!(
+            control
+                .dispatch_original_display_root_power_retirement(
+                    principal(),
+                    actor(false),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, 0);
+        let result = control.dispatch_original_display_root_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut port,
+        );
+        assert_eq!(result.is_err(), lost_reply || fault != 0, "{result:?}");
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .root_power_write_fault = 0;
+        assert!(
+            control
+                .dispatch_original_display_root_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, usize::from(fault == 0));
+        let inspection =
+            control.inspect_original_display_root_power_retirement(principal(), &request);
+        assert_eq!(inspection.is_ok(), effect && fault == 0, "{inspection:?}");
+        if let Ok(inspection) = inspection {
+            assert!(!inspection.current().frames().power_fence_held());
+            assert_eq!(
+                inspection.root().completion_comparison().lineage().record,
+                inspection.current().frames().completion_digest()
+            );
+        }
+        assert_eq!(snapshot(&database, &transaction), before);
+        drop(control);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        assert!(
+            restarted
+                .dispatch_original_display_root_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, usize::from(fault == 0));
+        assert_eq!(
+            restarted
+                .inspect_original_display_root_power_retirement(principal(), &request)
+                .is_ok(),
+            effect && fault == 0
+        );
+        if effect && fault == 0 {
+            assert!(
+                restarted
+                    .inspect_original_display_native_power_retirement(principal(), &request)
+                    .is_err()
+            );
+            for fault in 1..=12 {
+                if fault == 2 {
+                    continue;
+                }
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                    .current_fault = fault;
+                assert!(
+                    restarted
+                        .inspect_original_display_root_power_retirement(principal(), &request)
+                        .is_err(),
+                    "post-Root fault {fault}"
+                );
+            }
+        }
+        assert_eq!(snapshot(&database, &transaction), before);
+    }
+}
+
+fn current_completion_is_signed_durable_and_recovers_metadata_without_replaying_effects() {
+    for (kind, fault) in [
+        (0, 0),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 1),
+        (2, 2),
+        (2, 3),
+        (3, 1),
+        (3, 2),
+        (3, 3),
+    ] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = prepared(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        value(control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false, 0),
+        ));
+        let mut completion = CompletionPort {
+            machine: Some(machine.clone()),
+            ..CompletionPort::default()
+        };
+        value(control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        ));
+        let mut native = PowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        value(control.dispatch_original_display_native_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut native,
+        ));
+        let mut root = RootPowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: true,
+            effect: true,
+        };
+        assert!(
+            control
+                .dispatch_original_display_root_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut root
+                )
+                .is_err()
+        );
+        {
+            let mut state = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            state.completion_write_key = kind;
+            state.completion_write_fault = fault;
+        }
+        let result = control.commit_original_display_current(principal(), actor(true), &request);
+        assert_eq!(
+            result.is_err(),
+            fault != 0,
+            "{result:?}; key {kind} fault {fault}"
+        );
+        assert_eq!(
+            snapshot(&database, &transaction).state,
+            match kind {
+                1 => TransactionState::Indeterminate,
+                2 => TransactionState::Verified,
+                _ => TransactionState::Committed,
+            }
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .completion_write_fault = 0;
+        drop(control);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        let released =
+            value(restarted.commit_original_display_current(principal(), actor(true), &request));
+        assert_eq!(released.terminal().state, TransactionState::Committed);
+        assert_eq!(&snapshot(&database, &transaction), released.terminal());
+        let digest = released.record_digest().clone();
+        let first = released.first_committed_at_unix_ms();
+        let again =
+            value(restarted.commit_original_display_current(principal(), actor(true), &request));
+        assert_eq!(again.record_digest(), &digest);
+        assert_eq!(again.first_committed_at_unix_ms(), first);
+        let current =
+            value(restarted.inspect_original_display_root_power_retirement(principal(), &request));
+        assert_eq!(
+            current.current().terminal().state,
+            TransactionState::Committed
+        );
+        assert_eq!(
+            current.current().comparison_terminal().state,
+            TransactionState::Indeterminate
+        );
+        assert!(
+            restarted
+                .dispatch_original_display_root_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut root
+                )
+                .is_err()
+        );
+        assert!(
+            restarted
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut native
+                )
+                .is_err()
+        );
+        assert_eq!(root.calls, 1);
+        assert_eq!(native.calls, 1);
+        assert_eq!(completion.calls, 1);
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .original_protection_lost = true;
+        assert!(
+            restarted
+                .commit_original_display_current(principal(), actor(true), &request)
+                .is_err()
+        );
+        assert_eq!(
+            snapshot(&database, &transaction).state,
+            TransactionState::Committed
+        );
+    }
+}
+#[derive(Debug)]
+struct CurrentCommitPort {
+    machine: Arc<Mutex<Machine>>,
+    calls: usize,
+    fault: u8,
+}
+impl linura_control::OriginalDisplayCurrentCommitPort for CurrentCommitPort {
+    fn commit_current(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayCurrentCommit,
+    ) -> Result<(), String> {
+        self.calls += 1;
+        assert_eq!(self.calls, 1);
+        assert_eq!(
+            prepared.committed().terminal().state,
+            TransactionState::Committed
+        );
+        assert!(prepared.expires_at_unix_ms() > now_unix_ms());
+        assert!(prepared.frames().input_retired() && !prepared.frames().power_fence_held());
+        let mut state = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert!(state.root_power_retired && state.native_current_grant.is_none());
+        let old = state
+            .root_retirement
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("Root phase"));
+        if self.fault != 3 {
+            state.root_retirement = Some(value(
+                linura_observation::DisplayOriginalRootRetirementFacts::new(
+                    old.lineage().clone(),
+                    old.original_comparison().clone(),
+                    old.completion_comparison().clone(),
+                    Some(linura_observation::DisplayCurrentGrantLineage {
+                        record: "5".repeat(64),
+                        preparation: prepared.preparation().hex().into(),
+                        committed_record: if self.fault == 4 {
+                            "9".repeat(64)
+                        } else {
+                            prepared.committed().record_digest().hex().into()
+                        },
+                    }),
+                ),
+            ));
+        }
+        if self.fault != 2 {
+            state.native_current_grant = Some("5".repeat(64));
+        }
+        if self.fault == 1 {
+            Err("simulated lost native qualification ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+fn current_qualification_requires_original_review_and_independent_matching_root_and_native_sources()
+{
+    for fault in 0..12 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = prepared(&database, &machine);
+        value(control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false, 0),
+        ));
+        let mut completion = CompletionPort {
+            machine: Some(machine.clone()),
+            ..CompletionPort::default()
+        };
+        value(control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        ));
+        let mut native = PowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        value(control.dispatch_original_display_native_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut native,
+        ));
+        let mut root = RootPowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        value(control.dispatch_original_display_root_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut root,
+        ));
+        value(control.commit_original_display_current(principal(), actor(true), &request));
+        assert!(
+            control
+                .verify_original_display_qualified_current(principal(), &request)
+                .is_err()
+        );
+        if fault >= 6 {
+            let mut state = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            state.completion_write_key = if fault < 9 { 4 } else { 5 };
+            state.completion_write_fault = (fault - 6) % 3 + 1;
+        }
+        let mut port = CurrentCommitPort {
+            machine: machine.clone(),
+            calls: 0,
+            fault,
+        };
+        if fault == 5 {
+            drop(control);
+            let previews = replacement_previews(&machine, &original, &input);
+            control = open_with_previews(database.path(), &machine, 0, previews);
+        }
+        let dispatched = control.dispatch_original_display_current_commit(
+            principal(),
+            actor(true),
+            &request,
+            &mut port,
+        );
+        assert_eq!(
+            dispatched.is_err(),
+            fault == 1 || (5..9).contains(&fault),
+            "{dispatched:?}; fault {fault}"
+        );
+        assert!(
+            control
+                .dispatch_original_display_current_commit(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, usize::from(!(5..9).contains(&fault)));
+        drop(control);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        if fault >= 9 {
+            assert!(
+                restarted
+                    .verify_original_display_qualified_current(principal(), &request)
+                    .is_err()
+            );
+        }
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .completion_write_fault = 0;
+        let proof = restarted.verify_original_display_qualified_current(principal(), &request);
+        if matches!(fault, 0 | 1 | 9..=11) {
+            let proof = value(proof);
+            let digest = proof.record_digest().clone();
+            let first = proof.first_verified_at_unix_ms();
+            let next =
+                value(restarted.verify_original_display_qualified_current(principal(), &request));
+            assert_eq!(next.record_digest(), &digest);
+            assert_eq!(next.first_verified_at_unix_ms(), first);
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .original_protection_lost = true;
+            assert!(
+                restarted
+                    .verify_original_display_qualified_current(principal(), &request)
+                    .is_err()
+            );
+        } else {
+            assert!(proof.is_err(), "fault {fault}");
+        }
+        assert!(
+            restarted
+                .dispatch_original_display_current_commit(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, usize::from(!(5..9).contains(&fault)));
+        assert_eq!(root.calls, 1);
+        assert_eq!(native.calls, 1);
+        assert_eq!(completion.calls, 1);
+    }
+}
+fn native_power_requires_original_live_review_and_independent_post_effect_state() {
+    for fault in 1..=3 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, _, _, request) = prepared(&database, &machine);
+        value(control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false, 0),
+        ));
+        let mut completion = CompletionPort {
+            machine: Some(machine.clone()),
+            ..CompletionPort::default()
+        };
+        value(control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        ));
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .native_power_write_fault = fault;
+        let mut port = PowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        assert!(
+            control
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .native_power_write_fault = 0;
+        assert!(
+            control
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(
+            port.calls, 0,
+            "storage fault {fault} cannot dispatch or rearm"
+        );
+    }
+    for (lost_completion, lost_power, effect) in [
+        (false, false, true),
+        (true, true, true),
+        (false, false, false),
+    ] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = prepared(&database, &machine);
+        let transaction =
+            TransactionId::for_namespace(&value(PrincipalId::new(principal().as_str())), &request);
+        let before = snapshot(&database, &transaction);
+        value(control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false, 0),
+        ));
+        let mut completion = CompletionPort {
+            machine: Some(machine.clone()),
+            lose_reply: lost_completion,
+            ..CompletionPort::default()
+        };
+        assert_eq!(
+            control
+                .dispatch_original_display_completion(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut completion
+                )
+                .is_err(),
+            lost_completion
+        );
+        let mut port = PowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: lost_power,
+            effect,
+        };
+        // Caller provenance cannot replace authenticated interactive ownership.
+        assert!(
+            control
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(false),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, 0);
+        assert_eq!(
+            control
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err(),
+            lost_power
+        );
+        assert_eq!(port.calls, 1);
+        assert!(
+            control
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, 1);
+        let inspection =
+            control.inspect_original_display_native_power_retirement(principal(), &request);
+        assert_eq!(inspection.is_ok(), effect, "{inspection:?}");
+        if let Ok(inspection) = inspection {
+            assert!(!inspection.current().frames().power_fence_held());
+            assert!(inspection.grant().grant_spent());
+        }
+        assert_eq!(snapshot(&database, &transaction), before);
+        drop(control);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        assert!(
+            restarted
+                .dispatch_original_display_native_power_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, 1);
+        assert_eq!(
+            restarted
+                .inspect_original_display_native_power_retirement(principal(), &request)
+                .is_ok(),
+            effect
+        );
+        if effect {
+            for fault in 1..=12 {
+                // Power false is now the required postcondition, not fault #2.
+                if fault == 2 {
+                    continue;
+                }
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                    .current_fault = fault;
+                assert!(
+                    restarted
+                        .inspect_original_display_native_power_retirement(principal(), &request)
+                        .is_err(),
+                    "fault {fault}"
+                );
+            }
+        }
+        assert_eq!(snapshot(&database, &transaction), before);
+    }
+}
 impl OriginalDisplayRetirementPreparationPort for RootPort {
     fn prepare_retirement(
         &mut self,
@@ -487,6 +1254,11 @@ fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
 
 #[test]
 fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_replay() {
+    native_power_requires_original_live_review_and_independent_post_effect_state();
+    root_power_requires_original_review_and_independent_retired_phase();
+    current_completion_is_signed_durable_and_recovers_metadata_without_replaying_effects();
+    current_qualification_requires_original_review_and_independent_matching_root_and_native_sources(
+    );
     for (lost_reply, lost_completion_reply) in [(false, false), (false, true), (true, false)] {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));

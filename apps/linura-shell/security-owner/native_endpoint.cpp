@@ -503,6 +503,48 @@ quint32 NativeEndpoint::SpendOriginalDisplayNativeRelease(
     return 7; // No retry or physical release on missing Root ACK.
 }
 
+quint32 NativeEndpoint::CommitOriginalDisplayCurrent(const NativeDisplayAttemptQueryWire &query,
+                                                     const QString &digest,
+                                                     const QByteArray &preparation)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        digest.size() == 64 && !preparation.isEmpty() && preparation.size() <= 49 * 1024) {
+        const auto intent = NativeDisplayFinalizationIntent::parse(query.intent);
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent ? runtime_.commitOriginalDisplayCurrent(
+                                         message(), *intent, bound, digest, preparation)
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Original committed-current handoff unavailable"));
+    return 7;
+}
+
+quint32 NativeEndpoint::RetireOriginalDisplayPower(const NativeDisplayAttemptQueryWire &query,
+                                                   const QString &digest,
+                                                   const QByteArray &preparation)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        digest.size() == 64 && !preparation.isEmpty() && preparation.size() <= 33 * 1024) {
+        const auto intent = NativeDisplayFinalizationIntent::parse(query.intent);
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent ? runtime_.retireOriginalDisplayPower(message(), *intent, bound,
+                                                                         digest, preparation)
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Original display power retirement unavailable"));
+    return 7;
+}
+
 quint32
 NativeEndpoint::TransferOriginalDisplayCompletion(const NativeDisplayAttemptQueryWire &query,
                                                   const QString &digest,

@@ -260,6 +260,7 @@ impl NativeCurrentVerified {
             self.frames.completion_digest().into(),
             true,
             true,
+            None,
         )
         .map_err(|_| invalid())?;
         if !old.is_empty() || !self.frames.reconciles(&frames) {
@@ -303,6 +304,25 @@ impl NativeCurrentVerified {
         self.reconcile(record.canonical())
     }
 
+    pub(crate) fn require_digest_readback(
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        request: &RequestId,
+        expected: &ContentDigest,
+    ) -> Result<(), ManagedLifecycleError> {
+        journal.integrity_check().map_err(|_| invalid())?;
+        let key = Self::key(request)?;
+        let record = journal.load(principal, &key).map_err(|_| invalid())?;
+        if record.principal() != principal
+            || record.request_id() != &key
+            || record.canonical().len() > LIMIT
+            || *expected == ContentDigest::zero()
+            || digest_bytes(DOMAIN, record.canonical()) != *expected
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
     pub(crate) fn digest(&self) -> ContentDigest {
         digest_bytes(DOMAIN, &self.canonical)
     }

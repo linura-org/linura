@@ -17,9 +17,11 @@ namespace Linura::HyprlandDisplay::SealedNativeMaterial {
 inline constexpr std::size_t MaxBytes = 14 * 1024;
 inline constexpr int Seals = F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL;
 
+template <std::size_t Limit = MaxBytes>
 inline std::optional<OwnedNativeFd> create(std::string_view material)
 {
-    if (material.empty() || material.size() > MaxBytes)
+    static_assert(Limit > 0 && Limit <= 64 * 1024);
+    if (material.empty() || material.size() > Limit)
         return std::nullopt;
     OwnedNativeFd descriptor{
         memfd_create("linura-display-comparison", MFD_CLOEXEC | MFD_ALLOW_SEALING)};
@@ -42,8 +44,10 @@ inline std::optional<OwnedNativeFd> create(std::string_view material)
 
 // Consume on every path. Reject pipes/sockets/devices and mutable or oversized
 // files before allocating or reading; pread ignores a sender-controlled offset.
+template <std::size_t Limit = MaxBytes>
 inline std::optional<std::string> read(OwnedNativeFd descriptor)
 {
+    static_assert(Limit > 0 && Limit <= 64 * 1024);
     const auto seals = descriptor.get() < 0 ? -1 : fcntl(descriptor.get(), F_GET_SEALS);
     if (seals < 0 || (seals & Seals) != Seals)
         return std::nullopt;
@@ -51,7 +55,7 @@ inline std::optional<std::string> read(OwnedNativeFd descriptor)
     {};
     if (fstat(descriptor.get(), &facts) != 0 || !S_ISREG(facts.st_mode) || facts.st_nlink != 0 ||
         facts.st_uid != getuid() || facts.st_size <= 0 ||
-        static_cast<std::uint64_t>(facts.st_size) > MaxBytes)
+        static_cast<std::uint64_t>(facts.st_size) > Limit)
         return std::nullopt;
     std::string material(static_cast<std::size_t>(facts.st_size), '\0');
     std::size_t offset = 0;

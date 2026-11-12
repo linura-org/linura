@@ -6,17 +6,25 @@ use crate::display_native_release_spend::verification::completion::NativeComplet
 use crate::display_native_release_spend::verification::current::NativeCurrentVerified;
 use linura_observation::{
     DISPLAY_NATIVE_CURRENT_CAPABILITY, DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
-    DisplayNativeCurrentFacts, DisplayOriginalCompletionFacts,
+    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DisplayNativeCurrentFacts,
+    DisplayOriginalCompletionFacts, DisplayOriginalRootRetirementFacts,
 };
+
+#[derive(Clone, Copy)]
+pub(super) enum CurrentRootPhase {
+    Held { native_power: bool },
+    Retired,
+}
 
 #[derive(Debug)]
 pub struct OriginalDisplayCurrentInspection {
-    observation: ObservationEnvelope,
+    pub(super) observation: ObservationEnvelope,
     frames: DisplayNativeCurrentFacts,
     terminal: TransactionSnapshot,
     preparation: linura_transaction::ContentDigest,
     prepared: NativeCompletionPrepared,
-    root: DisplayOriginalCompletionFacts,
+    pub(super) root: DisplayOriginalCompletionFacts,
+    pub(super) retired_root: Option<DisplayOriginalRootRetirementFacts>,
     context: TerminalInspectionContext,
     anchors: HandoffAnchors,
     history: LinkedHistory,
@@ -34,6 +42,12 @@ impl OriginalDisplayCurrentInspection {
     pub const fn terminal(&self) -> &TransactionSnapshot {
         &self.terminal
     }
+    /// Authenticated pre-CAS comparison ancestry. It never substitutes for the
+    /// actual current signed terminal returned by terminal().
+    pub const fn comparison_terminal(&self) -> &TransactionSnapshot {
+        &self.context.snapshot
+    }
+
     #[must_use]
     pub const fn preparation(&self) -> &linura_transaction::ContentDigest {
         &self.preparation
@@ -136,6 +150,51 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         })
     }
 
+    pub(super) fn require_current_inspection_history(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        inspection: &OriginalDisplayCurrentInspection,
+    ) -> Result<(), ManagedLifecycleError> {
+        self.require_current_inspection_history_at(principal, inspection, &inspection.terminal)
+    }
+    pub(super) fn require_current_inspection_history_at(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        inspection: &OriginalDisplayCurrentInspection,
+        actual: &TransactionSnapshot,
+    ) -> Result<(), ManagedLifecycleError> {
+        let context = &inspection.context;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        inspection
+            .prepared
+            .require_readback(self.display_journal()?)?;
+        let reloaded = if inspection.retired_root.is_some() {
+            self.current_finalization_comparison_context(principal, &context.request.request_id)?
+        } else {
+            self.terminal_inspection_context(principal, &context.request.request_id)?
+        };
+        if reloaded != *context
+            || self
+                .authority
+                .matching_request_snapshot(principal, &context.request)?
+                != *actual
+            || self.native_handoff_anchors(&principal_id, context)? != inspection.anchors
+            || self.finalization_history(
+                principal,
+                DisplayFinalizationMaterial::decode(context.intent.material())
+                    .map_err(|_| invalid())?
+                    .restoration_request(),
+            )? != inspection.history
+        {
+            return Err(invalid());
+        }
+        inspection
+            .observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        Ok(())
+    }
+
     /// Lost acknowledgements and Control restart may inspect the actual live
     /// Root/native lifetime, but cannot redeliver any spent grant. This joins
     /// current native frames with immutable old proof without relabelling the
@@ -145,7 +204,39 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: AuthenticatedPrincipal,
         terminal_request: &RequestId,
     ) -> Result<OriginalDisplayCurrentInspection, ManagedLifecycleError> {
-        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        self.inspect_current_original_display_completion_phase(principal, terminal_request, true)
+    }
+
+    pub(super) fn inspect_current_original_display_completion_phase(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        terminal_request: &RequestId,
+        power_held: bool,
+    ) -> Result<OriginalDisplayCurrentInspection, ManagedLifecycleError> {
+        self.inspect_current_original_display_completion_root(
+            principal,
+            terminal_request,
+            CurrentRootPhase::Held {
+                native_power: power_held,
+            },
+        )
+    }
+    pub(super) fn inspect_current_original_display_completion_root(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        terminal_request: &RequestId,
+        phase: CurrentRootPhase,
+    ) -> Result<OriginalDisplayCurrentInspection, ManagedLifecycleError> {
+        let power_held = matches!(phase, CurrentRootPhase::Held { native_power: true });
+        let root_retired = matches!(phase, CurrentRootPhase::Retired);
+        let terminal = if root_retired {
+            self.current_finalization_comparison_context(&principal, terminal_request)?
+        } else {
+            self.terminal_inspection_context(&principal, terminal_request)?
+        };
+        let actual_terminal = self
+            .authority
+            .matching_request_snapshot(&principal, &terminal.request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
         let anchors = self.native_handoff_anchors(&principal_id, &terminal)?;
         let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
@@ -170,12 +261,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         };
         let root_query = query(
             DISPLAY_RECOVERY_PROVIDER,
-            DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
+            if root_retired {
+                DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
+            } else {
+                DISPLAY_ORIGINAL_COMPLETION_CAPABILITY
+            },
             resource.clone(),
         )?;
         let protection_query = query(
             DISPLAY_RECOVERY_PROVIDER,
-            DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
+            if root_retired {
+                DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
+            } else {
+                DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+            },
             resource.clone(),
         )?;
         let current_query = query(
@@ -229,11 +328,41 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         )?;
         let frames = observe(self, &current_query)?;
         let now = now_ms()?;
-        let root_facts = DisplayOriginalCompletionFacts::from_envelope(&root, &scope, now)
-            .map_err(|_| invalid())?;
+        let retired_facts = |source: &ObservationEnvelope| -> Result<
+            Option<DisplayOriginalRootRetirementFacts>,
+            ManagedLifecycleError,
+        > {
+            if root_retired {
+                Ok(Some(
+                    DisplayOriginalRootRetirementFacts::from_envelope(source, &scope, now_ms()?)
+                        .map_err(|_| invalid())?,
+                ))
+            } else {
+                Ok(None)
+            }
+        };
+        let root_comparison=|source:&ObservationEnvelope|->Result<DisplayOriginalCompletionFacts,ManagedLifecycleError>{
+            if let Some(retired)=retired_facts(source)? {Ok(retired.completion_comparison().clone())}
+            else {DisplayOriginalCompletionFacts::from_envelope(source,&scope,now_ms()?).map_err(|_|invalid())}
+        };
+        let original_comparison = |source: &ObservationEnvelope| -> Result<
+            DisplayOriginalProtectionFacts,
+            ManagedLifecycleError,
+        > {
+            if let Some(retired) = retired_facts(source)? {
+                Ok(retired.original_comparison().clone())
+            } else {
+                DisplayOriginalProtectionFacts::from_envelope(source, &scope, now_ms()?)
+                    .map_err(|_| invalid())
+            }
+        };
+        let retired_root = retired_facts(&root)?;
+        if retired_facts(&protection)? != retired_root {
+            return Err(invalid());
+        }
+        let root_facts = root_comparison(&root)?;
+        let original = original_comparison(&protection)?;
         let current = DisplayNativeCurrentFacts::from_envelope(&frames, &scope, now)
-            .map_err(|_| invalid())?;
-        let original = DisplayOriginalProtectionFacts::from_envelope(&protection, &scope, now)
             .map_err(|_| invalid())?;
         let outputs = DisplayObservationFacts::from_envelope(
             &display,
@@ -269,7 +398,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 != effect_from_request(&history.restoration)?.digest().to_hex()
             || current.completion_digest() != root_facts.lineage().record
             || !current.input_retired()
-            || !current.power_fence_held()
+            || current.power_fence_held() != power_held
             || !current.follows_handoff(root_facts.first())
             || current.lineage().source_guard != source_guard.to_hex()
             || !current.matches_layout(restored.desired())
@@ -294,14 +423,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || after_root.sequence <= root.sequence
             || after_protection.sequence <= protection.sequence
             || !checked.reconciles(&current)
-            || DisplayOriginalCompletionFacts::from_envelope(&after_root, &scope, now_ms()?)
-                .map_err(|_| invalid())?
-                != root_facts
-            || DisplayOriginalProtectionFacts::from_envelope(&after_protection, &scope, now_ms()?)
-                .map_err(|_| invalid())?
-                != original
+            || root_comparison(&after_root)? != root_facts
+            || original_comparison(&after_protection)? != original
+            || retired_facts(&after_root)? != retired_root
+            || retired_facts(&after_protection)? != retired_root
             || self.finalization_history(&principal, material.restoration_request())? != history
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
+            || (if root_retired {
+                self.current_finalization_comparison_context(&principal, terminal_request)?
+            } else {
+                self.terminal_inspection_context(&principal, terminal_request)?
+            }) != terminal
+            || self
+                .authority
+                .matching_request_snapshot(&principal, &terminal.request)?
+                != actual_terminal
             || self.native_handoff_anchors(&principal_id, &terminal)? != anchors
             || NativeCompletionPrepared::load_comparison(
                 self.display_journal()?,
@@ -341,10 +476,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         Ok(OriginalDisplayCurrentInspection {
             observation: root,
             frames: checked,
-            terminal: terminal.snapshot.clone(),
+            terminal: actual_terminal,
             preparation: prepared.digest(),
             prepared,
             root: root_facts,
+            retired_root,
             context: terminal,
             anchors,
             history,

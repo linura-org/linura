@@ -18,11 +18,21 @@ fn frame_current(record: &NativeDisplayCompletionPreparation) -> zbus::fdo::Resu
 }
 
 impl NativeProtection {
-    fn completion_scope_live(
+    pub(super) fn completion_scope_live(
         &self,
         admission: &Admission,
         record: &NativeDisplayCompletionPreparation,
         transferred: bool,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let payload = self.original_for_scope(admission, record.frames().scope())?;
+        self.completion_scope_from_original(admission, record, transferred, payload)
+    }
+    pub(super) fn completion_scope_from_original(
+        &self,
+        admission: &Admission,
+        record: &NativeDisplayCompletionPreparation,
+        transferred: bool,
+        payload: Vec<u8>,
     ) -> zbus::fdo::Result<Vec<u8>> {
         let parent = record.parent();
         let terminal = parent.terminal();
@@ -31,7 +41,6 @@ impl NativeProtection {
             .map_err(|_| unavailable())?
             .recovery_scope()
             .map_err(|_| unavailable())?;
-        let payload = self.original_for_scope(admission, &scope)?;
         let restoration = super::super::display_checkpoint::read_restoration(&scope)
             .map_err(|_| unavailable())?;
         record
@@ -175,7 +184,7 @@ impl NativeProtection {
                         super::super::protection_lock::BUDGET,
                     )
                     .map_err(|_| unavailable())?;
-                    service.completion_scope_live(&admission, &record, !initial)?;
+                    service.completion_lifetime_scope_live(&admission, &record, !initial)?;
                     let live = admission.completions.get(&key).ok_or_else(unavailable)?;
                     if live.scope != scope
                         || live.digest != fingerprint
@@ -281,6 +290,10 @@ impl NativeProtection {
                     authenticate,
                     &mut verify,
                     transfer,
+                    |digest| service.spend_power_mechanism(&control, &key, &record, digest),
+                    |digest| {
+                        service.spend_current_commit_mechanism(&control, &key, &record, digest)
+                    },
                 );
             })
             .map_err(|_| unavailable())?;

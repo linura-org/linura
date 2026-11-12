@@ -11,10 +11,12 @@ use std::time::{Duration, Instant};
 
 use linura_linux_session::{
     MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION,
-    NativeDisplayCompletionPreparation, NativeDisplayFinalizationReservation,
-    NativeDisplayKernelSubscription, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
+    NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
     NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeSessionChannel, NativeSessionRole,
+    NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
+    NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -27,6 +29,9 @@ const MAX_PENDING: usize = 32;
 const ORIGINAL_PROBE: Duration = Duration::from_secs(2);
 const MAX_STARTUPS: usize = 64;
 mod completion;
+mod current_commit;
+mod power;
+mod root_power;
 
 fn valid_dispatch_deadline(deadline: u64, now: u64) -> zbus::fdo::Result<()> {
     if now == 0 || deadline <= now || deadline - now > 15_000 {
@@ -118,6 +123,24 @@ struct Admission {
     // transfer; a lost descriptor cannot be recreated from the LNRN file.
     native_release_grants: BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
     completions: BTreeMap<String, CompletionReservation>,
+    power_retirements: BTreeMap<String, PowerRetirementReservation>,
+    root_power_retirements: BTreeMap<String, RootPowerRetirementReservation>,
+    current_commits: BTreeMap<String, CurrentCommitReservation>,
+}
+
+struct CurrentCommitReservation {
+    digest: ComponentDigest,
+    spent: bool,
+}
+
+struct RootPowerRetirementReservation {
+    digest: ComponentDigest,
+    closed: bool,
+}
+
+struct PowerRetirementReservation {
+    digest: ComponentDigest,
+    spent: bool,
 }
 
 struct CompletionReservation {
@@ -315,7 +338,35 @@ fn retire_unused_startups<T>(
     }
 }
 
+type OriginalRootPowerRead = (Vec<u8>, Vec<u8>, Vec<u8>, bool);
+
 trait ProtectionPort: Clone + Send + Sync + 'static {
+    fn reserve_current_commit(
+        &self,
+        sender: &str,
+        record: NativeDisplayCurrentCommitPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn retire_root_power(
+        &self,
+        sender: &str,
+        record: NativeDisplayRootRetirementPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn read_root_power(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<OriginalRootPowerRead>;
+    fn reserve_power_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayPowerRetirementPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn read_power_retirement(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
+
     fn reserve_completion_grant(
         &self,
         sender: &str,
@@ -577,8 +628,35 @@ impl NativeProtection {
             .witnesses
             .read_original(&dispatch, &self.channel)
             .map_err(|_| unavailable())?;
+        self.require_scope_startups(admission, scope, &payload)?;
+        Ok(payload)
+    }
+    fn retired_original_for_scope(
+        &self,
+        admission: &Admission,
+        scope: &linura_core::DisplayRecoveryScope,
+        prepared: &ComponentDigest,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let payload = self
+            .witnesses
+            .read_retired_original(
+                &dispatch(scope.original_dispatch())?,
+                prepared,
+                &self.channel,
+            )
+            .map_err(|_| unavailable())?;
+        self.require_scope_startups(admission, scope, &payload)?;
+        Ok(payload)
+    }
+    fn require_scope_startups(
+        &self,
+        admission: &Admission,
+        scope: &linura_core::DisplayRecoveryScope,
+        payload: &[u8],
+    ) -> zbus::fdo::Result<()> {
+        let dispatch = dispatch(scope.original_dispatch())?;
         let (original, integration) =
-            NativeDisplayRecoveryCheckpoint::original_startup_scope(&payload, &dispatch)
+            NativeDisplayRecoveryCheckpoint::original_startup_scope(payload, &dispatch)
                 .map_err(|_| unavailable())?;
         let current = scope.replacement();
         if original.session().boot() != current.session().boot()
@@ -602,7 +680,7 @@ impl NativeProtection {
             return Err(unavailable());
         }
         current.live().map_err(|_| unavailable())?;
-        Ok(payload)
+        Ok(())
     }
     fn admit(&self, sender: &str) -> zbus::fdo::Result<()> {
         self.channel
@@ -625,6 +703,42 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn reserve_current_commit(
+        &self,
+        sender: &str,
+        record: NativeDisplayCurrentCommitPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.reserve_current_commit_mechanism(sender, record)
+    }
+    fn retire_root_power(
+        &self,
+        sender: &str,
+        record: NativeDisplayRootRetirementPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.retire_root_power_mechanism(sender, record)
+    }
+    fn read_root_power(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<OriginalRootPowerRead> {
+        self.read_root_power_mechanism(sender, scope)
+    }
+    fn reserve_power_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayPowerRetirementPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.reserve_power_mechanism(sender, record)
+    }
+    fn read_power_retirement(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        self.read_power_mechanism(sender, scope)
+    }
+
     fn reserve_completion_grant(
         &self,
         sender: &str,
@@ -1669,6 +1783,102 @@ impl ProtectionPort for NativeProtection {
 
 #[zbus::interface(name = "org.linura.DisplayProtection1")]
 impl<P: ProtectionPort> ProtectionService<P> {
+    #[zbus(out_args("accepted"))]
+    async fn reserve_current_commit(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayCurrentCommitPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_current_commit(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
+    async fn retire_root_power(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayRootRetirementPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.retire_root_power(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "preimage", "current_commit_digest", "retired"))]
+    async fn read_root_power(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<OriginalRootPowerRead> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_root_power(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
+    async fn reserve_power_retirement(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayPowerRetirementPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_power_retirement(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "phase"))]
+    async fn read_power_retirement(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_power_retirement(&sender, scope)
+        })
+        .await
+    }
+
     #[zbus(out_args("grant"))]
     async fn reserve_completion_grant(
         &self,
@@ -2002,6 +2212,41 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn reserve_current_commit(
+            &self,
+            _: &str,
+            _: NativeDisplayCurrentCommitPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(zbus::fdo::Error::AccessDenied("untrusted peer".into()))
+        }
+        fn retire_root_power(
+            &self,
+            _: &str,
+            _: NativeDisplayRootRetirementPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(zbus::fdo::Error::AccessDenied("untrusted peer".into()))
+        }
+        fn read_root_power(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+        ) -> zbus::fdo::Result<OriginalRootPowerRead> {
+            Err(zbus::fdo::Error::AccessDenied("untrusted peer".into()))
+        }
+        fn reserve_power_retirement(
+            &self,
+            _: &str,
+            _: NativeDisplayPowerRetirementPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
+        fn read_power_retirement(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+            Err(unavailable())
+        }
         fn reserve_completion_grant(
             &self,
             _: &str,
@@ -2105,7 +2350,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 14);
+            assert_eq!(text.matches("<method ").count(), 19);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2137,6 +2382,11 @@ mod tests {
             "ReadFinalization",
             "ReadCompletion",
             "ReserveCompletionGrant",
+            "ReservePowerRetirement",
+            "ReadPowerRetirement",
+            "ReserveCurrentCommit",
+            "RetireRootPower",
+            "ReadRootPower",
             "ReserveRestoration",
             "ReserveFinalization",
             "ReserveNativeReleaseGrant",

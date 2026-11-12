@@ -91,7 +91,7 @@ impl OriginalDisplayCompletionReceipt {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn revalidate_completion_review(
+    pub(super) fn revalidate_completion_review(
         &mut self,
         principal: &AuthenticatedPrincipal,
         terminal: &TerminalInspectionContext,
@@ -208,13 +208,23 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // backward wall-clock transition since preparation.
         preparation.require_current(now_ms()?)?;
         let intent = preparation.digest();
+        // Move the ORIGINAL live review forward before dispatch. An absent
+        // acknowledgement cannot reconstruct authority or repeat completion;
+        // the later phase may proceed only after fresh independent proof.
+        review.stage = DisplayReviewStage::CompletionDispatched {
+            preparation: intent.clone(),
+            verification: verified.clone(),
+        };
+        self.check_display_review_capacity(review.retained_bytes)?;
+        self.display_reviews
+            .insert(terminal.snapshot.transaction_id.clone(), review);
         port.dispatch_completion(AuthorizedOriginalDisplayCompletion {
             material: terminal.intent.material().into(),
             terminal: terminal.snapshot.clone(),
             dispatch_digest: dispatch.into(),
             retirement_observation: anchors.retirement.observation().clone(),
             preparation_digest: intent.clone(),
-            verification_digest: verified.clone(),
+            verification_digest: verified,
             frames: proof.inspection.frames,
             expires_at_unix_ms: preparation.expiry(),
         })
@@ -229,14 +239,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        self.revalidate_completion_review(&principal, &terminal, &review)?;
-        review.stage = DisplayReviewStage::CompletionDispatched {
-            preparation: intent.clone(),
-            verification: verified,
-        };
-        self.check_display_review_capacity(review.retained_bytes)?;
+        let review = self
+            .display_reviews
+            .remove(&terminal.snapshot.transaction_id)
+            .ok_or_else(invalid)?;
+        let current = self.revalidate_completion_review(&principal, &terminal, &review);
         self.display_reviews
             .insert(terminal.snapshot.transaction_id.clone(), review);
+        current?;
         Ok(OriginalDisplayCompletionReceipt {
             request: terminal_request.clone(),
             transaction: terminal.snapshot.transaction_id,

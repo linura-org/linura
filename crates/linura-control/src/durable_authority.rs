@@ -502,6 +502,42 @@ where
         original.revalidate(principal, floor, &self.approvals)
     }
 
+    /// The original process-local finalization review may continue only after
+    /// the same signed transaction advanced exactly twice to Committed. The
+    /// caller must independently validate the retained completion record; this
+    /// method never accepts a reconstructed review or manufactures an approval.
+    pub(crate) fn revalidate_committed_display_review(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        original: &DisplayRetainedReview,
+        floor: TrustedRiskFloor,
+        committed: &TransactionSnapshot,
+        before: &TransactionSnapshot,
+    ) -> Result<(), DurableAuthorityError> {
+        let _now = self.authority_now_unix_ms()?;
+        let current = self.transactions.snapshot(&original.transaction_id)?;
+        if current != *committed
+            || current.state != TransactionState::Committed
+            || before.state != TransactionState::Indeterminate
+            || current.transaction_id != before.transaction_id
+            || before.state_version.checked_add(2) != Some(current.state_version)
+            || current.current_generation != before.current_generation
+            || current.binding_digest != before.binding_digest
+            || current.current_generation != original.generation
+            || current.binding_digest != *original.binding.digest()
+            || principal.as_str() != original.binding.principal().as_str()
+            || current.principal != *original.binding.principal()
+            || current.request_id != request.request_id
+            || digest_request(request)? != *original.binding.request_digest()
+            || original.risk_floor != floor
+            || original.purpose != DisplayReviewPurpose::OriginalFinalization
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        original.revalidate(principal, floor, &self.approvals)
+    }
+
     pub fn new(
         store: S,
         authority_signer: TransactionAuthoritySigner,
@@ -1417,6 +1453,100 @@ where
             graph_digest: material.graph_digest,
             provenance_digest: material.provenance_digest,
         })
+    }
+
+    /// Verify the already performed original-display handoff from the canonical
+    /// post-effect factory. This cannot dispatch, reprepare or recreate approval.
+    pub(crate) fn verify_original_display_current_without_replay(
+        &mut self,
+        previews: &PlanPreviewControl,
+        principal: &AuthenticatedPrincipal,
+        actor: Actor,
+        request: &PlanDesiredStateRequest,
+        inspection: &crate::OriginalDisplayRootPowerInspection,
+    ) -> Result<VerifiedDurableAuthority, DurableAuthorityError> {
+        self.assert_request_matches(principal, request)?;
+        let anchor = self
+            .transactions
+            .recovery_anchor(&inspection.current().terminal().transaction_id)?;
+        if anchor.snapshot != *inspection.current().terminal()
+            || anchor.snapshot.state != TransactionState::Indeterminate
+            || anchor.snapshot.principal.as_str() != principal.as_str()
+            || anchor.request_digest != digest_request(request)?
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let (plan, observation) = previews
+            .build_verified_original_display_current_plan(principal, actor, request, inspection)?;
+        if plan.status != linura_planner::PlanStatus::NoChange
+            || !plan.changes.is_empty()
+            || plan.execution_authorized()
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        observation
+            .validate(&plan.provider, &plan.resource, &plan.observation_capability)
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        let observed = digest_observation(&observation)?;
+        let (desired_state_digest, graph_digest, provenance_digest) =
+            verified_commit_digests(&anchor, &plan, &observed)?;
+        let at = self.authority_now_unix_ms()?;
+        observation
+            .require_current(at)
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        let recovery = self.authority_signer.authorize_recovery(
+            &anchor.snapshot,
+            RecoveryResolution::IntendedStateVerified {
+                observation_digest: observed,
+                desired_state_digest: desired_state_digest.clone(),
+                graph_digest: graph_digest.clone(),
+                provenance_digest: provenance_digest.clone(),
+            },
+            at,
+            observation_expires_at_unix_ms(&observation)?,
+        )?;
+        let RecoveryOutcome::Verified(snapshot) = self.transactions.recover(&recovery)? else {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        };
+        let material = self
+            .transactions
+            .verified_commit_material(&snapshot.transaction_id)?;
+        if material.snapshot != snapshot
+            || material.desired_state_digest != desired_state_digest
+            || material.graph_digest != graph_digest
+            || material.provenance_digest != provenance_digest
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        Ok(VerifiedDurableAuthority {
+            principal: material.snapshot.principal.clone(),
+            snapshot: material.snapshot,
+            desired_state_digest: material.desired_state_digest,
+            graph_digest: material.graph_digest,
+            provenance_digest: material.provenance_digest,
+        })
+    }
+
+    pub(crate) fn original_display_verified_material(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<linura_transaction::VerifiedCommitMaterial, DurableAuthorityError> {
+        let snapshot = self.matching_request_snapshot(principal, request)?;
+        if snapshot.state != TransactionState::Verified {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let material = self
+            .transactions
+            .verified_commit_material(&snapshot.transaction_id)?;
+        if material.snapshot != snapshot
+            || material.desired_state_digest != digest_request(request)?
+            || material.graph_digest == ContentDigest::zero()
+            || material.provenance_digest == ContentDigest::zero()
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        Ok(material)
     }
 
     pub fn commit_verified(

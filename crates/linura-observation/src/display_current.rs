@@ -35,8 +35,10 @@ pub struct DisplayNativeCurrentFacts {
     completion_digest: String,
     input_retired: bool,
     power_fence_held: bool,
+    current_commit: Option<String>,
 }
 impl DisplayNativeCurrentFacts {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         scope: DisplayRecoveryScope,
         lineage: DisplayNativeHandoffLineage,
@@ -45,6 +47,7 @@ impl DisplayNativeCurrentFacts {
         completion_digest: String,
         input_retired: bool,
         power_fence_held: bool,
+        current_commit: Option<String>,
     ) -> Result<Self, DisplayEvidenceError> {
         let transaction = |value: &str| {
             value.starts_with("transaction:")
@@ -54,7 +57,10 @@ impl DisplayNativeCurrentFacts {
                     c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b':' | b'-')
                 })
         };
-        if !canonical_digest(&completion_digest)
+        if current_commit
+            .as_ref()
+            .is_some_and(|digest| !canonical_digest(digest) || power_fence_held || !input_retired)
+            || !canonical_digest(&completion_digest)
             || [
                 &lineage.checkpoint,
                 &lineage.restoration_effect,
@@ -117,13 +123,14 @@ impl DisplayNativeCurrentFacts {
             completion_digest,
             input_retired,
             power_fence_held,
+            current_commit,
         })
     }
 
     pub fn attributes(&self) -> BTreeMap<String, ObservedValue> {
         let lineage = &self.lineage;
         let mut result = BTreeMap::from([
-            ("current_schema".into(), ObservedValue::U64(1)),
+            ("current_schema".into(), ObservedValue::U64(2)),
             (
                 "original_dispatch".into(),
                 ObservedValue::Text(self.scope.original_dispatch().into()),
@@ -153,6 +160,14 @@ impl DisplayNativeCurrentFacts {
                 ObservedValue::U64(self.outputs.len() as u64),
             ),
         ]);
+        result.insert(
+            "current_commit_digest".into(),
+            ObservedValue::Text(
+                self.current_commit
+                    .clone()
+                    .unwrap_or_else(|| "0".repeat(64)),
+            ),
+        );
         result.insert(
             "completion_digest".into(),
             ObservedValue::Text(self.completion_digest.clone()),
@@ -217,11 +232,11 @@ impl DisplayNativeCurrentFacts {
             return Err(DisplayEvidenceError::Identity);
         }
         let attrs = &observation.attributes;
-        if attrs.len() > 164
+        if attrs.len() > 165
             || attrs.iter().any(|(key, value)| {
                 key.len() > 64 || matches!(value, ObservedValue::Text(text) if text.len() > 256)
             })
-            || number(attrs, "current_schema")? != 1
+            || number(attrs, "current_schema")? != 2
             || text(attrs, "original_dispatch")? != scope.original_dispatch()
         {
             return Err(DisplayEvidenceError::Shape);
@@ -285,6 +300,10 @@ impl DisplayNativeCurrentFacts {
             text(attrs, "completion_digest")?.into(),
             boolean(attrs, "input_retired")?,
             boolean(attrs, "power_fence_held")?,
+            match text(attrs, "current_commit_digest")? {
+                raw if raw == "0".repeat(64) => None,
+                raw => Some(raw.into()),
+            },
         )?;
         if result.attributes() != *attrs {
             return Err(DisplayEvidenceError::Shape);
@@ -341,6 +360,10 @@ impl DisplayNativeCurrentFacts {
             })
             && first.scope() == &self.scope
     }
+    #[must_use]
+    pub fn current_commit_digest(&self) -> Option<&str> {
+        self.current_commit.as_deref()
+    }
     /// Comparison only. No previous sample can recreate the current native
     /// lifetime or authorize another effect. Power retirement is checked as a
     /// separate transition, never inferred from a newer timestamp.
@@ -351,7 +374,26 @@ impl DisplayNativeCurrentFacts {
             && self.completion_digest == previous.completion_digest
             && self.input_retired == previous.input_retired
             && self.power_fence_held == previous.power_fence_held
-            && self.window.observed_unix_ms >= previous.window.observed_unix_ms
+            && self.current_commit == previous.current_commit
+            && self.reconciles_inventory(previous)
+    }
+    /// Typed comparison of the separately authorized native-power transition.
+    /// This alone is neither an observation nor a release permission.
+    #[must_use]
+    pub fn follows_native_power_retirement(&self, previous: &Self) -> bool {
+        self.current_commit.is_none()
+            && previous.current_commit.is_none()
+            && self.input_retired
+            && previous.input_retired
+            && previous.power_fence_held
+            && !self.power_fence_held
+            && self.scope == previous.scope
+            && self.lineage == previous.lineage
+            && self.completion_digest == previous.completion_digest
+            && self.reconciles_inventory(previous)
+    }
+    fn reconciles_inventory(&self, previous: &Self) -> bool {
+        self.window.observed_unix_ms >= previous.window.observed_unix_ms
             && self.window.observed_boot_ms >= previous.window.observed_boot_ms
             && self.outputs.len() == previous.outputs.len()
             && self.outputs.iter().all(|(id, current)| {

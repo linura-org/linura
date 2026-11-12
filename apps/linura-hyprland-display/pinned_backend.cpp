@@ -1142,7 +1142,7 @@ NativeOutputCommits frameHighWater(const Correlation &original, const Snapshot &
         return std::nullopt;
     if (!backend->originalRecovery->grant || !backend->originalRecovery->protection)
         return std::nullopt;
-    if (!backend->powerInhibitor.held() || !frameScopeLive(scope))
+    if ((scope == FrameScope::First && !backend->powerInhibitor.held()) || !frameScopeLive(scope))
         return std::nullopt;
     const auto began = backend->clock();
     const auto initial = backend->snapshot();
@@ -1298,6 +1298,18 @@ void shutdown()
     service.reset(); // Compensation while monitor/rule/lock/protection still exist.
     shutdownProtectedDisplay();
     backend.reset();
+}
+bool nativePowerFenceHeld() noexcept
+{
+    return backend && backend->powerInhibitor.retained() && backend->powerInhibitor.held();
+}
+bool retireNativePowerFence() noexcept
+{
+    if (!nativePowerFenceHeld())
+        return false;
+    // Preserve the original rule/overlay checkpoint for ownership-aware cleanup.
+    backend->powerInhibitor.release();
+    return !backend->powerInhibitor.retained();
 }
 bool startupRecoveryAvailable()
 {

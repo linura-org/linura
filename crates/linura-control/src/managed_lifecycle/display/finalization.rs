@@ -16,10 +16,14 @@ use linura_observation::{
 use linura_transaction::TransactionSnapshot;
 mod handoff;
 pub use handoff::{
-    AuthorizedOriginalDisplayCompletion, OriginalDisplayCompletionPort,
-    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentInspection,
+    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
+    AuthorizedOriginalDisplayNativePowerRetirement, AuthorizedOriginalDisplayRootPowerRetirement,
+    OriginalDisplayCompletionPort, OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
+    OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
     OriginalDisplayCurrentVerification, OriginalDisplayNativeHandoffInspection,
-    OriginalDisplayNativeHandoffVerification,
+    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativePowerInspection,
+    OriginalDisplayNativePowerRetirementPort, OriginalDisplayQualifiedCurrent,
+    OriginalDisplayRootPowerInspection, OriginalDisplayRootPowerRetirementPort,
 };
 
 /// The caller identifies existing restoration history and supplies provenance.

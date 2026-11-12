@@ -1000,6 +1000,32 @@ they cannot replay execution, renew old proof or change the Indeterminate
 terminal. Power/global-admission retirement, ReleasedCurrent and later ordinary
 release/adoption/cleanup remain separate source requirements.
 
+A separately prepared one-use continuation may now retire only native power.
+The original canonical review, fresh independent current checkpoint and exclusive
+Control before-effect record are required; a historical proof or restart cannot
+mint this permit. Root records LNPP preparation and LNPS permission spend before
+ACK on the original credential-bearing lifetime. The compositor checks the full
+sealed comparison bytes and exact parent digest, both original producer clocks,
+complete current KMS/commit inventory and drained input again after the reply.
+It releases only its actual native inhibitor; Root's independent power blocker,
+S17, startup admission and original recovery checkpoint remain retained.
+A distinct Root power-grant observation cannot attest the physical effect:
+Control independently joins current native power absence with Root's still-held
+protection, source/layout, current KMS/input, logind and S17 before reporting the
+post-native inspection. Storage failure, acknowledged-but-missing write, ambiguous
+sync, denial, stale proof and lost ACK cannot cause redelivery. This native-only step leaves terminal history Indeterminate.
+A further original-review continuation now durably prepares and closes Root's
+own scope-specific blocker while retaining its kernel/checkpoint witnesses.
+The separate retired-Root capability independently verifies logind processing;
+it cannot be mistaken for held-power evidence. Control joins it with fresh
+current native/source/layout/input/power, logind and S17 facts before its
+canonical NoChange verification and signed Verified/Committed transitions.
+Immutable pre-CAS comparison ancestry, verified material and CurrentCommitted
+history support storage-failure and restart recovery without physical replay.
+The inspection's actual signed terminal stays distinct from its old comparison
+snapshot. Native permanent-current qualification, Root ReleasedCurrent and
+ordered startup admission remain separately unimplemented.
+
 Control's separate current-verification route retains the independently joined
 current-state checkpoint under a purpose-separated immutable journal key. The
 bounded record binds the complete current KMS/output inventory, original
@@ -1044,7 +1070,7 @@ native/Root continuity, original connection, monotonic clocks and bounded status
 probes still govern that held lifetime. Loss never reconstructs or renews authority.
 The typed Control finalization authorizer recomputes material's SDK payload and
 resource, checks the exact principal/administrator class, and consumes that separate
-native proof. Generic approval cannot substitute. Final Root/native power and
-global-admission retirement and durable completion remain unimplemented; the
+native proof. Generic approval cannot substitute. Permanent native-current and final Root/global-admission
+retirement remain unimplemented; the
 same-invocation pending handoff and its read-only current inspection cannot
 substitute for those requirements.

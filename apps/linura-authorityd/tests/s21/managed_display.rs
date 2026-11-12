@@ -68,6 +68,16 @@ struct Machine {
     current_completion: Option<linura_observation::DisplayOriginalCompletionFacts>,
     current_reads: u64,
     current_fault: u8,
+    native_power_write_fault: u8,
+    completion_write_key: u8,
+    completion_write_fault: u8,
+    root_power_write_fault: u8,
+    root_power_retired: bool,
+    native_current_grant: Option<String>,
+    root_retirement: Option<linura_observation::DisplayOriginalRootRetirementFacts>,
+    last_original_protection: Option<linura_observation::DisplayOriginalProtectionFacts>,
+    native_power_retired: bool,
+    power_grant: Option<linura_observation::DisplayOriginalPowerRetirementFacts>,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -246,6 +256,24 @@ impl Observer for LiveFixtureObserver {
                 reason: None,
             });
         }
+        if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
+                )),
+                support: SupportLevel::Supported,
+                provider: Some(self.template.provider.clone()),
+                reason: None,
+            });
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY,
+                )),
+                support: SupportLevel::Supported,
+                provider: Some(self.template.provider.clone()),
+                reason: None,
+            });
+        }
         capabilities
     }
     fn health(&self) -> ProviderHealth {
@@ -269,8 +297,20 @@ impl Observer for LiveFixtureObserver {
         let completion = self.template.provider.as_str()
             == linura_observation::DISPLAY_RECOVERY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_ORIGINAL_COMPLETION_CAPABILITY;
+        let power = self.template.provider.as_str()
+            == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && capability.as_str()
+                == linura_observation::DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY;
+        let root_retirement = self.template.provider.as_str()
+            == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && capability.as_str()
+                == linura_observation::DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY;
         if resource != &self.template.resource
-            || (capability != &self.template.capability && !finalization && !completion)
+            || (capability != &self.template.capability
+                && !finalization
+                && !completion
+                && !power
+                && !root_retirement)
         {
             return Err(ProviderError::Unsupported("fixture route mismatch".into()));
         }
@@ -289,6 +329,36 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if root_retirement {
+            let root = machine
+                .root_retirement
+                .as_ref()
+                .ok_or_else(|| ProviderError::Unavailable("no simulated retired Root".into()))?;
+            sample.capability = capability.clone();
+            sample.attributes = root.attributes();
+            if machine.current_fault == 9 {
+                sample.attributes.insert(
+                    "phase".into(),
+                    ObservedValue::Text("released-current".into()),
+                );
+            }
+            return Ok(sample);
+        }
+        if machine.root_power_retired
+            && self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        {
+            return Err(ProviderError::Unavailable(
+                "simulated Root no longer holds power; old-phase probe denied".into(),
+            ));
+        }
+        if power {
+            let grant = machine.power_grant.as_ref().ok_or_else(|| {
+                ProviderError::Unavailable("no simulated power permission".into())
+            })?;
+            sample.capability = capability.clone();
+            sample.attributes = grant.attributes();
+            return Ok(sample);
+        }
         if completion {
             let root = machine.current_completion.as_ref().ok_or_else(|| {
                 ProviderError::Unavailable("no simulated transferred Root lifetime".into())
@@ -459,6 +529,18 @@ impl Observer for LiveFixtureObserver {
                 ObservedValue::Text("c".repeat(64)),
             );
         }
+        if sample.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && sample.capability.as_str()
+                == linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+            && let Ok(scope) = linura_core::DisplayRecoveryScope::from_resource(&sample.resource)
+            && let Ok(facts) = linura_observation::DisplayOriginalProtectionFacts::from_envelope(
+                &sample,
+                &scope,
+                now_unix_ms(),
+            )
+        {
+            machine.last_original_protection = Some(facts);
+        }
         Ok(sample)
     }
 }
@@ -513,6 +595,107 @@ struct FailingJournal {
 }
 impl ApprovedRequestJournal for FailingJournal {
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+        let completion_kind = if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-current-completion-prepared:")
+        {
+            1
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-current-completion-verified:")
+        {
+            2
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-current-committed:")
+        {
+            3
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-native-current-prepared:")
+        {
+            4
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-native-current-verified:")
+        {
+            5
+        } else {
+            0
+        };
+        if completion_kind != 0 {
+            let fault = {
+                let state = self
+                    .machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                if state.completion_write_key == completion_kind {
+                    state.completion_write_fault
+                } else {
+                    0
+                }
+            };
+            match fault {
+                1 => return Err(TransactionStoreError::CapacityExceeded),
+                2 => return Ok(()),
+                3 => {
+                    self.inner.retain(record)?;
+                    return Err(TransactionStoreError::Storage(
+                        "simulated ambiguous current completion sync".into(),
+                    ));
+                }
+                _ => (),
+            }
+        }
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-root-power-prepared:")
+        {
+            let fault = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .root_power_write_fault;
+            match fault {
+                1 => return Err(TransactionStoreError::CapacityExceeded),
+                2 => return Ok(()),
+                3 => {
+                    self.inner.retain(record)?;
+                    return Err(TransactionStoreError::Storage(
+                        "simulated ambiguous Root power sync".into(),
+                    ));
+                }
+                _ => (),
+            }
+        }
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-native-power-prepared:")
+        {
+            let fault = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .native_power_write_fault;
+            match fault {
+                1 => return Err(TransactionStoreError::CapacityExceeded),
+                2 => return Ok(()),
+                3 => {
+                    self.inner.retain(record)?;
+                    return Err(TransactionStoreError::Storage(
+                        "simulated ambiguous native power sync".into(),
+                    ));
+                }
+                _ => (),
+            }
+        }
         if record
             .request_id()
             .as_str()

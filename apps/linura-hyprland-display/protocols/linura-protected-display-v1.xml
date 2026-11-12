@@ -140,6 +140,28 @@
       <arg name="control_binding" type="string"/>
       <arg name="control_observation" type="string"/>
     </request>
+    <request name="commit_current">
+      <description summary="spend one original Root committed-current permission">
+        Complete sealed comparison bytes bind the independently committed Control
+        state and original Root power/current lineage. Only the original Root
+        credential channel may spend this one-use permission. Native rechecks
+        both fixed clocks, actual current KMS/input/source and absent native
+        power before retaining the committed current lifetime. S17, checkpoint
+        provenance and future startup admission remain separately retained.
+      </description>
+      <arg name="preparation" type="fd"/>
+      <arg name="preparation_digest" type="string"/>
+    </request>
+    <request name="retire_power">
+      <description summary="consume one original Root native-power permission">
+        Control separately prepares the exact current-state retirement. The
+        original credential-checked channel spends LNPS before acknowledgment.
+        Native KMS/input/source proof precedes release of only the native
+        inhibitor. Root power, S17, startup and checkpoint provenance stay held.
+      </description>
+      <arg name="preparation" type="fd"/>
+      <arg name="preparation_digest" type="string"/>
+    </request>
     <request name="transfer_completion">
       <description summary="transfer the original live Root lifetime once">
         The authenticated original Root channel carries bounded LNCP material

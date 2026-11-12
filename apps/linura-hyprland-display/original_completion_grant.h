@@ -65,6 +65,30 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
 class OriginalCompletionGrant final
 {
   public:
+    // Unforgeable, non-copyable lifetime. It is created only after the separate
+    // original Root LNCF spend; raw comparison bytes or a bool cannot create it.
+    class CommittedCurrent final
+    {
+      public:
+        CommittedCurrent(const CommittedCurrent &) = delete;
+        CommittedCurrent &operator=(const CommittedCurrent &) = delete;
+        [[nodiscard]] bool live() const
+        {
+            return check_ && check_();
+        }
+        [[nodiscard]] const std::string &comparisonDigest() const noexcept
+        {
+            return digest_;
+        }
+
+      private:
+        friend class OriginalCompletionGrant;
+        CommittedCurrent(std::string digest, std::function<bool()> check)
+            : digest_(std::move(digest)), check_(std::move(check))
+        {}
+        const std::string digest_;
+        std::function<bool()> check_;
+    };
     ~OriginalCompletionGrant()
     {
         liveness_->owner = nullptr;
@@ -119,6 +143,33 @@ class OriginalCompletionGrant final
     [[nodiscard]] bool verify()
     {
         return sequence_ > 1 ? probe(false) : fail();
+    }
+    [[nodiscard]] bool retirePower(std::string_view preparation)
+    {
+        if (powerAttempted_ || !currentAttempted_ || !OriginalGrantCodec::digest(preparation) ||
+            !live())
+            return fail();
+        powerAttempted_ = true;
+        return probe(false, preparation);
+    }
+    [[nodiscard]] std::unique_ptr<CommittedCurrent> commitCurrent(std::string_view digest)
+    {
+        if (commitAttempted_ || !currentAttempted_ || !powerAttempted_ ||
+            !OriginalGrantCodec::digest(digest) || !live()) {
+            fail();
+            return {};
+        }
+        commitAttempted_ = true;
+        if (!probe(false, {}, digest))
+            return {};
+        committedDigest_ = std::string(digest);
+        std::weak_ptr<Liveness> weak = liveness_;
+        return std::unique_ptr<CommittedCurrent>(
+            new CommittedCurrent(committedDigest_, [weak, digest = committedDigest_] {
+                const auto scope = weak.lock();
+                return scope && scope->owner && scope->owner->committedDigest_ == digest &&
+                       scope->owner->live();
+            }));
     }
     [[nodiscard]] bool live()
     {
@@ -232,7 +283,7 @@ class OriginalCompletionGrant final
     {
         return transfer(bytes.data(), bytes.size(), deadline, false);
     }
-    bool probe(bool initial)
+    bool probe(bool initial, std::string_view power = {}, std::string_view committed = {})
     {
         const auto now = clock();
         if (!now || sequence_ == std::numeric_limits<std::uint64_t>::max() ||
@@ -242,13 +293,19 @@ class OriginalCompletionGrant final
         auto deadline = now->bootMs + 1000;
         if (initial)
             deadline = std::min(deadline, expires_.bootMs);
-        std::string request = initial ? "LNCH:1\n" : "LNCV:1\n";
+        std::string request = !committed.empty() ? "LNCF:1\n"
+                              : !power.empty()   ? "LNPR:1\n"
+                              : initial          ? "LNCH:1\n"
+                                                 : "LNCV:1\n";
         request += '\0';
         for (unsigned shift = 64; shift; shift -= 8)
             request += static_cast<char>((sequence_ >> (shift - 8)) & 255U);
-        for (std::size_t i = 0; i < digest_.size(); i += 2) {
+        const std::string_view digest = !committed.empty() ? committed
+                                        : power.empty()    ? std::string_view(digest_)
+                                                           : power;
+        for (std::size_t i = 0; i < digest.size(); i += 2) {
             const auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
-            request += static_cast<char>((nibble(digest_[i]) << 4) | nibble(digest_[i + 1]));
+            request += static_cast<char>((nibble(digest[i]) << 4) | nibble(digest[i + 1]));
         }
         std::string response(48, '\0');
         if (request.size() != 48 || !transfer(request.data(), request.size(), deadline, true) ||
@@ -263,10 +320,11 @@ class OriginalCompletionGrant final
     }
     StartupFence &fence_;
     OwnedNativeFd descriptor_;
-    std::string digest_;
+    std::string digest_, committedDigest_;
     std::shared_ptr<Liveness> liveness_;
     ClockSample last_{}, expires_{};
     std::uint64_t sequence_ = 1;
-    bool failed_ = false, attempted_ = false, currentAttempted_ = false;
+    bool failed_ = false, attempted_ = false, currentAttempted_ = false, powerAttempted_ = false,
+         commitAttempted_ = false;
 };
 } // namespace Linura::HyprlandDisplay

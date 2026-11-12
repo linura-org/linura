@@ -14,6 +14,14 @@ use linura_provider_sdk::{Observer, VerificationDisposition, VerificationOutcome
 
 use crate::session_adapter::{FreshSessionVerifier, SessionExecutorClient};
 
+// Cross this representation boundary once, with a typed input. Passing the
+// prefixed Control string to a raw native digest decoder cannot type-check.
+fn native_component_digest(
+    digest: &linura_transaction::ContentDigest,
+) -> Result<linura_provider_sdk::ComponentDigest, String> {
+    linura_provider_sdk::ComponentDigest::parse_hex(digest.hex()).map_err(|error| error.to_string())
+}
+
 impl linura_control::OriginalDisplayRestorationPort for SessionExecutorClient {
     fn dispatch_original(
         &mut self,
@@ -56,8 +64,8 @@ impl linura_control::OriginalDisplayRetirementPreparationPort for SessionExecuto
             terminal.transaction_id.as_str(),
             preparation.dispatch_digest(),
             terminal.state_version,
-            terminal.binding_digest.as_str(),
-            preparation.observation_digest().as_str(),
+            native_component_digest(&terminal.binding_digest)?,
+            native_component_digest(preparation.observation_digest())?,
             preparation.expires_at_unix_ms(),
         )
     }
@@ -74,8 +82,8 @@ impl linura_control::OriginalDisplayNativeReleaseReservationPort for SessionExec
             terminal.transaction_id.as_str(),
             reservation.dispatch_digest(),
             terminal.state_version,
-            terminal.binding_digest.as_str(),
-            reservation.control_observation().as_str(),
+            native_component_digest(&terminal.binding_digest)?,
+            native_component_digest(reservation.control_observation())?,
             reservation.expires_at_unix_ms(),
         )
     }
@@ -92,8 +100,8 @@ impl linura_control::OriginalDisplayNativeReleaseSpendPort for SessionExecutorCl
             terminal.transaction_id.as_str(),
             attempt.dispatch_digest(),
             terminal.state_version,
-            terminal.binding_digest.as_str(),
-            attempt.control_observation().as_str(),
+            native_component_digest(&terminal.binding_digest)?,
+            native_component_digest(attempt.control_observation())?,
             attempt.expires_at_unix_ms(),
         )
     }
@@ -110,10 +118,10 @@ impl linura_control::OriginalDisplayCompletionPort for SessionExecutorClient {
             terminal.transaction_id.as_str(),
             completion.dispatch_digest(),
             terminal.state_version,
-            terminal.binding_digest.as_str(),
-            completion.retirement_observation().as_str(),
-            completion.preparation_digest().as_str(),
-            completion.verification_digest().as_str(),
+            native_component_digest(&terminal.binding_digest)?,
+            native_component_digest(completion.retirement_observation())?,
+            native_component_digest(completion.preparation_digest())?,
+            native_component_digest(completion.verification_digest())?,
             completion.frames(),
             completion.expires_at_unix_ms(),
         )
@@ -338,5 +346,70 @@ impl IndependentDisplayVerifier for FreshSessionVerifier {
             Err(error) => return Err(error.to_string()),
         }
         .map_err(|e| e.to_string())
+    }
+}
+
+impl linura_control::OriginalDisplayNativePowerRetirementPort for SessionExecutorClient {
+    fn retire_native_power(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayNativePowerRetirement,
+    ) -> Result<(), String> {
+        self.channel.retire_original_display_native_power(
+            prepared.root(),
+            prepared.frames(),
+            native_component_digest(prepared.preparation())?,
+            native_component_digest(prepared.checkpoint())?,
+            prepared.expires_at_unix_ms(),
+        )
+    }
+}
+
+impl linura_control::OriginalDisplayRootPowerRetirementPort for SessionExecutorClient {
+    fn retire_root_power(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayRootPowerRetirement,
+    ) -> Result<(), String> {
+        self.channel.retire_original_display_root_power(
+            prepared.root(),
+            prepared.power(),
+            prepared.frames(),
+            native_component_digest(prepared.preparation())?,
+            native_component_digest(prepared.verification())?,
+            prepared.expires_at_unix_ms(),
+        )
+    }
+}
+
+impl linura_control::OriginalDisplayCurrentCommitPort for SessionExecutorClient {
+    fn commit_current(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayCurrentCommit,
+    ) -> Result<(), String> {
+        let committed = prepared.committed();
+        let snapshot = committed.terminal();
+        self.channel.commit_original_display_current(
+            prepared.root(),
+            prepared.frames(),
+            native_component_digest(prepared.preparation())?,
+            native_component_digest(committed.record_digest())?,
+            snapshot.current_generation,
+            snapshot.state_version,
+            native_component_digest(&snapshot.binding_digest)?,
+            prepared.expires_at_unix_ms(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod digest_boundary_tests {
+    #[test]
+    fn control_content_digest_is_encoded_as_native_fixed_sha256_not_prefixed_text() {
+        let control =
+            linura_transaction::digest_bytes("test.native-boundary", b"canonical preparation");
+        assert!(control.as_str().starts_with("sha256:"));
+        assert!(linura_provider_sdk::ComponentDigest::parse_hex(control.as_str()).is_err());
+        let native =
+            super::native_component_digest(&control).unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(native.to_hex(), control.hex());
     }
 }
