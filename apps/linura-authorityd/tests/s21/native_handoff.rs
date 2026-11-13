@@ -57,6 +57,7 @@ pub(super) fn observe_current(
         true,
         !machine.native_power_retired,
         machine.native_current_grant.clone(),
+        machine.native_final_retirement.clone(),
     ));
     sample.resource = value(scope.resource_id());
     sample.capability = value(CapabilityId::new(
@@ -742,6 +743,86 @@ impl linura_control::OriginalDisplayCurrentCommitPort for CurrentCommitPort {
         }
     }
 }
+fn retained_recovery_bytes(
+    database: &TestDatabase,
+    machine: &Arc<Mutex<Machine>>,
+) -> Vec<(PrincipalId, RequestId, Vec<u8>)> {
+    let keys = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .journal_keys
+        .clone();
+    let journal = value(
+        linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
+            database.path().with_extension("requests.sqlite3"),
+            value(SqliteIntegrityKey::new(fixture_key(6))),
+        ),
+    );
+    value(journal.integrity_check());
+    keys.into_iter()
+        .filter_map(|(principal, request)| {
+            match journal.load(&principal, &request) {
+                Ok(record) => Some((principal, request, record.canonical().to_vec())),
+                Err(TransactionStoreError::NotFound) => None, // A failed before-write reservation.
+                Err(error) => unreachable!("{error}"),
+            }
+        })
+        .collect()
+}
+fn committed_is_not_competing_apply_or_cleanup_authority(
+    control: &mut ManagedLifecycleControl<SqliteTransactionStore>,
+    database: &TestDatabase,
+    machine: &Arc<Mutex<Machine>>,
+) {
+    let retained = retained_recovery_bytes(database, machine);
+    let (state, sampled, applies, decisions) = {
+        let mut native = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        let state = native.state;
+        native.state = None; // Even an idle/replaced native must not admit it.
+        (state, native.sequence, native.applies, native.decisions)
+    };
+    for replacement in [false, true] {
+        let mut competing = display_request("competing-with-current-committed");
+        if replacement {
+            let old = "11223344-1234-4567-89ab-0123456789ab";
+            let new = "33445566-1234-4567-89ab-0123456789ab";
+            competing.resource = value(ResourceId::new(
+                competing.resource.as_str().replace(old, new),
+            ));
+            let material = competing
+                .desired_state
+                .get_mut("layout")
+                .unwrap_or_else(|| unreachable!("layout"));
+            *material = material.replace(old, new);
+            competing.request_id = value(managed_request_id("competing-successor", &competing));
+        }
+        let result = control.begin_display_layout(
+            principal(),
+            actor(true),
+            competing,
+            &approval(),
+            &mut Port(machine.clone()),
+            &mut Verifier(machine.clone()),
+        );
+        assert!(
+            matches!(result, Err(ManagedLifecycleError::Indeterminate(ref reason)) if reason.contains("completion ownership remains retained")),
+            "{result:?}"
+        );
+    }
+    let mut native = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+    assert_eq!(
+        (native.sequence, native.applies, native.decisions),
+        (sampled, applies, decisions)
+    );
+    native.state = state;
+    drop(native);
+    // Compare every retained intent/checkpoint/proof byte, not just row count.
+    assert_eq!(retained_recovery_bytes(database, machine), retained);
+}
 fn current_qualification_requires_original_review_and_independent_matching_root_and_native_sources()
 {
     for fault in 0..12 {
@@ -789,6 +870,7 @@ fn current_qualification_requires_original_review_and_independent_matching_root_
             &mut root,
         ));
         value(control.commit_original_display_current(principal(), actor(true), &request));
+        committed_is_not_competing_apply_or_cleanup_authority(&mut control, &database, &machine);
         assert!(
             control
                 .verify_original_display_qualified_current(principal(), &request)
@@ -833,9 +915,11 @@ fn current_qualification_requires_original_review_and_independent_matching_root_
                 .is_err()
         );
         assert_eq!(port.calls, usize::from(!(5..9).contains(&fault)));
+        committed_is_not_competing_apply_or_cleanup_authority(&mut control, &database, &machine);
         drop(control);
         let previews = replacement_previews(&machine, &original, &input);
         let mut restarted = open_with_previews(database.path(), &machine, 0, previews);
+        committed_is_not_competing_apply_or_cleanup_authority(&mut restarted, &database, &machine);
         if fault >= 9 {
             assert!(
                 restarted
@@ -884,6 +968,305 @@ fn current_qualification_requires_original_review_and_independent_matching_root_
         assert_eq!(completion.calls, 1);
     }
 }
+#[derive(Debug)]
+struct FinalRetirementPort {
+    machine: Arc<Mutex<Machine>>,
+    calls: usize,
+    fault: u8,
+}
+impl linura_control::OriginalDisplayFinalRetirementPort for FinalRetirementPort {
+    fn retire_current(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayFinalRetirement,
+    ) -> Result<(), String> {
+        self.calls += 1;
+        assert_eq!(self.calls, 1);
+        assert!(prepared.frames().current_commit_digest().is_some());
+        assert!(prepared.frames().final_retirement_digest().is_none());
+        assert!(prepared.expires_at_unix_ms() > now_unix_ms());
+        let mut state = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        let grant = prepared
+            .root()
+            .current_grant()
+            .unwrap_or_else(|| unreachable!("qualified"));
+        if self.fault != 3 {
+            state.final_retirement = Some(value(
+                linura_observation::DisplayOriginalFinalRetirementFacts::new(
+                    prepared.frames().scope().clone(),
+                    linura_observation::DisplayFinalRetirementLineage {
+                        record: "6".repeat(64),
+                        preparation: prepared.preparation().hex().into(),
+                        verification: if self.fault == 4 {
+                            "9".repeat(64)
+                        } else {
+                            prepared.qualification().hex().into()
+                        },
+                        current_grant: grant.record.clone(),
+                        committed_record: grant.committed_record.clone(),
+                    },
+                    2,
+                    None,
+                ),
+            ));
+        }
+        if self.fault != 2 {
+            state.native_final_retirement = Some("6".repeat(64));
+        }
+        if self.fault == 1 {
+            Err("simulated lost final retirement ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+#[derive(Debug)]
+struct ReleasedCurrentPort {
+    machine: Arc<Mutex<Machine>>,
+    calls: usize,
+    fault: u8,
+}
+impl linura_control::OriginalDisplayReleasedCurrentPort for ReleasedCurrentPort {
+    fn complete_released_current(
+        &mut self,
+        completed: linura_control::OriginalDisplayReleasedCurrentCompletion,
+    ) -> Result<(), String> {
+        self.calls += 1;
+        let mut state = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(
+            state.native_final_retirement.as_deref(),
+            Some(completed.final_record().to_hex().as_str())
+        );
+        let old = state
+            .final_retirement
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("Root final"));
+        if self.fault != 11 {
+            state.final_retirement = Some(value(
+                linura_observation::DisplayOriginalFinalRetirementFacts::new(
+                    completed.scope().clone(),
+                    old.lineage().clone(),
+                    3,
+                    Some(linura_observation::DisplayReleasedCurrentLineage {
+                        record: "7".repeat(64),
+                        verification: completed.verification().hex().into(),
+                    }),
+                ),
+            ));
+        }
+        if self.fault == 10 {
+            Err("simulated lost metadata ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+fn final_retirement_requires_original_review_independent_postconditions_and_durable_completion() {
+    for fault in 0..=13 {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (mut control, original, input, request) = prepared(&database, &machine);
+        value(control.spend_original_display_native_release(
+            principal(),
+            actor(true),
+            &request,
+            &mut RootPort(machine.clone(), false, 0),
+        ));
+        let mut completion = CompletionPort {
+            machine: Some(machine.clone()),
+            ..CompletionPort::default()
+        };
+        value(control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        ));
+        let mut native = PowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        value(control.dispatch_original_display_native_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut native,
+        ));
+        let mut root = RootPowerPort {
+            machine: machine.clone(),
+            calls: 0,
+            lose_reply: false,
+            effect: true,
+        };
+        value(control.dispatch_original_display_root_power_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut root,
+        ));
+
+        value(control.commit_original_display_current(principal(), actor(true), &request));
+        value(control.dispatch_original_display_current_commit(
+            principal(),
+            actor(true),
+            &request,
+            &mut CurrentCommitPort {
+                machine: machine.clone(),
+                calls: 0,
+                fault: 0,
+            },
+        ));
+        assert!(
+            control
+                .verify_original_display_final_retirement(principal(), &request)
+                .is_err()
+        );
+        if fault == 5 {
+            drop(control);
+            control = open_with_previews(
+                database.path(),
+                &machine,
+                0,
+                replacement_previews(&machine, &original, &input),
+            );
+        }
+        if (6..=8).contains(&fault) {
+            let mut state = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            state.completion_write_key = 6;
+            state.completion_write_fault = fault - 5;
+        }
+        let mut port = FinalRetirementPort {
+            machine: machine.clone(),
+            calls: 0,
+            fault,
+        };
+        let result = control.dispatch_original_display_final_retirement(
+            principal(),
+            actor(true),
+            &request,
+            &mut port,
+        );
+        assert_eq!(
+            result.is_err(),
+            fault == 1 || (5..=8).contains(&fault),
+            "fault {fault}: {result:?}"
+        );
+        assert!(
+            control
+                .dispatch_original_display_final_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, usize::from(!(5..=8).contains(&fault)));
+        committed_is_not_competing_apply_or_cleanup_authority(&mut control, &database, &machine);
+        drop(control);
+        let mut restarted = open_with_previews(
+            database.path(),
+            &machine,
+            0,
+            replacement_previews(&machine, &original, &input),
+        );
+        {
+            let mut state = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            state.completion_write_fault = 0;
+            if fault == 9 || fault == 12 {
+                state.completion_write_key = 7;
+                state.completion_write_fault = if fault == 9 { 2 } else { 3 };
+            }
+            if fault == 13 {
+                state.completion_write_key = 8;
+                state.completion_write_fault = 3;
+            }
+        }
+        let verified = restarted.verify_original_display_final_retirement(principal(), &request);
+        if matches!(fault, 2..=8) {
+            assert!(verified.is_err(), "fault {fault}");
+        } else {
+            if matches!(fault, 9 | 12) {
+                assert!(verified.is_err());
+            }
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .completion_write_fault = if fault == 13 { 3 } else { 0 };
+            let first =
+                value(restarted.verify_original_display_final_retirement(principal(), &request));
+            let second =
+                value(restarted.verify_original_display_final_retirement(principal(), &request));
+            assert_eq!(first.record_digest(), second.record_digest());
+            assert_eq!(first.first_window(), second.first_window());
+            let mut metadata = ReleasedCurrentPort {
+                machine: machine.clone(),
+                calls: 0,
+                fault,
+            };
+            let completed = restarted.complete_original_display_released_current(
+                principal(),
+                &request,
+                &mut metadata,
+            );
+            assert_eq!(
+                completed.is_err(),
+                matches!(fault, 10 | 11 | 13),
+                "fault {fault}: {completed:?}"
+            );
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .completion_write_fault = 0;
+            metadata.fault = 0;
+            let next = value(restarted.complete_original_display_released_current(
+                principal(),
+                &request,
+                &mut metadata,
+            ));
+            if let Ok(old) = completed {
+                assert_eq!(old.record_digest(), next.record_digest());
+            }
+            let count = metadata.calls;
+            let again = value(restarted.complete_original_display_released_current(
+                principal(),
+                &request,
+                &mut metadata,
+            ));
+            assert_eq!(again.record_digest(), next.record_digest());
+            assert_eq!(metadata.calls, count);
+            assert_eq!(count, if fault == 11 { 2 } else { 1 });
+            committed_is_not_competing_apply_or_cleanup_authority(
+                &mut restarted,
+                &database,
+                &machine,
+            );
+        }
+        assert!(
+            restarted
+                .dispatch_original_display_final_retirement(
+                    principal(),
+                    actor(true),
+                    &request,
+                    &mut port
+                )
+                .is_err()
+        );
+        assert_eq!(port.calls, usize::from(!(5..=8).contains(&fault)));
+    }
+}
+
 fn native_power_requires_original_live_review_and_independent_post_effect_state() {
     for fault in 1..=3 {
         let database = TestDatabase::new();
@@ -1254,6 +1637,7 @@ fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
 
 #[test]
 fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_replay() {
+    final_retirement_requires_original_review_independent_postconditions_and_durable_completion();
     native_power_requires_original_live_review_and_independent_post_effect_state();
     root_power_requires_original_review_and_independent_retired_phase();
     current_completion_is_signed_durable_and_recovers_metadata_without_replaying_effects();

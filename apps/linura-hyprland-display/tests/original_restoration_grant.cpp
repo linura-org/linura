@@ -5,6 +5,7 @@
 #include "original_completion_grant.h"
 #include "original_power_retirement.h"
 #include "original_current_commit.h"
+#include "original_final_retirement.h"
 #include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
@@ -399,6 +400,45 @@ void terminalComparison(const std::string &material)
             auto changed = committedFields;
             changed[index] = bad;
             assert(!committedMatches(framed(changed)));
+        }
+        // A final-retirement comparison is powerless without the distinct
+        // one-use LNCA exchange on the actual committed-current Root channel.
+        auto finalFields = powerFields;
+        finalFields[0] = "linura.native-display.final-retirement.v1";
+        finalFields[1] = committedBytes;
+        finalFields[2] = std::string(64, 'b');
+        finalFields[3] = std::string(64, 'c');
+        const auto currentDigest = nativeSha256(committedBytes);
+        assert(currentDigest);
+        const auto finalMatches = [&](std::string_view bytes, ClockSample now = {1100, 200}) {
+            return OriginalFinalRetirementCodec::matches(bytes, *currentDigest, current, now);
+        };
+        const auto finalBytes = framed(finalFields);
+        assert(finalMatches(finalBytes));
+        for (const auto now : {ClockSample{1149, 249}, ClockSample{1148, 250},
+                               ClockSample{1089, 200}, ClockSample{1100, 189}})
+            assert(!finalMatches(finalBytes, now));
+        for (std::size_t size = 0; size < finalBytes.size(); ++size)
+            assert(!finalMatches(std::string_view(finalBytes).substr(0, size)));
+        assert(!finalMatches(finalBytes + 'x'));
+        assert(!OriginalFinalRetirementCodec::matches(finalBytes, std::string(64, '1'), current,
+                                                      {1100, 200}));
+        for (const auto &[index, bad] :
+             std::vector<std::pair<std::size_t, std::string>>{{0, "other-purpose"},
+                                                              {1, powerBytes},
+                                                              {2, std::string(64, '0')},
+                                                              {3, std::string(64, 'b')},
+                                                              {4, "1151"},
+                                                              {5, "01090"},
+                                                              {9, "0"},
+                                                              {10, "9"},
+                                                              {12, "0"},
+                                                              {16, "4294967296"},
+                                                              {17, "8"},
+                                                              {18, "11"}}) {
+            auto changed = finalFields;
+            changed[index] = bad;
+            assert(!finalMatches(framed(changed)));
         }
         ++current.completed[0].completedCommit;
         ++current.completed[0].kernel.framebuffer;

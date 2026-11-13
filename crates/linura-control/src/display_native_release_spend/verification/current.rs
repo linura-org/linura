@@ -261,6 +261,7 @@ impl NativeCurrentVerified {
             true,
             true,
             None,
+            None,
         )
         .map_err(|_| invalid())?;
         if !old.is_empty() || !self.frames.reconciles(&frames) {

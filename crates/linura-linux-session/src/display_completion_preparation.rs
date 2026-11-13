@@ -12,6 +12,7 @@ use linura_provider_sdk::ComponentDigest;
 use crate::{NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation};
 
 pub(crate) mod current_commit;
+pub(crate) mod final_retirement;
 pub(crate) mod power;
 pub(crate) mod root_retirement;
 
@@ -537,6 +538,7 @@ mod tests {
             true,
             true,
             None,
+            None,
         ));
         let make = |frames: &DisplayNativeCurrentFacts, expiry| {
             Power::new(
@@ -587,6 +589,7 @@ mod tests {
             frames.completion_digest().into(),
             true,
             false,
+            None,
             None,
         ));
         let root = value(
@@ -684,6 +687,104 @@ mod tests {
                 .is_err()
             );
         }
+        let qualified = value(DisplayNativeCurrentFacts::new(
+            absent.scope().clone(),
+            absent.lineage().clone(),
+            window,
+            absent.outputs().clone(),
+            absent.completion_digest().into(),
+            true,
+            false,
+            Some(committed.record_digest().to_hex()),
+            None,
+        ));
+        assert!(qualified.follows_current_qualification(&absent));
+        assert!(!qualified.reconciles(&absent));
+        let final_record = value(
+            final_retirement::NativeDisplayFinalRetirementPreparation::new(
+                &committed,
+                ComponentDigest::from_bytes([13; 32]),
+                ComponentDigest::from_bytes([14; 32]),
+                &qualified,
+                1149,
+            ),
+        );
+        let final_bytes = final_record.canonical_bytes();
+        assert_eq!(
+            value(final_retirement::NativeDisplayFinalRetirementPreparation::decode(&final_bytes))
+                .canonical_bytes(),
+            final_bytes
+        );
+        assert!(
+            current_commit::NativeDisplayCurrentCommitPreparation::decode(&final_bytes).is_err()
+        );
+        assert!(
+            final_retirement::NativeDisplayFinalRetirementPreparation::new(
+                &committed,
+                ComponentDigest::from_bytes([13; 32]),
+                ComponentDigest::from_bytes([14; 32]),
+                &absent,
+                1149,
+            )
+            .is_err()
+        );
+        let foreign = value(DisplayNativeCurrentFacts::new(
+            absent.scope().clone(),
+            absent.lineage().clone(),
+            window,
+            absent.outputs().clone(),
+            absent.completion_digest().into(),
+            true,
+            false,
+            Some("1".repeat(64)),
+            None,
+        ));
+        assert!(
+            final_retirement::NativeDisplayFinalRetirementPreparation::new(
+                &committed,
+                ComponentDigest::from_bytes([13; 32]),
+                ComponentDigest::from_bytes([14; 32]),
+                &foreign,
+                1149,
+            )
+            .is_err()
+        );
+        for end in 0..final_bytes.len() {
+            assert!(
+                final_retirement::NativeDisplayFinalRetirementPreparation::decode(
+                    &final_bytes[..end]
+                )
+                .is_err()
+            );
+        }
+        let mut trailing = final_bytes.clone();
+        trailing.push(0);
+        assert!(
+            final_retirement::NativeDisplayFinalRetirementPreparation::decode(&trailing).is_err()
+        );
+        let original = parts(&final_bytes);
+        for (index, bad) in [
+            (0, b"wrong-purpose".as_slice()),
+            (1, root_bytes.as_slice()),
+            (2, b"0"),
+            (3, original[2].as_slice()),
+            (4, b"1151"),
+            (5, b"01100"),
+            (9, b"0"),
+            (10, b"9"),
+            (13, b"4294967296"),
+            (18, b"0"),
+        ] {
+            let mut changed = original.clone();
+            changed[index] = bad.to_vec();
+            assert!(
+                final_retirement::NativeDisplayFinalRetirementPreparation::decode(&encoded(
+                    &changed
+                ))
+                .is_err(),
+                "final field {index}"
+            );
+        }
         for (input, power) in [(false, true), (true, false)] {
             let wrong = value(DisplayNativeCurrentFacts::new(
                 frames.scope().clone(),
@@ -693,6 +794,7 @@ mod tests {
                 frames.completion_digest().into(),
                 input,
                 power,
+                None,
                 None,
             ));
             assert!(make(&wrong, 1149).is_err());

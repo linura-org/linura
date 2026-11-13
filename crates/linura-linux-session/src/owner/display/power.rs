@@ -185,6 +185,23 @@ impl NativeSessionChannel {
         }
         Ok(())
     }
+    /// Read-only identity continuity after final Root/native retirement. This
+    /// does not assert a power inhibitor, an absent inhibitor, or a quiet power
+    /// transition. Pending retirement uses the stricter separate probes above.
+    pub fn verify_released_display_power_identity(
+        &self,
+        fence: &NativeDisplayRetiredPowerFence,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        let started = Instant::now();
+        if current_boot()? != fence.boot
+            || self.logind_owner(started)? != fence.owner
+            || current_boot()? != fence.boot
+        {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
     /// Read-only independent logind processing of the original descriptor
     /// close. Other scopes may retain their own blockers; they are not ours to
     /// release. A same-PID unrelated scope cannot substitute for this identity.
@@ -198,6 +215,27 @@ impl NativeSessionChannel {
             return Err(unavailable());
         }
         self.display_power_conditions(&fence.owner, started)?;
+        self.verify_retired_power_absence_at(fence, started)?;
+        self.display_power_conditions(&fence.owner, started)
+    }
+    /// Fresh scope-specific absence after final completion; no pending
+    /// transition protection is claimed or reacquired.
+    pub fn verify_released_display_power_absence(
+        &self,
+        fence: &NativeDisplayRetiredPowerFence,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::DisplayProtection)?;
+        let started = Instant::now();
+        if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
+            return Err(unavailable());
+        }
+        self.verify_retired_power_absence_at(fence, started)
+    }
+    fn verify_retired_power_absence_at(
+        &self,
+        fence: &NativeDisplayRetiredPowerFence,
+        started: Instant,
+    ) -> Result<(), String> {
         let reply = self.call(
             &fence.owner,
             MANAGER,
@@ -221,7 +259,7 @@ impl NativeSessionChannel {
         if current_boot()? != fence.boot || self.logind_owner(started)? != fence.owner {
             return Err(unavailable());
         }
-        self.display_power_conditions(&fence.owner, started)
+        Ok(())
     }
     fn verify_display_power_fence_at(
         &self,

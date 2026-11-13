@@ -28,6 +28,11 @@ enum PowerWitness {
         preparation: ComponentDigest,
         original: NativeDisplayRetiredPowerFence,
     },
+    Released {
+        preparation: ComponentDigest,
+        completion: ComponentDigest,
+        original: NativeDisplayRetiredPowerFence,
+    },
     Failed,
 }
 impl Witnesses {
@@ -170,6 +175,78 @@ impl Witnesses {
             protection.verify_retired(preparation, channel)
         })
     }
+    /// Retire the pending power-transition guard only after the actual original
+    /// native channel and exact durable ReleasedCurrent ancestry have completed.
+    /// All kernel/checkpoint ownership remains retained for successor adoption.
+    pub(super) fn complete_final_retirement(
+        &self,
+        dispatch: &ComponentDigest,
+        preparation: &ComponentDigest,
+        completion: ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<(), String> {
+        self.with_witness(dispatch, |protection| {
+            if completion == ComponentDigest::from_bytes([0; 32]) {
+                return Err("missing released-current lineage".into());
+            }
+            if let PowerWitness::Released {
+                preparation: expected,
+                completion: old,
+                ..
+            } = &protection.power
+            {
+                if expected != preparation || *old != completion {
+                    return Err("released-current lineage differs".into());
+                }
+                return protection.verify_released(preparation, &completion, channel);
+            }
+            protection.verify_retired(preparation, channel)?;
+            let PowerWitness::Retired {
+                preparation,
+                original,
+            } = std::mem::replace(&mut protection.power, PowerWitness::Failed)
+            else {
+                return Err("power retirement cannot be reconstructed".into());
+            };
+            protection.power = PowerWitness::Released {
+                preparation,
+                completion,
+                original,
+            };
+            Ok(())
+        })
+    }
+    pub(super) fn read_released_original(
+        &self,
+        dispatch: &ComponentDigest,
+        preparation: &ComponentDigest,
+        completion: &ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<Vec<u8>, String> {
+        self.with_witness(dispatch, |protection| {
+            protection.verify_released(preparation, completion, channel)?;
+            let payload =
+                super::display_checkpoint::read_original(dispatch, &protection.checkpoint_digest)?;
+            protection.verify_released(preparation, completion, channel)?;
+            Ok(payload)
+        })
+    }
+    pub(super) fn verify_released_power_absent(
+        &self,
+        dispatch: &ComponentDigest,
+        preparation: &ComponentDigest,
+        completion: &ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<(), String> {
+        self.with_witness(dispatch, |protection| {
+            protection.verify_released(preparation, completion, channel)?;
+            let PowerWitness::Released { original, .. } = &protection.power else {
+                return Err("released power lifetime unavailable".into());
+            };
+            channel.verify_released_display_power_absence(original)?;
+            protection.verify_released(preparation, completion, channel)
+        })
+    }
     fn with_witness<T>(
         &self,
         dispatch: &ComponentDigest,
@@ -207,6 +284,37 @@ impl Protection {
             };
             channel.verify_display_recovery_power_fence(original)?;
             // Bus probes consume time while kernel changes can queue independently.
+            self.kernel.verify()
+        })();
+        if result.is_err() {
+            self.valid = false;
+        }
+        result
+    }
+    fn verify_released(
+        &mut self,
+        preparation: &ComponentDigest,
+        completion: &ComponentDigest,
+        channel: &NativeSessionChannel,
+    ) -> Result<(), String> {
+        let PowerWitness::Released {
+            preparation: expected,
+            completion: actual,
+            original,
+        } = &self.power
+        else {
+            return Err("final released-current lifetime unavailable".into());
+        };
+        if expected != preparation || actual != completion {
+            return Err("final released-current ancestry differs".into());
+        }
+        let result = (|| {
+            if !self.valid {
+                return Err("original kernel witness lost".into());
+            }
+            super::display_checkpoint::validate(&self.dispatch, &self.checkpoint_digest)?;
+            self.kernel.verify()?;
+            channel.verify_released_display_power_identity(original)?;
             self.kernel.verify()
         })();
         if result.is_err() {

@@ -15,7 +15,7 @@ fn current(record: &NativeDisplayCurrentCommitPreparation) -> zbus::fdo::Result<
     Ok(())
 }
 impl NativeProtection {
-    pub(super) fn completion_lifetime_scope_live(
+    pub(super) fn completion_current_scope_live(
         &self,
         admission: &Admission,
         original: &NativeDisplayCompletionPreparation,

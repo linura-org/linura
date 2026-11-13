@@ -1762,6 +1762,7 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
         true,
         true,
         None,
+        None,
     )
     .unwrap_or_else(|e| unreachable!("{e:?}"));
     let power = NativeDisplayPowerRetirementPreparation::new(
@@ -1780,6 +1781,7 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
         frames.completion_digest().into(),
         true,
         false,
+        None,
         None,
     )
     .unwrap_or_else(|e| unreachable!("{e:?}"));
@@ -1852,6 +1854,14 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
     .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(publish(Kind::CurrentCommitSpent, &committed.canonical_bytes()).is_err());
     assert!(publish(Kind::CurrentCommitPrepared, &committed.canonical_bytes()).is_ok());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    assert!(
+        read_final_lineage_at(&fixture.fd, fixture.uid, &parent, |lineage, scope| lineage
+            .final_retirement_prepared
+            .remove(scope))
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .is_none()
+    );
     assert!(publish(Kind::CurrentCommitPrepared, &committed.canonical_bytes()).is_err());
     let substituted = NativeDisplayCurrentCommitPreparation::new(
         &root,
@@ -1866,7 +1876,112 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
     .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(publish(Kind::CurrentCommitSpent, &substituted.canonical_bytes()).is_err());
     assert!(publish(Kind::CurrentCommitSpent, &committed.canonical_bytes()).is_ok());
+    // Early Control Committed and even a Root current-grant spend do not retire
+    // startup admission or create final release/cleanup history.
+    let early_reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        !startup_clear_at(&early_reopened, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
+    );
+    assert!(
+        read_final_lineage_at(&early_reopened, fixture.uid, &parent, |lineage, scope| {
+            lineage.released_current.remove(scope)
+        })
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .is_none()
+    );
+    assert!(
+        fixture
+            .path
+            .join(Kind::Restoration.name(&parent.binding().dispatch_digest))
+            .exists()
+    );
+    assert!(
+        fixture
+            .path
+            .join(Kind::CurrentCommitSpent.name(&terminal.binding().dispatch_digest))
+            .exists()
+    );
+
     assert!(publish(Kind::CurrentCommitSpent, &committed.canonical_bytes()).is_err());
+    let qualified = DisplayNativeCurrentFacts::new(
+        absent.scope().clone(),
+        absent.lineage().clone(),
+        absent.window(),
+        absent.outputs().clone(),
+        absent.completion_digest().into(),
+        true,
+        false,
+        Some(committed.record_digest().to_hex()),
+        None,
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    let final_preparation = NativeDisplayFinalRetirementPreparation::new(
+        &committed,
+        ComponentDigest::from_bytes([15; 32]),
+        ComponentDigest::from_bytes([16; 32]),
+        &qualified,
+        1150,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let released = NativeDisplayReleasedCurrentRecord::new(
+        &final_preparation,
+        ComponentDigest::from_bytes([17; 32]),
+        qualified.window(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::ReleasedCurrent, &released.canonical_bytes()).is_err());
+    assert!(
+        publish(
+            Kind::FinalRetirementSpent,
+            &final_preparation.canonical_bytes()
+        )
+        .is_err()
+    );
+    assert!(
+        publish(
+            Kind::FinalRetirementPrepared,
+            &final_preparation.canonical_bytes()
+        )
+        .is_ok()
+    );
+    assert!(
+        publish(
+            Kind::FinalRetirementPrepared,
+            &final_preparation.canonical_bytes()
+        )
+        .is_err()
+    );
+    assert!(publish(Kind::ReleasedCurrent, &released.canonical_bytes()).is_err());
+    assert!(
+        publish(
+            Kind::FinalRetirementSpent,
+            &final_preparation.canonical_bytes()
+        )
+        .is_ok()
+    );
+    assert!(
+        publish(
+            Kind::FinalRetirementSpent,
+            &final_preparation.canonical_bytes()
+        )
+        .is_err()
+    );
+    assert!(publish(Kind::ReleasedCurrent, &released.canonical_bytes()).is_ok());
+    assert!(publish(Kind::ReleasedCurrent, &released.canonical_bytes()).is_err());
+    assert_eq!(
+        read_final_lineage_at(&fixture.fd, fixture.uid, &parent, |lineage, scope| lineage
+            .released_current
+            .remove(scope))
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("Root completion"))
+        .canonical_bytes(),
+        released.canonical_bytes()
+    );
     let reopened = fs::open(
         &fixture.path,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,

@@ -110,6 +110,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Read-only exact native phase after the spent completion attempt. It
     // cannot admit another invocation or prove post-effect durable completion.
     [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayCurrent(const NativeDisplayFinalizationIntent &intent,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
     commitOriginalDisplayCurrent(const NativeDisplayFinalizationIntent &intent,
                                  const NativeDisplayCorrelation &, const QString &digest,
                                  const QByteArray &preparation);

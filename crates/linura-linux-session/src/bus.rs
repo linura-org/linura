@@ -21,6 +21,18 @@ pub(crate) const MAX_DISPLAY_REPLY_BYTES: usize = 384 * 1024;
 pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
 
 fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &str) -> usize {
+    let protection = path == "/org/linura/DisplayProtection1"
+        && interface == "org.linura.DisplayProtection1"
+        && role == NativeSessionRole::Control;
+    if protection && method == "ReadRootPower" {
+        return crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
+            + crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT
+            + MAX_DISPLAY_REPLY_BYTES
+            + 160;
+    }
+    if protection && method == "ReadFinalRetirement" {
+        return 2 * crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 1024;
+    }
     let original = path == "/org/linura/DisplayProtection1"
         && interface == "org.linura.DisplayProtection1"
         && method == "ReadOriginal"
@@ -649,6 +661,8 @@ mod diagnostic_tests {
                         "GetAll",
                         "ReadOriginal",
                         "ReadFinalization",
+                        "ReadRootPower",
+                        "ReadFinalRetirement",
                     ] {
                         let admitted = path == "/org/linura/SecurityOwner1"
                             && interface == "org.linura.SecurityOwner1"
@@ -663,7 +677,22 @@ mod diagnostic_tests {
                                 && method == "ReadOriginal";
                         assert_eq!(
                             reply_limit(role, path, interface, method),
-                            if admitted {
+                            if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadRootPower"
+                            {
+                                crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
+                                    + crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT
+                                    + MAX_DISPLAY_REPLY_BYTES
+                                    + 160
+                            } else if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadFinalRetirement"
+                            {
+                                2 * crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 1024
+                            } else if admitted {
                                 MAX_DISPLAY_REPLY_BYTES
                             } else {
                                 MAX_REPLY_BYTES
@@ -673,6 +702,50 @@ mod diagnostic_tests {
                 }
             }
         }
+    }
+    #[test]
+    fn full_retirement_reply_shapes_fit_only_their_exact_transport_exceptions()
+    -> Result<(), zbus::Error> {
+        use super::*;
+        let scope = "/org/linura/DisplayProtection1";
+        let interface = "org.linura.DisplayProtection1";
+        let root = zbus::Message::method_call(scope, "ReadRootPower")?.build(&(
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT],
+            vec![0_u8; MAX_DISPLAY_REPLY_BYTES],
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT],
+            true,
+        ))?;
+        let final_record = zbus::Message::method_call(scope, "ReadFinalRetirement")?.build(&(
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT],
+            3_u32,
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 512],
+        ))?;
+        for (message, method) in [
+            (root, "ReadRootPower"),
+            (final_record, "ReadFinalRetirement"),
+        ] {
+            assert!(message.body().len() > MAX_REPLY_BYTES);
+            assert!(
+                message.body().len()
+                    <= reply_limit(NativeSessionRole::Control, scope, interface, method)
+            );
+            for role in [
+                NativeSessionRole::Executor,
+                NativeSessionRole::DisplayProtection,
+            ] {
+                assert!(message.body().len() > reply_limit(role, scope, interface, method));
+            }
+            assert!(
+                message.body().len()
+                    > reply_limit(
+                        NativeSessionRole::Control,
+                        scope,
+                        interface,
+                        "ReadFinalization"
+                    )
+            );
+        }
+        Ok(())
     }
     use super::*;
 

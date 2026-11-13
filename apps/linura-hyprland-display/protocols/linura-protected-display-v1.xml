@@ -140,6 +140,17 @@
       <arg name="control_binding" type="string"/>
       <arg name="control_observation" type="string"/>
     </request>
+    <request name="retire_current">
+      <description summary="spend the final original Root fence-retirement permission">
+        Complete sealed comparison binds the original committed-current grant and
+        independent qualification. The original Root channel must spend its exact
+        digest, then both clocks and physical source/KMS/input are rechecked before
+        retiring obsolete review and input-device bindings. This does not unlock
+        S17, admit a successor, delete provenance or certify Control completion.
+      </description>
+      <arg name="preparation" type="fd"/>
+      <arg name="preparation_digest" type="string"/>
+    </request>
     <request name="commit_current">
       <description summary="spend one original Root committed-current permission">
         Complete sealed comparison bytes bind the independently committed Control

@@ -12,7 +12,7 @@ fn fixture() -> (DisplayRecoveryScope, Value) {
             linura_core::ResourceId::new(topology),
         ))),
     ));
-    let raw = json!({"schema":2,"current_commit_digest":"0".repeat(64),"completion_digest":"3".repeat(64),"input_retired":true,"power_fence_held":true,"topology":topology,"original_dispatch":"a".repeat(64),"checkpoint":"b".repeat(64),
+    let raw = json!({"schema":3,"final_retirement_digest":"0".repeat(64),"current_commit_digest":"0".repeat(64),"completion_digest":"3".repeat(64),"input_retired":true,"power_fence_held":true,"topology":topology,"original_dispatch":"a".repeat(64),"checkpoint":"b".repeat(64),
         "restoration_transaction":"transaction:restored","restoration_effect":"c".repeat(64),"restoration_dispatch":"d".repeat(64),
         "terminal_transaction":"transaction:terminal","terminal_effect":"e".repeat(64),"terminal_dispatch":"f".repeat(64),
         "terminal_link":"1".repeat(64),"source_guard":"2".repeat(64),"post_write_epoch":"3","security_epoch":"4",
@@ -82,7 +82,7 @@ fn native_current_frame_rejects_missing_extra_cross_scope_or_retired_commit_fact
         assert!(!accepts(&scope, &missing), "{key}");
     }
     for (key, changed) in [
-        ("schema", json!(3)),
+        ("schema", json!(4)),
         ("released", json!(true)),
         ("completion_digest", json!("0".repeat(64))),
         ("input_retired", json!("true")),

@@ -17,13 +17,17 @@ use linura_transaction::TransactionSnapshot;
 mod handoff;
 pub use handoff::{
     AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
-    AuthorizedOriginalDisplayNativePowerRetirement, AuthorizedOriginalDisplayRootPowerRetirement,
-    OriginalDisplayCompletionPort, OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
+    AuthorizedOriginalDisplayFinalRetirement, AuthorizedOriginalDisplayNativePowerRetirement,
+    AuthorizedOriginalDisplayRootPowerRetirement, OriginalDisplayCompletionPort,
+    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
     OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
-    OriginalDisplayCurrentVerification, OriginalDisplayNativeHandoffInspection,
+    OriginalDisplayCurrentVerification, OriginalDisplayFinalRetirementPort,
+    OriginalDisplayFinalRetirementVerification, OriginalDisplayNativeHandoffInspection,
     OriginalDisplayNativeHandoffVerification, OriginalDisplayNativePowerInspection,
     OriginalDisplayNativePowerRetirementPort, OriginalDisplayQualifiedCurrent,
-    OriginalDisplayRootPowerInspection, OriginalDisplayRootPowerRetirementPort,
+    OriginalDisplayReleasedCurrent, OriginalDisplayReleasedCurrentCompletion,
+    OriginalDisplayReleasedCurrentPort, OriginalDisplayRootPowerInspection,
+    OriginalDisplayRootPowerRetirementPort,
 };
 
 /// The caller identifies existing restoration history and supplies provenance.

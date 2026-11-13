@@ -1027,6 +1027,10 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             return false; // Simulated transport has no Root LNRX or physical release authority.
         }
+        bool retireCurrent(OwnedNativeFd, std::string_view) override
+        {
+            return false;
+        }
         bool commitCurrent(OwnedNativeFd, std::string_view) override
         {
             return false;

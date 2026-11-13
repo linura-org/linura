@@ -54,7 +54,7 @@ impl OriginalDisplayQualifiedCurrent {
     }
 }
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn revalidate_current_commit_review(
+    pub(super) fn revalidate_current_commit_review(
         &mut self,
         principal: &AuthenticatedPrincipal,
         context: &TerminalInspectionContext,

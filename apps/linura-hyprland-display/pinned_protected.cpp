@@ -7,6 +7,7 @@
 #include "original_completion_grant.h"
 #include "original_power_retirement.h"
 #include "original_current_commit.h"
+#include "original_final_retirement.h"
 #include "sealed_native_material.h"
 #include "native_current_frame_gate.h"
 #include "protected_input_retirement.h"
@@ -236,6 +237,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
     std::unique_ptr<OriginalCompletionGrant> completionGrant;
     std::unique_ptr<OriginalCompletionGrant::CommittedCurrent> committedCurrent;
+    std::unique_ptr<OriginalCompletionGrant::RetiredCurrent> retiredCurrent;
+    bool finalRetirementAttempted = false;
     bool currentCommitAttempted = false;
     std::string nativeReleaseParent;
     bool completionAttempted = false;
@@ -288,6 +291,26 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                 return false;
         return true;
     }
+    // Exact managed display-source comparison after the separate final grant
+    // retires obsolete display/input/S17-review bindings. Ongoing S17 authority
+    // remains in its native session-lock implementation; this never unlocks it.
+    bool sameReleasedSource(const Snapshot &fresh) const
+    {
+        if (fresh.generation != stableInventory.generation ||
+            fresh.heads.size() != stableInventory.heads.size())
+            return false;
+        for (std::size_t i = 0; i < fresh.heads.size(); ++i) {
+            const auto &a = fresh.heads[i];
+            const auto &b = stableInventory.heads[i];
+            if (a.key != b.key || a.modes != b.modes || a.current != b.current ||
+                a.powered != b.powered || a.linuraOwned != b.linuraOwned ||
+                a.baseRuleWitness != b.baseRuleWitness ||
+                a.outputIdentityWitness != b.outputIdentityWitness ||
+                a.ownedTargetWitness != b.ownedTargetWitness)
+                return false;
+        }
+        return true;
+    }
     bool refreshCurrent()
     {
         auto *backend = nativeBackend();
@@ -298,9 +321,10 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             completionGrant->live() &&
             (nativePowerRetired ? !nativePowerFenceHeld() : nativePowerFenceHeld()) &&
             currentFrames && currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
-            originalAlive && originalAlive() && devicesCurrent() && facts && clock &&
-            *facts == stableInventory && clock->unixMs >= mutationClock.unixMs &&
-            clock->bootMs >= mutationClock.bootMs &&
+            originalAlive && originalAlive() && facts && clock &&
+            (retiredCurrent ? (retiredCurrent->live() && sameReleasedSource(*facts))
+                            : (devicesCurrent() && *facts == stableInventory)) &&
+            clock->unixMs >= mutationClock.unixMs && clock->bootMs >= mutationClock.bootMs &&
             (committedCurrent ? committedCurrent->live()
                               : (clock->unixMs < interaction.scope().deadlineUnixMs &&
                                  clock->bootMs < interaction.scope().deadlineBootMs));
@@ -985,6 +1009,42 @@ class PinnedScene final : public ProtectedScene
             !current())
             return refuse();
         data->committedCurrent = std::move(committed);
+        return data->refreshCurrent() ? true : refuse();
+    }
+    bool retireCurrent(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->finalRetirementAttempted)
+            return refuse();
+        data->finalRetirementAttempted = true;
+        const auto bytes = SealedNativeMaterial::read<OriginalFinalRetirementCodec::MaxPreparation>(
+            std::move(descriptor));
+        if (!bytes || nativeSha256(*bytes) != std::optional{std::string(digest)} ||
+            !data->refreshCurrent() || !data->nativePowerRetired || !data->committedCurrent ||
+            data->retiredCurrent ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Open || heldInput().any)
+            return refuse();
+        const auto current = [&] {
+            const auto frame = readNativeCurrentComparison();
+            const auto now = compositorClock();
+            return frame && now &&
+                   OriginalFinalRetirementCodec::matches(
+                       *bytes, data->committedCurrent->comparisonDigest(), *frame, *now)
+                       .has_value();
+        };
+        if (!current())
+            return refuse();
+        auto retired = data->completionGrant->retireCurrent(digest);
+        if (!retired || !retired->live() || !data->refreshCurrent() || heldInput().any ||
+            !current())
+            return refuse();
+        data->retiredCurrent = std::move(retired);
+        // Retire only the obsolete physical input/review dependency. The live
+        // original Root, source ownership, frame tracking and provenance remain.
         return data->refreshCurrent() ? true : refuse();
     }
     bool retirePower(OwnedNativeFd descriptor, std::string_view digest) override
@@ -1732,6 +1792,11 @@ std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
         data->damage();
         return std::nullopt;
     };
+    if (data->retiredCurrent) {
+        const auto now = backend->snapshot();
+        if (now && data->sameReleasedSource(*now) && *now != data->stableInventory)
+            return std::nullopt; // Obsolete S17 scope: no current proof or authority.
+    }
     const auto started = compositorClock();
     const auto held = data->stableInventory;
     if (!started || !data->completionGrant->verify())
@@ -1823,7 +1888,7 @@ std::optional<std::string> framePresentation(bool current)
                  std::to_string(row.completedCommit) + "\"}";
     }
     std::string proof =
-        std::string(current ? "{\"schema\":2,\"topology\":\"" : "{\"schema\":1,\"topology\":\"") +
+        std::string(current ? "{\"schema\":3,\"topology\":\"" : "{\"schema\":1,\"topology\":\"") +
         std::string(restored->topology) + "\",\"original_dispatch\":\"" +
         std::string((*original)[1]) + "\",\"checkpoint\":\"" + std::string((*original)[2]) +
         "\",\"restoration_transaction\":\"" + data->bound.transaction +
@@ -1849,6 +1914,9 @@ std::optional<std::string> framePresentation(bool current)
             ",\"current_commit_digest\":\"" +
             (data->committedCurrent ? data->committedCurrent->comparisonDigest()
                                     : std::string(64, '0')) +
+            "\",\"final_retirement_digest\":\"" +
+            (data->retiredCurrent ? data->retiredCurrent->comparisonDigest()
+                                  : std::string(64, '0')) +
             "\",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
             "\",\"input_retired\":" +
             (inputRetirement.phase() == ProtectedInputRetirement::Phase::Open && !heldInput().any

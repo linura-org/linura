@@ -196,6 +196,19 @@ class S17DeploymentTests(unittest.TestCase):
             [p.get("user") for p in policy.findall("policy[@user]")],
             ["linura-authority", "root"],
         )
+        self.assertEqual(
+            [
+                dict(rule.attrib)
+                for rule in policy.findall("policy[@context='default']/allow")
+            ],
+            [
+                {
+                    "send_destination": "org.linura.DisplayProtection1",
+                    "send_interface": "org.linura.DisplayProtection1",
+                    "send_member": "NativeStartup",
+                }
+            ],
+        )
         authority = policy.find("policy[@user='linura-authority']")
         self.assertIsNotNone(authority)
         assert authority is not None
@@ -208,6 +221,9 @@ class S17DeploymentTests(unittest.TestCase):
                     "send_member": method,
                 }
                 for method in (
+                    "ReserveFinalRetirement",
+                    "CompleteReleasedCurrent",
+                    "ReadFinalRetirement",
                     "ReserveCurrentCommit",
                     "RetireRootPower",
                     "ReadRootPower",

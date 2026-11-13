@@ -139,6 +139,7 @@ impl NativeDisplayCurrentCommitPreparation {
             true,
             false,
             None,
+            None,
         )
         .map_err(|_| invalid())?;
         let result = Self::new(
@@ -196,6 +197,10 @@ impl NativeDisplayCurrentCommitPreparation {
             }
         }
         out
+    }
+    pub fn record_digest(&self) -> ComponentDigest {
+        use sha2::{Digest, Sha256};
+        ComponentDigest::from_bytes(Sha256::digest(self.canonical_bytes()).into())
     }
     pub fn parent(&self) -> &NativeDisplayRootRetirementPreparation {
         &self.parent

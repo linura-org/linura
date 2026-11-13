@@ -9,8 +9,9 @@ use std::path::Component;
 
 use linura_linux_session::{
     NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
-    NativeDisplayFinalizationReservation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayRestorationReservation,
+    NativeDisplayFinalRetirementPreparation, NativeDisplayFinalizationReservation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
     NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
@@ -32,6 +33,9 @@ const COMPLETION_PREPARED_MAGIC: &[u8] = b"LNCP:1\n";
 const COMPLETION_SPENT_MAGIC: &[u8] = b"LNCS:1\n";
 const CURRENT_COMMIT_PREPARED_MAGIC: &[u8] = b"LNCQ:1\n";
 const CURRENT_COMMIT_SPENT_MAGIC: &[u8] = b"LNCC:1\n";
+const FINAL_RETIREMENT_PREPARED_MAGIC: &[u8] = b"LNCT:1\n";
+const FINAL_RETIREMENT_SPENT_MAGIC: &[u8] = b"LNCE:1\n";
+const RELEASED_CURRENT_MAGIC: &[u8] = b"LNCZ:1\n";
 const ROOT_POWER_PREPARED_MAGIC: &[u8] = b"LNFP:1\n";
 const POWER_PREPARED_MAGIC: &[u8] = b"LNPP:1\n";
 const POWER_SPENT_MAGIC: &[u8] = b"LNPS:1\n";
@@ -56,6 +60,9 @@ enum Kind {
     RootPowerPrepared,
     CurrentCommitPrepared,
     CurrentCommitSpent,
+    FinalRetirementPrepared,
+    FinalRetirementSpent,
+    ReleasedCurrent,
 }
 impl Kind {
     fn prefix(self) -> &'static str {
@@ -72,6 +79,9 @@ impl Kind {
             Self::CompletionSpent => "completion-spent-",
             Self::CurrentCommitPrepared => "current-commit-prepared-",
             Self::CurrentCommitSpent => "current-commit-spent-",
+            Self::FinalRetirementPrepared => "final-retirement-prepared-",
+            Self::FinalRetirementSpent => "final-retirement-spent-",
+            Self::ReleasedCurrent => "released-current-",
             Self::RootPowerPrepared => "root-power-prepared-",
             Self::PowerPrepared => "power-prepared-",
             Self::PowerSpent => "power-spent-",
@@ -91,6 +101,9 @@ impl Kind {
             Self::CompletionSpent => COMPLETION_SPENT_MAGIC,
             Self::CurrentCommitPrepared => CURRENT_COMMIT_PREPARED_MAGIC,
             Self::CurrentCommitSpent => CURRENT_COMMIT_SPENT_MAGIC,
+            Self::FinalRetirementPrepared => FINAL_RETIREMENT_PREPARED_MAGIC,
+            Self::FinalRetirementSpent => FINAL_RETIREMENT_SPENT_MAGIC,
+            Self::ReleasedCurrent => RELEASED_CURRENT_MAGIC,
             Self::RootPowerPrepared => ROOT_POWER_PREPARED_MAGIC,
             Self::PowerPrepared => POWER_PREPARED_MAGIC,
             Self::PowerSpent => POWER_SPENT_MAGIC,
@@ -98,6 +111,27 @@ impl Kind {
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
         match self {
+            Self::FinalRetirementPrepared | Self::FinalRetirementSpent => {
+                Ok(NativeDisplayFinalRetirementPreparation::decode(payload)?
+                    .parent()
+                    .parent()
+                    .parent()
+                    .parent()
+                    .parent()
+                    .terminal()
+                    .binding()
+                    .dispatch_digest)
+            }
+            Self::ReleasedCurrent => Ok(NativeDisplayReleasedCurrentRecord::decode(payload)?
+                .parent()
+                .parent()
+                .parent()
+                .parent()
+                .parent()
+                .parent()
+                .terminal()
+                .binding()
+                .dispatch_digest),
             Self::CurrentCommitPrepared | Self::CurrentCommitSpent => {
                 Ok(NativeDisplayCurrentCommitPreparation::decode(payload)?
                     .parent()
@@ -168,6 +202,9 @@ struct TerminalLineage {
     release_spent: BTreeMap<String, NativeDisplayRetirementPreparation>,
     completion_prepared: BTreeMap<String, NativeDisplayCompletionPreparation>,
     completion_spent: BTreeMap<String, NativeDisplayCompletionPreparation>,
+    final_retirement_prepared: BTreeMap<String, NativeDisplayFinalRetirementPreparation>,
+    final_retirement_spent: BTreeMap<String, NativeDisplayFinalRetirementPreparation>,
+    released_current: BTreeMap<String, NativeDisplayReleasedCurrentRecord>,
     current_commit_prepared: BTreeMap<String, NativeDisplayCurrentCommitPreparation>,
     current_commit_spent: BTreeMap<String, NativeDisplayCurrentCommitPreparation>,
     root_power_prepared: BTreeMap<String, NativeDisplayRootRetirementPreparation>,
@@ -178,6 +215,40 @@ struct TerminalLineage {
 impl TerminalLineage {
     fn observe(&mut self, kind: Kind, bytes: &[u8]) -> Result<(), String> {
         match kind {
+            Kind::FinalRetirementPrepared | Kind::FinalRetirementSpent => {
+                let record = NativeDisplayFinalRetirementPreparation::decode(bytes)?;
+                let scope = record
+                    .frames()
+                    .scope()
+                    .resource_id()
+                    .map_err(|_| unavailable())?
+                    .as_str()
+                    .to_owned();
+                let table = if kind == Kind::FinalRetirementPrepared {
+                    &mut self.final_retirement_prepared
+                } else {
+                    &mut self.final_retirement_spent
+                };
+                if table.insert(scope, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::ReleasedCurrent => {
+                let record = NativeDisplayReleasedCurrentRecord::decode(bytes)?;
+                let scope = record
+                    .parent()
+                    .frames()
+                    .scope()
+                    .resource_id()
+                    .map_err(|_| unavailable())?
+                    .as_str()
+                    .to_owned();
+                if self.released_current.insert(scope, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
             Kind::CurrentCommitPrepared | Kind::CurrentCommitSpent => {
                 let record = NativeDisplayCurrentCommitPreparation::decode(bytes)?;
                 let scope = record
@@ -418,6 +489,33 @@ impl TerminalLineage {
                 return Err(unavailable());
             }
         }
+        for (scope, record) in &self.final_retirement_prepared {
+            let parent = self
+                .current_commit_spent
+                .get(scope)
+                .ok_or_else(unavailable)?;
+            if record.parent().canonical_bytes() != parent.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
+        for (scope, record) in &self.final_retirement_spent {
+            let prepared = self
+                .final_retirement_prepared
+                .get(scope)
+                .ok_or_else(unavailable)?;
+            if record.canonical_bytes() != prepared.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
+        for (scope, record) in &self.released_current {
+            let spent = self
+                .final_retirement_spent
+                .get(scope)
+                .ok_or_else(unavailable)?;
+            if record.parent().canonical_bytes() != spent.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
         Ok(())
     }
 }
@@ -436,6 +534,9 @@ fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
         Kind::CompletionSpent,
         Kind::CurrentCommitPrepared,
         Kind::CurrentCommitSpent,
+        Kind::FinalRetirementPrepared,
+        Kind::FinalRetirementSpent,
+        Kind::ReleasedCurrent,
         Kind::RootPowerPrepared,
         Kind::PowerPrepared,
         Kind::PowerSpent,
@@ -1366,9 +1467,6 @@ pub(super) fn startup_clear() -> Result<bool, String> {
     startup_clear_at(&open()?, 0)
 }
 
-#[cfg(test)]
-pub(super) mod tests;
-
 fn read_power_retirement_at(
     fd: &OwnedFd,
     uid: u32,
@@ -1600,3 +1698,149 @@ pub(super) fn read_current_commit(
 ) -> Result<Option<NativeDisplayCurrentCommitPreparation>, String> {
     read_current_commit_at(&open()?, 0, retained, spent)
 }
+
+fn read_final_lineage_at<T>(
+    fd: &OwnedFd,
+    uid: u32,
+    retained: &NativeDisplayRestorationReservation,
+    extract: impl FnOnce(&mut TerminalLineage, &str) -> Option<T>,
+) -> Result<Option<T>, String> {
+    directory(fd, uid, true)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let scope = retained
+            .decoded_material()?
+            .recovery_scope()
+            .map_err(|_| unavailable())?
+            .resource_id()
+            .map_err(|_| unavailable())?
+            .as_str()
+            .to_owned();
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        if lineage
+            .restorations
+            .get(&scope)
+            .is_none_or(|old| old.canonical_bytes() != retained.canonical_bytes())
+        {
+            return Err(unavailable());
+        }
+        Ok(extract(&mut lineage, &scope))
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        _ => Err(unavailable()),
+    }
+}
+pub(super) fn reserve_final_retirement(
+    record: &NativeDisplayFinalRetirementPreparation,
+    spent: bool,
+) -> Result<(), String> {
+    let bytes = record.canonical_bytes();
+    let kind = if spent {
+        Kind::FinalRetirementSpent
+    } else {
+        Kind::FinalRetirementPrepared
+    };
+    reserve_kind_at(&open()?, 0, &kind.dispatch(&bytes)?, &bytes, kind)
+}
+pub(super) fn read_final_retirement(
+    retained: &NativeDisplayRestorationReservation,
+    spent: bool,
+) -> Result<Option<NativeDisplayFinalRetirementPreparation>, String> {
+    read_final_lineage_at(&open()?, 0, retained, |lineage, scope| {
+        if spent {
+            lineage.final_retirement_spent.remove(scope)
+        } else {
+            lineage.final_retirement_prepared.remove(scope)
+        }
+    })
+}
+pub(super) fn reserve_released_current(
+    record: &NativeDisplayReleasedCurrentRecord,
+) -> Result<(), String> {
+    let bytes = record.canonical_bytes();
+    let directory_fd = open()?;
+    let digest = Kind::ReleasedCurrent.dispatch(&bytes)?;
+    if reserve_kind_at(&directory_fd, 0, &digest, &bytes, Kind::ReleasedCurrent).is_ok() {
+        return Ok(());
+    }
+    // Metadata completion may recover a failed sync, never rewrite conflicting
+    // bytes or replay a native grant. Confirm every immutable parent under the
+    // directory lock, then sync the exact retained file AND directory again.
+    fs::flock(&directory_fd, FlockOperation::NonBlockingLockExclusive)
+        .map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(&directory_fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, payload) = read_named_record(&directory_fd, 0, entry.file_name())?;
+            lineage.observe(kind, &payload)?;
+        }
+        lineage.verify()?;
+        let scope = record
+            .parent()
+            .frames()
+            .scope()
+            .resource_id()
+            .map_err(|_| unavailable())?;
+        if lineage
+            .released_current
+            .get(scope.as_str())
+            .is_none_or(|old| old.canonical_bytes() != bytes)
+        {
+            return Err(unavailable());
+        }
+        let fd = fs::openat(
+            &directory_fd,
+            Kind::ReleasedCurrent.name(&digest),
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|_| unavailable())?;
+        record_metadata(&fs::fstat(&fd).map_err(|_| unavailable())?, 0)?;
+        fs::fsync(&fd).map_err(|_| unavailable())?;
+        fs::fsync(&directory_fd).map_err(|_| unavailable())?;
+        if check_kind_record(fd, 0, &digest, Kind::ReleasedCurrent)? != bytes {
+            return Err(unavailable());
+        }
+        Ok(())
+    })();
+    let unlocked = fs::flock(&directory_fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(()), Ok(())) => Ok(()),
+        _ => Err(unavailable()),
+    }
+}
+pub(super) fn read_released_current(
+    retained: &NativeDisplayRestorationReservation,
+) -> Result<Option<NativeDisplayReleasedCurrentRecord>, String> {
+    read_final_lineage_at(&open()?, 0, retained, |lineage, scope| {
+        lineage.released_current.remove(scope)
+    })
+}
+
+#[cfg(test)]
+pub(super) mod tests;

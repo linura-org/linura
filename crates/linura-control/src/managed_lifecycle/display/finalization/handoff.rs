@@ -14,6 +14,12 @@ mod completed;
 mod completion;
 pub use completed::OriginalDisplayCurrentCommit;
 mod current;
+mod final_retirement;
+pub use final_retirement::{
+    AuthorizedOriginalDisplayFinalRetirement, OriginalDisplayFinalRetirementPort,
+    OriginalDisplayFinalRetirementVerification, OriginalDisplayReleasedCurrent,
+    OriginalDisplayReleasedCurrentCompletion, OriginalDisplayReleasedCurrentPort,
+};
 mod current_commit;
 pub use current_commit::{
     AuthorizedOriginalDisplayCurrentCommit, OriginalDisplayCurrentCommitPort,

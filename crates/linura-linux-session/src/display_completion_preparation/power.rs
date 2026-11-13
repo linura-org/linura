@@ -126,6 +126,7 @@ impl NativeDisplayPowerRetirementPreparation {
             true,
             true,
             None,
+            None,
         )
         .map_err(|_| invalid())?;
         let result = Self::new(&parent, preparation, checkpoint, &frames, expiry)?;

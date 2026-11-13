@@ -64,6 +64,7 @@ fn fixture() -> (DisplayNativeCurrentFacts, ObservationEnvelope) {
         true,
         true,
         None,
+        None,
     ));
     let envelope = ObservationEnvelope {
         provider: value(ProviderId::new(DISPLAY_PROVIDER)),
@@ -246,5 +247,69 @@ fn power_transition_comparison_never_weakens_same_phase_or_inventory_checks() {
             }
         }
         assert!(!wrong.follows_native_power_retirement(&held));
+    }
+}
+
+#[test]
+fn final_retirement_requires_distinct_qualified_lineage_and_exact_current_frames() {
+    let (mut pending, mut sample) = fixture();
+    pending.power_fence_held = false;
+    let mut qualified = pending.clone();
+    qualified.current_commit = Some("4".repeat(64));
+    assert!(qualified.follows_current_qualification(&pending));
+    let mut retired = qualified.clone();
+    retired.final_retirement = Some("5".repeat(64));
+    assert!(retired.follows_final_retirement(&qualified));
+    assert!(!retired.reconciles(&qualified));
+    assert!(!retired.follows_current_qualification(&pending));
+    assert!(!retired.follows_final_retirement(&pending));
+    assert!(!qualified.follows_final_retirement(&retired));
+    assert!(!retired.follows_final_retirement(&retired));
+    sample.attributes = retired.attributes();
+    assert_eq!(
+        value(DisplayNativeCurrentFacts::from_envelope(
+            &sample,
+            retired.scope(),
+            1002
+        )),
+        retired
+    );
+    for fault in 0..9 {
+        let mut wrong = retired.clone();
+        match fault {
+            0 => wrong.current_commit = Some("6".repeat(64)),
+            1 => wrong.final_retirement = None,
+            2 => wrong.input_retired = false,
+            3 => wrong.power_fence_held = true,
+            4 => wrong.window.observed_boot_ms -= 1,
+            5 => wrong.lineage.source_guard = "6".repeat(64),
+            6 => wrong.completion_digest = "6".repeat(64),
+            7 => {
+                wrong
+                    .outputs
+                    .values_mut()
+                    .next()
+                    .unwrap_or_else(|| unreachable!())
+                    .completed_commit -= 1
+            }
+            _ => {
+                wrong
+                    .outputs
+                    .values_mut()
+                    .next()
+                    .unwrap_or_else(|| unreachable!())
+                    .framebuffer += 1
+            }
+        }
+        assert!(!wrong.follows_final_retirement(&qualified), "fault {fault}");
+    }
+    for (key, raw) in [
+        ("current_schema", ObservedValue::U64(2)),
+        ("final_retirement_digest", ObservedValue::Text("ack".into())),
+        ("current_commit_digest", ObservedValue::Text("0".repeat(64))),
+    ] {
+        let mut wrong = sample.clone();
+        wrong.attributes.insert(key.into(), raw);
+        assert!(DisplayNativeCurrentFacts::from_envelope(&wrong, retired.scope(), 1002).is_err());
     }
 }

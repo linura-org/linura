@@ -20,6 +20,7 @@ use linura_transaction::{ApprovedRequestJournal, RetainedRequest, TransactionSto
 
 #[derive(Debug, Default)]
 struct Machine {
+    journal_keys: std::collections::BTreeSet<(PrincipalId, RequestId)>,
     desired: bool,
     state: Option<&'static str>,
     binding: Option<ExecutionBinding>,
@@ -74,6 +75,8 @@ struct Machine {
     root_power_write_fault: u8,
     root_power_retired: bool,
     native_current_grant: Option<String>,
+    native_final_retirement: Option<String>,
+    final_retirement: Option<linura_observation::DisplayOriginalFinalRetirementFacts>,
     root_retirement: Option<linura_observation::DisplayOriginalRootRetirementFacts>,
     last_original_protection: Option<linura_observation::DisplayOriginalProtectionFacts>,
     native_power_retired: bool,
@@ -241,6 +244,14 @@ impl Observer for LiveFixtureObserver {
         if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
             capabilities.push(Capability {
                 id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
+                )),
+                support: SupportLevel::Supported,
+                provider: Some(self.template.provider.clone()),
+                reason: None,
+            });
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
                     linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
                 )),
                 support: SupportLevel::Supported,
@@ -301,6 +312,10 @@ impl Observer for LiveFixtureObserver {
             == linura_observation::DISPLAY_RECOVERY_PROVIDER
             && capability.as_str()
                 == linura_observation::DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY;
+        let final_retirement = self.template.provider.as_str()
+            == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && capability.as_str()
+                == linura_observation::DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY;
         let root_retirement = self.template.provider.as_str()
             == linura_observation::DISPLAY_RECOVERY_PROVIDER
             && capability.as_str()
@@ -310,7 +325,8 @@ impl Observer for LiveFixtureObserver {
                 && !finalization
                 && !completion
                 && !power
-                && !root_retirement)
+                && !root_retirement
+                && !final_retirement)
         {
             return Err(ProviderError::Unsupported("fixture route mismatch".into()));
         }
@@ -329,6 +345,14 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if final_retirement {
+            let root = machine.final_retirement.as_ref().ok_or_else(|| {
+                ProviderError::Unavailable("no simulated final Root permission".into())
+            })?;
+            sample.capability = capability.clone();
+            sample.attributes = root.attributes();
+            return Ok(sample);
+        }
         if root_retirement {
             let root = machine
                 .root_retirement
@@ -595,6 +619,11 @@ struct FailingJournal {
 }
 impl ApprovedRequestJournal for FailingJournal {
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+        self.machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .journal_keys
+            .insert((record.principal().clone(), record.request_id().clone()));
         let completion_kind = if record
             .request_id()
             .as_str()
@@ -625,6 +654,24 @@ impl ApprovedRequestJournal for FailingJournal {
             .starts_with("request:v010:display-native-current-verified:")
         {
             5
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-final-retirement-prepared:")
+        {
+            6
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-final-retirement-verified:")
+        {
+            7
+        } else if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-released-current:")
+        {
+            8
         } else {
             0
         };

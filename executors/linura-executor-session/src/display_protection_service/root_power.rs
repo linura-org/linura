@@ -177,13 +177,28 @@ impl NativeProtection {
         {
             return Err(unavailable());
         }
-        self.witnesses
-            .verify_retired_power_absent(
-                &dispatch(scope.original_dispatch())?,
-                &memory.digest,
-                &self.channel,
-            )
-            .map_err(|_| unavailable())?;
+        if let Some(completed) = admission
+            .final_retirements
+            .get(key.as_str())
+            .and_then(|v| v.completed)
+        {
+            self.witnesses
+                .verify_released_power_absent(
+                    &dispatch(scope.original_dispatch())?,
+                    &memory.digest,
+                    &completed,
+                    &self.channel,
+                )
+                .map_err(|_| unavailable())?;
+        } else {
+            self.witnesses
+                .verify_retired_power_absent(
+                    &dispatch(scope.original_dispatch())?,
+                    &memory.digest,
+                    &self.channel,
+                )
+                .map_err(|_| unavailable())?;
+        }
         self.admit_control(sender)?;
         let current_commit = self.current_commit_record(&admission, &scope)?;
         Ok((record.canonical_bytes(), payload, current_commit, true))

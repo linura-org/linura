@@ -486,6 +486,28 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void retireCurrent(wl_client *, wl_resource *resource, std::int32_t descriptor,
+                              const char *preparation)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!digest(preparation) || !state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) ||
+                !state->scene->retireCurrent(std::move(owned), preparation)) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+                return;
+            }
+            status(nullptr, resource);
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static void commitCurrent(wl_client *, wl_resource *resource, std::int32_t descriptor,
                               const char *preparation)
     {
@@ -564,7 +586,8 @@ const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
     destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization,
-        quiesceFinalization, spendNativeRelease, commitCurrent, retirePower, transferCompletion
+        quiesceFinalization, spendNativeRelease, retireCurrent, commitCurrent, retirePower,
+        transferCompletion
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {

@@ -13,6 +13,9 @@ pub(super) enum Kind {
     Committed,
     NativePrepared,
     NativeVerified,
+    FinalPrepared,
+    FinalVerified,
+    Released,
 }
 impl Kind {
     pub(super) fn domain(self) -> &'static str {
@@ -22,6 +25,9 @@ impl Kind {
             Self::Committed => "linura.display.original-current-committed.v1",
             Self::NativePrepared => "linura.display.original-native-current-prepared.v1",
             Self::NativeVerified => "linura.display.original-native-current-verified.v1",
+            Self::FinalPrepared => "linura.display.original-final-retirement-prepared.v1",
+            Self::FinalVerified => "linura.display.original-final-retirement-verified.v1",
+            Self::Released => "linura.display.original-released-current.v1",
         }
     }
     fn prefix(self) -> &'static str {
@@ -31,6 +37,9 @@ impl Kind {
             Self::Committed => "display-current-committed",
             Self::NativePrepared => "display-native-current-prepared",
             Self::NativeVerified => "display-native-current-verified",
+            Self::FinalPrepared => "display-final-retirement-prepared",
+            Self::FinalVerified => "display-final-retirement-verified",
+            Self::Released => "display-released-current",
         }
     }
     pub(super) fn key(self, request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
@@ -106,7 +115,9 @@ fn validate_fields(kind: Kind, fields: &[String]) -> Result<(), ManagedLifecycle
     let expected = match kind {
         Kind::Ready => 12,
         Kind::Verified | Kind::Committed => 11,
-        Kind::NativePrepared | Kind::NativeVerified => 10,
+        Kind::NativePrepared | Kind::NativeVerified | Kind::Released => 10,
+        Kind::FinalPrepared => 11,
+        Kind::FinalVerified => 14,
     };
     if fields.len() != expected {
         return Err(invalid());
@@ -147,6 +158,35 @@ fn validate_fields(kind: Kind, fields: &[String]) -> Result<(), ManagedLifecycle
             if unsigned(&fields[8])? <= unsigned(&fields[9])? {
                 return Err(invalid());
             }
+        }
+        Kind::FinalPrepared => {
+            content(&fields[5])?;
+            content(&fields[6])?;
+            raw_digest(&fields[7])?;
+            content(&fields[8])?;
+            if unsigned(&fields[9])? <= unsigned(&fields[10])? {
+                return Err(invalid());
+            }
+        }
+        Kind::FinalVerified => {
+            content(&fields[5])?;
+            content(&fields[6])?;
+            raw_digest(&fields[7])?;
+            content(&fields[8])?;
+            linura_observation::DisplayNativeHandoffWindow {
+                observed_unix_ms: unsigned(&fields[9])?,
+                observed_boot_ms: unsigned(&fields[10])?,
+                deadline_unix_ms: unsigned(&fields[11])?,
+                deadline_boot_ms: unsigned(&fields[12])?,
+            }
+            .valid_for_ms()
+            .map_err(|_| invalid())?;
+        }
+        Kind::Released => {
+            content(&fields[5])?;
+            content(&fields[6])?;
+            raw_digest(&fields[7])?;
+            raw_digest(&fields[8])?;
         }
         Kind::NativeVerified => {
             content(&fields[5])?;

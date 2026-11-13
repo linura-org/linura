@@ -6,10 +6,10 @@ use linura_core::{
     Capability, CapabilityId, DisplayRecoveryScope, ProviderId, ResourceId, SupportLevel,
 };
 use linura_observation::{
-    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
-    DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
-    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope,
-    ProviderAvailability, ProviderHealth,
+    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
+    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY,
+    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
+    DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope, ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 
@@ -36,6 +36,7 @@ impl Observer for NativeOriginalDisplayObserver {
     }
     fn observation_capabilities(&self) -> Vec<Capability> {
         [
+            DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
             DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
             DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
             DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
@@ -55,7 +56,8 @@ impl Observer for NativeOriginalDisplayObserver {
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
         matches!(
             capability.as_str(),
-            DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+            DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY
+                | DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
                 | DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
                 | DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
                 | DISPLAY_ORIGINAL_COMPLETION_CAPABILITY
@@ -105,6 +107,9 @@ impl Observer for NativeOriginalDisplayObserver {
         let result = if capability.as_str() == DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY {
             self.channel
                 .observe_original_display_root_retirement(&scope, sequence + 1)
+        } else if capability.as_str() == DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY {
+            self.channel
+                .observe_original_display_final_retirement(&scope, sequence + 1)
         } else if capability.as_str() == DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY {
             self.channel
                 .observe_original_display_power_retirement(&scope, sequence + 1)

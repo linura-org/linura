@@ -36,6 +36,7 @@ pub struct DisplayNativeCurrentFacts {
     input_retired: bool,
     power_fence_held: bool,
     current_commit: Option<String>,
+    final_retirement: Option<String>,
 }
 impl DisplayNativeCurrentFacts {
     #[allow(clippy::too_many_arguments)]
@@ -48,6 +49,7 @@ impl DisplayNativeCurrentFacts {
         input_retired: bool,
         power_fence_held: bool,
         current_commit: Option<String>,
+        final_retirement: Option<String>,
     ) -> Result<Self, DisplayEvidenceError> {
         let transaction = |value: &str| {
             value.starts_with("transaction:")
@@ -57,9 +59,12 @@ impl DisplayNativeCurrentFacts {
                     c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b':' | b'-')
                 })
         };
-        if current_commit
+        if final_retirement
             .as_ref()
-            .is_some_and(|digest| !canonical_digest(digest) || power_fence_held || !input_retired)
+            .is_some_and(|digest| !canonical_digest(digest) || current_commit.is_none())
+            || current_commit.as_ref().is_some_and(|digest| {
+                !canonical_digest(digest) || power_fence_held || !input_retired
+            })
             || !canonical_digest(&completion_digest)
             || [
                 &lineage.checkpoint,
@@ -124,13 +129,14 @@ impl DisplayNativeCurrentFacts {
             input_retired,
             power_fence_held,
             current_commit,
+            final_retirement,
         })
     }
 
     pub fn attributes(&self) -> BTreeMap<String, ObservedValue> {
         let lineage = &self.lineage;
         let mut result = BTreeMap::from([
-            ("current_schema".into(), ObservedValue::U64(2)),
+            ("current_schema".into(), ObservedValue::U64(3)),
             (
                 "original_dispatch".into(),
                 ObservedValue::Text(self.scope.original_dispatch().into()),
@@ -164,6 +170,14 @@ impl DisplayNativeCurrentFacts {
             "current_commit_digest".into(),
             ObservedValue::Text(
                 self.current_commit
+                    .clone()
+                    .unwrap_or_else(|| "0".repeat(64)),
+            ),
+        );
+        result.insert(
+            "final_retirement_digest".into(),
+            ObservedValue::Text(
+                self.final_retirement
                     .clone()
                     .unwrap_or_else(|| "0".repeat(64)),
             ),
@@ -232,11 +246,11 @@ impl DisplayNativeCurrentFacts {
             return Err(DisplayEvidenceError::Identity);
         }
         let attrs = &observation.attributes;
-        if attrs.len() > 165
+        if attrs.len() > 166
             || attrs.iter().any(|(key, value)| {
                 key.len() > 64 || matches!(value, ObservedValue::Text(text) if text.len() > 256)
             })
-            || number(attrs, "current_schema")? != 2
+            || number(attrs, "current_schema")? != 3
             || text(attrs, "original_dispatch")? != scope.original_dispatch()
         {
             return Err(DisplayEvidenceError::Shape);
@@ -304,6 +318,10 @@ impl DisplayNativeCurrentFacts {
                 raw if raw == "0".repeat(64) => None,
                 raw => Some(raw.into()),
             },
+            match text(attrs, "final_retirement_digest")? {
+                raw if raw == "0".repeat(64) => None,
+                raw => Some(raw.into()),
+            },
         )?;
         if result.attributes() != *attrs {
             return Err(DisplayEvidenceError::Shape);
@@ -361,6 +379,37 @@ impl DisplayNativeCurrentFacts {
             && first.scope() == &self.scope
     }
     #[must_use]
+    /// Phase transition comparison only. The independently observed Root grant
+    /// must still match current_commit_digest; this cannot create a lifetime.
+    pub fn follows_current_qualification(&self, pending: &Self) -> bool {
+        if self.current_commit.is_none()
+            || pending.current_commit.is_some()
+            || self.final_retirement.is_some()
+            || pending.final_retirement.is_some()
+            || !self.input_retired
+            || self.power_fence_held
+        {
+            return false;
+        }
+        let mut comparison = self.clone();
+        comparison.current_commit = None;
+        comparison.reconciles(pending)
+    }
+    pub fn final_retirement_digest(&self) -> Option<&str> {
+        self.final_retirement.as_deref()
+    }
+    /// Comparison only; the final Root grant must be independently joined.
+    pub fn follows_final_retirement(&self, qualified: &Self) -> bool {
+        if self.final_retirement.is_none()
+            || qualified.final_retirement.is_some()
+            || self.current_commit.is_none()
+        {
+            return false;
+        }
+        let mut comparison = self.clone();
+        comparison.final_retirement = None;
+        comparison.reconciles(qualified)
+    }
     pub fn current_commit_digest(&self) -> Option<&str> {
         self.current_commit.as_deref()
     }
@@ -375,6 +424,7 @@ impl DisplayNativeCurrentFacts {
             && self.input_retired == previous.input_retired
             && self.power_fence_held == previous.power_fence_held
             && self.current_commit == previous.current_commit
+            && self.final_retirement == previous.final_retirement
             && self.reconciles_inventory(previous)
     }
     /// Typed comparison of the separately authorized native-power transition.
@@ -383,6 +433,8 @@ impl DisplayNativeCurrentFacts {
     pub fn follows_native_power_retirement(&self, previous: &Self) -> bool {
         self.current_commit.is_none()
             && previous.current_commit.is_none()
+            && self.final_retirement.is_none()
+            && previous.final_retirement.is_none()
             && self.input_retired
             && previous.input_retired
             && previous.power_fence_held

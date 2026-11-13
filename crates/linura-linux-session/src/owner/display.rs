@@ -38,6 +38,7 @@ pub use startup::{NativeDisplayStartupPeer, NativeDisplayStartupRequest};
 mod completion;
 mod current;
 mod current_commit;
+mod final_retirement;
 mod finalization;
 mod handoff;
 mod original;

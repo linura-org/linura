@@ -13,6 +13,11 @@ pub use display_root_retirement::{
     DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DisplayCurrentGrantLineage,
     DisplayOriginalRootRetirementFacts, DisplayRootRetirementLineage,
 };
+mod display_final_retirement;
+pub use display_final_retirement::{
+    DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY, DisplayFinalRetirementLineage,
+    DisplayOriginalFinalRetirementFacts, DisplayReleasedCurrentLineage,
+};
 mod display_power_retirement;
 pub use display_power_retirement::{
     DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DisplayOriginalPowerRetirementFacts,

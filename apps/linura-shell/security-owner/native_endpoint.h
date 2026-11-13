@@ -190,6 +190,11 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<arg name=\"control_observation\" type=\"s\" direction=\"in\"/>"
         "<arg name=\"native_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
+        "<method name=\"RetireOriginalDisplayCurrent\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"preparation_digest\" type=\"s\" direction=\"in\"/><arg name=\"preparation\" "
+        "type=\"ay\" direction=\"in\"/><arg name=\"phase\" "
+        "type=\"u\" direction=\"out\"/></method>"
         "<method name=\"CommitOriginalDisplayCurrent\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/>"
         "<arg name=\"preparation_digest\" type=\"s\" direction=\"in\"/><arg name=\"preparation\" "
@@ -296,6 +301,9 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                               const QString &control_binding,
                                               const QString &control_observation,
                                               const QDBusUnixFileDescriptor &native_grant);
+    quint32 RetireOriginalDisplayCurrent(const NativeDisplayAttemptQueryWire &,
+                                         const QString &preparationDigest,
+                                         const QByteArray &preparation);
     quint32 CommitOriginalDisplayCurrent(const NativeDisplayAttemptQueryWire &,
                                          const QString &preparationDigest,
                                          const QByteArray &preparation);

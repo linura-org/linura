@@ -294,6 +294,9 @@ impl NativeProtection {
                     |digest| {
                         service.spend_current_commit_mechanism(&control, &key, &record, digest)
                     },
+                    |digest| {
+                        service.spend_final_retirement_mechanism(&control, &key, &record, digest)
+                    },
                 );
             })
             .map_err(|_| unavailable())?;

@@ -347,7 +347,7 @@ Read-only recovery after a missing spend reply can retain or reconcile that
 proof. An existing record keeps its first verification time and expiry; later
 reads cannot adopt a successor frame, replace contradictory bytes or renew it.
 Torn/unavailable storage and failed readback leave the terminal Indeterminate.
-Final `ReleasedCurrent` completion and fence retirement remain source work.
+Final `ReleasedCurrent` completion and native fence retirement use the separate protocol below; successor admission remains lifecycle work.
 Existing durable bytes and protocol versions keep their meanings.
 The Control continuation now moves the original process-local canonical review
 from initial spend to a distinct handoff-verified stage only after direct
@@ -438,7 +438,7 @@ buffer at the same commit, rollback, foreign lineage or corrupt checkpoint
 refuses. The fresh inspection's expiry and the first proof's original expiry
 are reported separately. This Linura-owned evidence write invokes no effect,
 does not reconstruct a review after restart and is not final retirement
-authority. `ReleasedCurrent` and final fence retirement remain outstanding.
+authority. `ReleasedCurrent` and final fence retirement require the distinct post-qualification protocol below.
 Once the native owner independently observes the same invocation's actual
 current handoff phase, it retires only the already-spent UI/approval flow and
 leaves the native endpoint with the backend. It does this even when the transfer
@@ -500,8 +500,9 @@ A missing referenced current checkpoint, contradictory history or lost Root
 continuity still refuses. This bookkeeping does not grant a permanent native
 current lifetime or retire future-startup admission.
 
-The final authenticated native committed lifetime, Root ReleasedCurrent marker,
-ordered global-admission retirement, ordinary release and lifecycle management
+The final authenticated native committed lifetime and matching Root/Control
+ReleasedCurrent records are implemented as separate continuations below.
+Ordered global-admission transfer, ordinary release and lifecycle management
 remain required before source completion. Native grant, current-frame and output-history headers are included
 in the live source identity; changing them invalidates the compositor/owner
 source match. The member-specific bus allowlist
@@ -609,3 +610,61 @@ allows read-only verification, not grant replay. Historical verification retains
 its first timestamp. Root/kernel and checkpoint provenance remain retained.
 This transition still does not assert final `ReleasedCurrent`, retire global
 startup admission, authorize ordinary release, or qualify production operation.
+
+### Early Committed is never release, successor or cleanup authority
+
+The signed Control `CurrentCommitted` CAS deliberately precedes native
+`commit_current`. It records the independently verified restored desired state;
+physical qualification and final fence retirement are separate. Every consumer
+must retain that distinction across restart and missing acknowledgments.
+
+Ordinary Begin now checks bounded authenticated restoration/finalization
+ownership for the whole seat, including Indeterminate, Verified, Committed and
+RecoveryBlocked histories. It compares the canonical request with the actual
+signed snapshot and retains finalization's immutable claim. An idle native,
+changed invocation UUID, completed CAS or restarted Control cannot bypass that
+ownership or infer an authenticated successor. This check occurs before review,
+prepare and dispatch, and again at existing effect boundaries. A future Stage 5
+successor must explicitly transfer ownership through its qualified managed path.
+
+The Control/SQLite adversarial fixtures exercise competing requests before
+native qualification, after missing acknowledgments and after restart. They
+require zero new native observations/applies/decisions and compare all retained
+intent, checkpoint and proof bytes. These are component assertions, not actual
+compositor qualification. Root startup admission separately remains closed at
+current-grant prepare/spend and after reopening the same retained records.
+
+### Final original retirement and matching ReleasedCurrent records
+
+After independently qualified committed-current admission, the original live
+review may authorize one final-retirement continuation. Its immutable Control
+preparation binds signed Committed history, the first qualified-current proof,
+Root current-grant ancestry and fresh current observations. Root's LNCT/LNCE
+preparation/spend records and the distinct LNCA purpose on the actual original
+credential channel precede native retirement. Native compares the full sealed
+parent and current KMS/source/input facts before and after ACK; an opaque
+retired-current lifetime, never a comparison digest or an expiry-bypass flag,
+selects the retired phase. S17's native lock authority stays independent.
+
+Control observes final Root state twice around the independent current-source
+join, requires the exact native final marker and retains the first post-effect
+proof with both original clocks. Root's LNCZ metadata record nests the entire
+final-retirement preparation and that Control proof digest. Control writes its
+own ReleasedCurrent record only after matching Root completion and fresh
+physical verification. Missing physical ACKs recover through reads; ambiguous
+metadata sync retries only the same immutable bookkeeping and fsync/readback.
+Neither retry has a native effect port or approval reconstruction path.
+
+Root's typed completed lifetime retires the obsolete pending power-transition
+condition while retaining kernel/checkpoint and boot/logind identity continuity.
+Global startup ownership and all recovery ancestry remain retained until a
+separately authenticated, reference-aware successor protocol takes ownership.
+A ReleasedCurrent record is not permission to unlink records or skip admission.
+
+Development tests cover early Committed exclusion, lost physical/metadata ACKs,
+false acknowledgments, missing independent postconditions, foreign proof,
+capacity/readback/ambiguous-sync failures, restart refusal and immutable recovery.
+Cross-language codecs, original credential-channel phase/sequence/replay cases,
+Root storage ancestry and native component builds are separate from real
+compositor execution. Level A/B, exact-head final gates, independent review and
+maintained Level C release evidence remain required where applicable.

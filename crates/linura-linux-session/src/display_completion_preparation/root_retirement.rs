@@ -123,6 +123,7 @@ impl NativeDisplayRootRetirementPreparation {
             true,
             false,
             None,
+            None,
         )
         .map_err(|_| invalid())?;
         let result = Self::new(&parent, preparation, verification, &frames, expiry)?;

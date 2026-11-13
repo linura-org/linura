@@ -400,6 +400,34 @@ impl linura_control::OriginalDisplayCurrentCommitPort for SessionExecutorClient 
     }
 }
 
+impl linura_control::OriginalDisplayFinalRetirementPort for SessionExecutorClient {
+    fn retire_current(
+        &mut self,
+        prepared: linura_control::AuthorizedOriginalDisplayFinalRetirement,
+    ) -> Result<(), String> {
+        self.channel.retire_original_display_current(
+            prepared.root(),
+            prepared.frames(),
+            native_component_digest(prepared.preparation())?,
+            native_component_digest(prepared.qualification())?,
+            prepared.expires_at_unix_ms(),
+        )
+    }
+}
+impl linura_control::OriginalDisplayReleasedCurrentPort for SessionExecutorClient {
+    fn complete_released_current(
+        &mut self,
+        completion: linura_control::OriginalDisplayReleasedCurrentCompletion,
+    ) -> Result<(), String> {
+        self.channel.complete_original_display_released_current(
+            completion.scope(),
+            *completion.final_record(),
+            native_component_digest(completion.verification())?,
+            completion.first_window(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod digest_boundary_tests {
     #[test]

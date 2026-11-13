@@ -1023,8 +1023,9 @@ canonical NoChange verification and signed Verified/Committed transitions.
 Immutable pre-CAS comparison ancestry, verified material and CurrentCommitted
 history support storage-failure and restart recovery without physical replay.
 The inspection's actual signed terminal stays distinct from its old comparison
-snapshot. Native permanent-current qualification, Root ReleasedCurrent and
-ordered startup admission remain separately unimplemented.
+snapshot. The separate original-review committed-current and final-retirement
+protocols below establish further native and durable postconditions. Ordered
+successor admission remains a separate lifecycle operation.
 
 Control's separate current-verification route retains the independently joined
 current-state checkpoint under a purpose-separated immutable journal key. The
@@ -1074,3 +1075,54 @@ native proof. Generic approval cannot substitute. Permanent native-current and f
 retirement remain unimplemented; the
 same-invocation pending handoff and its read-only current inspection cannot
 substitute for those requirements.
+
+## Original display final retirement and the early Committed boundary
+
+Control's signed `CurrentCommitted` transition intentionally precedes the native
+committed-current port. It records desired state, not final release, successor
+admission or cleanup authority. Before new display preparation or dispatch,
+Control loads bounded, MAC-checked restoration/finalization ownership across the
+seat, including Committed and RecoveryBlocked transactions. An idle native
+provider, changed compositor invocation, missing reply or Control restart cannot
+skip this ownership barrier. The actual retained canonical recovery bytes must
+remain unchanged when competing operations are refused.
+
+After independent committed-current qualification, only the still-retained
+original canonical finalization review can prepare final retirement. Control
+revalidates its purpose, authenticated principal, generation, exact signed-state
+version/binding, registered risk, current policy and protected approval before
+retention and immediately before dispatch. The immutable preparation binds the
+signed commit, first qualified-current proof, original Root grant and fresh
+physical observation. Losing process-local review at restart prevents dispatch.
+
+Root retains exclusive LNCT preparation and LNCE spend records. The actual
+original credential-bearing completion channel accepts the distinct LNCA purpose
+only after its committed-current phase, with exact digest and sequence. The
+spend is durable before ACK; neither an ACK nor these comparison bytes asserts a
+physical effect. Native code compares the complete sealed preparation and parent
+grant, both clocks, source, KMS/commit inventory and drained input before and
+after the exchange. Only that successful exchange constructs its non-cloneable
+retired-current lifetime. Obsolete display-review input/device and S17-epoch
+bindings may then retire; native session-lock authority remains separate. Source
+ownership, frame tracking, original Root lifetime and recovery provenance remain.
+
+Control independently joins fresh current native frames and its existing eight
+sources between two authenticated Root final-retirement observations. It requires
+the exact native final-retirement marker and every durable parent before retaining
+an immutable post-effect proof. Root then records LNCZ ReleasedCurrent metadata;
+Control completes its own purpose-separated ReleasedCurrent record only after
+matching Root readback and another fresh independent join. A lost physical ACK
+permits read-only verification. Metadata-only retry preserves the original proof
+and producer clocks and cannot call the native effect, reconstruct approval or
+renew a grant. Missing, corrupt, foreign, stale or conflicting evidence refuses.
+
+Only actual final completion moves Root's already-retired power witness into a
+separate released-lifetime state. That state preserves original kernel,
+checkpoint, boot and logind identity continuity without claiming pending power
+protection. Pending paths retain their original strict power-transition checks.
+The complete Root power and final metadata reply shapes have exact schema-sized
+transport bounds only for authenticated Control calls to their specific private
+endpoint/interface/method. All other replies retain the ordinary bounded limit.
+Final records do not clear global startup ownership, admit a successor, delete
+recovery files, or authorize shared-reference cleanup. Those require the separate
+qualified lifecycle protocol. Public display mutations remain unsupported.

@@ -57,6 +57,7 @@ pub(super) enum DisplayReviewStage {
     },
     PowerDispatched,
     CurrentCommitDispatched,
+    FinalRetirementDispatched,
     RootPowerDispatched {
         preparation: linura_transaction::ContentDigest,
     },
@@ -81,20 +82,24 @@ mod restoration;
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
     AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
-    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativePowerRetirement,
+    AuthorizedOriginalDisplayFinalRetirement, AuthorizedOriginalDisplayFinalization,
+    AuthorizedOriginalDisplayNativePowerRetirement,
     AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
     AuthorizedOriginalDisplayRetirementPreparation, AuthorizedOriginalDisplayRootPowerRetirement,
     OriginalDisplayCompletionPort, OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
     OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
-    OriginalDisplayCurrentVerification, OriginalDisplayFinalizationAuthorizer,
+    OriginalDisplayCurrentVerification, OriginalDisplayFinalRetirementPort,
+    OriginalDisplayFinalRetirementVerification, OriginalDisplayFinalizationAuthorizer,
     OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
     OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
     OriginalDisplayFinalizationRequest, OriginalDisplayNativeHandoffInspection,
     OriginalDisplayNativeHandoffVerification, OriginalDisplayNativePowerInspection,
     OriginalDisplayNativePowerRetirementPort, OriginalDisplayNativeReleaseReservationPort,
     OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQualifiedCurrent,
-    OriginalDisplayQuiescenceInspection, OriginalDisplayRetirementPreparationPort,
-    OriginalDisplayRootPowerInspection, OriginalDisplayRootPowerRetirementPort,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayReleasedCurrent,
+    OriginalDisplayReleasedCurrentCompletion, OriginalDisplayReleasedCurrentPort,
+    OriginalDisplayRetirementPreparationPort, OriginalDisplayRootPowerInspection,
+    OriginalDisplayRootPowerRetirementPort,
 };
 pub use release::OrdinaryDisplayReleaseInspection;
 pub use restoration::{
@@ -638,11 +643,130 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         Ok(None)
     }
 
+    /// Signed Committed is a bookkeeping milestone. Retained restoration and
+    /// finalization ownership still excludes a competing apply, including a
+    /// new compositor/session UUID on the same seat. Only the separate future
+    /// authenticated successor/adoption transition may transfer that ownership;
+    /// ordinary Begin and status reconciliation cannot infer such a transfer.
+    fn require_display_completion_ownership_settled(
+        &self,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<(), ManagedLifecycleError> {
+        const MAX_OWNERS: usize = 32;
+        let target = material(request)?;
+        let mut seen = BTreeSet::new();
+        self.display_journal()?.integrity_check().map_err(|_| {
+            ManagedLifecycleError::Authority(
+                "display completion ownership history unavailable".into(),
+            )
+        })?;
+        for prefix in [
+            DISPLAY_RESTORATION_REQUEST_PREFIX,
+            DISPLAY_FINALIZATION_REQUEST_PREFIX,
+        ] {
+            for state in [
+                TransactionState::Indeterminate,
+                TransactionState::Verified,
+                TransactionState::Committed,
+                TransactionState::RecoveryBlocked,
+            ] {
+                for snapshot in self
+                    .authority
+                    .recovery_snapshots_in_namespace(state, prefix, MAX_OWNERS)?
+                {
+                    if !seen.insert(snapshot.transaction_id.clone()) || seen.len() > MAX_OWNERS {
+                        return Err(ManagedLifecycleError::Authority(
+                            "display completion ownership inventory is ambiguous or exhausted"
+                                .into(),
+                        ));
+                    }
+                    let historical = AuthenticatedPrincipal::new(snapshot.principal.as_str())
+                        .map_err(|_| {
+                            ManagedLifecycleError::Authority(
+                                "display completion owner identity unavailable".into(),
+                            )
+                        })?;
+                    let retained = self
+                        .display_journal()?
+                        .load(&snapshot.principal, &snapshot.request_id)
+                        .map_err(|_| {
+                            ManagedLifecycleError::Authority(
+                                "display completion ownership request unavailable".into(),
+                            )
+                        })?;
+                    if retained.principal() != &snapshot.principal
+                        || retained.request_id() != &snapshot.request_id
+                    {
+                        return Err(ManagedLifecycleError::Authority(
+                            "display completion ownership request substituted".into(),
+                        ));
+                    }
+                    let retained_request = crate::retained_request::decode(&retained)?;
+                    validate_public_request(&retained_request)?;
+                    validate_request_identity(&retained_request)?;
+                    if retained.digest()
+                        != &crate::durable_authority::digest_request(&retained_request)?
+                        || self
+                            .authority
+                            .matching_request_snapshot(&historical, &retained_request)?
+                            != snapshot
+                    {
+                        return Err(ManagedLifecycleError::Authority(
+                            "display completion ownership binding changed".into(),
+                        ));
+                    }
+                    let blocked = if prefix == DISPLAY_RESTORATION_REQUEST_PREFIX {
+                        let text = retained_request
+                            .desired_state
+                            .get("restore_original")
+                            .ok_or_else(|| {
+                                ManagedLifecycleError::Authority(
+                                    "display restoration ownership material unavailable".into(),
+                                )
+                            })?;
+                        let restoration = linura_core::DisplayRestorationMaterial::decode(text)
+                            .map_err(|_| {
+                                ManagedLifecycleError::Authority(
+                                    "display restoration ownership material invalid".into(),
+                                )
+                            })?;
+                        restoration.original().topology().seat() == target.topology().seat()
+                    } else {
+                        let intent = crate::display_finalization_intent::FinalizationIntent::load(
+                            self.display_journal()?,
+                            &snapshot.principal,
+                            &retained_request,
+                        )?;
+                        intent.require_claim(
+                            self.display_journal()?,
+                            &snapshot.principal,
+                            &retained_request,
+                        )?;
+                        let finalization =
+                            linura_core::DisplayFinalizationMaterial::decode(intent.material())
+                                .map_err(|_| {
+                                    ManagedLifecycleError::Authority(
+                                        "display finalization ownership material invalid".into(),
+                                    )
+                                })?;
+                        finalization.restoration().original().topology().seat()
+                            == target.topology().seat()
+                    };
+                    if blocked {
+                        return Err(ManagedLifecycleError::Indeterminate("display completion ownership remains retained for this seat; Committed is not successor, release or cleanup authority".into()));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn require_display_recovery_settled(
         &self,
         principal: &PrincipalId,
         request: &PlanDesiredStateRequest,
     ) -> Result<(), ManagedLifecycleError> {
+        self.require_display_completion_ownership_settled(request)?;
         if self.pending_display_recovery(principal, request)?.is_some() {
             return Err(ManagedLifecycleError::Indeterminate(
                 "display recovery is unresolved for this seat; reconcile or restore it before another mutation".into(),

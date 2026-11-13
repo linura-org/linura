@@ -23,7 +23,7 @@ function(linura_display_integration_identity source_dir output_dir)
         native_output_identity.h recovery_witness.h recovery_rule.h recovery_lineage.h startup_fence.h
         native_kernel_scanout.h
         native_output_commit_history.h
-        native_process_privilege.h native_environment.h original_restoration_grant.h owned_native_fd.h native_digest.h native_baseline_guard.h original_finalization_intent.h original_finalization_grant.h original_native_release_grant.h original_completion_grant.h original_power_retirement.h original_current_commit.h sealed_native_material.h
+        native_process_privilege.h native_environment.h original_restoration_grant.h owned_native_fd.h native_digest.h native_baseline_guard.h original_finalization_intent.h original_finalization_grant.h original_native_release_grant.h original_completion_grant.h original_power_retirement.h original_current_commit.h original_final_retirement.h sealed_native_material.h
         wire_endpoint.cpp wire_endpoint.h
         protocols/linura-display-management-v1.xml
     )

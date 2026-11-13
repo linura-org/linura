@@ -89,6 +89,28 @@ class OriginalCompletionGrant final
         const std::string digest_;
         std::function<bool()> check_;
     };
+    class RetiredCurrent final
+    {
+      public:
+        RetiredCurrent(const RetiredCurrent &) = delete;
+        RetiredCurrent &operator=(const RetiredCurrent &) = delete;
+        [[nodiscard]] bool live() const
+        {
+            return check_ && check_();
+        }
+        [[nodiscard]] const std::string &comparisonDigest() const noexcept
+        {
+            return digest_;
+        }
+
+      private:
+        friend class OriginalCompletionGrant;
+        RetiredCurrent(std::string digest, std::function<bool()> check)
+            : digest_(std::move(digest)), check_(std::move(check))
+        {}
+        const std::string digest_;
+        std::function<bool()> check_;
+    };
     ~OriginalCompletionGrant()
     {
         liveness_->owner = nullptr;
@@ -168,6 +190,25 @@ class OriginalCompletionGrant final
             new CommittedCurrent(committedDigest_, [weak, digest = committedDigest_] {
                 const auto scope = weak.lock();
                 return scope && scope->owner && scope->owner->committedDigest_ == digest &&
+                       scope->owner->live();
+            }));
+    }
+    [[nodiscard]] std::unique_ptr<RetiredCurrent> retireCurrent(std::string_view digest)
+    {
+        if (retirementAttempted_ || committedDigest_.empty() || !commitAttempted_ ||
+            !OriginalGrantCodec::digest(digest) || !live()) {
+            fail();
+            return {};
+        }
+        retirementAttempted_ = true;
+        if (!probe(false, {}, {}, digest))
+            return {};
+        retirementDigest_ = std::string(digest);
+        std::weak_ptr<Liveness> weak = liveness_;
+        return std::unique_ptr<RetiredCurrent>(
+            new RetiredCurrent(retirementDigest_, [weak, digest = retirementDigest_] {
+                const auto scope = weak.lock();
+                return scope && scope->owner && scope->owner->retirementDigest_ == digest &&
                        scope->owner->live();
             }));
     }
@@ -283,7 +324,8 @@ class OriginalCompletionGrant final
     {
         return transfer(bytes.data(), bytes.size(), deadline, false);
     }
-    bool probe(bool initial, std::string_view power = {}, std::string_view committed = {})
+    bool probe(bool initial, std::string_view power = {}, std::string_view committed = {},
+               std::string_view retirement = {})
     {
         const auto now = clock();
         if (!now || sequence_ == std::numeric_limits<std::uint64_t>::max() ||
@@ -293,16 +335,18 @@ class OriginalCompletionGrant final
         auto deadline = now->bootMs + 1000;
         if (initial)
             deadline = std::min(deadline, expires_.bootMs);
-        std::string request = !committed.empty() ? "LNCF:1\n"
-                              : !power.empty()   ? "LNPR:1\n"
-                              : initial          ? "LNCH:1\n"
-                                                 : "LNCV:1\n";
+        std::string request = !retirement.empty()  ? "LNCA:1\n"
+                              : !committed.empty() ? "LNCF:1\n"
+                              : !power.empty()     ? "LNPR:1\n"
+                              : initial            ? "LNCH:1\n"
+                                                   : "LNCV:1\n";
         request += '\0';
         for (unsigned shift = 64; shift; shift -= 8)
             request += static_cast<char>((sequence_ >> (shift - 8)) & 255U);
-        const std::string_view digest = !committed.empty() ? committed
-                                        : power.empty()    ? std::string_view(digest_)
-                                                           : power;
+        const std::string_view digest = !retirement.empty()  ? retirement
+                                        : !committed.empty() ? committed
+                                        : power.empty()      ? std::string_view(digest_)
+                                                             : power;
         for (std::size_t i = 0; i < digest.size(); i += 2) {
             const auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
             request += static_cast<char>((nibble(digest[i]) << 4) | nibble(digest[i + 1]));
@@ -320,10 +364,11 @@ class OriginalCompletionGrant final
     }
     StartupFence &fence_;
     OwnedNativeFd descriptor_;
-    std::string digest_, committedDigest_;
+    std::string digest_, committedDigest_, retirementDigest_;
     std::shared_ptr<Liveness> liveness_;
     ClockSample last_{}, expires_{};
     std::uint64_t sequence_ = 1;
+    bool retirementAttempted_ = false;
     bool failed_ = false, attempted_ = false, currentAttempted_ = false, powerAttempted_ = false,
          commitAttempted_ = false;
 };
