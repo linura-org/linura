@@ -71,6 +71,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else if history.revert.is_some() {
             DisplayOrdinaryReleaseOutcome::Revert
         } else {
+            // Native restoration can also follow an early owner/input fault.
+            // A restored flag proves no expiry cause. This release disposition
+            // is available only after the original authenticated timer ends.
+            let original = history.dispatched.as_ref().ok_or_else(invalid_original)?;
+            if now_ms()? < original.deadline_unix_ms {
+                return Err(invalid_original());
+            }
             DisplayOrdinaryReleaseOutcome::Expired
         };
         let target = if disposition == DisplayOrdinaryReleaseOutcome::Keep {

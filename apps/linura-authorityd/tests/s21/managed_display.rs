@@ -150,6 +150,7 @@ fn display_request(operation: &str) -> PlanDesiredStateRequest {
 #[test]
 fn replacement_review_reloads_authenticated_history_without_replaying_an_apply() {
     ordinary_release::original_source_and_terminal_inspection_are_read_only_across_restart();
+    ordinary_release::early_automatic_restoration_is_not_expiry_release_authority();
     let database = TestDatabase::new();
     let machine = Arc::new(Mutex::new(Machine::default()));
     let mut port = Port(machine.clone());

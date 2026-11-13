@@ -706,3 +706,10 @@ review before persistence/probes, checks exact retained verification and spend,
 revalidates policy before dispatch, and reloads all anchors after preparation
 and dispatch. The original two-second window and immutable first proof are
 unchanged. Timing failures remain refusals, never renewed grants.
+
+An independently restored native state without an explicit Revert record may
+precede the original confirmation deadline, for example after an early native
+fault. Control therefore refuses an Expired release plan until that authenticated
+original deadline has elapsed. This is the release disposition at planning time,
+not a claim about the cause of native restoration; it never renews the old timer
+or grants authority from the restored flag. Restart preserves the same refusal.

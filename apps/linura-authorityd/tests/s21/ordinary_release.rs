@@ -349,3 +349,110 @@ pub(super) fn original_source_and_terminal_inspection_are_read_only_across_resta
         }
     }
 }
+
+pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
+    let database = TestDatabase::new();
+    let machine = Arc::new(Mutex::new(Machine::default()));
+    let mut port = Port(machine.clone());
+    let mut verifier = Verifier(machine.clone());
+    let original = display_request("ordinary-release-automatic-restoration");
+    let mut control =
+        open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+    value(control.begin_display_layout(
+        principal(),
+        actor(true),
+        original.clone(),
+        &approval(),
+        &mut port,
+        &mut verifier,
+    ));
+    let deadline = {
+        let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+        m.state = Some("restored");
+        m.desired = false;
+        m.deadline
+    };
+    let status = value(control.display_layout_status(
+        principal(),
+        actor(true),
+        &original.request_id,
+        &mut port,
+        &mut verifier,
+    ));
+    assert_eq!(status.state, DisplayLayoutState::Restored);
+    let input = linura_control::OrdinaryDisplayReleaseRequest {
+        operation_id: "ordinary-release-after-timer".into(),
+        original_request: original.request_id.clone(),
+        reason: original.reason.clone(),
+    };
+    let before = value(control.inspect_ordinary_display_original(
+        principal(),
+        &original.request_id,
+        &mut port,
+        &mut verifier,
+    ))
+    .original_snapshot()
+    .clone();
+    assert!(
+        now_unix_ms() < deadline,
+        "fixture must exercise early restoration before its original timer"
+    );
+    assert!(
+        control
+            .plan_ordinary_display_release(
+                principal(),
+                actor(true),
+                input.clone(),
+                &mut port,
+                &mut verifier
+            )
+            .is_err()
+    );
+    drop(control);
+    let mut restarted =
+        open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+    assert!(
+        restarted
+            .plan_ordinary_display_release(
+                principal(),
+                actor(true),
+                input.clone(),
+                &mut port,
+                &mut verifier
+            )
+            .is_err()
+    );
+    let now = now_unix_ms();
+    if now <= deadline {
+        std::thread::sleep(std::time::Duration::from_millis(deadline - now + 1));
+    }
+    let plan = value(restarted.plan_ordinary_display_release(
+        principal(),
+        actor(true),
+        input,
+        &mut port,
+        &mut verifier,
+    ));
+    assert_eq!(plan.status.as_str(), "change-proposed");
+    assert!(!plan.execution_authorized());
+    assert!(
+        plan.findings
+            .iter()
+            .any(|finding| finding.code == "display-ordinary-release-lineage"
+                && finding.message.starts_with("Separate expired release"))
+    );
+    assert_eq!(
+        value(restarted.inspect_ordinary_display_original(
+            principal(),
+            &original.request_id,
+            &mut port,
+            &mut verifier
+        ))
+        .original_snapshot(),
+        &before
+    );
+    let m = machine.lock().unwrap_or_else(|_| unreachable!());
+    assert_eq!(m.applies, 1);
+    assert_eq!(m.decisions, 0);
+    assert_eq!(m.deadline, deadline);
+}
