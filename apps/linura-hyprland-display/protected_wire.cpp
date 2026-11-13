@@ -354,20 +354,21 @@ class ProtectedWireEndpoint::Impl final
             return {};
         return state->scene->reserveMutation(bound, baseline, desired, captured, clock);
     }
-    static std::shared_ptr<MutationProtection> reserveSuccessorMutation(
-        wl_resource *resource, wl_client *client, OwnedNativeFd descriptor,
-        const Correlation &bound, const Layout &baseline, const Layout &desired,
-        const Snapshot &captured, ClockSample clock)
+    static std::shared_ptr<MutationProtection>
+    reserveSuccessorMutation(wl_resource *resource, wl_client *client, OwnedNativeFd descriptor,
+                             const Correlation &bound, const Layout &baseline,
+                             const Layout &desired, const Snapshot &captured, ClockSample clock)
     {
         if (!resource || !client || wl_resource_get_client(resource) != client ||
             !wl_resource_instance_of(resource, &linura_protected_display_interaction_v1_interface,
-                                     &interactionImpl)) return {};
+                                     &interactionImpl))
+            return {};
         auto &interaction = object<Interaction>(resource);
         const auto &state = interaction.state;
         if (!state || state->closed || !state->scene || !interaction.owner.current(interaction))
             return {};
         return state->scene->reserveSuccessorMutation(std::move(descriptor), bound, baseline,
-                                                       desired, captured, clock);
+                                                      desired, captured, clock);
     }
     static std::shared_ptr<MutationProtection> reserveOriginalRestoration(
         wl_resource *resource, wl_client *client, const Correlation &bound, const Layout &baseline,
@@ -634,11 +635,10 @@ std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveOriginalRestor
                                             std::move(originalAlive));
 }
 std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveSuccessorMutation(
-    wl_resource *resource, wl_client *client, OwnedNativeFd descriptor,
-    const Correlation &bound, const Layout &baseline, const Layout &desired,
-    const Snapshot &captured, ClockSample clock)
+    wl_resource *resource, wl_client *client, OwnedNativeFd descriptor, const Correlation &bound,
+    const Layout &baseline, const Layout &desired, const Snapshot &captured, ClockSample clock)
 {
-    return Impl::reserveSuccessorMutation(resource, client, std::move(descriptor), bound,
-                                           baseline, desired, captured, clock);
+    return Impl::reserveSuccessorMutation(resource, client, std::move(descriptor), bound, baseline,
+                                          desired, captured, clock);
 }
 } // namespace Linura::HyprlandDisplay

@@ -70,12 +70,20 @@ class OriginalCompletionGrant final
       public:
         SuccessorCurrent(const SuccessorCurrent &) = delete;
         SuccessorCurrent &operator=(const SuccessorCurrent &) = delete;
-        [[nodiscard]] bool live() const { return check_ && check_(); }
-        [[nodiscard]] const std::string &comparisonDigest() const noexcept { return digest_; }
+        [[nodiscard]] bool live() const
+        {
+            return check_ && check_();
+        }
+        [[nodiscard]] const std::string &comparisonDigest() const noexcept
+        {
+            return digest_;
+        }
+
       private:
         friend class OriginalCompletionGrant;
         SuccessorCurrent(std::string digest, std::function<bool()> check)
-            : digest_(std::move(digest)), check_(std::move(check)) {}
+            : digest_(std::move(digest)), check_(std::move(check))
+        {}
         const std::string digest_;
         std::function<bool()> check_;
     };
@@ -246,21 +254,32 @@ class OriginalCompletionGrant final
     {
         if (successorAttempted_ || !retirementAttempted_ || retirementDigest_.empty() ||
             !OriginalGrantCodec::digest(digest) || !scopeAlive || !scopeAlive() || !live()) {
-            fail(); return {};
+            fail();
+            return {};
         }
         successorAttempted_ = true;
-        if (!probe(false, {}, {}, {}, digest)) return {};
+        if (!probe(false, {}, {}, {}, digest))
+            return {};
         successorDigest_ = std::string(digest);
         std::weak_ptr<Liveness> weak = liveness_;
         const auto alive = [weak, scopeAlive = std::move(scopeAlive)] {
             const auto retained = weak.lock();
-            if (!retained || !retained->owner || !retained->owner->live()) return false;
-            try { if (scopeAlive()) return true; } catch (...) {}
-            retained->owner->invalidate(); return false;
+            if (!retained || !retained->owner || !retained->owner->live())
+                return false;
+            try {
+                if (scopeAlive())
+                    return true;
+            } catch (...) {
+            }
+            retained->owner->invalidate();
+            return false;
         };
-        if (!fence_.transferCurrent(alive)) { fail(); return {}; }
-        return std::unique_ptr<SuccessorCurrent>(new SuccessorCurrent(successorDigest_,
-            [weak, digest = successorDigest_] {
+        if (!fence_.transferCurrent(alive)) {
+            fail();
+            return {};
+        }
+        return std::unique_ptr<SuccessorCurrent>(
+            new SuccessorCurrent(successorDigest_, [weak, digest = successorDigest_] {
                 const auto retained = weak.lock();
                 return retained && retained->owner && retained->owner->successorDigest_ == digest &&
                        retained->owner->live();
@@ -382,20 +401,20 @@ class OriginalCompletionGrant final
         auto deadline = now->bootMs + 1000;
         if (initial)
             deadline = std::min(deadline, expires_.bootMs);
-        std::string request = !successor.empty()   ? "LNSA:1\n"
-                              : !retirement.empty()  ? "LNCA:1\n"
-                              : !committed.empty() ? "LNCF:1\n"
-                              : !power.empty()     ? "LNPR:1\n"
-                              : initial            ? "LNCH:1\n"
-                                                   : "LNCV:1\n";
+        std::string request = !successor.empty()    ? "LNSA:1\n"
+                              : !retirement.empty() ? "LNCA:1\n"
+                              : !committed.empty()  ? "LNCF:1\n"
+                              : !power.empty()      ? "LNPR:1\n"
+                              : initial             ? "LNCH:1\n"
+                                                    : "LNCV:1\n";
         request += '\0';
         for (unsigned shift = 64; shift; shift -= 8)
             request += static_cast<char>((sequence_ >> (shift - 8)) & 255U);
-        const std::string_view digest = !successor.empty()   ? successor
-                                        : !retirement.empty()  ? retirement
-                                        : !committed.empty() ? committed
-                                        : power.empty()      ? std::string_view(digest_)
-                                                             : power;
+        const std::string_view digest = !successor.empty()    ? successor
+                                        : !retirement.empty() ? retirement
+                                        : !committed.empty()  ? committed
+                                        : power.empty()       ? std::string_view(digest_)
+                                                              : power;
         for (std::size_t i = 0; i < digest.size(); i += 2) {
             const auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
             request += static_cast<char>((nibble(digest[i]) << 4) | nibble(digest[i + 1]));

@@ -149,8 +149,10 @@ std::string terminalMaterial(const OriginalFinalizationCodec::Intent &intent)
 // retirement handle separately bind this parent; this fixture grants nothing.
 void successorComparison(const std::string &finalBytes)
 {
-    const std::string topology = "display:topology:11111111-1111-4111-8111-111111111111:1000:c3:99:seat0:44444444-4444-4444-8444-444444444444:3";
-    const std::string lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c3:99:22222222-2222-4222-8222-222222222222:1";
+    const std::string topology = "display:topology:11111111-1111-4111-8111-111111111111:1000:c3:99:"
+                                 "seat0:44444444-4444-4444-8444-444444444444:3";
+    const std::string lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c3:99:"
+                             "22222222-2222-4222-8222-222222222222:1";
     const auto baselineText = "LNDL:1;" + topology + ";1:2:enabled:1920:1080:60000:1000:0:0:0:-;";
     const auto desiredText = "LNDL:1;" + topology + ";1:2:enabled:1920:1080:60000:1000:0:100:0:-;";
     const auto material = "LNDI:1;" + lock + ';' + baselineText + desiredText;
@@ -161,21 +163,36 @@ void successorComparison(const std::string &finalBytes)
     captured.securityEpoch = 1;
     captured.coverage = Coverage::Unlocked;
     Head head;
-    head.key = {1,2}; head.current = intent->baseline.front();
-    head.modes.push_back(head.current.mode); head.powered = true;
+    head.key = {1, 2};
+    head.current = intent->baseline.front();
+    head.modes.push_back(head.current.mode);
+    head.powered = true;
     captured.heads.push_back(head);
-    const Correlation next{"transaction:next", std::string(64,'a'), std::string(64,'b'), 15000};
+    const Correlation next{"transaction:next", std::string(64, 'a'), std::string(64, 'b'), 15000};
     const auto retired = nativeSha256(finalBytes);
     assert(retired);
     const auto parent = framed({"linura.native-display.released-current.v1", finalBytes,
-        std::string(64,'1'), "1100", "200", "3100", "2200"});
-    const std::vector<std::string> fields{
-        "linura.native-display.successor-preparation.v1", parent, material, next.transaction,
-        "0", "1", std::string(64,'2'), std::string(64,'3'), next.effectDigest, next.dispatchDigest,
-        std::string(64,'4'), std::string(64,'5'), "1200", "300", "3200", "2300"};
-    const auto matches = [&](std::string_view bytes, ClockSample now = {1201,301}) {
+                                std::string(64, '1'), "1100", "200", "3100", "2200"});
+    const std::vector<std::string> fields{"linura.native-display.successor-preparation.v1",
+                                          parent,
+                                          material,
+                                          next.transaction,
+                                          "0",
+                                          "1",
+                                          std::string(64, '2'),
+                                          std::string(64, '3'),
+                                          next.effectDigest,
+                                          next.dispatchDigest,
+                                          std::string(64, '4'),
+                                          std::string(64, '5'),
+                                          "1200",
+                                          "300",
+                                          "3200",
+                                          "2300"};
+    const auto matches = [&](std::string_view bytes, ClockSample now = {1201, 301}) {
         return OriginalSuccessorCodec::matches(bytes, *retired, next, intent->baseline,
-            intent->desired, captured, {1200,300}, now, std::string(64,'5'));
+                                               intent->desired, captured, {1200, 300}, now,
+                                               std::string(64, '5'));
     };
     const auto bytes = framed(fields);
     assert(matches(bytes));
@@ -185,19 +202,32 @@ void successorComparison(const std::string &finalBytes)
         changed[index] = "untrusted";
         assert(!matches(framed(changed)));
     }
-    for (const auto now : {ClockSample{1199,301}, ClockSample{1201,299},
-        ClockSample{3200,301}, ClockSample{1201,2300}}) assert(!matches(bytes, now));
-    for (const auto &[index, bad] : std::vector<std::pair<std::size_t,std::string>>{
-        {4,"00"}, {5,"0"}, {6,std::string(64,'0')}, {7,std::string(64,'G')},
-        {10,std::string(64,'0')}, {11,std::string(64,'6')}, {12,"1199"},
-        {13,"301"}, {14,"3201"}, {15,"2301"}}) {
-        auto changed = fields; changed[index] = bad; assert(!matches(framed(changed)));
+    for (const auto now : {ClockSample{1199, 301}, ClockSample{1201, 299}, ClockSample{3200, 301},
+                           ClockSample{1201, 2300}})
+        assert(!matches(bytes, now));
+    for (const auto &[index, bad] :
+         std::vector<std::pair<std::size_t, std::string>>{{4, "00"},
+                                                          {5, "0"},
+                                                          {6, std::string(64, '0')},
+                                                          {7, std::string(64, 'G')},
+                                                          {10, std::string(64, '0')},
+                                                          {11, std::string(64, '6')},
+                                                          {12, "1199"},
+                                                          {13, "301"},
+                                                          {14, "3201"},
+                                                          {15, "2301"}}) {
+        auto changed = fields;
+        changed[index] = bad;
+        assert(!matches(framed(changed)));
     }
-    assert(!OriginalSuccessorCodec::matches(bytes, std::string(64,'9'), next,
-        intent->baseline, intent->desired, captured, {1200,300}, {1201,301}, std::string(64,'5')));
-    auto drifted = captured; drifted.heads.front().modes.clear();
+    assert(!OriginalSuccessorCodec::matches(bytes, std::string(64, '9'), next, intent->baseline,
+                                            intent->desired, captured, {1200, 300}, {1201, 301},
+                                            std::string(64, '5')));
+    auto drifted = captured;
+    drifted.heads.front().modes.clear();
     assert(!OriginalSuccessorCodec::matches(bytes, *retired, next, intent->baseline,
-        intent->desired, drifted, {1200,300}, {1201,301}, std::string(64,'5')));
+                                            intent->desired, drifted, {1200, 300}, {1201, 301},
+                                            std::string(64, '5')));
 }
 void terminalComparison(const std::string &material)
 {

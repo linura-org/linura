@@ -93,12 +93,10 @@ class NativeDisplayConnection final
     [[nodiscard]] std::optional<quint32> decide(const NativeDisplayCorrelation &, bool confirm);
 
   private:
-    [[nodiscard]] std::optional<quint32> submit(const NativeDisplayCorrelation &,
-                                                const NativeDisplayLayout &baseline,
-                                                const NativeDisplayLayout &desired,
-                                                linura_protected_display_interaction_v1 *protection,
-                                                std::optional<int> originalGrant,
-                                                std::optional<int> successorPreparation = {});
+    [[nodiscard]] std::optional<quint32>
+    submit(const NativeDisplayCorrelation &, const NativeDisplayLayout &baseline,
+           const NativeDisplayLayout &desired, linura_protected_display_interaction_v1 *protection,
+           std::optional<int> originalGrant, std::optional<int> successorPreparation = {});
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

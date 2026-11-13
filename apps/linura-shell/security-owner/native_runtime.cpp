@@ -1049,10 +1049,11 @@ std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMess
         static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty());
-    const bool expectedStartup = sample->startupPhase == expectedPhase ||
+    const bool expectedStartup =
+        sample->startupPhase == expectedPhase ||
         (kind == DisplayPresentation::Current && sample->startupPhase == 5);
-    if (!independent || !sample->fenced || !expectedStartup ||
-        presentation.isEmpty() || presentation.size() > 16 * 1024 || presentationCount != 1 ||
+    if (!independent || !sample->fenced || !expectedStartup || presentation.isEmpty() ||
+        presentation.size() > 16 * 1024 || presentationCount != 1 ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
@@ -1168,9 +1169,9 @@ std::optional<quint32> NativeRuntime::dispatchPreparedSuccessorDisplay(
                             NativeDeadline::Stage::DisplayDispatch);
     const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
     const auto clock = NativeDisplayClock::sample();
-    if (preparation.isEmpty() || preparation.size() > 64 * 1024 || !peer || !clock || intent.lock != identity() || impl_->approvalScope ||
-        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
-        impl_->transitionRequest ||
+    if (preparation.isEmpty() || preparation.size() > 64 * 1024 || !peer || !clock ||
+        intent.lock != identity() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest ||
         !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
         !NativeDisplayIntent::parse(intent.encode()))
         return std::nullopt;
@@ -1191,7 +1192,7 @@ std::optional<quint32> NativeRuntime::dispatchPreparedSuccessorDisplay(
     // samples once more and reserves exactly one private native apply. A lost
     // response is ambiguity, never permission to invoke this call again.
     return impl_->backend->dispatchPreparedSuccessorDisplay(intent, correlation, sampledBootMs,
-                                                   nativeBaselineGuard, preparation);
+                                                            nativeBaselineGuard, preparation);
 }
 
 std::optional<quint32> NativeRuntime::restoreOriginalDisplay(

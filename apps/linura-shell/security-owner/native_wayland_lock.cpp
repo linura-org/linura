@@ -946,8 +946,8 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
         impl_->pumping || !scope.valid() ||
         scope.purpose == NativeDisplayPromptScope::Purpose::Finalization ||
         !impl_->protectedManager || !impl_->keyboard || !impl_->keyboard->available() ||
-        impl_->confirmation || impl_->releaseAck ||
-        requestedSecure() != secureCoverage() || !NativeDisplayIntent::parse(intent.encode()))
+        impl_->confirmation || impl_->releaseAck || requestedSecure() != secureCoverage() ||
+        !NativeDisplayIntent::parse(intent.encode()))
         return false;
     const auto current = impl_->displayConnection->sample();
     const auto now = NativeDisplayClock::sample();
@@ -1169,8 +1169,7 @@ bool NativeWaylandLock::currentOriginalDisplayHandoff(const NativeDisplayCorrela
     if (!impl_->completionAttempted || !heldOriginalDisplayFinalization(bound))
         return false;
     const auto sample = displayStartupSample();
-    return sample && sample->fenced &&
-           (sample->startupPhase == 4 || sample->startupPhase == 5) &&
+    return sample && sample->fenced && (sample->startupPhase == 4 || sample->startupPhase == 5) &&
            sample->compositor == displayInvocation();
 }
 std::optional<quint32> NativeWaylandLock::quiesceOriginalDisplayFinalization(
@@ -1760,10 +1759,11 @@ std::optional<quint32> NativeWaylandLock::dispatchPreparedSuccessorDisplay(
     const auto current = impl_->displayConnection->sample();
     const auto nowBootMs = bootMilliseconds();
     if (!current || validatedSampledBootMs == 0 || nowBootMs < validatedSampledBootMs ||
-        nowBootMs - validatedSampledBootMs >= 2000 || !current->fenced || current->startupPhase != 5 ||
-        current->coverage != (secure ? 1U : 0U) || requestedSecure() != secure ||
-        secureCoverage() != secure || (secure && !impl_->inputCovered()) ||
-        current->compositor != impl_->displayInvocation || current->topology.generation == 0 ||
+        nowBootMs - validatedSampledBootMs >= 2000 || !current->fenced ||
+        current->startupPhase != 5 || current->coverage != (secure ? 1U : 0U) ||
+        requestedSecure() != secure || secureCoverage() != secure ||
+        (secure && !impl_->inputCovered()) || current->compositor != impl_->displayInvocation ||
+        current->topology.generation == 0 ||
         intent.baseline.topology.section(QLatin1Char(':'), 8, 8) !=
             QString::number(current->topology.generation) ||
         current->topology.baselineGuard(intent.baseline.encode()) !=
@@ -1773,11 +1773,14 @@ std::optional<quint32> NativeWaylandLock::dispatchPreparedSuccessorDisplay(
     // native inventory against this same retained immutable snapshot. It
     // reserves the one-use wire attempt before any potentially effectful call.
     namespace Codec = Linura::HyprlandDisplay::OriginalSuccessorCodec;
-    const auto descriptor = Linura::HyprlandDisplay::SealedNativeMaterial::create<Codec::MaxPreparation>(
-        std::string_view(preparation.constData(), static_cast<std::size_t>(preparation.size())));
-    if (!descriptor) return std::nullopt;
+    const auto descriptor =
+        Linura::HyprlandDisplay::SealedNativeMaterial::create<Codec::MaxPreparation>(
+            std::string_view(preparation.constData(),
+                             static_cast<std::size_t>(preparation.size())));
+    if (!descriptor)
+        return std::nullopt;
     return impl_->displayConnection->applySuccessor(correlation, intent.baseline, intent.desired,
-        descriptor->get(), impl_->protectedInteraction);
+                                                    descriptor->get(), impl_->protectedInteraction);
 }
 std::optional<quint32>
 NativeWaylandLock::restoreOriginalDisplay(const NativeDisplayRestorationIntent &intent,

@@ -559,7 +559,8 @@ int main(int argc, char **argv)
            -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeNativeDisplayHandoff()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
-    assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedSuccessorDisplay()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedSuccessorDisplay()") ==
+           -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("restoreOriginalDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("quiesceOriginalDisplayFinalization()") ==
            -1);

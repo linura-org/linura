@@ -295,8 +295,9 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                     const QString &sample_digest, quint64 sampled_boot_ms,
                                     const QString &native_baseline_guard);
     quint32 DispatchPreparedSuccessorDisplay(const NativeDisplayAttemptQueryWire &,
-        const QString &sample_digest, quint64 sampled_boot_ms, const QString &native_baseline_guard,
-        const QByteArray &preparation);
+                                             const QString &sample_digest, quint64 sampled_boot_ms,
+                                             const QString &native_baseline_guard,
+                                             const QByteArray &preparation);
     quint32 RestoreOriginalDisplay(const NativeDisplayAttemptQueryWire &,
                                    const QString &sample_digest, quint64 sampled_boot_ms,
                                    const QDBusUnixFileDescriptor &original_grant);

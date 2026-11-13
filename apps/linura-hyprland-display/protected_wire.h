@@ -90,8 +90,8 @@ class ProtectedWireEndpoint final
                     const Layout &desired, const Snapshot &, ClockSample captured);
     [[nodiscard]] static std::shared_ptr<MutationProtection>
     reserveSuccessorMutation(wl_resource *, wl_client *, OwnedNativeFd, const Correlation &,
-                             const Layout &baseline, const Layout &desired,
-                             const Snapshot &, ClockSample captured);
+                             const Layout &baseline, const Layout &desired, const Snapshot &,
+                             ClockSample captured);
     [[nodiscard]] static std::shared_ptr<MutationProtection>
     reserveOriginalRestoration(wl_resource *, wl_client *, const Correlation &,
                                const Layout &baseline, const Layout &desired, const Snapshot &,

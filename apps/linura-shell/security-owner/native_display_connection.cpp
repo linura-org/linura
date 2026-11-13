@@ -606,12 +606,14 @@ std::optional<quint32> NativeDisplayConnection::restoreOriginal(
     return submit(bound, intent.replacement.baseline, intent.replacement.desired, protection,
                   originalGrant);
 }
-std::optional<quint32> NativeDisplayConnection::applySuccessor(
-    const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,
-    const NativeDisplayLayout &desired, int preparation,
-    linura_protected_display_interaction_v1 *protection)
+std::optional<quint32>
+NativeDisplayConnection::applySuccessor(const NativeDisplayCorrelation &bound,
+                                        const NativeDisplayLayout &baseline,
+                                        const NativeDisplayLayout &desired, int preparation,
+                                        linura_protected_display_interaction_v1 *protection)
 {
-    if (preparation < 0) return std::nullopt;
+    if (preparation < 0)
+        return std::nullopt;
     return submit(bound, baseline, desired, protection, std::nullopt, preparation);
 }
 std::optional<quint32> NativeDisplayConnection::submit(
@@ -624,7 +626,7 @@ std::optional<quint32> NativeDisplayConnection::submit(
         (successorPreparation
              ? (!impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 5 ||
                 baseline.encode() == desired.encode())
-             : originalGrant
+         : originalGrant
              ? (!impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 2)
              : (impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 1 ||
                 baseline.encode() == desired.encode())) ||
@@ -695,7 +697,8 @@ std::optional<quint32> NativeDisplayConnection::submit(
     }
     attempt->phase.reset();
     if (successorPreparation)
-        linura_display_attempt_v1_apply_successor(attempt->native, *successorPreparation, protection);
+        linura_display_attempt_v1_apply_successor(attempt->native, *successorPreparation,
+                                                  protection);
     else if (originalGrant)
         linura_display_attempt_v1_restore_original(attempt->native, *originalGrant, protection);
     else

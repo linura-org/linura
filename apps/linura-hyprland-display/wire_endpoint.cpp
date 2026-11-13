@@ -569,8 +569,8 @@ class WireEndpoint::Impl final
                 return;
             }
             auto fence = ProtectedWireEndpoint::reserveSuccessorMutation(
-                protection, client, std::move(preparation), attempt.bound, baseline, desired, attempt.captured->sample,
-                attempt.captured->at);
+                protection, client, std::move(preparation), attempt.bound, baseline, desired,
+                attempt.captured->sample, attempt.captured->at);
             if (!fence) {
                 attempt.deny();
                 return;
@@ -640,8 +640,8 @@ class WireEndpoint::Impl final
         auto &attempt = object<Attempt>(resource);
         const auto phase = attempt.owner.startup.phase();
         const auto origin = attempt.owner.origins.find(attempt.bound.transaction);
-        const bool admitted = phase == 1 || (phase == 4 &&
-            origin != attempt.owner.origins.end() && origin->second.successor);
+        const bool admitted = phase == 1 || (phase == 4 && origin != attempt.owner.origins.end() &&
+                                             origin->second.successor);
         if (attempt.invalid || !admitted || !attempt.original()) {
             attempt.deny();
             return;
@@ -700,7 +700,8 @@ const struct linura_display_head_v1_interface WireEndpoint::Impl::headImplementa
 };
 const struct linura_display_attempt_v1_interface WireEndpoint::Impl::attemptImplementation
 {
-    release, configure, enable, disable, apply, confirm, restore, status, restoreOriginal, applySuccessor
+    release, configure, enable, disable, apply, confirm, restore, status, restoreOriginal,
+        applySuccessor
 };
 
 WireEndpoint::WireEndpoint(wl_display &display, Backend &backend, CompositorDisplayService &service,

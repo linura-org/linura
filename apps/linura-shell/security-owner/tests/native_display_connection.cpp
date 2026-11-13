@@ -151,7 +151,8 @@ class Harness final
                     return invocation;
                 },
                 NativeStartupPort{[presentation] {
-                                      if (presentation == PresentationFixture::CurrentRetired) return 5U;
+                                      if (presentation == PresentationFixture::CurrentRetired)
+                                          return 5U;
                                       if (presentation == PresentationFixture::Current ||
                                           presentation == PresentationFixture::CurrentBoth ||
                                           presentation == PresentationFixture::CurrentEmpty ||
@@ -781,21 +782,24 @@ void firstOrdinaryFrameObservationStaysDistinctAndCannotReleaseFences()
 void currentScanoutRequiresDistinctCurrentAdmission()
 {
     using F = Harness::PresentationFixture;
-    for (const auto kind : {F::Current, F::CurrentRetired, F::CurrentRecovery, F::CurrentOrdinary, F::CurrentBoth,
-                            F::CurrentEmpty, F::CurrentOversized}) {
+    for (const auto kind : {F::Current, F::CurrentRetired, F::CurrentRecovery, F::CurrentOrdinary,
+                            F::CurrentBoth, F::CurrentEmpty, F::CurrentOversized}) {
         Harness harness(Harness::BuildMismatch::None, true, Instance, kind);
         Client owner(harness.descriptors[0]);
         const auto sample = owner.connection->sample();
         if (kind == F::Current || kind == F::CurrentRetired) {
-            assert(sample && sample->fenced && sample->startupPhase == (kind == F::CurrentRetired ? 5U : 4U));
+            assert(sample && sample->fenced &&
+                   sample->startupPhase == (kind == F::CurrentRetired ? 5U : 4U));
             assert(sample->nativeCurrentPresentation == QByteArray("{\"fixture\":\"current\"}"));
             assert(sample->nativeHandoffPresentation.isEmpty());
             assert(sample->originalRestorationPresentation.isEmpty());
-            assert(owner.connection->securityTransitionAllowed(false) == (kind == F::CurrentRetired));
+            assert(owner.connection->securityTransitionAllowed(false) ==
+                   (kind == F::CurrentRetired));
             auto desired = baseline(*sample);
             desired.outputs[0].x = 100;
-            assert(!owner.connection->apply(bound(QStringLiteral("transaction:ordinary-over-current")),
-                baseline(*sample), desired, owner.protection()));
+            assert(
+                !owner.connection->apply(bound(QStringLiteral("transaction:ordinary-over-current")),
+                                         baseline(*sample), desired, owner.protection()));
         } else {
             assert(!sample);
         }
