@@ -109,6 +109,22 @@ impl NativeDisplayOrdinaryReleasePreparation {
     pub fn material(&self) -> &str {
         &self.material
     }
+    /// Bind the distinct release operation to Root's complete immutable
+    /// original preimage. These comparisons do not prove terminal scanout.
+    pub fn validate_original(&self, payload: &[u8]) -> Result<(), String> {
+        let material = self.decoded_material()?;
+        let scope = material.release_scope().map_err(|_| invalid())?;
+        let original =
+            crate::NativeDisplayRecoveryCheckpoint::ordinary_original_facts(payload, &scope)?;
+        if original.comparison().checkpoint != material.lineage().original_checkpoint
+            || original.comparison().material != material.original_text()
+            || original.comparison().transaction == self.binding.transaction_id
+            || material.lineage().original_dispatch == self.binding.dispatch_digest.to_hex()
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
     pub fn decoded_material(&self) -> Result<DisplayOrdinaryReleaseMaterial<'_>, String> {
         DisplayOrdinaryReleaseMaterial::decode(&self.material).map_err(|_| invalid())
     }

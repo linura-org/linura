@@ -220,6 +220,7 @@ pub struct PreparedDurableAuthority {
 pub(crate) enum DisplayReviewPurpose {
     Keep,
     OriginalFinalization,
+    OrdinaryRelease,
 }
 impl DisplayReviewPurpose {
     fn matches(self, plan: &linura_planner::ReconciliationPlan) -> bool {
@@ -228,6 +229,11 @@ impl DisplayReviewPurpose {
                 linura_observation::DISPLAY_PROVIDER,
                 linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
                 "layout",
+            ),
+            Self::OrdinaryRelease => (
+                linura_observation::DISPLAY_RECOVERY_PROVIDER,
+                linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
+                "release_ordinary",
             ),
             Self::OriginalFinalization => (
                 linura_observation::DISPLAY_RECOVERY_PROVIDER,

@@ -906,12 +906,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: &AuthenticatedPrincipal,
         request_id: &RequestId,
     ) -> Result<LinkedHistory, ManagedLifecycleError> {
+        let checked = self.checked_display_history()?;
+        self.finalization_history_from_checked(principal, request_id, &checked)
+    }
+
+    // Reuse only within a synchronous history read, with no mutable provider,
+    // persistence write or external effect between the full store checks and
+    // these authenticated record/snapshot loads.
+    fn finalization_history_from_checked(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+        checked_history: &CheckedDisplayHistoryRead<'_>,
+    ) -> Result<LinkedHistory, ManagedLifecycleError> {
         let suffix = request_id
             .as_str()
             .strip_prefix(DISPLAY_RESTORATION_REQUEST_PREFIX)
             .ok_or_else(invalid)?;
         validate_operation_id(suffix)?;
-        let checked_history = self.checked_display_history()?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
         let retained = self
             .display_journal()?
@@ -1108,74 +1120,31 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // protocol. Demand this *original* Control one-use reservation and
         // its exact signed request/transaction/intent correlation before
         // visiting providers. An expired historical observation is NOT renewed.
-        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        let dispatch = terminal
-            .receipt
-            .dispatch_digest
-            .as_deref()
-            .ok_or_else(invalid)?;
-        let before = crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
-            self.display_journal()?,
-            &principal_id,
-            &terminal.request,
-            &terminal.snapshot,
-            dispatch,
-            terminal.intent.material(),
-        )?;
-        let native_decision = if matches!(
-            expected,
-            DisplayFinalizationPhase::NativeReleaseReserved
-                | DisplayFinalizationPhase::NativeReleaseSpent
-        ) {
-            Some(NativeReleasePrepared::load_spent(
-                self.display_journal()?,
-                &principal_id,
-                &terminal.request,
-                &terminal.snapshot,
-                dispatch,
-                terminal.intent.material(),
-                &before,
-            )?)
-        } else {
-            None
-        };
-        let spend_decision = if expected == DisplayFinalizationPhase::NativeReleaseSpent {
-            Some(NativeReleaseSpendPrepared::load_spent(
-                self.display_journal()?,
-                &principal_id,
-                &terminal.request,
-                &terminal.snapshot,
-                dispatch,
-                terminal.intent.material(),
-                native_decision.as_ref().ok_or_else(invalid)?,
-            )?)
-        } else {
-            None
-        };
-        let restoration = self.inspect_terminal_phase_from_context(
-            principal.clone(),
-            actor,
-            &terminal,
-            expected,
-        )?;
-        // A lost reply is reconciled by fresh physical facts and the exact
-        // old immutable record, never another Root/native write or approval.
-        if self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
-                self.display_journal()?,
-                &principal_id,
-                &terminal.request,
-                &terminal.snapshot,
-                dispatch,
-                terminal.intent.material(),
-            )? != before
-            || (matches!(
+        let (terminal, before, native_decision, spend_decision, history) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let dispatch = terminal
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?;
+            let before =
+                crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )?;
+            let native_decision = if matches!(
                 expected,
                 DisplayFinalizationPhase::NativeReleaseReserved
                     | DisplayFinalizationPhase::NativeReleaseSpent
-            ) && native_decision
-                != Some(NativeReleasePrepared::load_spent(
+            ) {
+                Some(NativeReleasePrepared::load_spent(
                     self.display_journal()?,
                     &principal_id,
                     &terminal.request,
@@ -1183,20 +1152,86 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                     dispatch,
                     terminal.intent.material(),
                     &before,
-                )?))
-            || (expected == DisplayFinalizationPhase::NativeReleaseSpent
-                && spend_decision
-                    != Some(NativeReleaseSpendPrepared::load_spent(
+                )?)
+            } else {
+                None
+            };
+            let spend_decision = if expected == DisplayFinalizationPhase::NativeReleaseSpent {
+                Some(NativeReleaseSpendPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    native_decision.as_ref().ok_or_else(invalid)?,
+                )?)
+            } else {
+                None
+            };
+            let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+                .map_err(|_| invalid())?;
+            let history = self.finalization_history_from_checked(
+                &principal,
+                material.restoration_request(),
+                &checked,
+            )?;
+            (terminal, before, native_decision, spend_decision, history)
+        };
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
+        let restoration = self.inspect_terminal_phase_with_history(
+            principal.clone(),
+            actor,
+            &terminal,
+            expected,
+            history,
+        )?;
+        // A lost reply is reconciled by fresh physical facts and the exact
+        // old immutable record, never another Root/native write or approval.
+        {
+            let checked = self.checked_display_history()?;
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != terminal
+                || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )? != before
+                || (matches!(
+                    expected,
+                    DisplayFinalizationPhase::NativeReleaseReserved
+                        | DisplayFinalizationPhase::NativeReleaseSpent
+                ) && native_decision
+                    != Some(NativeReleasePrepared::load_spent(
                         self.display_journal()?,
                         &principal_id,
                         &terminal.request,
                         &terminal.snapshot,
                         dispatch,
                         terminal.intent.material(),
-                        native_decision.as_ref().ok_or_else(invalid)?,
+                        &before,
                     )?))
-        {
-            return Err(invalid());
+                || (expected == DisplayFinalizationPhase::NativeReleaseSpent
+                    && spend_decision
+                        != Some(NativeReleaseSpendPrepared::load_spent(
+                            self.display_journal()?,
+                            &principal_id,
+                            &terminal.request,
+                            &terminal.snapshot,
+                            dispatch,
+                            terminal.intent.material(),
+                            native_decision.as_ref().ok_or_else(invalid)?,
+                        )?))
+            {
+                return Err(invalid());
+            }
         }
         Ok(OriginalDisplayQuiescenceInspection {
             restoration,
@@ -1218,14 +1253,27 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if !matches!(
             expected,
             DisplayFinalizationPhase::Retired | DisplayFinalizationPhase::NativeReleaseReserved
-        ) || self.terminal_inspection_context(principal, &terminal.request.request_id)?
-            != *terminal
-        {
+        ) {
             return Err(invalid());
         }
         let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
             .map_err(|_| invalid())?;
-        let history = self.finalization_history(principal, material.restoration_request())?;
+        let history = {
+            let checked = self.checked_display_history()?;
+            if self.terminal_context_from_checked(
+                principal,
+                &terminal.request.request_id,
+                &checked,
+            )? != *terminal
+            {
+                return Err(invalid());
+            }
+            self.finalization_history_from_checked(
+                principal,
+                material.restoration_request(),
+                &checked,
+            )?
+        };
         if material.terminal_link() != history.link.digest().hex()
             || material.restoration_text() != history.restoration.desired_state["restore_original"]
             || Some(material.restoration_dispatch())
@@ -1266,11 +1314,21 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             before = Some(current);
             observations.push(observation);
         }
-        if self.finalization_history(principal, material.restoration_request())? != history
-            || self.terminal_inspection_context(principal, &terminal.request.request_id)?
-                != *terminal
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            if self.finalization_history_from_checked(
+                principal,
+                material.restoration_request(),
+                &checked,
+            )? != history
+                || self.terminal_context_from_checked(
+                    principal,
+                    &terminal.request.request_id,
+                    &checked,
+                )? != *terminal
+            {
+                return Err(invalid());
+            }
         }
         for observation in observations {
             observation
@@ -1317,6 +1375,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .map_err(|_| invalid())?;
         let restoration_request = material.restoration_request().clone();
         let history = self.finalization_history(&principal, &restoration_request)?;
+        self.inspect_terminal_phase_with_history(principal, actor, terminal, expected, history)
+    }
+
+    fn inspect_terminal_phase_with_history(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal: &TerminalInspectionContext,
+        expected: DisplayFinalizationPhase,
+        history: LinkedHistory,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
+        let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+            .map_err(|_| invalid())?;
+        let restoration_request = material.restoration_request().clone();
         if material.terminal_link() != history.link.digest().hex()
             || material.restoration_text() != history.restoration.desired_state["restore_original"]
             || Some(material.restoration_dispatch())
@@ -1405,11 +1477,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             principal_id.clone(),
             terminal_request,
         )?;
-        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
-        if now_ms()? >= record.expiry()
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+            if now_ms()? >= record.expiry()
+                || self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                    != terminal
+            {
+                return Err(invalid());
+            }
         }
         observation
             .require_current(now_ms()?)
@@ -1455,27 +1531,38 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "native release reservation requires authenticated interactive ownership".into(),
             ));
         }
-        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
-        self.require_current_original_finalization_review(&principal, &terminal)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let (terminal, original) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let dispatch = terminal
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?;
+            let original =
+                crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )?;
+            NativeReleasePrepared::require_absent(
+                self.display_journal()?,
+                &principal_id,
+                terminal_request,
+            )?;
+            (terminal, original)
+        };
+        self.require_current_original_finalization_review(&principal, &terminal)?;
         let dispatch = terminal
             .receipt
             .dispatch_digest
             .as_deref()
             .ok_or_else(invalid)?;
-        let original = crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
-            self.display_journal()?,
-            &principal_id,
-            &terminal.request,
-            &terminal.snapshot,
-            dispatch,
-            terminal.intent.material(),
-        )?;
-        NativeReleasePrepared::require_absent(
-            self.display_journal()?,
-            &principal_id,
-            terminal_request,
-        )?;
         let held = self.inspect_root_retired_held_original_display_finalization(
             principal.clone(),
             actor.clone(),
@@ -1507,19 +1594,23 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             principal_id.clone(),
             terminal_request,
         )?;
-        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
-        if now_ms()? >= record.expiry()
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
-                self.display_journal()?,
-                &principal_id,
-                &terminal.request,
-                &terminal.snapshot,
-                dispatch,
-                terminal.intent.material(),
-            )? != original
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+            if now_ms()? >= record.expiry()
+                || self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                    != terminal
+                || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )? != original
+            {
+                return Err(invalid());
+            }
         }
         let authorized = AuthorizedOriginalDisplayNativeReleaseReservation {
             material: terminal.intent.material().to_owned(),
@@ -1568,35 +1659,46 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "native Root release spend requires authenticated interactive ownership".into(),
             ));
         }
-        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let (terminal, original, reserved) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let dispatch = terminal
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?;
+            let original =
+                crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )?;
+            let reserved = NativeReleasePrepared::load_spent(
+                self.display_journal()?,
+                &principal_id,
+                &terminal.request,
+                &terminal.snapshot,
+                dispatch,
+                terminal.intent.material(),
+                &original,
+            )?;
+            NativeReleaseSpendPrepared::require_absent(
+                self.display_journal()?,
+                &principal_id,
+                terminal_request,
+            )?;
+            (terminal, original, reserved)
+        };
         let dispatch = terminal
             .receipt
             .dispatch_digest
             .as_deref()
             .ok_or_else(invalid)?;
-        let original = crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
-            self.display_journal()?,
-            &principal_id,
-            &terminal.request,
-            &terminal.snapshot,
-            dispatch,
-            terminal.intent.material(),
-        )?;
-        let reserved = NativeReleasePrepared::load_spent(
-            self.display_journal()?,
-            &principal_id,
-            &terminal.request,
-            &terminal.snapshot,
-            dispatch,
-            terminal.intent.material(),
-            &original,
-        )?;
-        NativeReleaseSpendPrepared::require_absent(
-            self.display_journal()?,
-            &principal_id,
-            terminal_request,
-        )?;
         let held = self.inspect_native_release_reserved_original_display_finalization(
             principal.clone(),
             actor.clone(),
@@ -1656,20 +1758,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             principal_id.clone(),
             terminal_request,
         )?;
-        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
-        if now_ms()? >= record.expiry()
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || NativeReleasePrepared::load_spent(
-                self.display_journal()?,
-                &principal_id,
-                &terminal.request,
-                &terminal.snapshot,
-                dispatch,
-                terminal.intent.material(),
-                &original,
-            )? != reserved
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+            if now_ms()? >= record.expiry()
+                || self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                    != terminal
+                || NativeReleasePrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    &original,
+                )? != reserved
+            {
+                return Err(invalid());
+            }
         }
         // Root's LNRN material contains the Control retirement observation,
         // NOT a newly sampled observation digest; using the new one here would
@@ -1748,19 +1854,25 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: &AuthenticatedPrincipal,
         request_id: &RequestId,
     ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
+        let checked = self.checked_display_history()?;
+        self.terminal_context_from_checked(principal, request_id, &checked)
+    }
+
+    fn terminal_context_from_checked(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+        checked: &CheckedDisplayHistoryRead<'_>,
+    ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
         validate_operation_id(
             request_id
                 .as_str()
                 .strip_prefix(DISPLAY_FINALIZATION_REQUEST_PREFIX)
                 .ok_or_else(invalid)?,
         )?;
-        self.display_journal()?
-            .integrity_check()
-            .map_err(|_| invalid())?;
-        self.authority.integrity_check()?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        let retained = self
-            .display_journal()?
+        let retained = checked
+            .journal
             .load(&principal_id, request_id)
             .map_err(|_| invalid())?;
         if retained.principal() != &principal_id || retained.request_id() != request_id {
@@ -1884,14 +1996,22 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         // A read-only probe can race another Control connection. Re-read all
         // immutable history and both exact snapshots after the provider join.
-        if self.finalization_history(&principal, restoration_request)? != history {
-            return Err(invalid());
-        }
-        if let Some((terminal, _)) = terminal
-            && self.terminal_inspection_context(&principal, &terminal.request.request_id)?
-                != *terminal
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            if self.finalization_history_from_checked(&principal, restoration_request, &checked)?
+                != history
+            {
+                return Err(invalid());
+            }
+            if let Some((terminal, _)) = terminal
+                && self.terminal_context_from_checked(
+                    &principal,
+                    &terminal.request.request_id,
+                    &checked,
+                )? != *terminal
+            {
+                return Err(invalid());
+            }
         }
         proof
             .observation

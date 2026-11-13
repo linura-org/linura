@@ -1600,6 +1600,89 @@ impl NativeSessionChannel {
         self.decode_executor_outcome(&identity, reply, binding, Instant::now())
     }
 
+    /// Separate managed ordinary-release preparation in the retained original
+    /// Root process. An ACK is not a native grant or completion evidence.
+    pub fn prepare_ordinary_display_release(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_ordinary_release_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let decoded = linura_core::DisplayOrdinaryReleaseMaterial::decode(material)
+            .map_err(|e| e.to_string())?;
+        let started = Instant::now();
+        let wall = crate::owner::unix_ms()?;
+        let boot = crate::owner::boot_ms()?;
+        if deadline_unix_ms <= wall
+            || deadline_unix_ms - wall > 15_000
+            || crate::owner::current_boot()? != *decoded.original().topology().session().boot()
+        {
+            return Err("ordinary release original deadline or boot differs".into());
+        }
+        let expires = wall
+            .checked_add(2000)
+            .ok_or("ordinary release clock overflow")?
+            .min(deadline_unix_ms);
+        let record = crate::NativeDisplayOrdinaryReleasePreparation::new(
+            material,
+            binding,
+            linura_observation::DisplayNativeHandoffWindow {
+                observed_unix_ms: wall,
+                observed_boot_ms: boot,
+                deadline_unix_ms: expires,
+                deadline_boot_ms: boot
+                    .checked_add(expires - wall)
+                    .ok_or("ordinary release clock overflow")?,
+            },
+        )?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReserveOrdinaryRelease",
+            &(record.canonical_bytes(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "b"
+            || reply.body().len() > 8
+        {
+            return Err("ordinary release preparation reply is substituted or malformed".into());
+        }
+        let (accepted,): (bool,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "ordinary release preparation reply is malformed")?;
+        let end_identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let end_clock = (crate::owner::unix_ms()?, crate::owner::boot_ms()?);
+        if !accepted
+            || end_identity != identity
+            || crate::owner::current_boot()? != *decoded.original().topology().session().boot()
+            || started.elapsed() >= Duration::from_secs(2)
+            || end_clock.0 < wall
+            || end_clock.0 >= expires
+            || end_clock.1 < boot
+            || end_clock.1 >= record.window().deadline_boot_ms
+        {
+            return Err(
+                "ordinary release original preparation expired or Root changed; no replay".into(),
+            );
+        }
+        ExecutionOutcome::new(
+            ExecutionDisposition::Dispatched,
+            binding.dispatch_digest,
+            "original Root ordinary release preparation retained; physical handoff unverified",
+        )
+        .map_err(|e| e.to_string())
+    }
+
     /// Separately prepared terminal-purpose handoff; acknowledgement is not completion.
     pub fn handoff_original_display_finalization(
         &self,

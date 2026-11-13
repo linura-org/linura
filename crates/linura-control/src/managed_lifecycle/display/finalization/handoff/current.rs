@@ -119,19 +119,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         )?;
         let retained =
             proof.retain_or_reconcile(self.request_journal.as_deref_mut().ok_or_else(invalid)?)?;
-        inspection
-            .prepared
-            .require_readback(self.display_journal()?)?;
-        if self.terminal_inspection_context(&principal, terminal_request)? != *context
-            || self.native_handoff_anchors(&principal_id, context)? != inspection.anchors
-            || self.finalization_history(
-                &principal,
-                DisplayFinalizationMaterial::decode(context.intent.material())
-                    .map_err(|_| invalid())?
-                    .restoration_request(),
-            )? != inspection.history
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            inspection
+                .prepared
+                .require_readback(self.display_journal()?)?;
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != *context
+                || self.native_handoff_anchors(&principal_id, context)? != inspection.anchors
+                || self.finalization_history_from_checked(
+                    &principal,
+                    DisplayFinalizationMaterial::decode(context.intent.material())
+                        .map_err(|_| invalid())?
+                        .restoration_request(),
+                    &checked,
+                )? != inspection.history
+            {
+                return Err(invalid());
+            }
         }
         let finished = now_ms()?;
         inspection
@@ -165,13 +170,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     ) -> Result<(), ManagedLifecycleError> {
         let context = &inspection.context;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let checked = self.checked_display_history()?;
         inspection
             .prepared
             .require_readback(self.display_journal()?)?;
         let reloaded = if inspection.retired_root.is_some() {
-            self.current_finalization_comparison_context(principal, &context.request.request_id)?
+            self.current_context_from_checked(principal, &context.request.request_id, &checked)?
         } else {
-            self.terminal_inspection_context(principal, &context.request.request_id)?
+            self.terminal_context_from_checked(principal, &context.request.request_id, &checked)?
         };
         if reloaded != *context
             || self
@@ -179,11 +185,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 .matching_request_snapshot(principal, &context.request)?
                 != *actual
             || self.native_handoff_anchors(&principal_id, context)? != inspection.anchors
-            || self.finalization_history(
+            || self.finalization_history_from_checked(
                 principal,
                 DisplayFinalizationMaterial::decode(context.intent.material())
                     .map_err(|_| invalid())?
                     .restoration_request(),
+                &checked,
             )? != inspection.history
         {
             return Err(invalid());
@@ -229,22 +236,32 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     ) -> Result<OriginalDisplayCurrentInspection, ManagedLifecycleError> {
         let power_held = matches!(phase, CurrentRootPhase::Held { native_power: true });
         let root_retired = matches!(phase, CurrentRootPhase::Retired);
-        let terminal = if root_retired {
-            self.current_finalization_comparison_context(&principal, terminal_request)?
-        } else {
-            self.terminal_inspection_context(&principal, terminal_request)?
-        };
-        let actual_terminal = self
-            .authority
-            .matching_request_snapshot(&principal, &terminal.request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        let anchors = self.native_handoff_anchors(&principal_id, &terminal)?;
+        let (terminal, actual_terminal, anchors, history) = {
+            let checked = self.checked_display_history()?;
+            let terminal = if root_retired {
+                self.current_context_from_checked(&principal, terminal_request, &checked)?
+            } else {
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+            };
+            let actual = self
+                .authority
+                .matching_request_snapshot(&principal, &terminal.request)?;
+            let anchors = self.native_handoff_anchors(&principal_id, &terminal)?;
+            let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+                .map_err(|_| invalid())?;
+            let history = self.finalization_history_from_checked(
+                &principal,
+                material.restoration_request(),
+                &checked,
+            )?;
+            (terminal, actual, anchors, history)
+        };
         let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
             .map_err(|_| invalid())?;
         let restoration = material.restoration();
         let scope = material.recovery_scope().map_err(|_| invalid())?;
         let resource = scope.resource_id().map_err(|_| invalid())?;
-        let history = self.finalization_history(&principal, material.restoration_request())?;
         if material.terminal_link() != history.link.digest().hex()
             || material.restoration_text() != history.restoration.desired_state["restore_original"]
             || Some(material.restoration_dispatch())
@@ -427,28 +444,38 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || original_comparison(&after_protection)? != original
             || retired_facts(&after_root)? != retired_root
             || retired_facts(&after_protection)? != retired_root
-            || self.finalization_history(&principal, material.restoration_request())? != history
-            || (if root_retired {
-                self.current_finalization_comparison_context(&principal, terminal_request)?
-            } else {
-                self.terminal_inspection_context(&principal, terminal_request)?
-            }) != terminal
-            || self
-                .authority
-                .matching_request_snapshot(&principal, &terminal.request)?
-                != actual_terminal
-            || self.native_handoff_anchors(&principal_id, &terminal)? != anchors
-            || NativeCompletionPrepared::load_comparison(
-                self.display_journal()?,
-                &principal_id,
-                &terminal.request,
-                &terminal.snapshot,
-                dispatch,
-                &anchors.spent,
-                &root_facts,
-            )? != prepared
         {
             return Err(invalid());
+        }
+        {
+            let checked = self.checked_display_history()?;
+            if self.finalization_history_from_checked(
+                &principal,
+                material.restoration_request(),
+                &checked,
+            )? != history
+                || (if root_retired {
+                    self.current_context_from_checked(&principal, terminal_request, &checked)?
+                } else {
+                    self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                }) != terminal
+                || self
+                    .authority
+                    .matching_request_snapshot(&principal, &terminal.request)?
+                    != actual_terminal
+                || self.native_handoff_anchors(&principal_id, &terminal)? != anchors
+                || NativeCompletionPrepared::load_comparison(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    &anchors.spent,
+                    &root_facts,
+                )? != prepared
+            {
+                return Err(invalid());
+            }
         }
         let now = now_ms()?;
         for (name, source) in [

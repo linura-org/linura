@@ -329,10 +329,17 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: &AuthenticatedPrincipal,
         request_id: &RequestId,
     ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
+        let checked = self.checked_display_history()?;
+        self.current_context_from_checked(principal, request_id, &checked)
+    }
+
+    pub(super) fn current_context_from_checked(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+        checked: &CheckedDisplayHistoryRead<'_>,
+    ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        self.display_journal()?
-            .integrity_check()
-            .map_err(|_| invalid())?;
         let retained = self
             .display_journal()?
             .load(&principal_id, request_id)
@@ -354,7 +361,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .authority
             .matching_request_snapshot(principal, &request)?;
         if actual.state == TransactionState::Indeterminate {
-            return self.terminal_inspection_context(principal, request_id);
+            return self.terminal_context_from_checked(principal, request_id, checked);
         }
         if !matches!(
             actual.state,

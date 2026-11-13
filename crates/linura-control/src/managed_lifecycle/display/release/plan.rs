@@ -30,11 +30,67 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         port: &mut P,
         verifier: &mut V,
     ) -> Result<linura_planner::ReconciliationPlan, ManagedLifecycleError> {
+        let (inspection, desired, source) = self.ordinary_display_release_input(
+            principal.clone(),
+            actor.clone(),
+            input,
+            port,
+            verifier,
+        )?;
+        let (plan, observation) = {
+            let _context = self
+                .previews
+                .enter_ordinary_display_release_context(source, &desired)
+                .map_err(|_| invalid_original())?;
+            self.previews
+                .authority_candidate(principal.clone(), actor, desired.clone())
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?
+        };
+        self.validate_registered_managed_plan(&plan, RiskClass::SecuritySensitive)?;
+        self.require_ordinary_release_history(&principal, &inspection)?;
+        observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid_original())?;
+        Ok(plan)
+    }
+    pub(super) fn ordinary_display_release_input<
+        P: DisplayTransactionPort,
+        V: IndependentDisplayVerifier,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        input: OrdinaryDisplayReleaseRequest,
+        port: &mut P,
+        verifier: &mut V,
+    ) -> Result<
+        (
+            OrdinaryDisplayOriginalInspection,
+            PlanDesiredStateRequest,
+            crate::display_ordinary_release_plan::OrdinaryReleasePlanningContext,
+        ),
+        ManagedLifecycleError,
+    > {
         validate_operation_id(&input.operation_id)?;
         if actor.kind != ActorKind::Human || !actor.interactive {
             return Err(ManagedLifecycleError::ApprovalBoundary(
                 "ordinary release requires authenticated interactive human ownership".into(),
             ));
+        }
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
+        let release_id = RequestId::new(format!(
+            "{DISPLAY_ORDINARY_RELEASE_REQUEST_PREFIX}{}",
+            input.operation_id
+        ))
+        .map_err(|_| invalid_original())?;
+        if crate::display_ordinary_release_intent::OrdinaryReleaseIntent::claimed_request(
+            self.display_journal()?,
+            &principal_id,
+            &input.original_request,
+        )?
+        .is_some_and(|owner| owner != release_id)
+        {
+            return Err(ManagedLifecycleError::Authority("original display already has an ordinary release owner; qualified supersession is required".into()));
         }
         let inspection = self.inspect_ordinary_display_original(
             principal.clone(),
@@ -152,7 +208,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         .map_err(|_| invalid_original())?;
         let effect = linura_provider_sdk::display_ordinary_release_effect(&full_material)
             .map_err(|_| invalid_original())?;
-        let mut reason = input.reason;
+        let mut reason = input.reason.clone();
         crate::display_restoration_plan::inherit_original_reason(&mut reason, &request.reason)
             .map_err(ManagedLifecycleError::Contract)?;
         let desired = PlanDesiredStateRequest {
@@ -177,20 +233,21 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             root: inspection.root().clone(),
             observation: inspection.observation().clone(),
         };
-        let (plan, observation) = {
-            let _context = self
-                .previews
-                .enter_ordinary_display_release_context(source, &desired)
-                .map_err(|_| invalid_original())?;
-            self.previews
-                .authority_candidate(principal.clone(), actor, desired.clone())
-                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?
-        };
-        self.validate_registered_managed_plan(&plan, RiskClass::SecuritySensitive)?;
-        if self.retained_display_request(&principal, &input.original_request)? != *request
+        Ok((inspection, desired, source))
+    }
+    pub(super) fn require_ordinary_release_history(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        inspection: &OrdinaryDisplayOriginalInspection,
+    ) -> Result<(), ManagedLifecycleError> {
+        let request = inspection.request();
+        let snapshot = inspection.original_snapshot();
+        let eligibility = inspection.eligibility();
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
+        if self.retained_display_request(principal, &request.request_id)? != *request
             || self
                 .authority
-                .matching_request_snapshot(&principal, request)?
+                .matching_request_snapshot(principal, request)?
                 != *snapshot
             || terminal_for_inspection(
                 &DisplayHistory::load(
@@ -210,9 +267,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid_original());
         }
-        observation
-            .require_current(now_ms()?)
-            .map_err(|_| invalid_original())?;
-        Ok(plan)
+        Ok(())
     }
 }

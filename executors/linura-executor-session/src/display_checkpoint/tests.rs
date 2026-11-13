@@ -2011,3 +2011,216 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
         Ok(true)
     ));
 }
+
+// Full strictly validated original preimage for ordinary Root persistence
+// tests. All identities/rules are synthetic; no live witness is claimed.
+pub(crate) fn ordinary_release_fixture(
+    attempt: u8,
+) -> (Vec<u8>, NativeDisplayOrdinaryReleasePreparation) {
+    ordinary_release_fixture_with_original(attempt, 2)
+}
+fn ordinary_release_fixture_with_original(
+    attempt: u8,
+    original_use: u8,
+) -> (Vec<u8>, NativeDisplayOrdinaryReleasePreparation) {
+    use linura_core::{
+        DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial,
+        DisplayOrdinaryReleaseOutcome, RequestId,
+    };
+    use linura_provider_sdk::ExecutionBinding;
+    let topology = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3";
+    let lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-4222-8222-222222222222:1";
+    let original = format!(
+        "LNDI:1;{lock};LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
+    );
+    let effect = linura_provider_sdk::display_layout_effect(&original)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = ExecutionBinding::new(
+        "transaction:ordinary-original",
+        0,
+        1,
+        ComponentDigest::from_bytes([1; 32]),
+        ComponentDigest::from_bytes([original_use; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let rule = concat!(
+        "0;0000000000000000;0000000000000000;404e000000000000;",
+        "0000000000000000;0000000000000000;bff0000000000000;0;0;;",
+        "0;0;0;0;0;0;0;0;0;0;0;0;0;0;",
+        "0000000000000000000000000000000000000000000000000000000000000000;;"
+    );
+    let preimage = serde_json::json!({"schema":2,"upstream":"efb50993780079460b0cbed1363e2166a2de1d9f", "integration":"a".repeat(64), "generation":"3", "heads":[{"handle":"1","generation":"2","kernel_drm":[226,0,1],"linura_owned":false,"owned_target":"","output_identity_digest":"b".repeat(64),"base_rule":format!("LNRL:2;0;0;{rule}{rule}0;0;0;;")}]}).to_string();
+    let mut payload = Vec::new();
+    for field in [
+        "linura.native-display.recovery-preimage.v1",
+        &binding.transaction_id,
+        "0",
+        "1",
+        &binding.authority_binding_digest.to_hex(),
+        &binding.authority_use_digest.to_hex(),
+        &binding.effect_digest.to_hex(),
+        &binding.dispatch_digest.to_hex(),
+        &original,
+        "25000",
+        "11111111-1111-4111-8111-111111111111",
+        ":1.42",
+        "1000",
+        "42",
+        "22222222-2222-4222-8222-222222222222",
+        "100",
+        &"c".repeat(64),
+        &"d".repeat(64),
+        &preimage,
+    ] {
+        payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        payload.extend_from_slice(field.as_bytes());
+    }
+    NativeDisplayRecoveryCheckpoint::validate_stored(&payload, &binding.dispatch_digest)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let checkpoint = ComponentDigest::from_bytes(Sha256::digest(&payload).into()).to_hex();
+    let layout = linura_core::DisplayLayoutMaterial::decode(&original)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let material = DisplayOrdinaryReleaseMaterial::encode(
+        &DisplayOrdinaryReleaseLineage {
+            original_request: RequestId::new("request:v010:display-layout:ordinary-original")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            original_dispatch: &binding.dispatch_digest.to_hex(),
+            terminal_record: &"e".repeat(64),
+            original_checkpoint: &checkpoint,
+            signed_binding: &"f".repeat(64),
+            generation: 0,
+            state_version: 9,
+            current_source_guard: &"c".repeat(64),
+        },
+        DisplayOrdinaryReleaseOutcome::Keep,
+        layout.lock(),
+        &original,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let effect = linura_provider_sdk::display_ordinary_release_effect(&material)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = ExecutionBinding::new(
+        format!("transaction:ordinary-release-{attempt}"),
+        0,
+        1,
+        ComponentDigest::from_bytes([3; 32]),
+        ComponentDigest::from_bytes([attempt; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let record = NativeDisplayOrdinaryReleasePreparation::new(
+        &material,
+        &binding,
+        linura_observation::DisplayNativeHandoffWindow {
+            observed_unix_ms: 1000,
+            observed_boot_ms: 100,
+            deadline_unix_ms: 2000,
+            deadline_boot_ms: 1100,
+        },
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    record
+        .validate_original(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    (payload, record)
+}
+
+#[test]
+fn ordinary_release_preparation_requires_original_parent_and_cannot_replay_or_supersede() {
+    let fixture = Fixture::new();
+    let (payload, record) = ordinary_release_fixture(7);
+    let reserve = |record: &NativeDisplayOrdinaryReleasePreparation| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            Kind::OrdinaryReleasePrepared,
+        )
+    };
+    assert!(reserve(&record).is_err());
+    assert!(
+        !fixture
+            .path
+            .join(Kind::OrdinaryReleasePrepared.name(&record.binding().dispatch_digest))
+            .exists()
+    );
+    let original = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    reserve_at(&fixture.fd, fixture.uid, &original, &payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    reserve(&record).unwrap_or_else(|e| unreachable!("{e}"));
+    let read = read_ordinary_release_at(&fixture.fd, fixture.uid, &record)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(read, record.canonical_bytes());
+    assert!(reserve(&record).is_err());
+    let (_, successor) = ordinary_release_fixture(8);
+    assert!(reserve(&successor).is_err());
+    // A different original dispatch on the same seat is still a competitor,
+    // including a recovery path using another scope/invocation.
+    let (other_payload, other) = ordinary_release_fixture_with_original(9, 4);
+    let other_original = NativeDisplayRecoveryCheckpoint::stored_dispatch(&other_payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    reserve_at(&fixture.fd, fixture.uid, &other_original, &other_payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(reserve(&other).is_err());
+    assert!(reserve_recovery(&fixture, &restoration(1, 2)).is_err());
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        read_ordinary_release_at(&reopened, fixture.uid, &record),
+        Ok(read)
+    );
+    assert!(
+        reserve_kind_at(
+            &reopened,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            Kind::OrdinaryReleasePrepared
+        )
+        .is_err()
+    );
+    assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+}
+
+#[test]
+fn orphan_or_corrupt_ordinary_release_quarantines_other_reservations_without_cleanup() {
+    for fault in 0..4 {
+        let fixture = Fixture::new();
+        let (payload, record) = ordinary_release_fixture(7);
+        let original = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        reserve_at(&fixture.fd, fixture.uid, &original, &payload)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            Kind::OrdinaryReleasePrepared,
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let parent = fixture.path.join(Kind::Original.name(&original));
+        let child = fixture
+            .path
+            .join(Kind::OrdinaryReleasePrepared.name(&record.binding().dispatch_digest));
+        match fault {
+            0 => std::fs::remove_file(&parent).unwrap_or_else(|e| unreachable!("{e}")),
+            1 => std::fs::write(&parent, MAGIC).unwrap_or_else(|e| unreachable!("{e}")),
+            2 => std::fs::write(&child, ORDINARY_RELEASE_PREPARED_MAGIC)
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => std::fs::set_permissions(&child, std::fs::Permissions::from_mode(0o640))
+                .unwrap_or_else(|e| unreachable!("{e}")),
+        }
+        assert!(read_ordinary_release_at(&fixture.fd, fixture.uid, &record).is_err());
+        assert!(fixture.reserve(9, b"unrelated comparison").is_err());
+        assert!(child.exists());
+        assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+    }
+}

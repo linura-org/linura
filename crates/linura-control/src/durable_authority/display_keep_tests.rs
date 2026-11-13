@@ -43,6 +43,12 @@ fn finalization_floor() -> TrustedRiskFloor {
         crate::operation_registry::MANAGED_DISPLAY_FINALIZATION_RISK_FLOOR_RULE_ID,
     )
 }
+fn ordinary_release_floor() -> TrustedRiskFloor {
+    TrustedRiskFloor::new(
+        RiskClass::SecuritySensitive,
+        crate::operation_registry::MANAGED_DISPLAY_ORDINARY_RELEASE_RISK_FLOOR_RULE_ID,
+    )
+}
 fn fixture_for(
     purpose: DisplayReviewPurpose,
 ) -> (DisplayRetainedReview, crate::ApprovalReviewControl) {
@@ -61,6 +67,13 @@ fn fixture_for(
             format!("display:recovery:{}:{topology}", "a".repeat(64)),
             "finalize_original",
             finalization_floor(),
+        ),
+        DisplayReviewPurpose::OrdinaryRelease => (
+            linura_observation::DISPLAY_RECOVERY_PROVIDER,
+            linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
+            format!("display:ordinary-release:{}:{topology}", "a".repeat(64)),
+            "release_ordinary",
+            ordinary_release_floor(),
         ),
     };
     let provider = checked(ProviderId::new(provider));
@@ -148,6 +161,39 @@ fn fixture_for(
         },
         approvals,
     )
+}
+
+#[test]
+fn ordinary_release_cannot_reuse_keep_or_finalization_review_or_revoked_approval() {
+    let (mut original, mut approvals) = fixture_for(DisplayReviewPurpose::OrdinaryRelease);
+    assert_eq!(
+        original.revalidate(&principal(), ordinary_release_floor(), &approvals),
+        Ok(())
+    );
+    for purpose in [
+        DisplayReviewPurpose::Keep,
+        DisplayReviewPurpose::OriginalFinalization,
+    ] {
+        original.purpose = purpose;
+        assert_eq!(
+            original.revalidate(&principal(), ordinary_release_floor(), &approvals),
+            Err(DurableAuthorityError::AuthorityChanged)
+        );
+    }
+    original.purpose = DisplayReviewPurpose::OrdinaryRelease;
+    for floor in [floor(), finalization_floor()] {
+        assert_eq!(
+            original.revalidate(&principal(), floor, &approvals),
+            Err(DurableAuthorityError::AuthorityChanged)
+        );
+    }
+    checked(approvals.revoke(&original.approval_evidence_id, &administrator()));
+    assert_eq!(
+        original.revalidate(&principal(), ordinary_release_floor(), &approvals),
+        Err(DurableAuthorityError::ApprovalUnsatisfied(
+            ApprovalValidation::Revoked
+        ))
+    );
 }
 
 #[test]

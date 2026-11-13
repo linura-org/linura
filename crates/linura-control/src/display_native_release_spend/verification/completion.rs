@@ -247,7 +247,9 @@ impl NativeCompletionPrepared {
     }
     pub(crate) fn require_current(&self, now: u64) -> Result<(), ManagedLifecycleError> {
         if now < self.prepared_at || now >= self.expiry {
-            return Err(invalid());
+            return Err(ManagedLifecycleError::Verification(
+                "original completion preparation expired before dispatch".into(),
+            ));
         }
         Ok(())
     }

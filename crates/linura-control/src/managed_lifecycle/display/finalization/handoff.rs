@@ -172,10 +172,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 )
             })?;
         let expiry = retained.expiry().min(proof.expiry());
-        if self.terminal_inspection_context(&principal, terminal_request)? != *terminal
-            || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != *terminal
+                || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
+            {
+                return Err(invalid());
+            }
         }
         let finished = now_ms()?;
         if finished < proof.observed_at() || finished >= expiry {
@@ -249,9 +253,21 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         expected_spend: Option<&NativeReleaseSpendPrepared>,
     ) -> Result<OriginalDisplayNativeHandoffInspection, ManagedLifecycleError> {
         // Authenticate all immutable history before probing any current source.
-        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        let anchors = self.native_handoff_anchors(&principal_id, &terminal)?;
+        let (terminal, history, anchors) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+                .map_err(|_| invalid())?;
+            let history = self.finalization_history_from_checked(
+                &principal,
+                material.restoration_request(),
+                &checked,
+            )?;
+            let anchors = self.native_handoff_anchors(&principal_id, &terminal)?;
+            (terminal, history, anchors)
+        };
         if expected_spend.is_some_and(|expected| expected != &anchors.spent) {
             return Err(unavailable_at("exact spent record readback"));
         }
@@ -259,7 +275,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .map_err(|_| invalid())?;
         let restoration = material.restoration();
         let scope = material.recovery_scope().map_err(|_| invalid())?;
-        let history = self.finalization_history(&principal, material.restoration_request())?;
         if material.terminal_link() != history.link.digest().hex()
             || material.restoration_text() != history.restoration.desired_state["restore_original"]
             || Some(material.restoration_dispatch())
@@ -396,13 +411,31 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || DisplayOriginalProtectionFacts::from_envelope(&after_protection, &scope, now_ms()?)
                 .map_err(|_| invalid())?
                 != original
-            || self.finalization_history(&principal, material.restoration_request())? != history
-            || self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || self.native_handoff_anchors(&principal_id, &terminal)? != anchors
-            || now_ms()? >= anchors.spent.expiry()
         {
+            return Err(unavailable_at("post-read native and Root reconciliation"));
+        }
+        {
+            let checked = self.checked_display_history()?;
+            if self.finalization_history_from_checked(
+                &principal,
+                material.restoration_request(),
+                &checked,
+            )? != history
+            {
+                return Err(unavailable_at("post-read restoration history"));
+            }
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != terminal
+            {
+                return Err(unavailable_at("post-read terminal history"));
+            }
+            if self.native_handoff_anchors(&principal_id, &terminal)? != anchors {
+                return Err(unavailable_at("post-read spent ancestry"));
+            }
+        }
+        if now_ms()? >= anchors.spent.expiry() {
             return Err(unavailable_at(
-                "post-read reconciliation or durable anchors",
+                "original spend deadline after durable reconciliation",
             ));
         }
         // Join absolute expiries, preserving every producer's original sample.

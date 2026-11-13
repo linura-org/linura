@@ -613,6 +613,7 @@ dependencies = [
  "linura-observation",
  "linura-provider-sdk",
  "rustix",
+ "serde_json",
  "sha2",
  "zbus",
 ]

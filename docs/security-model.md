@@ -1126,3 +1126,33 @@ endpoint/interface/method. All other replies retain the ordinary bounded limit.
 Final records do not clear global startup ownership, admit a successor, delete
 recovery files, or authorize shared-reference cleanup. Those require the separate
 qualified lifecycle protocol. Public display mutations remain unsupported.
+
+Ordinary terminal release preparation uses a distinct managed purpose and fresh
+plan-bound protected approval. Neither the original Keep approval nor signed
+Committed state authorizes it. Control durably claims a single release owner for
+the original request and retains complete canonical LNOR material before prepare
+and one-use dispatch. Restart/lost-ACK retries are read-only; unresolved ordinary
+release also blocks competing seat mutations. The private Root
+`ReserveOrdinaryRelease` endpoint accepts only the exact supervised Control
+transport, validates the distinct execution binding against complete LNOR
+material, and rechecks the live original ordinary startup/kernel/power witnesses
+and both absolute clocks around immutable `LNOP:1` publication/readback. The
+complete actual original checkpoint must match, and missing/corrupt ancestry
+fences all subsequent writes. Root preparation never releases native coverage,
+input, S17, power, startup admission or evidence. Native grant/spend, physical
+handoff and independent completion remain required and unavailable in this
+increment; public production display mutation remains prohibited.
+
+A checked request-history read scope is a synchronous storage lifetime, never a
+current-provider observation or execution capability. SQLite fully validates
+live identity/schema/durability and all authenticated history at scope entry,
+then authenticates individual loads in that same read transaction. Nested
+integrity checks revalidate live identity/durability settings and require the
+same still-open, unmodified transaction; the complete history was authenticated
+at entry and every selected row is authenticated again on load. A shared borrow and
+read-only contract prohibit carrying it across Control's mutable provider/effect
+boundary; fresh scopes obtain fresh snapshots. Neither forgetting the guard nor
+a failed rollback permits writes or a new inspection. Unknown rollback state or
+an invalid scoped MAC poisons the journal lifetime. No validation result or row
+is reused as current authority after the scope ends, and the original native
+spend/first-frame deadlines are unchanged.

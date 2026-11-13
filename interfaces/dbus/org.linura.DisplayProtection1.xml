@@ -12,6 +12,12 @@
       <arg name="ordinary_scope" type="s" direction="in"/>
       <arg name="checkpoint" type="ay" direction="out"/>
     </method>
+    <method name="ReserveOrdinaryRelease">
+      <!-- Exact supervised Control only; immutable separate LNOR managed
+           binding and original preimage ancestry. No physical effect or grant. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="ReadOriginal">
       <!-- Supervised Control only; exact historical bytes plus live retained
            witness checks. No credential, restoration grant or output write. -->

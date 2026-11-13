@@ -10,9 +10,10 @@ use std::path::Component;
 use linura_linux_session::{
     NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
     NativeDisplayFinalRetirementPreparation, NativeDisplayFinalizationReservation,
-    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
-    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
-    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
+    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
+    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
+    NativeDisplayRootRetirementPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
@@ -39,6 +40,7 @@ const RELEASED_CURRENT_MAGIC: &[u8] = b"LNCZ:1\n";
 const ROOT_POWER_PREPARED_MAGIC: &[u8] = b"LNFP:1\n";
 const POWER_PREPARED_MAGIC: &[u8] = b"LNPP:1\n";
 const POWER_SPENT_MAGIC: &[u8] = b"LNPS:1\n";
+const ORDINARY_RELEASE_PREPARED_MAGIC: &[u8] = b"LNOP:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
@@ -46,6 +48,7 @@ const HEADER: usize = MAGIC.len() + 32 + 8;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Kind {
     Original,
+    OrdinaryReleasePrepared,
     Restoration,
     Finalization,
     Quiescence,
@@ -68,6 +71,7 @@ impl Kind {
     fn prefix(self) -> &'static str {
         match self {
             Self::Original => "attempt-",
+            Self::OrdinaryReleasePrepared => "ordinary-release-prepared-",
             Self::Restoration => "restoration-",
             Self::Finalization => "finalization-",
             Self::Quiescence => "quiescence-",
@@ -90,6 +94,7 @@ impl Kind {
     fn magic(self) -> &'static [u8] {
         match self {
             Self::Original => MAGIC,
+            Self::OrdinaryReleasePrepared => ORDINARY_RELEASE_PREPARED_MAGIC,
             Self::Restoration => RESTORATION_MAGIC,
             Self::Finalization => FINALIZATION_MAGIC,
             Self::Quiescence => QUIESCENCE_MAGIC,
@@ -111,6 +116,11 @@ impl Kind {
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
         match self {
+            Self::OrdinaryReleasePrepared => {
+                Ok(NativeDisplayOrdinaryReleasePreparation::decode(payload)?
+                    .binding()
+                    .dispatch_digest)
+            }
             Self::FinalRetirementPrepared | Self::FinalRetirementSpent => {
                 Ok(NativeDisplayFinalRetirementPreparation::decode(payload)?
                     .parent()
@@ -193,6 +203,8 @@ impl Kind {
 /// structure grants neither current native authority nor permission to retire.
 #[derive(Default)]
 struct TerminalLineage {
+    originals: BTreeMap<String, Vec<u8>>,
+    ordinary_releases: BTreeMap<String, NativeDisplayOrdinaryReleasePreparation>,
     restorations: BTreeMap<String, NativeDisplayRestorationReservation>,
     terminals: BTreeMap<String, NativeDisplayFinalizationReservation>,
     quiescences: BTreeMap<String, NativeDisplayFinalizationReservation>,
@@ -215,6 +227,18 @@ struct TerminalLineage {
 impl TerminalLineage {
     fn observe(&mut self, kind: Kind, bytes: &[u8]) -> Result<(), String> {
         match kind {
+            Kind::OrdinaryReleasePrepared => {
+                let record = NativeDisplayOrdinaryReleasePreparation::decode(bytes)?;
+                let dispatch = record
+                    .decoded_material()?
+                    .lineage()
+                    .original_dispatch
+                    .to_owned();
+                if self.ordinary_releases.insert(dispatch, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
             Kind::FinalRetirementPrepared | Kind::FinalRetirementSpent => {
                 let record = NativeDisplayFinalRetirementPreparation::decode(bytes)?;
                 let scope = record
@@ -324,7 +348,13 @@ impl TerminalLineage {
                 }
                 Ok(())
             }
-            Kind::Original => Ok(()),
+            Kind::Original => {
+                let dispatch = NativeDisplayRecoveryCheckpoint::stored_dispatch(bytes)?.to_hex();
+                if self.originals.insert(dispatch, bytes.to_vec()).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
             Kind::Restoration => {
                 let record = NativeDisplayRestorationReservation::decode(bytes)?;
                 let scope = record
@@ -390,6 +420,35 @@ impl TerminalLineage {
     }
 
     fn verify(&self) -> Result<(), String> {
+        for (dispatch, record) in &self.ordinary_releases {
+            record.validate_original(self.originals.get(dispatch).ok_or_else(unavailable)?)?;
+            let material = record.decoded_material()?;
+            let topology = material.original().topology();
+            for (other_dispatch, other) in &self.ordinary_releases {
+                if other_dispatch == dispatch {
+                    continue;
+                }
+                let other = other.decoded_material()?;
+                let other_topology = other.original().topology();
+                if topology.session().boot() == other_topology.session().boot()
+                    && topology.session().uid() == other_topology.session().uid()
+                    && topology.seat() == other_topology.seat()
+                {
+                    return Err(unavailable());
+                }
+            }
+            for restoration in self.restorations.values() {
+                let old = restoration.decoded_material()?;
+                let replacement = old.replacement().topology();
+                if old.original_dispatch() == dispatch
+                    || (replacement.session().boot() == topology.session().boot()
+                        && replacement.session().uid() == topology.session().uid()
+                        && replacement.seat() == topology.seat())
+                {
+                    return Err(unavailable());
+                }
+            }
+        }
         // Every retained finalization must have the exact actual restoration
         // transaction and bound material, even when it is for another scope.
         for (scope, record) in &self.terminals {
@@ -523,6 +582,7 @@ impl TerminalLineage {
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
     for kind in [
         Kind::Original,
+        Kind::OrdinaryReleasePrepared,
         Kind::Restoration,
         Kind::Finalization,
         Kind::Quiescence,
@@ -968,6 +1028,71 @@ fn reserve_kind_at(
 pub(super) fn reserve_stored(dispatch: &ComponentDigest, payload: &[u8]) -> Result<(), String> {
     NativeDisplayRecoveryCheckpoint::validate_stored(payload, dispatch)?;
     reserve_at(&open()?, 0, dispatch, payload)
+}
+
+/// Immutable separate ordinary-release preparation. Publication validates the
+/// complete original parent and all competing ownership under the same flock.
+/// No grant, physical handoff, fence retirement or completion occurs here.
+pub(super) fn reserve_ordinary_release(
+    record: &NativeDisplayOrdinaryReleasePreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::OrdinaryReleasePrepared,
+    )
+}
+
+pub(super) fn read_ordinary_release(
+    record: &NativeDisplayOrdinaryReleasePreparation,
+) -> Result<Vec<u8>, String> {
+    read_ordinary_release_at(&open()?, 0, record)
+}
+
+fn read_ordinary_release_at(
+    fd: &OwnedFd,
+    uid: u32,
+    record: &NativeDisplayOrdinaryReleasePreparation,
+) -> Result<Vec<u8>, String> {
+    directory(fd, uid, false)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut found = None;
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, dispatch, bytes) = read_named_record(fd, uid, name)?;
+            lineage.observe(kind, &bytes)?;
+            if kind == Kind::OrdinaryReleasePrepared
+                && dispatch == record.binding().dispatch_digest
+                && found.replace(bytes).is_some()
+            {
+                return Err(unavailable());
+            }
+        }
+        lineage.verify()?;
+        let bytes = found.ok_or_else(unavailable)?;
+        if bytes != record.canonical_bytes() {
+            return Err(unavailable());
+        }
+        Ok(bytes)
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(bytes), Ok(())) => Ok(bytes),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
 }
 
 pub(super) fn reserve_restoration(

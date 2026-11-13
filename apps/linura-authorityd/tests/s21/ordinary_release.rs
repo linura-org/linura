@@ -422,6 +422,25 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
             )
             .is_err()
     );
+    let mut release_port = ReleasePort(machine.clone(), 0);
+    assert!(
+        restarted
+            .begin_ordinary_display_release(
+                principal(),
+                actor(true),
+                input.clone(),
+                &ReleaseApproval(machine.clone(), 0),
+                &mut port,
+                &mut verifier,
+                &mut release_port,
+            )
+            .is_err()
+    );
+    {
+        let m = machine.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(m.ordinary_release_approvals, 0);
+        assert_eq!(m.ordinary_release_calls, 0);
+    }
     let now = now_unix_ms();
     if now <= deadline {
         std::thread::sleep(std::time::Duration::from_millis(deadline - now + 1));
@@ -429,7 +448,7 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     let plan = value(restarted.plan_ordinary_display_release(
         principal(),
         actor(true),
-        input,
+        input.clone(),
         &mut port,
         &mut verifier,
     ));
@@ -455,4 +474,336 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     assert_eq!(m.applies, 1);
     assert_eq!(m.decisions, 0);
     assert_eq!(m.deadline, deadline);
+    drop(m);
+    let receipt = value(restarted.begin_ordinary_display_release(
+        principal(),
+        actor(true),
+        input.clone(),
+        &ReleaseApproval(machine.clone(), 0),
+        &mut port,
+        &mut verifier,
+        &mut release_port,
+    ));
+    assert!(receipt.dispatch_digest.is_some());
+    drop(restarted);
+    let mut restarted =
+        open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+    assert_eq!(
+        value(restarted.begin_ordinary_display_release(
+            principal(),
+            actor(true),
+            input,
+            &ReleaseApproval(machine.clone(), 1),
+            &mut port,
+            &mut verifier,
+            &mut release_port,
+        )),
+        receipt
+    );
+    let m = machine.lock().unwrap_or_else(|_| unreachable!());
+    assert_eq!(m.ordinary_release_approvals, 1);
+    assert_eq!(m.ordinary_release_calls, 1);
+    assert_eq!(m.applies, 1);
+    assert_eq!(m.decisions, 0);
+    assert_eq!(m.deadline, deadline);
+}
+
+#[derive(Debug)]
+struct ReleaseApproval(Arc<Mutex<Machine>>, u8);
+impl linura_control::OrdinaryDisplayReleaseAuthorizer for ReleaseApproval {
+    fn authorize_ordinary_release(
+        &self,
+        challenge: &linura_control::OrdinaryDisplayReleaseChallenge,
+    ) -> Result<TrustedHumanApproval, String> {
+        let managed = challenge.managed();
+        assert_eq!(managed.change_key(), "release_ordinary");
+        assert_eq!(
+            managed.approval_class(),
+            linura_control::ManagedApprovalClass::Administrator
+        );
+        assert!(
+            managed
+                .request_id()
+                .as_str()
+                .starts_with("request:v010:display-ordinary-release:")
+        );
+        assert_eq!(
+            managed.desired_value().as_bytes(),
+            value(linura_provider_sdk::display_ordinary_release_effect(
+                challenge.material()
+            ))
+            .canonical_payload
+        );
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        m.ordinary_release_approvals += 1;
+        match self.1 {
+            1 => return Err("simulated protected release cancellation".into()),
+            2 => {
+                return Ok(TrustedHumanApproval::from_privileged_local_boundary(
+                    managed.principal().clone(),
+                ));
+            }
+            3 => {
+                return Ok(TrustedHumanApproval::from_authorized_challenge(
+                    value(PrincipalId::new("unix:uid:1001")),
+                    managed,
+                ));
+            }
+            4 => m.native_base_drift = true,
+            5 => m.ordinary_root_fault = 1,
+            _ => (),
+        }
+        Ok(TrustedHumanApproval::from_authorized_challenge(
+            managed.principal().clone(),
+            managed,
+        ))
+    }
+}
+#[derive(Debug)]
+struct ReleasePort(Arc<Mutex<Machine>>, u8);
+impl linura_control::OrdinaryDisplayReleasePort for ReleasePort {
+    fn dispatch_ordinary_release(
+        &mut self,
+        release: linura_control::AuthorizedOrdinaryDisplayRelease,
+    ) -> Result<ExecutionOutcome, String> {
+        let (authorization, material, deadline) = release.into_executor_request();
+        assert!(deadline > now_unix_ms() && deadline - now_unix_ms() <= 15_000);
+        let (effect, binding) = authorization.into_executor_request();
+        assert_eq!(
+            effect,
+            value(linura_provider_sdk::display_ordinary_release_effect(
+                &material
+            ))
+        );
+        value(binding.validate_for(&effect));
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        m.ordinary_release_calls += 1;
+        let original = m.binding.as_ref().unwrap_or_else(|| unreachable!());
+        assert_ne!(binding.transaction_id, original.transaction_id);
+        assert_ne!(binding.dispatch_digest, original.dispatch_digest);
+        assert_ne!(binding.effect_digest, original.effect_digest);
+        if self.1 == 1 {
+            return Err("simulated Root reservation lost reply".into());
+        }
+        ExecutionOutcome::new(
+            ExecutionDisposition::Dispatched,
+            if self.1 == 2 {
+                linura_provider_sdk::ComponentDigest::from_bytes([9; 32])
+            } else {
+                binding.dispatch_digest
+            },
+            "simulated Root grant preparation only; no physical release",
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+
+pub(super) fn ordinary_release_dispatch_is_separately_approved_durable_and_never_replayed() {
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
+    ] {
+        // Approval faults, persistence failure at every predispatch write, lost
+        // and substituted acknowledgments all retain the original protection.
+        for case in 0..=22 {
+            let database = TestDatabase::new();
+            let machine = Arc::new(Mutex::new(Machine::default()));
+            let mut port = Port(machine.clone());
+            let mut verifier = Verifier(machine.clone());
+            let original = display_request("ordinary-release-dispatch-original");
+            let mut control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                original.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier,
+            ));
+            value(control.decide_display_layout(
+                principal(),
+                actor(true),
+                &original.request_id,
+                action,
+                &Decision::approve(&machine),
+                &mut port,
+                &mut verifier,
+            ));
+            drop(control);
+            let fail_at = match case {
+                6..=10 => usize::from(case - 5),
+                13..=17 => usize::from(case - 12),
+                18..=22 => usize::from(case - 17),
+                _ => 0,
+            };
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_release_write_fault = match case {
+                13..=17 => 1,
+                18..=22 => 2,
+                _ => 0,
+            };
+            let mut control = open_with_previews(
+                database.path(),
+                &machine,
+                fail_at,
+                previews_inner(&machine, true),
+            );
+            let before = value(control.inspect_ordinary_display_original(
+                principal(),
+                &original.request_id,
+                &mut port,
+                &mut verifier,
+            ))
+            .original_snapshot()
+            .clone();
+            let input = linura_control::OrdinaryDisplayReleaseRequest {
+                operation_id: "ordinary-release-dispatch".into(),
+                original_request: original.request_id.clone(),
+                reason: original.reason.clone(),
+            };
+            let authorization = ReleaseApproval(machine.clone(), if case <= 5 { case } else { 0 });
+            let mut release = ReleasePort(
+                machine.clone(),
+                if (11..=12).contains(&case) {
+                    case - 10
+                } else {
+                    0
+                },
+            );
+            let result = control.begin_ordinary_display_release(
+                principal(),
+                actor(true),
+                input.clone(),
+                &authorization,
+                &mut port,
+                &mut verifier,
+                &mut release,
+            );
+            assert_eq!(
+                result.is_ok(),
+                case == 0 || case == 11,
+                "{action:?} case {case}: {result:?}; approvals/dispatches/records {:?}",
+                {
+                    let m = machine.lock().unwrap_or_else(|_| unreachable!());
+                    (
+                        m.ordinary_release_approvals,
+                        m.ordinary_release_calls,
+                        m.journal_keys.clone(),
+                    )
+                }
+            );
+            {
+                let m = machine.lock().unwrap_or_else(|_| unreachable!());
+                assert_eq!(m.ordinary_release_approvals, 1);
+                assert_eq!(
+                    m.ordinary_release_calls,
+                    usize::from(case == 0 || (11..=12).contains(&case))
+                );
+                assert_eq!(m.applies, 1);
+                assert_eq!(m.decisions, 1);
+            }
+            if case == 0 || (11..=12).contains(&case) {
+                let denied = ReleaseApproval(machine.clone(), 1);
+                let receipt = value(control.begin_ordinary_display_release(
+                    principal(),
+                    actor(true),
+                    input.clone(),
+                    &denied,
+                    &mut port,
+                    &mut verifier,
+                    &mut release,
+                ));
+                assert!(receipt.dispatch_digest.is_some());
+                assert!(
+                    control
+                        .begin_display_layout(
+                            principal(),
+                            actor(true),
+                            display_request("ordinary-release-competing-apply"),
+                            &approval(),
+                            &mut port,
+                            &mut verifier
+                        )
+                        .is_err()
+                );
+                let mut competing = input.clone();
+                competing.operation_id = "ordinary-release-competing-owner".into();
+                assert!(
+                    control
+                        .begin_ordinary_display_release(
+                            principal(),
+                            actor(true),
+                            competing,
+                            &denied,
+                            &mut port,
+                            &mut verifier,
+                            &mut release
+                        )
+                        .is_err()
+                );
+                drop(control);
+                let mut restarted = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+                assert_eq!(
+                    value(restarted.begin_ordinary_display_release(
+                        principal(),
+                        actor(true),
+                        input.clone(),
+                        &denied,
+                        &mut port,
+                        &mut verifier,
+                        &mut release
+                    )),
+                    receipt
+                );
+                assert!(
+                    restarted
+                        .begin_ordinary_display_release(
+                            value(AuthenticatedPrincipal::new("unix:uid:1001")),
+                            actor(true),
+                            input,
+                            &denied,
+                            &mut port,
+                            &mut verifier,
+                            &mut release
+                        )
+                        .is_err()
+                );
+                assert!(
+                    restarted
+                        .begin_display_layout(
+                            principal(),
+                            actor(true),
+                            display_request("ordinary-release-competing-restart"),
+                            &approval(),
+                            &mut port,
+                            &mut verifier
+                        )
+                        .is_err()
+                );
+                assert_eq!(
+                    value(restarted.inspect_ordinary_display_original(
+                        principal(),
+                        &original.request_id,
+                        &mut port,
+                        &mut verifier
+                    ))
+                    .original_snapshot(),
+                    &before
+                );
+                let m = machine.lock().unwrap_or_else(|_| unreachable!());
+                assert_eq!(m.ordinary_release_approvals, 1);
+                assert_eq!(m.ordinary_release_calls, 1);
+                assert_eq!(m.applies, 1);
+                assert_eq!(m.decisions, 1);
+            }
+        }
+    }
 }

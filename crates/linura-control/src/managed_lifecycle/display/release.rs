@@ -1,11 +1,17 @@
-//! Read-only, authenticated eligibility inspection for ordinary display
-//! post-commit release. This is explicitly NOT an execution credential, Root
-//! reservation, evidence-retirement operation, or native fence-release path.
-//! A separate, still-unimplemented Root/native protocol must independently
-//! authenticate and consume a durable one-use post-commit release authority.
+//! Ordinary post-commit eligibility, canonical review and durable preparation.
+//! Inspection cannot produce execution authority. The separate managed release
+//! operation requires fresh protected approval and retains a one-use Root
+//! preparation; its ACK is neither physical handoff nor completion evidence.
+//! Native grant spend, physical verification and ordered retirement remain
+//! separate requirements before any protective fence can be released.
 
 use super::*;
+mod execution;
 mod original;
+pub use execution::{
+    AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayReleaseAuthorizer,
+    OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
+};
 mod plan;
 pub use original::OrdinaryDisplayOriginalInspection;
 use original::invalid_original;

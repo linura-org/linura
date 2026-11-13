@@ -396,6 +396,7 @@ impl linura_control::OriginalDisplayRootPowerRetirementPort for RootPowerPort {
         }
     }
 }
+#[test]
 fn root_power_requires_original_review_and_independent_retired_phase() {
     for (lost_reply, effect, fault) in [
         (false, true, 0),
@@ -539,6 +540,7 @@ fn root_power_requires_original_review_and_independent_retired_phase() {
     }
 }
 
+#[test]
 fn current_completion_is_signed_durable_and_recovers_metadata_without_replaying_effects() {
     for (kind, fault) in [
         (0, 0),
@@ -823,6 +825,7 @@ fn committed_is_not_competing_apply_or_cleanup_authority(
     // Compare every retained intent/checkpoint/proof byte, not just row count.
     assert_eq!(retained_recovery_bytes(database, machine), retained);
 }
+#[test]
 fn current_qualification_requires_original_review_and_independent_matching_root_and_native_sources()
 {
     for fault in 0..12 {
@@ -1066,6 +1069,7 @@ impl linura_control::OriginalDisplayReleasedCurrentPort for ReleasedCurrentPort 
         }
     }
 }
+#[test]
 fn final_retirement_requires_original_review_independent_postconditions_and_durable_completion() {
     for fault in 0..=13 {
         let database = TestDatabase::new();
@@ -1267,6 +1271,7 @@ fn final_retirement_requires_original_review_independent_postconditions_and_dura
     }
 }
 
+#[test]
 fn native_power_requires_original_live_review_and_independent_post_effect_state() {
     for fault in 1..=3 {
         let database = TestDatabase::new();
@@ -1639,12 +1644,6 @@ fn restart_cannot_reconstruct_review_for_another_root_reservation_write() {
 
 #[test]
 fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_replay() {
-    final_retirement_requires_original_review_independent_postconditions_and_durable_completion();
-    native_power_requires_original_live_review_and_independent_post_effect_state();
-    root_power_requires_original_review_and_independent_retired_phase();
-    current_completion_is_signed_durable_and_recovers_metadata_without_replaying_effects();
-    current_qualification_requires_original_review_and_independent_matching_root_and_native_sources(
-    );
     for (lost_reply, lost_completion_reply) in [(false, false), (false, true), (true, false)] {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));
@@ -1674,6 +1673,8 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
             machine: Some(machine.clone()),
             ..CompletionPort::default()
         };
+        let window_before_completion = expires_at.saturating_sub(now_unix_ms());
+        let completion_started = std::time::Instant::now();
         let attempted = control.dispatch_original_display_completion(
             principal(),
             actor(true),
@@ -1688,7 +1689,12 @@ fn original_native_handoff_verification_is_durable_and_expired_restart_cannot_re
             !lost_reply && !lost_completion_reply,
             "{attempted:?}"
         );
-        assert_eq!(completion.calls, usize::from(!lost_reply));
+        assert_eq!(
+            completion.calls,
+            usize::from(!lost_reply),
+            "lost_reply={lost_reply}, lost_completion_reply={lost_completion_reply}, window_before_ms={window_before_completion}, elapsed={:?}, attempted={attempted:?}",
+            completion_started.elapsed(),
+        );
         if let Ok(receipt) = attempted {
             assert_eq!(receipt.request(), &request);
             assert_eq!(receipt.transaction(), &transaction);

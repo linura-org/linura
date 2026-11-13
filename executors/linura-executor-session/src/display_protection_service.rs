@@ -10,10 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use linura_linux_session::{
-    MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION,
-    NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
-    NativeDisplayFinalRetirementPreparation, NativeDisplayFinalizationReservation,
-    NativeDisplayKernelSubscription, NativeDisplayPowerRetirementPreparation,
+    MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, MAX_NATIVE_DISPLAY_ORDINARY_RELEASE,
+    MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayCompletionPreparation,
+    NativeDisplayCurrentCommitPreparation, NativeDisplayFinalRetirementPreparation,
+    NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
     NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
     NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
     NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
@@ -32,6 +33,7 @@ const MAX_STARTUPS: usize = 64;
 mod completion;
 mod current_commit;
 mod final_retirement;
+mod ordinary;
 mod power;
 mod root_power;
 
@@ -110,6 +112,7 @@ struct Admission {
     // Reserve before publication and retain even after failed sync/readback or
     // missing files. Neither disk loss nor restart reconstructs this lifetime.
     finalizations: BTreeMap<String, FinalizationReservation>,
+    ordinary_releases: BTreeMap<String, (ComponentDigest, String)>,
     // Reserve in memory before any synced preparation write; even disk errors
     // cannot make this original live Control attempt look unused.
     retirements: BTreeMap<String, ComponentDigest>,
@@ -441,6 +444,11 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sender: &str,
         scope: linura_core::DisplayOrdinaryReleaseScope,
     ) -> zbus::fdo::Result<Vec<u8>>;
+    fn reserve_ordinary_release(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryReleasePreparation,
+    ) -> zbus::fdo::Result<bool>;
     fn read_original(
         &self,
         sender: &str,
@@ -758,6 +766,13 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn reserve_ordinary_release(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryReleasePreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.reserve_ordinary_release_mechanism(sender, record)
+    }
     fn reserve_final_retirement(
         &self,
         sender: &str,
@@ -2122,6 +2137,26 @@ impl<P: ProtectionPort> ProtectionService<P> {
         .await
     }
     #[zbus(out_args("accepted"))]
+    async fn reserve_ordinary_release(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        if preparation.len() > MAX_NATIVE_DISPLAY_ORDINARY_RELEASE {
+            return Err(unavailable());
+        }
+        let record = NativeDisplayOrdinaryReleasePreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_ordinary_release(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
     async fn prepare_retirement(
         &self,
         preparation: &[u8],
@@ -2507,6 +2542,13 @@ mod tests {
         ) -> zbus::fdo::Result<Vec<u8>> {
             Err(unavailable())
         }
+        fn reserve_ordinary_release(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryReleasePreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
         fn read_original(
             &self,
             _: &str,
@@ -2548,7 +2590,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 23);
+            assert_eq!(text.matches("<method ").count(), 24);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2577,6 +2619,7 @@ mod tests {
             "Reserve",
             "Verify",
             "ReadOrdinaryOriginal",
+            "ReserveOrdinaryRelease",
             "ReadOriginal",
             "ReadFinalization",
             "ReadCompletion",
@@ -2805,6 +2848,47 @@ mod tests {
         assert!(async_io::block_on(service.read_finalization(&scope, message.header())).is_err());
         drop(slot);
     }
+    #[test]
+    fn ordinary_release_rpc_needs_authenticated_sender_bounded_material_and_live_port() {
+        let service = ProtectionService::new(DenyProtection);
+        let (_, record) = super::super::display_checkpoint::tests::ordinary_release_fixture(7);
+        let bytes = record.canonical_bytes();
+        let anonymous = zbus::Message::method_call(PATH, "ReserveOrdinaryRelease")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(matches!(
+            async_io::block_on(service.reserve_ordinary_release(&bytes, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let message = zbus::Message::method_call(PATH, "ReserveOrdinaryRelease")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .sender(":1.7")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        for malformed in [
+            Vec::new(),
+            b"LNRT:1\n".to_vec(),
+            bytes[..bytes.len() - 1].to_vec(),
+            vec![0; MAX_NATIVE_DISPLAY_ORDINARY_RELEASE + 1],
+        ] {
+            assert!(
+                async_io::block_on(service.reserve_ordinary_release(&malformed, message.header()))
+                    .is_err()
+            );
+        }
+        assert!(
+            async_io::block_on(service.reserve_ordinary_release(&bytes, message.header())).is_err()
+        );
+        let slot = StartupSlot::enter(&service.restoration_pending)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            async_io::block_on(service.reserve_ordinary_release(&bytes, message.header())).is_err()
+        );
+        drop(slot);
+    }
+
     #[test]
     fn ordinary_original_read_requires_sender_exact_same_scope_and_live_admission() {
         let service = ProtectionService::new(DenyProtection);

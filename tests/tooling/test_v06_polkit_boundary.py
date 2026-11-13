@@ -62,8 +62,8 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             .read_text(encoding="ascii")
             .splitlines()
         )
-        self.assertEqual(len(names), 71)
-        self.assertEqual(len(set(names)), 71)
+        self.assertEqual(len(names), 76)
+        self.assertEqual(len(set(names)), 76)
         self.assertEqual(inventory, sorted(names))
         self.assertEqual(
             sum(
@@ -91,7 +91,7 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             "| tee /tmp/v06-legacy-matrix.log",
             script,
         )
-        self.assertIn("71 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("76 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
@@ -106,7 +106,10 @@ matrix() {
 }
 """
         for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
-            (71, 11, 0, 0, 0, 0, True),
+            (76, 11, 0, 0, 0, 0, True),
+            (71, 11, 0, 0, 0, 0, False),
+            (75, 11, 0, 0, 0, 0, False),
+            (77, 11, 0, 0, 0, 0, False),
             (67, 11, 0, 0, 0, 0, False),
             (70, 11, 0, 0, 0, 0, False),
             (72, 11, 0, 0, 0, 0, False),
@@ -124,12 +127,12 @@ matrix() {
             (65, 11, 0, 0, 0, 0, False),
             (66, 11, 0, 0, 0, 0, False),
             (68, 11, 0, 0, 0, 0, False),
-            (71, 10, 0, 0, 0, 0, False),
-            (71, 12, 0, 0, 0, 0, False),
-            (71, 11, 1, 0, 0, 0, False),
-            (71, 11, 0, 1, 0, 0, False),
-            (71, 11, 0, 0, 1, 0, False),
-            (71, 11, 0, 0, 0, 1, False),
+            (76, 10, 0, 0, 0, 0, False),
+            (76, 12, 0, 0, 0, 0, False),
+            (76, 11, 1, 0, 0, 0, False),
+            (76, 11, 0, 1, 0, 0, False),
+            (76, 11, 0, 0, 1, 0, False),
+            (76, 11, 0, 0, 0, 1, False),
         ):
             with (
                 self.subTest(

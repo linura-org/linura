@@ -172,7 +172,11 @@ impl NativeHandoffVerified {
         let decoded = DisplayFinalizationMaterial::decode(material).map_err(|_| invalid())?;
         let scope = decoded.recovery_scope().map_err(|_| invalid())?;
         let lineage = frames.lineage();
-        observation.require_current(now).map_err(|_| invalid())?;
+        observation.require_current(now).map_err(|_| {
+            ManagedLifecycleError::Verification(
+                "original handoff observation expired before proof capture".into(),
+            )
+        })?;
         let window = frames.window();
         let frame_expiry = window
             .observed_unix_ms
@@ -184,6 +188,11 @@ impl NativeHandoffVerified {
             .ok_or_else(invalid)?
             .min(parent.expiry())
             .min(frame_expiry);
+        if now < window.observed_unix_ms || now >= expiry {
+            return Err(ManagedLifecycleError::Verification(
+                "original handoff grant/frame deadline expired before proof capture".into(),
+            ));
+        }
         if snapshot.principal != *principal
             || snapshot.request_id != request.request_id
             || snapshot.transaction_id

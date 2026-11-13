@@ -10,6 +10,16 @@ use crate::{ContentDigest, TransactionStoreError};
 pub const MAX_RETAINED_REQUEST_BYTES: usize = 256 * 1024;
 pub const RETAINED_REQUEST_FORMAT: u32 = 1;
 
+/// Synchronous read lifetime only: no approval, execution or writer handle.
+/// Implementations may hold an authenticated storage snapshot until drop.
+/// The borrow prevents journal mutation; never retain this across a provider
+/// or effect boundary. A new scope must fully revalidate current storage.
+pub trait ApprovedRequestReadScope: Debug {}
+
+#[derive(Debug)]
+struct IndividuallyCheckedReads;
+impl ApprovedRequestReadScope for IndividuallyCheckedReads {}
+
 /// Opaque, bounded canonical structured request supplied by trusted Control.
 /// The payload contains no reusable approval, executor handle or secret.
 /// Persistence authenticates its principal/identity and bytes; only Control
@@ -89,4 +99,14 @@ pub trait ApprovedRequestJournal: Debug + Send {
         request_id: &RequestId,
     ) -> Result<RetainedRequest, TransactionStoreError>;
     fn integrity_check(&self) -> Result<(), TransactionStoreError>;
+
+    /// Validate all history before one synchronous group of authenticated
+    /// loads. The default preserves individual load validation; an adapter may
+    /// instead hold a checked read transaction, without caching record values.
+    fn checked_read_scope(
+        &self,
+    ) -> Result<Box<dyn ApprovedRequestReadScope + '_>, TransactionStoreError> {
+        self.integrity_check()?;
+        Ok(Box::new(IndividuallyCheckedReads))
+    }
 }

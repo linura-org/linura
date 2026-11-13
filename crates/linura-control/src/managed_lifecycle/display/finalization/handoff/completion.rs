@@ -156,11 +156,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .display_reviews
             .remove(&transaction)
             .ok_or_else(invalid)?;
-        NativeCompletionPrepared::require_absent(
-            self.display_journal()?,
-            &principal_id,
-            terminal_request,
-        )?;
         // This inspection authenticates the exact terminal and spend before
         // probing, and reloads them after independent proof retention. Reuse
         // its private qualified anchors: an identical scan before it has no
@@ -176,7 +171,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        self.revalidate_completion_review(&principal, terminal, &review)?;
         let dispatch = terminal
             .receipt
             .dispatch_digest
@@ -195,11 +189,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             now_ms()?,
         )?;
         self.revalidate_completion_review(&principal, terminal, &review)?;
+        // Exclusive absence validation remains in retain_once immediately
+        // before its durable write. The review was already consumed before
+        // inspection; no observation or retry can reconstruct that review.
         preparation.retain_once(self.request_journal.as_deref_mut().ok_or_else(invalid)?)?;
-        if self.terminal_inspection_context(&principal, terminal_request)? != *terminal
-            || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != *terminal
+                || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
+            {
+                return Err(invalid());
+            }
         }
         self.revalidate_completion_review(&principal, terminal, &review)?;
         // Policy and durable readbacks consume the original budget too. Check
@@ -232,11 +233,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "original completion outcome uncertain; no replay".into(),
             )
         })?;
-        preparation.require_readback(self.display_journal()?)?;
-        if self.terminal_inspection_context(&principal, terminal_request)? != *terminal
-            || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
         {
-            return Err(invalid());
+            let checked = self.checked_display_history()?;
+            preparation.require_readback(self.display_journal()?)?;
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != *terminal
+                || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
+            {
+                return Err(invalid());
+            }
         }
         let review = self
             .display_reviews

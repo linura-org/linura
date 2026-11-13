@@ -12,6 +12,7 @@ use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValu
 #[derive(Debug)]
 struct CheckedDisplayHistoryRead<'a> {
     journal: &'a dyn ApprovedRequestJournal,
+    _scope: Box<dyn linura_transaction::ApprovedRequestReadScope + 'a>,
 }
 impl CheckedDisplayHistoryRead<'_> {
     fn original_request(
@@ -102,7 +103,9 @@ pub use finalization::{
     OriginalDisplayRootPowerRetirementPort,
 };
 pub use release::{
-    OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseInspection,
+    AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayOriginalInspection,
+    OrdinaryDisplayReleaseAuthorizer, OrdinaryDisplayReleaseChallenge,
+    OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
     OrdinaryDisplayReleaseRequest,
 };
 pub use restoration::{
@@ -666,6 +669,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         for prefix in [
             DISPLAY_RESTORATION_REQUEST_PREFIX,
             DISPLAY_FINALIZATION_REQUEST_PREFIX,
+            DISPLAY_ORDINARY_RELEASE_REQUEST_PREFIX,
         ] {
             for state in [
                 TransactionState::Indeterminate,
@@ -734,6 +738,28 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                                 )
                             })?;
                         restoration.original().topology().seat() == target.topology().seat()
+                    } else if prefix == DISPLAY_ORDINARY_RELEASE_REQUEST_PREFIX {
+                        let intent =
+                            crate::display_ordinary_release_intent::OrdinaryReleaseIntent::load(
+                                self.display_journal()?,
+                                &snapshot.principal,
+                                &retained_request,
+                            )?;
+                        intent.require_claim(
+                            self.display_journal()?,
+                            &snapshot.principal,
+                            &retained_request,
+                        )?;
+                        linura_core::DisplayOrdinaryReleaseMaterial::decode(intent.material())
+                            .map_err(|_| {
+                                ManagedLifecycleError::Authority(
+                                    "ordinary display release ownership material invalid".into(),
+                                )
+                            })?
+                            .original()
+                            .topology()
+                            .seat()
+                            == target.topology().seat()
                     } else {
                         let intent = crate::display_finalization_intent::FinalizationIntent::load(
                             self.display_journal()?,
@@ -838,11 +864,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         &self,
     ) -> Result<CheckedDisplayHistoryRead<'_>, ManagedLifecycleError> {
         let journal = self.display_journal()?;
-        journal
-            .integrity_check()
+        let scope = journal
+            .checked_read_scope()
             .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         self.authority.integrity_check()?;
-        Ok(CheckedDisplayHistoryRead { journal })
+        Ok(CheckedDisplayHistoryRead {
+            journal,
+            _scope: scope,
+        })
     }
 
     fn retained_display_request(

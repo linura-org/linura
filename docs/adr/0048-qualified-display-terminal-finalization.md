@@ -188,13 +188,14 @@ native/Root continuity, original connection, monotonic clocks and bounded status
 probes still govern that held lifetime. Loss never reconstructs or renews authority.
 The typed Control finalization authorizer recomputes material's SDK payload and
 resource, checks the exact principal/administrator class, and consumes that separate
-native proof. Generic approval cannot substitute. Root/native prepared release,
-current admission and final completion verification remain unimplemented.
+native proof. Generic approval cannot substitute. The subsequent original
+Root/native release, current qualification and final completion continuations
+are described below; this approval mechanism alone provides none of them.
 
 The private prepared executor endpoint acknowledges quiescence only. No public
-production mutation, Root retirement or native release is activated. The remaining
-terminal finalization workflow, normal Keep/Revert ordering, Committed adoption, safe supersession
-and reference-aware cleanup still require coherent implementation.
+production mutation is activated. Normal Keep/Revert physical release,
+qualified successor/global-admission transfer, Committed adoption, safe
+supersession and reference-aware cleanup still require coherent implementation.
 
 Before activation, qualify the complete exact-source native failure matrix:
 multi-output rules/overlays/modes/frames, compositor loss at each phase, stale or
@@ -360,7 +361,7 @@ rollback also refuses. Removing the review precedes persistence and dispatch,
 so storage ambiguity, a lost completion reply or a restart cannot rearm it.
 Read-only handoff reconciliation never creates this continuation. Its receipt
 records only the attempt: an adapter ACK leaves Control Indeterminate and every
-unimplemented native/Root retirement gate outstanding. The private completion
+subsequent native/Root retirement gate outstanding. The private completion
 adapter now transfers the original live Root lifetime through `LNCP:1` and
 `LNCS:1`; ordered fence retirement and final independent commit are still required.
 In particular, RootRetiredHeld, native Confirmed/Restored and a physical ACK
@@ -713,3 +714,53 @@ fault. Control therefore refuses an Expired release plan until that authenticate
 original deadline has elapsed. This is the release disposition at planning time,
 not a claim about the cause of native restoration; it never renews the old timer
 or grants authority from the restored flag. Restart preserves the same refusal.
+
+Ordinary release preparation has a separate canonical execution entry after
+planning. Its sealed challenge binds the full LNOR material and the new managed
+request; cancellation, unscoped local proof, foreign principal or changed
+original/source facts cannot prepare an effect. Control retains the canonical
+request, complete material and immutable per-original owner claim before durable
+prepare. Reserved and dispatched records are read back before handing a
+non-cloneable authorization to the narrow Root adapter. The process-local
+ordinary-purpose review is retained separately from the old Keep/finalization
+reviews. Exact retries, including after restart and lost acknowledgment, return
+comparison receipts only and cannot invoke the adapter again. An unresolved
+ordinary owner also excludes competing applies across the seat.
+
+The private `ReserveOrdinaryRelease` method authenticates the actual supervised
+Control sender and requires the original ordinary startup peer and live original
+kernel/power witnesses. Its closed preparation binds complete LNOR material, a
+separate native execution binding and both original producer clocks. Root claims
+its live preparation before fallible storage work. Immutable `LNOP:1` publication
+requires the actual complete original checkpoint under the same directory lock;
+readback validates all retained ancestry and excludes competing restoration
+ownership. Corrupt or missing parents quarantine subsequent reservations rather
+than reopening authority. An ACK retains protection and grants no native release.
+The separate protected native release interaction, authenticated spend, physical
+handoff, independent postconditions and ordered completion remain implementation
+work; this preparation increment does not complete Stage 4 or Stage 5.
+
+Original first-frame inspection also groups terminal and restoration history
+loads inside one synchronous checked read on each side of the provider boundary.
+Rust's shared borrow prevents provider calls or writes while that checked scope
+exists. Full integrity checks still precede both groups, every record/snapshot
+is freshly authenticated, post-retention readbacks remain, and neither the
+original spend deadline nor the immutable first-proof window can be renewed.
+Distinct reconciliation errors identify native/Root, restoration, terminal,
+spent-ancestry and deadline failures. Exact-source guest qualification is still
+required to establish that this resolves the observed TCG timing refusal.
+
+Checked synchronous history reads now hold a read-only SQLite transaction rather
+than starting a separate identity-validation transaction for every row. Scope
+entry still checks the live schema, identity, durability settings, SQLite
+integrity and every retained record. Each subsequent load still authenticates
+that row's exact principal/key/bytes/digest/MAC from the same coherent snapshot;
+record values are not cached. Nested record integrity checks revalidate live
+identity/durability settings and require the same open transaction with its
+unchanged SQLite write counter. They reuse the full-history check only inside
+that immutable snapshot. The scoped shared borrow ends before a provider call,
+write or effect; the next scope revalidates a new storage snapshot. Nested scope
+creation and writes are refused, and failed rollback or an invalid scoped row
+poisons the journal lifetime. Forgetting a scope cannot create a new current
+inspection or restore writer access. This changes no on-disk schema, authority
+record, freshness interval, immutable first proof, Root grant or policy gate.

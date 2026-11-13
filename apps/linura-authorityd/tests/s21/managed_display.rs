@@ -41,6 +41,9 @@ struct Machine {
     ordinary_root_reads: u64,
     ordinary_root_fault: u8,
     ordinary_checkpoint_unavailable: bool,
+    ordinary_release_approvals: usize,
+    ordinary_release_calls: usize,
+    ordinary_release_write_fault: u8,
     original_protection_lost: bool,
     restoration_calls: usize,
     restoration_outcome: u8,
@@ -149,6 +152,7 @@ fn display_request(operation: &str) -> PlanDesiredStateRequest {
 
 #[test]
 fn replacement_review_reloads_authenticated_history_without_replaying_an_apply() {
+    ordinary_release::ordinary_release_dispatch_is_separately_approved_durable_and_never_replayed();
     ordinary_release::original_source_and_terminal_inspection_are_read_only_across_restart();
     ordinary_release::early_automatic_restoration_is_not_expiry_release_authority();
     let database = TestDatabase::new();
@@ -635,6 +639,13 @@ struct FailingJournal {
     writes: usize,
 }
 impl ApprovedRequestJournal for FailingJournal {
+    fn checked_read_scope(
+        &self,
+    ) -> Result<Box<dyn linura_transaction::ApprovedRequestReadScope + '_>, TransactionStoreError>
+    {
+        self.inner.checked_read_scope()
+    }
+
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
         self.machine
             .lock()
@@ -870,6 +881,17 @@ impl ApprovedRequestJournal for FailingJournal {
         }
         self.writes += 1;
         if self.writes == self.fail_at {
+            let fault = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .ordinary_release_write_fault;
+            if fault == 1 {
+                return Ok(()); // A false ACK is never readback.
+            }
+            if fault == 2 {
+                self.inner.retain(record)?;
+            }
             self.machine
                 .lock()
                 .unwrap_or_else(|_| unreachable!("fixture poisoned"))
