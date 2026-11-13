@@ -22,6 +22,10 @@ mod display_retirement_preparation;
 pub use display_retirement_preparation::{
     MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION, NativeDisplayRetirementPreparation,
 };
+mod display_ordinary_release_preparation;
+pub use display_ordinary_release_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_RELEASE, NativeDisplayOrdinaryReleasePreparation,
+};
 mod display_completion_preparation;
 pub use display_completion_preparation::current_commit::{
     MAX_NATIVE_DISPLAY_CURRENT_COMMIT, NativeDisplayCurrentCommitPreparation,

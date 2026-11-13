@@ -221,6 +221,7 @@ class S17DeploymentTests(unittest.TestCase):
                     "send_member": method,
                 }
                 for method in (
+                    "ReadOrdinaryOriginal",
                     "ReserveFinalRetirement",
                     "CompleteReleasedCurrent",
                     "ReadFinalRetirement",

@@ -14,7 +14,8 @@ pub use display::{
     AuthorizedOriginalDisplayRootPowerRetirement, DISPLAY_CONFIRMATION_WINDOW_MS,
     DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
     DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
-    IndependentDisplayVerifier, OrdinaryDisplayReleaseInspection, OriginalDisplayCompletionPort,
+    IndependentDisplayVerifier, OrdinaryDisplayOriginalInspection,
+    OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleaseRequest, OriginalDisplayCompletionPort,
     OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
     OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
     OriginalDisplayCurrentVerification, OriginalDisplayFinalRetirementPort,
@@ -79,6 +80,7 @@ const SESSION_REQUEST_PREFIX: &str = "request:v010:session-lock:";
 const TRANSITION_REQUEST_PREFIX: &str = "request:v010:session-transition:";
 const DISPLAY_REQUEST_PREFIX: &str = "request:v010:display-layout:";
 const DISPLAY_RESTORATION_REQUEST_PREFIX: &str = "request:v010:display-restoration:";
+const DISPLAY_ORDINARY_RELEASE_REQUEST_PREFIX: &str = "request:v010:display-ordinary-release:";
 const DISPLAY_FINALIZATION_REQUEST_PREFIX: &str = "request:v010:display-finalization:";
 const MAX_OPERATION_ID_BYTES: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_ATTEMPTS: usize = 64;
@@ -497,6 +499,8 @@ pub fn managed_request_id(
         DISPLAY_REQUEST_PREFIX
     } else if is_display_restoration_request(request) {
         DISPLAY_RESTORATION_REQUEST_PREFIX
+    } else if is_display_ordinary_release_request(request) {
+        DISPLAY_ORDINARY_RELEASE_REQUEST_PREFIX
     } else if is_display_finalization_request(request) {
         DISPLAY_FINALIZATION_REQUEST_PREFIX
     } else {
@@ -2013,6 +2017,16 @@ fn registered_route(
     resource: &ResourceId,
 ) -> Result<(&'static str, &'static str), ManagedLifecycleError> {
     if provider == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && capability == linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+    {
+        linura_core::DisplayOrdinaryReleaseScope::from_resource(resource)
+            .map_err(|e| ManagedLifecycleError::UnsupportedEffect(e.to_string()))?;
+        return Ok((
+            crate::operation_registry::MANAGED_DISPLAY_ORDINARY_RELEASE_OPERATION_ID,
+            crate::operation_registry::MANAGED_DISPLAY_ORDINARY_RELEASE_RISK_FLOOR_RULE_ID,
+        ));
+    }
+    if provider == linura_observation::DISPLAY_RECOVERY_PROVIDER
         && capability == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
     {
         linura_core::DisplayRecoveryScope::from_resource(resource)
@@ -2098,7 +2112,7 @@ fn required_approval_for_request(
     match (request.provider.as_str(), key.as_str(), value.as_str()) {
         (
             linura_observation::DISPLAY_RECOVERY_PROVIDER,
-            "restore_original" | "finalize_original",
+            "restore_original" | "finalize_original" | "release_ordinary",
             _,
         ) => Ok(ApprovalClass::Administrator),
         (linura_observation::DISPLAY_PROVIDER, "layout", _) => Ok(ApprovalClass::Administrator),
@@ -2148,6 +2162,10 @@ fn effect_from_candidate(
     let change = &subject.changes()[0];
     let expected_key = if subject.provider().as_str()
         == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && subject.capability().as_str() == linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+    {
+        "release_ordinary"
+    } else if subject.provider().as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
         && subject.capability().as_str()
             == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
     {
@@ -2188,6 +2206,17 @@ fn effect_from_parts(
             return Err(ManagedLifecycleError::UnsupportedEffect(
                 "original restoration requires one complete material".into(),
             ));
+        }
+        if capability == linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY {
+            return linura_provider_sdk::display_ordinary_release_effect_for_payload(
+                &resource,
+                desired_state.get("release_ordinary").ok_or_else(|| {
+                    ManagedLifecycleError::UnsupportedEffect(
+                        "ordinary release intent is absent".into(),
+                    )
+                })?,
+            )
+            .map_err(ManagedLifecycleError::UnsupportedEffect);
         }
         let terminal = capability == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY;
         let key = if terminal {
@@ -2389,6 +2418,8 @@ fn validate_request_identity(
         DISPLAY_REQUEST_PREFIX
     } else if is_display_restoration_request(request) {
         DISPLAY_RESTORATION_REQUEST_PREFIX
+    } else if is_display_ordinary_release_request(request) {
+        DISPLAY_ORDINARY_RELEASE_REQUEST_PREFIX
     } else if is_display_finalization_request(request) {
         DISPLAY_FINALIZATION_REQUEST_PREFIX
     } else {
@@ -2418,6 +2449,11 @@ fn is_display_restoration_request(request: &PlanDesiredStateRequest) -> bool {
     request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
         && request.observation_capability.as_str()
             == linura_observation::DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
+}
+fn is_display_ordinary_release_request(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER
+        && request.observation_capability.as_str()
+            == linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
 }
 fn is_display_finalization_request(request: &PlanDesiredStateRequest) -> bool {
     request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER

@@ -5,6 +5,11 @@
 //! authenticate and consume a durable one-use post-commit release authority.
 
 use super::*;
+mod original;
+mod plan;
+pub use original::OrdinaryDisplayOriginalInspection;
+use original::invalid_original;
+pub use plan::OrdinaryDisplayReleaseRequest;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OrdinaryDisplayReleaseInspection {

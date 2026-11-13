@@ -1,6 +1,8 @@
 //! Deterministic managed-controller and SQLite restart/fault fixtures.
 //! NativeApi labels are simulated here; these are not compositor qualification.
 use super::*;
+#[path = "ordinary_release.rs"]
+mod ordinary_release;
 #[path = "original_restoration.rs"]
 mod original_restoration;
 use linura_control::{
@@ -36,6 +38,9 @@ struct Machine {
     read_only_outputs: bool,
     native_base_drift: bool,
     original_native_guard: Option<linura_provider_sdk::ComponentDigest>,
+    ordinary_root_reads: u64,
+    ordinary_root_fault: u8,
+    ordinary_checkpoint_unavailable: bool,
     original_protection_lost: bool,
     restoration_calls: usize,
     restoration_outcome: u8,
@@ -144,6 +149,7 @@ fn display_request(operation: &str) -> PlanDesiredStateRequest {
 
 #[test]
 fn replacement_review_reloads_authenticated_history_without_replaying_an_apply() {
+    ordinary_release::original_source_and_terminal_inspection_are_read_only_across_restart();
     let database = TestDatabase::new();
     let machine = Arc::new(Mutex::new(Machine::default()));
     let mut port = Port(machine.clone());
@@ -569,6 +575,9 @@ impl Observer for LiveFixtureObserver {
     }
 }
 fn previews(machine: &Arc<Mutex<Machine>>) -> PlanPreviewControl {
+    previews_inner(machine, false)
+}
+fn previews_inner(machine: &Arc<Mutex<Machine>>, ordinary_original: bool) -> PlanPreviewControl {
     let (baseline, _, inventory, caps) = layouts();
     let mut display = s17_managed_lock::session_observation(1);
     display.provider = value(ProviderId::new("hyprland"));
@@ -607,6 +616,13 @@ fn previews(machine: &Arc<Mutex<Machine>>) -> PlanPreviewControl {
             template,
             replacement: false,
         })));
+    }
+    if ordinary_original {
+        value(
+            coordinator.register_observer(Box::new(ordinary_release::OriginalObserver(
+                machine.clone(),
+            ))),
+        );
     }
     PlanPreviewControl::new(coordinator)
 }
@@ -866,6 +882,19 @@ impl ApprovedRequestJournal for FailingJournal {
         principal: &PrincipalId,
         request: &RequestId,
     ) -> Result<RetainedRequest, TransactionStoreError> {
+        if request
+            .as_str()
+            .starts_with("request:v010:display-native-baseline:")
+            && self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .ordinary_checkpoint_unavailable
+        {
+            return Err(TransactionStoreError::Storage(
+                "simulated ordinary checkpoint read failure".into(),
+            ));
+        }
         if request
             .as_str()
             .starts_with("request:v010:display-restoration-link:")

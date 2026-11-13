@@ -24,6 +24,9 @@ fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &st
     let protection = path == "/org/linura/DisplayProtection1"
         && interface == "org.linura.DisplayProtection1"
         && role == NativeSessionRole::Control;
+    if protection && method == "ReadOrdinaryOriginal" {
+        return MAX_DISPLAY_REPLY_BYTES + 32;
+    }
     if protection && method == "ReadRootPower" {
         return crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
             + crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT
@@ -663,6 +666,7 @@ mod diagnostic_tests {
                         "ReadFinalization",
                         "ReadRootPower",
                         "ReadFinalRetirement",
+                        "ReadOrdinaryOriginal",
                     ] {
                         let admitted = path == "/org/linura/SecurityOwner1"
                             && interface == "org.linura.SecurityOwner1"
@@ -678,6 +682,12 @@ mod diagnostic_tests {
                         assert_eq!(
                             reply_limit(role, path, interface, method),
                             if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadOrdinaryOriginal"
+                            {
+                                MAX_DISPLAY_REPLY_BYTES + 32
+                            } else if role == NativeSessionRole::Control
                                 && path == "/org/linura/DisplayProtection1"
                                 && interface == "org.linura.DisplayProtection1"
                                 && method == "ReadRootPower"
@@ -720,9 +730,12 @@ mod diagnostic_tests {
             3_u32,
             vec![0_u8; crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 512],
         ))?;
+        let ordinary = zbus::Message::method_call(scope, "ReadOrdinaryOriginal")?
+            .build(&(vec![0_u8; MAX_DISPLAY_REPLY_BYTES],))?;
         for (message, method) in [
             (root, "ReadRootPower"),
             (final_record, "ReadFinalRetirement"),
+            (ordinary, "ReadOrdinaryOriginal"),
         ] {
             assert!(message.body().len() > MAX_REPLY_BYTES);
             assert!(

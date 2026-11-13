@@ -5,6 +5,11 @@ use std::fmt::{Display, Formatter};
 
 use linura_core::{CapabilityId, ProviderId, ResourceId};
 
+mod display_ordinary_original;
+pub use display_ordinary_original::{
+    DISPLAY_ORDINARY_ORIGINAL_CAPABILITY, DisplayOrdinaryOriginalComparison,
+    DisplayOrdinaryOriginalFacts,
+};
 mod display;
 mod display_completion;
 mod display_current;

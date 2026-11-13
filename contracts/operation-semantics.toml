@@ -97,6 +97,16 @@ observation_capability = "display.original-finalization.observe"
 resource_prefix = "display:recovery:"
 change_keys = ["finalize_original"]
 
+[registered_operations.managed-display-ordinary-release]
+operation_id = "operation:display.layout.release-ordinary"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+risk_floor_rule_id = "operation-registry.managed-display-ordinary-release.risk-floor"
+provider = "hyprland-recovery"
+observation_capability = "display.ordinary-original.observe"
+resource_prefix = "display:ordinary-release:"
+change_keys = ["release_ordinary"]
+
 [registered_operations.managed-display-layout]
 operation_id = "operation:display.layout.apply"
 class = "managed-external-effect"

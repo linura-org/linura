@@ -101,7 +101,10 @@ pub use finalization::{
     OriginalDisplayRetirementPreparationPort, OriginalDisplayRootPowerInspection,
     OriginalDisplayRootPowerRetirementPort,
 };
-pub use release::OrdinaryDisplayReleaseInspection;
+pub use release::{
+    OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseInspection,
+    OrdinaryDisplayReleaseRequest,
+};
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,
     OriginalDisplayRestorationReceipt, OriginalDisplayRestorationRequest,

@@ -373,6 +373,63 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
         &scope,
     )
     .unwrap_or_else(|e| unreachable!("{e}"));
+    let ordinary_scope = linura_core::DisplayOrdinaryReleaseScope::new(
+        &binding.dispatch_digest.to_hex(),
+        linura_core::DisplayLayoutMaterial::decode(&material)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .topology()
+            .clone(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let ordinary = NativeDisplayRecoveryCheckpoint::ordinary_original_facts(
+        record.canonical_bytes(),
+        &ordinary_scope,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(ordinary.comparison().material, material);
+    assert_eq!(ordinary.comparison().transaction, binding.transaction_id);
+    assert_eq!(ordinary.comparison().checkpoint, facts.checkpoint_digest());
+    assert_eq!(ordinary.comparison().native_guard, facts.native_guard());
+    assert_eq!(
+        ordinary.comparison().integration,
+        facts.integration_digest()
+    );
+    assert_eq!(ordinary.comparison().sampled_boot_ms, 100);
+    assert_eq!(ordinary.comparison().original_deadline_unix_ms, 25_000);
+    for value in ordinary.attributes().values() {
+        if let ObservedValue::Text(text) = value {
+            assert!(
+                !text.contains("LNDR:") && !text.contains("LNRL:") && !text.contains("base_rule")
+            );
+        }
+    }
+    for end in [0, 1, 7, 8, record.canonical_bytes().len() - 1] {
+        assert!(
+            NativeDisplayRecoveryCheckpoint::ordinary_original_facts(
+                &record.canonical_bytes()[..end],
+                &ordinary_scope
+            )
+            .is_err()
+        );
+    }
+    let mut trailing = record.canonical_bytes().to_vec();
+    trailing.push(0);
+    assert!(
+        NativeDisplayRecoveryCheckpoint::ordinary_original_facts(&trailing, &ordinary_scope)
+            .is_err()
+    );
+    let foreign_ordinary = linura_core::DisplayOrdinaryReleaseScope::new(
+        &binding.dispatch_digest.to_hex(),
+        scope.replacement().clone(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        NativeDisplayRecoveryCheckpoint::ordinary_original_facts(
+            record.canonical_bytes(),
+            &foreign_ordinary
+        )
+        .is_err()
+    );
     assert_eq!(facts.original_material(), material);
     assert_eq!(facts.original_transaction(), binding.transaction_id);
     assert_eq!(

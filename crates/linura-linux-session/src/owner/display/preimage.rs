@@ -449,6 +449,48 @@ impl NativeDisplayRecoveryCheckpoint {
         )
         .map_err(|_| invalid())
     }
+    /// Historical comparison only. The caller must already have authenticated
+    /// the actual live original Root/kernel/power and ordinary startup scope.
+    pub(crate) fn ordinary_original_facts(
+        payload: &[u8],
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+    ) -> Result<linura_observation::DisplayOrdinaryOriginalFacts, String> {
+        let dispatch =
+            ComponentDigest::parse_hex(scope.original_dispatch()).map_err(|_| invalid())?;
+        Self::validate_stored(payload, &dispatch)?;
+        let mut rest = payload;
+        let mut fields = Vec::with_capacity(19);
+        for _ in 0..19 {
+            let (length, body) = rest.split_at_checked(8).ok_or_else(invalid)?;
+            let length = usize::try_from(u64::from_be_bytes(
+                length.try_into().map_err(|_| invalid())?,
+            ))
+            .map_err(|_| invalid())?;
+            let (field, tail) = body.split_at_checked(length).ok_or_else(invalid)?;
+            fields.push(std::str::from_utf8(field).map_err(|_| invalid())?);
+            rest = tail;
+        }
+        if !rest.is_empty() {
+            return Err(invalid());
+        }
+        let saved: Preimage = serde_json::from_str(fields[18]).map_err(|_| invalid())?;
+        if saved.schema != 2 {
+            return Err(invalid());
+        }
+        linura_observation::DisplayOrdinaryOriginalFacts::new(
+            scope.clone(),
+            linura_observation::DisplayOrdinaryOriginalComparison {
+                material: fields[8].into(),
+                transaction: fields[1].into(),
+                checkpoint: ComponentDigest::from_bytes(Sha256::digest(payload).into()).to_hex(),
+                native_guard: fields[17].into(),
+                integration: saved.integration,
+                sampled_boot_ms: number(fields[15])?,
+                original_deadline_unix_ms: number(fields[9])?,
+            },
+        )
+        .map_err(|_| invalid())
+    }
     /// Historical scope comparison for the retained native startup lease.
     /// This cannot turn history into current evidence or a recovery permit.
     pub fn original_startup_scope(

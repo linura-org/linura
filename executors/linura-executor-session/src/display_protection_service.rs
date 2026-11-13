@@ -436,6 +436,11 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         deadline_unix_ms: u64,
         sampled_boot_ms: u64,
     ) -> zbus::fdo::Result<OwnedFd>;
+    fn read_ordinary_original(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<Vec<u8>>;
     fn read_original(
         &self,
         sender: &str,
@@ -669,6 +674,33 @@ impl NativeProtection {
             )
             .map_err(|_| unavailable())?;
         self.require_scope_startups(admission, scope, &payload)?;
+        Ok(payload)
+    }
+    fn ordinary_original_for_scope(
+        &self,
+        admission: &Admission,
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let dispatch = dispatch(scope.original_dispatch())?;
+        let payload = self
+            .witnesses
+            .read_original(&dispatch, &self.channel)
+            .map_err(|_| unavailable())?;
+        let (original, integration) =
+            NativeDisplayRecoveryCheckpoint::original_startup_scope(&payload, &dispatch)
+                .map_err(|_| unavailable())?;
+        if original != *scope.topology() {
+            return Err(unavailable());
+        }
+        let startup = admission
+            .startups
+            .iter()
+            .find(|v| v.peer.matches_preimage(&original, &integration))
+            .ok_or_else(unavailable)?;
+        if !startup.ordinary {
+            return Err(unavailable());
+        }
+        startup.live().map_err(|_| unavailable())?;
         Ok(payload)
     }
     fn require_scope_startups(
@@ -1579,6 +1611,22 @@ impl ProtectionPort for NativeProtection {
             .map_err(|_| unavailable())?;
         Ok(OwnedFd::from(std::os::fd::OwnedFd::from(native)))
     }
+    fn read_ordinary_original(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        self.admit_control(sender)?;
+        let admission =
+            super::protection_lock::acquire(&self.admission, super::protection_lock::BUDGET)
+                .map_err(|_| unavailable())?;
+        let payload = self.ordinary_original_for_scope(&admission, &scope)?;
+        self.admit_control(sender)?;
+        if self.ordinary_original_for_scope(&admission, &scope)? != payload {
+            return Err(unavailable());
+        }
+        Ok(payload)
+    }
     fn read_original(
         &self,
         sender: &str,
@@ -2163,6 +2211,28 @@ impl<P: ProtectionPort> ProtectionService<P> {
         .await
     }
     #[zbus(out_args("checkpoint"))]
+    async fn read_ordinary_original(
+        &self,
+        ordinary_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_original(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("checkpoint"))]
     async fn read_original(
         &self,
         recovery_scope: &str,
@@ -2430,6 +2500,13 @@ mod tests {
         ) -> zbus::fdo::Result<OwnedFd> {
             Err(unavailable())
         }
+        fn read_ordinary_original(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<Vec<u8>> {
+            Err(unavailable())
+        }
         fn read_original(
             &self,
             _: &str,
@@ -2471,7 +2548,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 22);
+            assert_eq!(text.matches("<method ").count(), 23);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2499,6 +2576,7 @@ mod tests {
             "Begin",
             "Reserve",
             "Verify",
+            "ReadOrdinaryOriginal",
             "ReadOriginal",
             "ReadFinalization",
             "ReadCompletion",
@@ -2725,6 +2803,47 @@ mod tests {
             StartupSlot::enter(&service.original_pending).unwrap_or_else(|e| unreachable!("{e}"));
         assert!(async_io::block_on(service.read_original(&scope, message.header())).is_err());
         assert!(async_io::block_on(service.read_finalization(&scope, message.header())).is_err());
+        drop(slot);
+    }
+    #[test]
+    fn ordinary_original_read_requires_sender_exact_same_scope_and_live_admission() {
+        let service = ProtectionService::new(DenyProtection);
+        let anonymous = zbus::Message::method_call(PATH, "ReadOrdinaryOriginal")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let scope = format!(
+            "display:ordinary-release:{}:11111111-1111-4111-8111-111111111111:1000:c3:99:seat0:44444444-4444-4444-8444-444444444444:1",
+            "a".repeat(64)
+        );
+        assert!(matches!(
+            async_io::block_on(service.read_ordinary_original(&scope, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
+        let message = zbus::Message::method_call(PATH, "ReadOrdinaryOriginal")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .sender(":1.7")
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .build(&())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        for bad in [
+            String::new(),
+            "x".repeat(257),
+            scope.replace("display:ordinary-release:", "display:recovery:"),
+            scope.replace(&"a".repeat(64), &"0".repeat(64)),
+        ] {
+            assert!(
+                async_io::block_on(service.read_ordinary_original(&bad, message.header())).is_err()
+            );
+        }
+        assert!(
+            async_io::block_on(service.read_ordinary_original(&scope, message.header())).is_err()
+        );
+        let slot =
+            StartupSlot::enter(&service.original_pending).unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(
+            async_io::block_on(service.read_ordinary_original(&scope, message.header())).is_err()
+        );
         drop(slot);
     }
     #[test]

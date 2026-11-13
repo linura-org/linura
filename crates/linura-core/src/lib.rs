@@ -11,6 +11,11 @@ pub use display_layout::{
 pub use display_recovery::DisplayRecoveryMapping;
 mod display_restoration;
 pub use display_restoration::{DisplayRestorationMaterial, MAX_DISPLAY_RESTORATION_BYTES};
+mod display_ordinary_release;
+pub use display_ordinary_release::{
+    DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial, DisplayOrdinaryReleaseOutcome,
+    DisplayOrdinaryReleaseScope, MAX_DISPLAY_ORDINARY_RELEASE_BYTES,
+};
 mod display_finalization;
 pub use display_finalization::{DisplayFinalizationMaterial, MAX_DISPLAY_FINALIZATION_BYTES};
 mod display_recovery_scope;

@@ -6,10 +6,11 @@ use linura_core::{
     Capability, CapabilityId, DisplayRecoveryScope, ProviderId, ResourceId, SupportLevel,
 };
 use linura_observation::{
-    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
-    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY,
-    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
-    DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope, ProviderAvailability, ProviderHealth,
+    DISPLAY_ORDINARY_ORIGINAL_CAPABILITY, DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
+    DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+    DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
+    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope,
+    ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 
@@ -36,6 +37,7 @@ impl Observer for NativeOriginalDisplayObserver {
     }
     fn observation_capabilities(&self) -> Vec<Capability> {
         [
+            DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
             DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
             DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
             DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
@@ -56,7 +58,8 @@ impl Observer for NativeOriginalDisplayObserver {
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
         matches!(
             capability.as_str(),
-            DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY
+            DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+                | DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY
                 | DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
                 | DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
                 | DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
@@ -81,7 +84,7 @@ impl Observer for NativeOriginalDisplayObserver {
     }
     fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
         Err(ProviderError::Unsupported(
-            "original protection requires an exact retained-attempt and replacement scope".into(),
+            "original protection requires an exact retained-attempt and invocation scope".into(),
         ))
     }
     fn observe_authoritative(
@@ -94,8 +97,6 @@ impl Observer for NativeOriginalDisplayObserver {
                 "original protection capability is unsupported".into(),
             ));
         }
-        let scope = DisplayRecoveryScope::from_resource(resource)
-            .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
         let sequence = self
             .sequence
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
@@ -104,6 +105,16 @@ impl Observer for NativeOriginalDisplayObserver {
             .map_err(|_| {
                 ProviderError::Unavailable("original display protection sequence exhausted".into())
             })?;
+        if capability.as_str() == DISPLAY_ORDINARY_ORIGINAL_CAPABILITY {
+            let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(resource)
+                .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
+            return self
+                .channel
+                .observe_ordinary_display_original(&scope, sequence + 1)
+                .map_err(ProviderError::Unavailable);
+        }
+        let scope = DisplayRecoveryScope::from_resource(resource)
+            .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
         let result = if capability.as_str() == DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY {
             self.channel
                 .observe_original_display_root_retirement(&scope, sequence + 1)

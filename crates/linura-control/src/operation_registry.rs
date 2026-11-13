@@ -25,6 +25,10 @@ pub(crate) const MANAGED_DISPLAY_RESTORATION_OPERATION_ID: &str =
     "operation:display.layout.restore-original";
 pub(crate) const MANAGED_DISPLAY_RESTORATION_RISK_FLOOR_RULE_ID: &str =
     "operation-registry.managed-display-restoration.risk-floor";
+pub(crate) const MANAGED_DISPLAY_ORDINARY_RELEASE_OPERATION_ID: &str =
+    "operation:display.layout.release-ordinary";
+pub(crate) const MANAGED_DISPLAY_ORDINARY_RELEASE_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-display-ordinary-release.risk-floor";
 pub(crate) const MANAGED_DISPLAY_FINALIZATION_OPERATION_ID: &str =
     "operation:display.layout.finalize-original";
 pub(crate) const MANAGED_DISPLAY_FINALIZATION_RISK_FLOOR_RULE_ID: &str =
@@ -176,6 +180,17 @@ pub(crate) fn trusted_builtin_operation_registry()
             vec!["finalize_original".into()],
         )?),
     )?)?;
+    registry.register(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_DISPLAY_ORDINARY_RELEASE_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(OperationEffectBinding::try_new(
+            ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)?,
+            CapabilityId::new(linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY)?,
+            "display:ordinary-release:",
+            vec!["release_ordinary".into()],
+        )?),
+    )?)?;
     for (_, operation, prefix, _, risk) in SESSION_TRANSITION_ROUTES {
         registry.register(OperationDescriptor::try_new(
             OperationId::new(operation)?,
@@ -282,6 +297,37 @@ mod tests {
             .unwrap_or_else(|| unreachable!("restoration registration"));
         assert_ne!(terminal.id(), old.id());
         assert_ne!(terminal.effect_binding(), old.effect_binding());
+        let ordinary = registry
+            .descriptor(
+                &OperationId::new(MANAGED_DISPLAY_ORDINARY_RELEASE_OPERATION_ID)
+                    .unwrap_or_else(|e| unreachable!("{e}")),
+            )
+            .unwrap_or_else(|| unreachable!("ordinary release registration"));
+        assert_eq!(ordinary.class(), OperationClass::ManagedExternalEffect);
+        assert_eq!(ordinary.risk_floor(), Some(RiskClass::SecuritySensitive));
+        let binding = ordinary
+            .effect_binding()
+            .unwrap_or_else(|| unreachable!("ordinary binding"));
+        assert_eq!(
+            binding.provider().as_str(),
+            linura_observation::DISPLAY_RECOVERY_PROVIDER
+        );
+        assert_eq!(
+            binding.observation_capability().as_str(),
+            linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+        );
+        assert_eq!(binding.resource_prefix(), "display:ordinary-release:");
+        assert_eq!(binding.resource_suffix(), None);
+        assert_eq!(
+            binding
+                .change_keys()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["release_ordinary"]
+        );
+        assert_ne!(ordinary.effect_binding(), terminal.effect_binding());
+        assert_ne!(ordinary.effect_binding(), old.effect_binding());
     }
 
     #[test]
@@ -363,7 +409,8 @@ mod tests {
             trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
         // Builtin registrations include the S21 managed display operation.
         // Keep verifying the legacy systemd binding below; never drop it.
-        assert_eq!(registry.len(), 10);
+        // Ordinary terminal release adds one separate purpose with its own full binding.
+        assert_eq!(registry.len(), 11);
         let display = registry
             .descriptor(
                 &OperationId::new(MANAGED_DISPLAY_LAYOUT_OPERATION_ID)

@@ -6,6 +6,12 @@
     <annotation name="org.linura.Stability" value="experimental"/>
     <!-- Private bounded original-witness and prepared handoff mechanisms.
          Control owns authority/orchestration; this process never writes outputs. -->
+    <method name="ReadOrdinaryOriginal">
+      <!-- Supervised Control only. Same actual original invocation with its
+           live original kernel/power/startup witnesses; no release authority. -->
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="out"/>
+    </method>
     <method name="ReadOriginal">
       <!-- Supervised Control only; exact historical bytes plus live retained
            witness checks. No credential, restoration grant or output write. -->

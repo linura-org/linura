@@ -155,6 +155,77 @@ impl NativeSessionChannel {
         Ok(observation)
     }
 
+    pub(crate) fn observe_ordinary_display_original(
+        &self,
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::DisplayOrdinaryOriginalFacts;
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "original completion lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.topology().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadOrdinaryOriginal",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ay"
+            || reply.body().len() > crate::bus::MAX_DISPLAY_REPLY_BYTES + 32
+        {
+            return Err(invalid());
+        }
+        let (bytes,): (Vec<u8>,) = reply.body().deserialize().map_err(|_| invalid())?;
+        let facts = crate::NativeDisplayRecoveryCheckpoint::ordinary_original_facts(&bytes, scope)?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.topology().session().boot()
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayOrdinaryOriginalFacts::from_envelope(&observation, scope, now)
+            .map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_original_display_power_retirement(
         &self,
         scope: &linura_core::DisplayRecoveryScope,

@@ -288,6 +288,49 @@ pub fn display_finalization_effect_for_payload(
     .map_err(|error| error.to_string())
 }
 
+/// Purpose-separated ordinary post-commit release correlation. Complete typed
+/// material still needs Control-derived canonical review, durable prepare and
+/// the actual original Root/native one-use exchange; this grants no execution.
+pub fn display_ordinary_release_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let material_decoded =
+        linura_core::DisplayOrdinaryReleaseMaterial::decode(material).map_err(|e| e.to_string())?;
+    let resource = material_decoded
+        .release_scope()
+        .map_err(|e| e.to_string())?
+        .resource_id()
+        .map_err(|e| e.to_string())?;
+    let digest = hash_parts(
+        b"linura.display.ordinary-release-intent.v1",
+        &[material.as_bytes()],
+    );
+    display_ordinary_release_effect_for_payload(
+        &resource,
+        &format!("LNOR-SHA256:1:{}", digest.to_hex()),
+    )
+}
+/// Non-executable canonical-plan correlation only. Decoding this digest cannot
+/// reconstruct complete intent, authenticated terminal history or a live grant.
+pub fn display_ordinary_release_effect_for_payload(
+    resource: &ResourceId,
+    payload: &str,
+) -> Result<EffectDescriptor, String> {
+    linura_core::DisplayOrdinaryReleaseScope::from_resource(resource).map_err(|e| e.to_string())?;
+    let raw = payload
+        .strip_prefix("LNOR-SHA256:1:")
+        .ok_or("ordinary release intent digest domain differs")?;
+    let digest = ComponentDigest::parse_hex(raw).map_err(|e| e.to_string())?;
+    if digest.to_hex() != raw || raw == "0".repeat(64) {
+        return Err("ordinary release intent digest is not canonical and nonzero".into());
+    }
+    EffectDescriptor::new(
+        ProviderId::new("hyprland").map_err(|e| e.to_string())?,
+        resource.clone(),
+        "release-ordinary-display-terminal",
+        payload.as_bytes().to_vec(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 impl EffectDescriptor {
     pub fn new(
         provider: ProviderId,
@@ -772,5 +815,113 @@ mod tests {
             &effect,
         ));
         assert_ne!(binding.dispatch_digest, substituted.dispatch_digest);
+    }
+}
+
+#[cfg(test)]
+mod ordinary_release_effect_tests {
+    use super::*;
+    use linura_core::{
+        DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial,
+        DisplayOrdinaryReleaseOutcome, DisplayRestorationMaterial,
+    };
+    fn value<T, E: std::fmt::Debug>(v: Result<T, E>) -> T {
+        v.unwrap_or_else(|e| unreachable!("{e:?}"))
+    }
+    #[test]
+    fn ordinary_release_correlation_cannot_alias_apply_original_restoration_or_outcome() {
+        let old = value(DisplayRestorationMaterial::decode(
+            include_str!("../../linura-core/src/display_recovery/fixtures/original-baseline.txt")
+                .trim_end(),
+        ));
+        // Extract the exact framed original intent; fixture-only comparison.
+        let text =
+            include_str!("../../linura-core/src/display_recovery/fixtures/original-baseline.txt")
+                .trim_end();
+        let start = text.find("LNDI:1;").unwrap_or_else(|| unreachable!());
+        let length = text[..start]
+            .rsplit(';')
+            .next()
+            .and_then(|v| v.strip_suffix(':'))
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(|| unreachable!());
+        let original = &text[start..start + length];
+        let lineage = DisplayOrdinaryReleaseLineage {
+            original_request: old.original_request().clone(),
+            original_dispatch: old.original_dispatch(),
+            terminal_record: &"1".repeat(64),
+            original_checkpoint: old.original_checkpoint(),
+            signed_binding: &"2".repeat(64),
+            generation: 0,
+            state_version: 9,
+            current_source_guard: &"3".repeat(64),
+        };
+        let mut digests = std::collections::BTreeSet::new();
+        for outcome in [
+            DisplayOrdinaryReleaseOutcome::Keep,
+            DisplayOrdinaryReleaseOutcome::Revert,
+            DisplayOrdinaryReleaseOutcome::Expired,
+        ] {
+            let text = value(DisplayOrdinaryReleaseMaterial::encode(
+                &lineage,
+                outcome,
+                old.original().lock(),
+                original,
+            ));
+            let effect = value(display_ordinary_release_effect(&text));
+            assert_eq!(effect.operation, "release-ordinary-display-terminal");
+            assert_eq!(effect.provider.as_str(), "hyprland");
+            assert!(digests.insert(effect.digest().to_hex()));
+            let payload = std::str::from_utf8(&effect.canonical_payload)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert_eq!(
+                value(display_ordinary_release_effect_for_payload(
+                    &effect.resource,
+                    payload
+                )),
+                effect
+            );
+            for prefix in ["LNDI-SHA256:1:", "LNRF-SHA256:1:", "LNRI-SHA256:1:"] {
+                assert!(
+                    display_ordinary_release_effect_for_payload(
+                        &effect.resource,
+                        &format!("{prefix}{}", "1".repeat(64))
+                    )
+                    .is_err()
+                );
+            }
+            for bad in [
+                "0".repeat(64),
+                "a".repeat(63),
+                "A".repeat(64),
+                "sha256:denied".into(),
+            ] {
+                assert!(
+                    display_ordinary_release_effect_for_payload(
+                        &effect.resource,
+                        &format!("LNOR-SHA256:1:{bad}")
+                    )
+                    .is_err()
+                );
+            }
+            assert!(
+                display_finalization_effect_for_payload(
+                    &effect.resource,
+                    &format!("LNRF-SHA256:1:{}", "1".repeat(64))
+                )
+                .is_err()
+            );
+            assert!(
+                display_ordinary_release_effect_for_payload(
+                    &value(old.recovery_scope())
+                        .resource_id()
+                        .unwrap_or_else(|e| unreachable!("{e}")),
+                    payload
+                )
+                .is_err()
+            );
+        }
+        assert!(display_ordinary_release_effect(original).is_err());
+        assert!(display_ordinary_release_effect(text).is_err());
     }
 }

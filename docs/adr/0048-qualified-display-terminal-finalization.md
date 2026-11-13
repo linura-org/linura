@@ -668,3 +668,41 @@ Cross-language codecs, original credential-channel phase/sequence/replay cases,
 Root storage ancestry and native component builds are separate from real
 compositor execution. Level A/B, exact-head final gates, independent review and
 maintained Level C release evidence remain required where applicable.
+
+
+### Ordinary release planning and same-invocation original evidence
+
+Ordinary terminal release now has its own `LNOR:1` comparison, same-invocation
+resource and registered SecuritySensitive ManagedExternalEffect purpose.
+Control derives the complete material from the authenticated original request,
+signed terminal snapshot, immutable terminal history and baseline checkpoint.
+Keep exposes only the desired layout with exactly the resulting owned rules;
+Revert/expiry exposes only the original baseline and original ownership. Base
+configuration and native identity digests must still match the checkpoint.
+Original semantic intent and requirement references remain in the new reason.
+
+The private Root `ReadOrdinaryOriginal` query authenticates the current Control
+sender and checks the actual live original startup peer, retained kernel/power
+witness and immutable checkpoint. It requires ordinary admission in the same
+invocation; it cannot borrow a replacement-restoration scope or its grant.
+Its closed observation describes original continuity, not scanout or permission
+to release. Control joins two Root reads with authenticated terminal history,
+two fresh native-attempt reads and independent layout verification.
+
+Only that private Control-derived context can produce the canonical release
+plan. Fresh Root, display/source, logind session and S17 coverage contributors
+are rechecked and bound to their original absolute validity windows. Generic
+client-authored previews are rejected before provider access. This planning
+route has no approval, prepare, effect or cleanup port. The bounded native
+preparation codec binds complete LNOR material, a separate canonical execution
+binding and both producer clocks; its bytes are comparison data, never a grant.
+The separate protected release review, durable one-use Root/native execution,
+physical postcondition verification and completion remain implementation work.
+
+Original-restoration completion reuses the private terminal/spend anchors from
+its independent first-frame inspection instead of scanning the same history
+immediately before that inspection. It still consumes the live process-local
+review before persistence/probes, checks exact retained verification and spend,
+revalidates policy before dispatch, and reloads all anchors after preparation
+and dispatch. The original two-second window and immutable first proof are
+unchanged. Timing failures remain refusals, never renewed grants.

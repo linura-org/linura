@@ -333,6 +333,8 @@ pub struct PlanPreviewControl {
     coordinator: ObservationCoordinator,
     previews: PreviewStore,
     pub(super) restoration_context: crate::display_restoration_plan::OriginalContextSlot,
+    pub(crate) ordinary_release_context:
+        crate::display_ordinary_release_plan::OrdinaryReleaseContextSlot,
     pub(super) finalization_context: crate::display_finalization_plan::FinalizationContextSlot,
 }
 
@@ -358,6 +360,8 @@ impl PlanPreviewControl {
             coordinator,
             previews: PreviewStore::default(),
             restoration_context: crate::display_restoration_plan::OriginalContextSlot::default(),
+            ordinary_release_context:
+                crate::display_ordinary_release_plan::OrdinaryReleaseContextSlot::default(),
             finalization_context:
                 crate::display_finalization_plan::FinalizationContextSlot::default(),
         }
@@ -430,6 +434,16 @@ impl PlanPreviewControl {
         observe_only_protective: bool,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
         if input.request.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            if input.request.observation_capability.as_str()
+                == linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+            {
+                return self.build_fresh_ordinary_display_release_plan(
+                    &input.principal,
+                    actor,
+                    &input.request,
+                );
+            }
+
             if input.request.observation_capability.as_str()
                 == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY
             {

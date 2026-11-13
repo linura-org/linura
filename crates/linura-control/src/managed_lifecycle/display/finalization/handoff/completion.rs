@@ -132,19 +132,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "display completion requires authenticated interactive ownership".into(),
             ));
         }
-        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let transaction = TransactionId::for_namespace(&principal_id, terminal_request);
         // Removing before any persistence/provider/Root call is irreversible.
         // The same cache slot is restored only into a later, non-replay stage.
-        let retained = self
-            .display_reviews
-            .get(&terminal.snapshot.transaction_id)
-            .ok_or_else(|| {
-                ManagedLifecycleError::ApprovalBoundary(
-                    "original completion review unavailable; retained proof cannot recreate it"
-                        .into(),
-                )
-            })?;
+        let retained = self.display_reviews.get(&transaction).ok_or_else(|| {
+            ManagedLifecycleError::ApprovalBoundary(
+                "original completion review unavailable; retained proof cannot recreate it".into(),
+            )
+        })?;
         let (spent, verified, deadline) = match &retained.stage {
             DisplayReviewStage::HandoffVerified {
                 spend,
@@ -158,26 +154,29 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         let mut review = self
             .display_reviews
-            .remove(&terminal.snapshot.transaction_id)
+            .remove(&transaction)
             .ok_or_else(invalid)?;
-        self.revalidate_completion_review(&principal, &terminal, &review)?;
         NativeCompletionPrepared::require_absent(
             self.display_journal()?,
             &principal_id,
             terminal_request,
         )?;
-        let anchors = self.native_handoff_anchors(&principal_id, &terminal)?;
-        if spent != anchors.spent.digest() {
+        // This inspection authenticates the exact terminal and spend before
+        // probing, and reloads them after independent proof retention. Reuse
+        // its private qualified anchors: an identical scan before it has no
+        // intervening effect to protect and consumes the original two-second
+        // first-frame budget on slower machines. No clock or gate is renewed.
+        let proof =
+            self.verify_native_handoff_with_spend(principal.clone(), terminal_request, None)?;
+        let terminal = &proof.inspection.context;
+        let anchors = &proof.inspection.anchors;
+        if terminal.snapshot.transaction_id != transaction
+            || spent != anchors.spent.digest()
+            || proof.record_digest != verified
+        {
             return Err(invalid());
         }
-        let proof = self.verify_native_handoff_with_spend(
-            principal.clone(),
-            terminal_request,
-            Some(&anchors.spent),
-        )?;
-        if proof.inspection.context != terminal || proof.record_digest != verified {
-            return Err(invalid());
-        }
+        self.revalidate_completion_review(&principal, terminal, &review)?;
         let dispatch = terminal
             .receipt
             .dispatch_digest
@@ -195,14 +194,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             &proof.inspection.frames,
             now_ms()?,
         )?;
-        self.revalidate_completion_review(&principal, &terminal, &review)?;
+        self.revalidate_completion_review(&principal, terminal, &review)?;
         preparation.retain_once(self.request_journal.as_deref_mut().ok_or_else(invalid)?)?;
-        if self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || self.native_handoff_anchors(&principal_id, &terminal)? != anchors
+        if self.terminal_inspection_context(&principal, terminal_request)? != *terminal
+            || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
         {
             return Err(invalid());
         }
-        self.revalidate_completion_review(&principal, &terminal, &review)?;
+        self.revalidate_completion_review(&principal, terminal, &review)?;
         // Policy and durable readbacks consume the original budget too. Check
         // AFTER them, immediately before the sole adapter call, including a
         // backward wall-clock transition since preparation.
@@ -234,8 +233,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             )
         })?;
         preparation.require_readback(self.display_journal()?)?;
-        if self.terminal_inspection_context(&principal, terminal_request)? != terminal
-            || self.native_handoff_anchors(&principal_id, &terminal)? != anchors
+        if self.terminal_inspection_context(&principal, terminal_request)? != *terminal
+            || self.native_handoff_anchors(&principal_id, terminal)? != *anchors
         {
             return Err(invalid());
         }
@@ -243,13 +242,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .display_reviews
             .remove(&terminal.snapshot.transaction_id)
             .ok_or_else(invalid)?;
-        let current = self.revalidate_completion_review(&principal, &terminal, &review);
+        let current = self.revalidate_completion_review(&principal, terminal, &review);
         self.display_reviews
             .insert(terminal.snapshot.transaction_id.clone(), review);
         current?;
         Ok(OriginalDisplayCompletionReceipt {
             request: terminal_request.clone(),
-            transaction: terminal.snapshot.transaction_id,
+            transaction: terminal.snapshot.transaction_id.clone(),
             preparation: intent,
         })
     }

@@ -196,6 +196,28 @@ impl RiskPolicy {
 
 pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassification {
     if plan.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+        if plan.observation_capability.as_str()
+            == linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+        {
+            let valid_scope =
+                linura_core::DisplayOrdinaryReleaseScope::from_resource(&plan.resource).is_ok();
+            return RiskPolicy {
+                revision: "risk-policy:v0.10:display-ordinary-release:1",
+                rules: if valid_scope && plan.changes.len() == 1 {
+                    vec![RiskRule {
+                        id: "hyprland.ordinary-release.security-sensitive",
+                        provider: linura_observation::DISPLAY_RECOVERY_PROVIDER,
+                        capability: linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
+                        resource_prefix: "display:ordinary-release:",
+                        change_keys: &["release_ordinary"],
+                        risk: RiskClass::SecuritySensitive,
+                    }]
+                } else {
+                    vec![]
+                },
+            }
+            .classify(plan);
+        }
         let valid_scope = linura_core::DisplayRecoveryScope::from_resource(&plan.resource).is_ok();
         if plan.observation_capability.as_str()
             == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY

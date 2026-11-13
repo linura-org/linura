@@ -491,12 +491,24 @@ class OperationSemanticsContractTests(unittest.TestCase):
     def test_original_restoration_registration_is_not_apply_or_transient_authority(
         self,
     ) -> None:
-        for operation, capability, change in (
-            ("restoration", "display.original-protection.observe", "restore_original"),
+        for operation, capability, change, prefix in (
+            (
+                "restoration",
+                "display.original-protection.observe",
+                "restore_original",
+                "display:recovery:",
+            ),
             (
                 "finalization",
                 "display.original-finalization.observe",
                 "finalize_original",
+                "display:recovery:",
+            ),
+            (
+                "ordinary-release",
+                "display.ordinary-original.observe",
+                "release_ordinary",
+                "display:ordinary-release:",
             ),
         ):
             for field, replacement in (
@@ -511,7 +523,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
                     'observation_capability = "display.outputs.observe"',
                 ),
                 (
-                    'resource_prefix = "display:recovery:"',
+                    f'resource_prefix = "{prefix}"',
                     'resource_prefix = "display:"',
                 ),
                 (f'change_keys = ["{change}"]', 'change_keys = ["layout"]'),

@@ -1349,16 +1349,18 @@ fn native_power_requires_original_live_review_and_independent_post_effect_state(
             lose_reply: lost_completion,
             ..CompletionPort::default()
         };
+        let completion_started = std::time::Instant::now();
+        let completed = control.dispatch_original_display_completion(
+            principal(),
+            actor(true),
+            &request,
+            &mut completion,
+        );
         assert_eq!(
-            control
-                .dispatch_original_display_completion(
-                    principal(),
-                    actor(true),
-                    &request,
-                    &mut completion
-                )
-                .is_err(),
-            lost_completion
+            completed.is_err(),
+            lost_completion,
+            "lost_completion={lost_completion}, lost_power={lost_power}, effect={effect}, elapsed={:?}: {completed:?}",
+            completion_started.elapsed(),
         );
         let mut port = PowerPort {
             machine: machine.clone(),
