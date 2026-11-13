@@ -559,6 +559,7 @@ int main(int argc, char **argv)
            -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeNativeDisplayHandoff()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedSuccessorDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("restoreOriginalDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("quiesceOriginalDisplayFinalization()") ==
            -1);
@@ -567,6 +568,8 @@ int main(int argc, char **argv)
                QByteArrayLiteral("quiesceOriginalDisplayFinalization"));
         assert(NativeRuntime::staticMetaObject.method(method).name() !=
                QByteArrayLiteral("observeNativeDisplayHandoff"));
+        assert(NativeRuntime::staticMetaObject.method(method).name() !=
+               QByteArrayLiteral("dispatchPreparedSuccessorDisplay"));
     }
     assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
     for (const char *method :
@@ -596,7 +599,8 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 37 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 38 && signals == 1 && annotations == 3);
+    assert(introspection.contains(QStringLiteral("DispatchPreparedSuccessorDisplay")));
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
           "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",

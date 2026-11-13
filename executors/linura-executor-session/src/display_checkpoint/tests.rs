@@ -1971,6 +1971,30 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
         )
         .is_err()
     );
+    // A new original checkpoint is necessary but cannot authorize transfer
+    // before the actual final ReleasedCurrent parent exists in this store.
+    let successor_payload = successor_checkpoint(31);
+    let successor = NativeDisplaySuccessorPreparation::from_checkpoint(
+        &released,
+        &successor_payload,
+        1100,
+        237,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let next_dispatch = successor.binding().dispatch_digest;
+    let next_publish = |kind, record: &NativeDisplaySuccessorPreparation| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            kind,
+        )
+    };
+    assert!(next_publish(Kind::SuccessorPrepared, &successor).is_err());
+    reserve_at(&fixture.fd, fixture.uid, &next_dispatch, &successor_payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(next_publish(Kind::SuccessorPrepared, &successor).is_err());
     assert!(publish(Kind::ReleasedCurrent, &released.canonical_bytes()).is_ok());
     assert!(publish(Kind::ReleasedCurrent, &released.canonical_bytes()).is_err());
     assert_eq!(
@@ -1982,6 +2006,65 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
         .canonical_bytes(),
         released.canonical_bytes()
     );
+    let encoded_successor = successor.canonical_bytes();
+    assert_eq!(
+        NativeDisplaySuccessorPreparation::decode(&encoded_successor)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        encoded_successor
+    );
+    // Every outer framing boundary, partial length word and truncated payload;
+    // nested codecs already have their own truncation suites. Avoid repeatedly
+    // decoding the complete nested ancestry for every byte of its last field.
+    let mut cuts = std::collections::BTreeSet::from([0, encoded_successor.len() - 1]);
+    let mut cursor = 0;
+    while cursor < encoded_successor.len() {
+        cuts.extend(cursor..cursor + 8);
+        let size = u64::from_be_bytes(
+            encoded_successor[cursor..cursor + 8]
+                .try_into()
+                .unwrap_or_else(|_| unreachable!("length")),
+        ) as usize;
+        cursor += 8 + size;
+        cuts.insert(cursor - 1);
+        if cursor < encoded_successor.len() {
+            cuts.insert(cursor);
+        }
+    }
+    for length in cuts {
+        assert!(NativeDisplaySuccessorPreparation::decode(&encoded_successor[..length]).is_err());
+    }
+    assert!(
+        NativeDisplaySuccessorPreparation::decode(&[encoded_successor.clone(), vec![0]].concat())
+            .is_err()
+    );
+    assert_eq!(successor.window().observed_boot_ms, 200);
+    assert_eq!(successor.window().deadline_boot_ms, 2200);
+    assert_eq!(successor.window().deadline_unix_ms, 3063);
+    for (wall, boot) in [(0, 237), (1100, 199), (1100, 2200), (0, u64::MAX)] {
+        assert!(
+            NativeDisplaySuccessorPreparation::from_checkpoint(
+                &released,
+                &successor_payload,
+                wall,
+                boot
+            )
+            .is_err()
+        );
+    }
+    let other_payload = successor_checkpoint(32);
+    assert!(successor.validate_checkpoint(&other_payload).is_err());
+    let other =
+        NativeDisplaySuccessorPreparation::from_checkpoint(&released, &other_payload, 1100, 237)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(next_publish(Kind::SuccessorSpent, &successor).is_err());
+    assert!(next_publish(Kind::SuccessorPrepared, &successor).is_ok());
+    assert!(next_publish(Kind::SuccessorPrepared, &successor).is_err());
+    assert!(next_publish(Kind::SuccessorPrepared, &other).is_err());
+    assert!(next_publish(Kind::SuccessorSpent, &other).is_err());
+    assert!(next_publish(Kind::SuccessorSpent, &successor).is_ok());
+    assert!(next_publish(Kind::SuccessorSpent, &successor).is_err());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
     let reopened = fs::open(
         &fixture.path,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
@@ -1996,6 +2079,14 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
         power.canonical_bytes()
     );
     assert!(!startup_clear_at(&reopened, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    let read_successor =
+        read_final_lineage_at(&reopened, fixture.uid, &parent, |lineage, scope| {
+            lineage.successor_spent.remove(scope)
+        })
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("successor spend must survive lost acknowledgement"));
+    assert_eq!(read_successor.canonical_bytes(), encoded_successor);
+    assert!(next_publish(Kind::SuccessorPrepared, &other).is_err());
     // Losing a parent poisons observation and new publication. No cleanup or
     // historical digest can reconstruct the missing original completion.
     std::fs::remove_file(
@@ -2223,4 +2314,53 @@ fn orphan_or_corrupt_ordinary_release_quarantines_other_reservations_without_cle
         assert!(child.exists());
         assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
     }
+}
+
+// A complete synthetic new checkpoint for the same replacement invocation.
+// These fixtures exercise parsing/storage only and cannot open a native fence.
+fn successor_checkpoint(use_byte: u8) -> Vec<u8> {
+    let (bytes, _) = ordinary_release_fixture(19);
+    let mut rest = bytes.as_slice();
+    let mut fields = Vec::new();
+    while !rest.is_empty() {
+        let (size, tail) = rest.split_at(8);
+        let size =
+            u64::from_be_bytes(size.try_into().unwrap_or_else(|_| unreachable!("length"))) as usize;
+        let (field, tail) = tail.split_at(size);
+        fields.push(
+            std::str::from_utf8(field)
+                .unwrap_or_else(|_| unreachable!("text"))
+                .to_owned(),
+        );
+        rest = tail;
+    }
+    fields[8] = fields[8].replace("c2:42", "c3:99").replace(
+        "33333333-3333-4333-8333-333333333333",
+        "44444444-4444-4444-8444-444444444444",
+    );
+    let effect = linura_provider_sdk::display_layout_effect(&fields[8])
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = linura_provider_sdk::ExecutionBinding::new(
+        format!("transaction:successor-{use_byte}"),
+        0,
+        1,
+        ComponentDigest::from_bytes([30; 32]),
+        ComponentDigest::from_bytes([use_byte; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    fields[1] = binding.transaction_id;
+    fields[4] = binding.authority_binding_digest.to_hex();
+    fields[5] = binding.authority_use_digest.to_hex();
+    fields[6] = binding.effect_digest.to_hex();
+    fields[7] = binding.dispatch_digest.to_hex();
+    fields[15] = "200".into();
+    let mut encoded = Vec::new();
+    for field in fields {
+        encoded.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        encoded.extend_from_slice(field.as_bytes());
+    }
+    NativeDisplayRecoveryCheckpoint::validate_stored(&encoded, &binding.dispatch_digest)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    encoded
 }

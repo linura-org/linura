@@ -59,6 +59,9 @@ class ProtectedScene
     [[nodiscard]] virtual std::shared_ptr<MutationProtection>
     reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
                     const Snapshot &, ClockSample captured) = 0;
+    [[nodiscard]] virtual std::shared_ptr<MutationProtection>
+    reserveSuccessorMutation(OwnedNativeFd, const Correlation &, const Layout &baseline,
+                             const Layout &desired, const Snapshot &, ClockSample captured) = 0;
     // Distinct consumed Recovery scene, admitted only alongside the original
     // Root endpoint. Post-write source witnesses are exact comparison data;
     // the native backend alone derives them from the authenticated grant.
@@ -85,6 +88,10 @@ class ProtectedWireEndpoint final
     [[nodiscard]] static std::shared_ptr<MutationProtection>
     reserveMutation(wl_resource *, wl_client *, const Correlation &, const Layout &baseline,
                     const Layout &desired, const Snapshot &, ClockSample captured);
+    [[nodiscard]] static std::shared_ptr<MutationProtection>
+    reserveSuccessorMutation(wl_resource *, wl_client *, OwnedNativeFd, const Correlation &,
+                             const Layout &baseline, const Layout &desired,
+                             const Snapshot &, ClockSample captured);
     [[nodiscard]] static std::shared_ptr<MutationProtection>
     reserveOriginalRestoration(wl_resource *, wl_client *, const Correlation &,
                                const Layout &baseline, const Layout &desired, const Snapshot &,

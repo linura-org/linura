@@ -103,7 +103,7 @@ impl OriginalDisplayReleasedCurrent {
     }
 }
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn observe_final_retirement(
+    pub(super) fn observe_final_retirement(
         &mut self,
         scope: &linura_core::DisplayRecoveryScope,
     ) -> Result<(ObservationEnvelope, DisplayOriginalFinalRetirementFacts), ManagedLifecycleError>

@@ -1156,3 +1156,23 @@ a failed rollback permits writes or a new inspection. Unknown rollback state or
 an invalid scoped MAC poisons the journal lifetime. No validation result or row
 is reused as current authority after the scope ends, and the original native
 spend/first-frame deadlines are unchanged.
+
+
+### Completed display ownership and a protected successor
+
+Early signed display Committed is not protection-release, successor-admission or
+cleanup authority. The private same-invocation successor requires exact immutable
+ReleasedCurrent ancestry and a fresh canonical managed Apply review/preparation.
+Root retains new kernel/power protection and an actual checkpoint before the
+original native credential channel can spend its one-use LNSA purpose. Native
+moves that real lifetime into the new opaque owner before retiring old ownership.
+Comparison records, a reconnect or a matching layout cannot reconstruct it.
+
+Final native retirement has its own live phase, distinct from current Committed.
+Only that actual Root lifetime may detach obsolete UI dependencies or permit a
+fresh S17 review. A pending successor holds protection again. Control joins fresh
+Root spend, native attempt and independent layout evidence; missing ACKs recover
+through reads without replay or first-proof rewriting. Every ancestor and global
+future-startup exclusion remains retained. Cross-invocation adoption and
+reference-aware cleanup require separate qualified protocols; public production
+display mutations remain unsupported. See ADR 0048 and the S21 recovery matrix.

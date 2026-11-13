@@ -134,6 +134,15 @@ impl<'a> DisplayLayoutMaterial<'a> {
     pub const fn topology(&self) -> &DisplayTopologyId {
         &self.topology
     }
+    /// Exact historical layout comparison for a same-invocation successor.
+    /// This does not establish current state, validate native capabilities, or
+    /// authorize ownership transfer. Those require fresh independent evidence.
+    #[must_use]
+    pub fn continues_after(&self, previous: &Self) -> bool {
+        self.topology == previous.topology
+            && self.lock.epoch() == previous.lock.epoch()
+            && self.baseline == previous.desired
+    }
     pub fn validate_native(
         &self,
         inventory: &DisplayOutputSet,
@@ -210,6 +219,35 @@ mod tests {
             caps,
             value(DisplayLayoutIntent::new(lock, baseline, desired)),
         )
+    }
+    #[test]
+    fn successor_comparison_requires_exact_previous_desired_and_same_native_scope() {
+        let (_, _, previous) = fixture();
+        let previous_text = value(previous.canonical_text());
+        let previous_material = value(DisplayLayoutMaterial::decode(&previous_text));
+        let next_text = value(DisplayLayoutIntent::new(
+            previous.lock().clone(),
+            previous.desired().clone(),
+            previous.baseline().clone(),
+        ))
+        .canonical_text()
+        .unwrap_or_else(|e| unreachable!("{e:?}"));
+        let next = value(DisplayLayoutMaterial::decode(&next_text));
+        assert!(next.continues_after(&previous_material));
+        assert!(!next.continues_after(&next));
+        assert!(!previous_material.continues_after(&previous_material));
+        let foreign = next_text.replace(
+            "33333333-3333-4333-8333-333333333333",
+            "44444444-4444-4444-8444-444444444444",
+        );
+        assert!(
+            !value(DisplayLayoutMaterial::decode(&foreign)).continues_after(&previous_material)
+        );
+        let different_epoch = next_text.replace("c2:42", "c3:43");
+        assert!(
+            !value(DisplayLayoutMaterial::decode(&different_epoch))
+                .continues_after(&previous_material)
+        );
     }
     #[test]
     fn complete_intent_binds_lock_baseline_desired_and_exact_native_scope() {

@@ -6,6 +6,19 @@
     <annotation name="org.linura.Stability" value="experimental"/>
     <!-- Private bounded original-witness and prepared handoff mechanisms.
          Control owns authority/orchestration; this process never writes outputs. -->
+    <method name="ReserveSuccessor">
+      <!-- Supervised executor only, after fresh canonical managed preparation.
+           The new protected checkpoint is retained before predecessor spend. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+    </method>
+    <method name="ReadSuccessor">
+      <!-- Control observes actual retained permission, never physical completion. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="spent" type="b" direction="out"/>
+    </method>
     <method name="ReadOrdinaryOriginal">
       <!-- Supervised Control only. Same actual original invocation with its
            live original kernel/power/startup witnesses; no release authority. -->

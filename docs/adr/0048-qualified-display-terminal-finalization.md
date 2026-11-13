@@ -764,3 +764,41 @@ creation and writes are refused, and failed rollback or an invalid scoped row
 poisons the journal lifetime. Forgetting a scope cannot create a new current
 inspection or restore writer access. This changes no on-disk schema, authority
 record, freshness interval, immutable first proof, Root grant or policy gate.
+
+
+### Same-invocation successor after completed original retirement
+
+A completed original path may transfer protection to a separately prepared
+managed Apply in the same actual compositor invocation. Its predecessor is exact
+signed Control/Root ReleasedCurrent ancestry, never early Committed alone. The
+new operation has its own canonical plan-bound review, SecuritySensitive approval,
+preparation, dispatch tombstone and immutable predecessor claim. The public
+production mutation prohibition and ordinary Begin exclusion stay in force.
+
+Root reserves the new actual checkpoint and independent kernel/power protection
+before LNST preparation. The original credential-bearing channel authenticates a
+new one-use LNSA purpose and publishes LNSX before acknowledging transfer. The
+compositor installs the new opaque owner before obsoleting the old timer and
+moves its genuine Root lifetime without cloning or reconnecting it. Missing
+acknowledgments cannot replay. Storage, peer, clock or native uncertainty retains
+protection and every source/transaction ancestor.
+
+A distinct read-only native phase 5 is selected only by the genuine final
+Root-retirement lifetime. Phase 4 remains insufficient for new S17 admission or
+successor review. Obsolete UI and wl_surface callbacks cannot invalidate a
+legitimately retired review's continuously retained current Root lifetime; actual
+Root/source loss still faults it. A successor transfer resets phase 5 to protected
+phase 4, retaining its input/power protection through ordinary Keep/Revert.
+
+The next opaque review intentionally prevents reporting the old ordinary frame
+as current evidence. Control verifies the original physical state before that
+review, rechecks immutable ancestry and actual Root lifetime after approval, and
+revalidates the new candidate's full current baseline/session/S17 facts. Fresh
+Root successor-spend observations, the exact native attempt and independent
+layout verification are joined after effect, with a second Root read and
+immutable first proof. Read-only recovery cannot recreate an approval or effect.
+
+This implements same-invocation ownership transfer, not replacement-invocation
+adoption or cleanup. Actual compositor Level A/B acceptance and maintained Level C
+release qualification remain separate required evidence. No unsupported
+production operation or qualification gate is enabled or weakened.

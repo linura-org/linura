@@ -80,6 +80,19 @@ mod decision;
 mod finalization;
 mod release;
 mod restoration;
+
+/// Exact immutable predecessor comparison. Only the final-retirement workflow
+/// constructs this after checking ReleasedCurrent and its signed ancestry.
+/// It is never a permit and never opens ordinary Begin admission.
+#[derive(Debug, Eq, PartialEq)]
+struct DisplaySuccessorContext {
+    terminal: linura_transaction::TransactionSnapshot,
+    restoration: linura_transaction::TransactionSnapshot,
+    scope: linura_core::DisplayRecoveryScope,
+    released: linura_transaction::ContentDigest,
+    root_released: String,
+    root_final: String,
+}
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
     AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
@@ -215,11 +228,22 @@ impl<'a> DisplayAttemptQuery<'a> {
 pub struct AuthorizedDisplayApplication {
     authorization: AuthorizedEffect,
     native_baseline_guard: ComponentDigest,
+    predecessor: Option<linura_core::DisplayRecoveryScope>,
 }
 impl AuthorizedDisplayApplication {
     #[must_use]
-    pub fn into_executor_request(self) -> (AuthorizedEffect, ComponentDigest) {
-        (self.authorization, self.native_baseline_guard)
+    pub fn into_executor_request(
+        self,
+    ) -> (
+        AuthorizedEffect,
+        ComponentDigest,
+        Option<linura_core::DisplayRecoveryScope>,
+    ) {
+        (
+            self.authorization,
+            self.native_baseline_guard,
+            self.predecessor,
+        )
     }
 }
 pub trait DisplayTransactionPort: Debug + Send {
@@ -657,6 +681,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     fn require_display_completion_ownership_settled(
         &self,
         request: &PlanDesiredStateRequest,
+        successor: Option<&DisplaySuccessorContext>,
     ) -> Result<(), ManagedLifecycleError> {
         const MAX_OWNERS: usize = 32;
         let target = material(request)?;
@@ -781,7 +806,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                         finalization.restoration().original().topology().seat()
                             == target.topology().seat()
                     };
-                    if blocked {
+                    let transferred = successor.is_some_and(|owner| {
+                        snapshot.principal == owner.terminal.principal
+                            && (snapshot == owner.terminal || snapshot == owner.restoration)
+                    });
+                    if blocked && !transferred {
                         return Err(ManagedLifecycleError::Indeterminate("display completion ownership remains retained for this seat; Committed is not successor, release or cleanup authority".into()));
                     }
                 }
@@ -794,8 +823,9 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         &self,
         principal: &PrincipalId,
         request: &PlanDesiredStateRequest,
+        successor: Option<&DisplaySuccessorContext>,
     ) -> Result<(), ManagedLifecycleError> {
-        self.require_display_completion_ownership_settled(request)?;
+        self.require_display_completion_ownership_settled(request, successor)?;
         if self.pending_display_recovery(principal, request)?.is_some() {
             return Err(ManagedLifecycleError::Indeterminate(
                 "display recovery is unresolved for this seat; reconcile or restore it before another mutation".into(),
@@ -836,7 +866,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 verifier,
             )?;
         }
-        self.require_display_recovery_settled(principal, request)
+        self.require_display_recovery_settled(principal, request, None)
     }
 
     fn display_journal(&self) -> Result<&dyn ApprovedRequestJournal, ManagedLifecycleError> {
@@ -896,6 +926,28 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         port: &mut P,
         verifier: &mut V,
     ) -> Result<DisplayLayoutReceipt, ManagedLifecycleError> {
+        self.begin_display_layout_inner(
+            principal,
+            actor,
+            request,
+            approval_authorizer,
+            port,
+            verifier,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn begin_display_layout_inner<P: DisplayTransactionPort, V: IndependentDisplayVerifier>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval_authorizer: &dyn ManagedApprovalAuthorizer,
+        port: &mut P,
+        verifier: &mut V,
+        successor: Option<DisplaySuccessorContext>,
+    ) -> Result<DisplayLayoutReceipt, ManagedLifecycleError> {
         require_owner(&principal, &request)?;
         if actor.kind != ActorKind::Human || !actor.interactive {
             return Err(ManagedLifecycleError::ApprovalBoundary(
@@ -927,7 +979,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         self.display_journal()?
             .integrity_check()
             .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
-        self.reconcile_prior_display_recovery(&principal_id, &request, port, verifier)?;
+        if let Some(context) = successor.as_ref() {
+            self.require_successor_context(&principal, context)?;
+            self.require_display_recovery_settled(&principal_id, &request, Some(context))?;
+        } else {
+            self.reconcile_prior_display_recovery(&principal_id, &request, port, verifier)?;
+        }
         self.check_display_review_capacity(0)?;
         let floor = self.registered_managed_risk_floor(&request)?;
         let candidate = self.authority.candidate_with_risk_floor(
@@ -975,6 +1032,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else {
             (candidate, None)
         };
+        if let Some(context) = successor.as_ref() {
+            self.require_successor_root(&principal, context)?;
+            self.retain_successor_claim(&principal_id, &request, context)?;
+        }
         let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
         self.request_journal
             .as_mut()
@@ -1024,7 +1085,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             None,
         )?;
         self.append_display_record(&reserved, principal_id.clone(), None)?;
-        self.require_display_recovery_settled(&principal_id, &request)?;
+        self.require_display_recovery_settled(&principal_id, &request, successor.as_ref())?;
+        if let Some(context) = successor.as_ref() {
+            self.require_successor_claim(&principal_id, &request, context)?;
+            self.require_successor_root(&principal, context)?;
+        }
         let permit = self.handoff_registered_managed(&principal, &mut prepared)?;
         let authorization = authorized_effect(effect, permit)?;
         let dispatch_digest = authorization.binding().dispatch_digest.to_hex();
@@ -1062,10 +1127,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &principal_id,
             ));
         }
-        self.require_display_recovery_settled(&principal_id, &request)?;
+        self.require_display_recovery_settled(&principal_id, &request, successor.as_ref())?;
+        if let Some(context) = successor.as_ref() {
+            self.require_successor_claim(&principal_id, &request, context)?;
+            self.require_successor_root(&principal, context)?;
+        }
         let application = AuthorizedDisplayApplication {
             authorization,
             native_baseline_guard: checkpoint.native_guard,
+            predecessor: successor.map(|context| context.scope),
         };
         match port.dispatch_layout(application, &request, deadline) {
             Ok(outcome) if outcome.dispatch_digest.to_hex() != dispatch_digest => {
@@ -1136,6 +1206,26 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             &snapshot,
             now_ms()?,
         )?;
+        if let Some(context) = self.successor_for_request(&principal, &request)?
+            && self
+                .verify_successor_transfer(
+                    &principal,
+                    &request,
+                    &context,
+                    &dispatched,
+                    &checkpoint.native_guard,
+                    port,
+                    verifier,
+                )
+                .is_err()
+        {
+            return Ok(receipt(
+                &request,
+                reserved.deadline_unix_ms,
+                DisplayLayoutState::Indeterminate,
+                &principal_id,
+            ));
+        }
         if history.confirmed.is_some() || history.restored.is_some() {
             self.display_reviews.remove(&transaction);
             return Ok(receipt(
@@ -1314,12 +1404,32 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let dispatched = history.dispatched.ok_or_else(|| {
             ManagedLifecycleError::Authority("display has no durable dispatch reservation".into())
         })?;
-        crate::display_checkpoint::Checkpoint::load(
+        let checkpoint = crate::display_checkpoint::Checkpoint::load(
             self.display_journal()?,
             &request,
             &snapshot,
             now_ms()?,
         )?;
+        if let Some(context) = self.successor_for_request(&principal, &request)?
+            && self
+                .verify_successor_transfer(
+                    &principal,
+                    &request,
+                    &context,
+                    &dispatched,
+                    &checkpoint.native_guard,
+                    port,
+                    verifier,
+                )
+                .is_err()
+        {
+            return Ok(receipt(
+                &request,
+                dispatched.deadline_unix_ms,
+                DisplayLayoutState::Indeterminate,
+                &principal_id,
+            ));
+        }
         if snapshot.state != TransactionState::Indeterminate {
             return Err(ManagedLifecycleError::Authority(
                 "display decision has no active indeterminate transaction".into(),

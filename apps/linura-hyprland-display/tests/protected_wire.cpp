@@ -91,6 +91,9 @@ class Scene final : public ProtectedScene
     {
         return {};
     }
+    std::shared_ptr<MutationProtection> reserveSuccessorMutation(OwnedNativeFd,
+        const Correlation &, const Layout &, const Layout &, const Snapshot &, ClockSample) override
+    { return {}; } // No original Root lifetime or successor grant in this fixture.
     bool beginFinalization(const ProtectedInteraction::Scope &next,
                            const std::string &material) override
     {

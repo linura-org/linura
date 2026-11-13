@@ -78,6 +78,10 @@ class NativeDisplayConnection final
                                                const NativeDisplayLayout &desired,
                                                linura_protected_display_interaction_v1 *protection);
     [[nodiscard]] std::optional<quint32>
+    applySuccessor(const NativeDisplayCorrelation &, const NativeDisplayLayout &baseline,
+                   const NativeDisplayLayout &desired, int preparation,
+                   linura_protected_display_interaction_v1 *protection);
+    [[nodiscard]] std::optional<quint32>
     restoreOriginal(const NativeDisplayCorrelation &, const NativeDisplayRestorationIntent &,
                     int originalGrant, linura_protected_display_interaction_v1 *protection);
     // Reconnection can observe a reservation, never acquire its continuation.
@@ -93,7 +97,8 @@ class NativeDisplayConnection final
                                                 const NativeDisplayLayout &baseline,
                                                 const NativeDisplayLayout &desired,
                                                 linura_protected_display_interaction_v1 *protection,
-                                                std::optional<int> originalGrant);
+                                                std::optional<int> originalGrant,
+                                                std::optional<int> successorPreparation = {});
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

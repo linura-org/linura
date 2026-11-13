@@ -14,6 +14,7 @@ const TRANSFER_SPENT: u8 = 2;
 const POWER_SPENT: u8 = 3;
 const CURRENT_SPENT: u8 = 4;
 const RETIREMENT_SPENT: u8 = 5;
+const SUCCESSOR_SPENT: u8 = 6;
 const FRAME_BYTES: usize = 48;
 const BUDGET: Duration = Duration::from_secs(1);
 
@@ -33,23 +34,29 @@ impl ChannelState {
     pub(super) fn transferred(&self) -> bool {
         matches!(
             self.0.load(Ordering::Acquire),
-            TRANSFER_SPENT | POWER_SPENT | CURRENT_SPENT | RETIREMENT_SPENT
+            TRANSFER_SPENT | POWER_SPENT | CURRENT_SPENT | RETIREMENT_SPENT | SUCCESSOR_SPENT
         )
     }
     pub(super) fn power_spent(&self) -> bool {
         matches!(
             self.0.load(Ordering::Acquire),
-            POWER_SPENT | CURRENT_SPENT | RETIREMENT_SPENT
+            POWER_SPENT | CURRENT_SPENT | RETIREMENT_SPENT | SUCCESSOR_SPENT
         )
     }
     pub(super) fn current_spent(&self) -> bool {
         matches!(
             self.0.load(Ordering::Acquire),
-            CURRENT_SPENT | RETIREMENT_SPENT
+            CURRENT_SPENT | RETIREMENT_SPENT | SUCCESSOR_SPENT
         )
     }
     pub(super) fn retirement_spent(&self) -> bool {
-        self.0.load(Ordering::Acquire) == RETIREMENT_SPENT
+        matches!(
+            self.0.load(Ordering::Acquire),
+            RETIREMENT_SPENT | SUCCESSOR_SPENT
+        )
+    }
+    pub(super) fn successor_spent(&self) -> bool {
+        self.0.load(Ordering::Acquire) == SUCCESSOR_SPENT
     }
     fn spend(&self) -> zbus::fdo::Result<()> {
         self.0
@@ -89,6 +96,7 @@ pub(super) fn serve(
     mut retire_power: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
     mut commit_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
     mut retire_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+    mut transfer_successor: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     stream.set_nonblocking(false).map_err(|_| unavailable())?;
     let mut sequence = 1_u64;
@@ -142,7 +150,10 @@ pub(super) fn serve(
         let power = sequence > 1 && &bytes[..8] == b"LNPR:1\n\0";
         let current = sequence > 1 && &bytes[..8] == b"LNCF:1\n\0";
         let retirement = sequence > 1 && &bytes[..8] == b"LNCA:1\n\0";
-        let purpose = if retirement {
+        let successor = sequence > 1 && &bytes[..8] == b"LNSA:1\n\0";
+        let purpose = if successor {
+            b"LNSA:1\n\0"
+        } else if retirement {
             b"LNCA:1\n\0"
         } else if current {
             b"LNCF:1\n\0"
@@ -156,7 +167,7 @@ pub(super) fn serve(
         let end = deadline.ok_or_else(unavailable)?;
         if bytes[..8] != purpose[..]
             || bytes[8..16] != sequence.to_be_bytes()
-            || (!power && !current && !retirement && bytes[16..] != digest[..])
+            || (!power && !current && !retirement && !successor && bytes[16..] != digest[..])
             || Instant::now() >= end
         {
             return Err(unavailable());
@@ -218,6 +229,22 @@ pub(super) fn serve(
                 .compare_exchange(
                     CURRENT_SPENT,
                     RETIREMENT_SPENT,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .map_err(|_| unavailable())?;
+        }
+        if successor {
+            if !lifetime.0.retirement_spent() || lifetime.0.successor_spent() {
+                return Err(unavailable());
+            }
+            transfer_successor(bytes[16..].try_into().map_err(|_| unavailable())?)?;
+            lifetime
+                .0
+                .0
+                .compare_exchange(
+                    RETIREMENT_SPENT,
+                    SUCCESSOR_SPENT,
                     Ordering::AcqRel,
                     Ordering::Acquire,
                 )
@@ -320,6 +347,7 @@ mod tests {
                     |_| Err(unavailable()),
                     |_| Err(unavailable()),
                     |_| Err(unavailable()),
+                    |_| Err(unavailable()),
                 )
                 .is_err()
             );
@@ -378,6 +406,7 @@ mod tests {
                         |_| unreachable!("invalid frame cannot retire power"),
                         |_| unreachable!("invalid frame cannot commit current"),
                         |_| Err(unavailable()),
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -418,6 +447,7 @@ mod tests {
                             worker_spends.fetch_add(1, Ordering::AcqRel);
                             Err(unavailable())
                         },
+                        |_| Err(unavailable()),
                         |_| Err(unavailable()),
                         |_| Err(unavailable()),
                         |_| Err(unavailable()),
@@ -464,6 +494,7 @@ mod tests {
                             }
                             Ok(())
                         },
+                        |_| Err(unavailable()),
                         |_| Err(unavailable()),
                         |_| Err(unavailable()),
                     )
@@ -539,6 +570,7 @@ mod tests {
                                 Ok(())
                             }
                         },
+                        |_| Err(unavailable()),
                         |_| Err(unavailable()),
                     )
                     .is_err()
@@ -621,6 +653,7 @@ mod tests {
                                 Ok(())
                             }
                         },
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -669,6 +702,112 @@ mod tests {
                 usize::from(!matches!(fault, 2 | 4))
             );
             assert!(!state.retirement_spent() && !old.transferred());
+        }
+    }
+    #[test]
+    fn successor_requires_final_retirement_exact_grant_and_one_spend_even_after_lost_ack() {
+        for fault in 0..7 {
+            let (old, old_native, old_worker) = quiesced();
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let retained = old.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let spent = calls.clone();
+            let worker = std::thread::spawn(move || {
+                assert!(
+                    serve(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        identity,
+                        |_| Ok(()),
+                        || retained.transfer(),
+                        |digest| if digest == &[8; 32] {
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        },
+                        |digest| if digest == &[9; 32] {
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        },
+                        |digest| if digest == &[10; 32] {
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        },
+                        |digest| {
+                            spent.fetch_add(1, Ordering::AcqRel);
+                            if fault == 3 || digest != &[11; 32] {
+                                Err(unavailable())
+                            } else {
+                                Ok(())
+                            }
+                        }
+                    )
+                    .is_err()
+                );
+            });
+            let mut response = [0; FRAME_BYTES];
+            for (purpose, sequence, digest) in [
+                (b"LNCH:1\n\0", 1, [7; 32]),
+                (b"LNPR:1\n\0", 2, [8; 32]),
+                (b"LNCF:1\n\0", 3, [9; 32]),
+                (b"LNCA:1\n\0", 4, [10; 32]),
+            ] {
+                if fault == 1 && sequence == 4 {
+                    break;
+                }
+                let request = frame(purpose, sequence, digest);
+                value(native.write_all(&request));
+                value(native.read_exact(&mut response));
+                assert_eq!(response, request);
+            }
+            drop(old_native);
+            value(old_worker.join());
+            let sequence = if fault == 1 {
+                4
+            } else if fault == 4 {
+                0
+            } else {
+                5
+            };
+            let purpose = if fault == 5 {
+                b"LNCH:1\n\0"
+            } else {
+                b"LNSA:1\n\0"
+            };
+            let request = frame(
+                purpose,
+                sequence,
+                if fault == 2 { [12; 32] } else { [11; 32] },
+            );
+            value(native.write_all(&request));
+            if fault == 0 {
+                value(native.read_exact(&mut response));
+                assert_eq!(response, request);
+                assert!(state.successor_spent() && state.retirement_spent());
+                let probe = frame(b"LNCV:1\n\0", 6, [7; 32]);
+                value(native.write_all(&probe));
+                value(native.read_exact(&mut response));
+                assert_eq!(response, probe);
+                value(native.write_all(&frame(b"LNSA:1\n\0", 7, [11; 32])));
+                assert!(native.read_exact(&mut response).is_err());
+                drop(native);
+            } else if fault == 6 {
+                drop(native); // The durable callback cannot be replayed after a missing ACK.
+            } else {
+                assert!(native.read_exact(&mut response).is_err());
+                drop(native);
+            }
+            value(worker.join());
+            assert_eq!(
+                calls.load(Ordering::Acquire),
+                usize::from(!matches!(fault, 1 | 4 | 5))
+            );
+            assert!(!state.transferred()); // Closure revokes liveness, never the spent history.
         }
     }
 }

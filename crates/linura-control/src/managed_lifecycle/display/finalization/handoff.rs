@@ -12,6 +12,7 @@ use linura_protocol::ObservationRequest;
 
 mod completed;
 mod completion;
+mod successor;
 pub use completed::OriginalDisplayCurrentCommit;
 mod current;
 mod final_retirement;

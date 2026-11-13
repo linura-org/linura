@@ -65,7 +65,10 @@
       <!-- 0 unadmitted, 1 ordinary, 2 recovery fenced, 3 lost/invalid,
            4 current invocation under the separately transferred live Root
            completion lease. Phase 4 remains fenced for managed mutations and
-           admits no future startup or completed Control history. -->
+           admits no future startup or completed Control history.
+           5 final native retirement under the same actual Root lifetime;
+           permits independent S17 review and a separately prepared successor,
+           never ordinary Apply, future startup or checkpoint cleanup. -->
       <arg name="startup_phase" type="uint"/>
     </event>
     <event name="head">
@@ -215,6 +218,17 @@
         replies and destroyed resources cannot replay the consumed stream.
       </description>
       <arg name="grant" type="fd"/>
+      <arg name="protection" type="object" interface="linura_protected_display_interaction_v1"/>
+    </request>
+    <request name="apply_successor">
+      <description summary="transfer original ownership to a fresh prepared Apply">
+        The sealed comparison must bind Root's exact completed predecessor,
+        new prepared checkpoint and original native sample clocks. The current
+        compositor separately spends the original credential-bearing Root
+        channel. Neither the descriptor nor its bytes grants authority. Both
+        protections remain held on uncertain acknowledgement; no replay.
+      </description>
+      <arg name="preparation" type="fd"/>
       <arg name="protection" type="object" interface="linura_protected_display_interaction_v1"/>
     </request>
     <event name="status">

@@ -431,6 +431,29 @@ quint32 NativeEndpoint::DispatchPreparedDisplay(const NativeDisplayAttemptQueryW
     return 7; // Unknown, never a no-dispatch acknowledgement.
 }
 
+quint32 NativeEndpoint::DispatchPreparedSuccessorDisplay(const NativeDisplayAttemptQueryWire &query,
+                                                const QString &sampleDigest, quint64 sampledBootMs,
+                                                const QString &nativeBaselineGuard, const QByteArray &preparation)
+{
+    if (calledFromDBus() && !preparation.isEmpty() && preparation.size() <= 64 * 1024 && query.intent.size() <= 4096 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        sampleDigest.size() == 64 && nativeBaselineGuard.size() == 64) {
+        const auto intent = NativeDisplayIntent::parse(query.intent);
+        const NativeDisplayCorrelation correlation{query.transaction, query.effectDigest,
+                                                   query.dispatchDigest, query.deadlineUnixMs};
+        const auto result =
+            intent ? runtime_.dispatchPreparedSuccessorDisplay(message(), *intent, correlation, sampleDigest,
+                                                      sampledBootMs, nativeBaselineGuard, preparation)
+                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native prepared display dispatch unavailable"));
+    return 7; // Unknown, never a no-dispatch acknowledgement.
+}
+
 quint32 NativeEndpoint::RestoreOriginalDisplay(const NativeDisplayAttemptQueryWire &query,
                                                const QString &sampleDigest, quint64 sampledBootMs,
                                                const QDBusUnixFileDescriptor &originalGrant)

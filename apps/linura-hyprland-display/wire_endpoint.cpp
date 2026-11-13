@@ -171,6 +171,7 @@ class WireEndpoint::Impl final
     {
         std::weak_ptr<Client> client;
         OwnerInvocation invocation;
+        bool successor = false;
     };
     std::map<std::string, Origin> origins;
     static_assert(std::is_standard_layout_v<Client> && offsetof(Client, destroyed) == 0);
@@ -534,6 +535,60 @@ class WireEndpoint::Impl final
             wl_client_post_no_memory(client);
         }
     }
+    static void applySuccessor(wl_client *client, wl_resource *resource, int descriptor,
+                               wl_resource *protection)
+    {
+        OwnedNativeFd preparation(descriptor);
+        auto &attempt = object<Attempt>(resource);
+        if (attempt.used || attempt.invalid || attempt.owner.startup.phase() != 5 ||
+            !attempt.captured || attempt.owner.origins.contains(attempt.bound.transaction)) {
+            attempt.deny();
+            return;
+        }
+        attempt.used = true; // Before constructing a potentially effectful call.
+        try {
+            const auto invocation =
+                attempt.owner.admitOwner(attempt.client->pid, attempt.client->uid);
+            if (!invocation || *invocation != attempt.client->invocation) {
+                attempt.deny();
+                return;
+            }
+            Layout baseline, desired;
+            for (const auto &head : attempt.captured->sample.heads)
+                baseline.push_back(head.current);
+            for (const auto &[key, target] : attempt.targets) {
+                (void)key;
+                desired.push_back(target);
+            }
+            if (!DisplayTransaction::validLayout(desired, attempt.captured->sample)) {
+                attempt.deny();
+                return;
+            }
+            if (attempt.owner.origins.size() >= CompositorDisplayService::MaxReservations) {
+                attempt.deny();
+                return;
+            }
+            auto fence = ProtectedWireEndpoint::reserveSuccessorMutation(
+                protection, client, std::move(preparation), attempt.bound, baseline, desired, attempt.captured->sample,
+                attempt.captured->at);
+            if (!fence) {
+                attempt.deny();
+                return;
+            }
+            attempt.owner.origins.emplace(attempt.bound.transaction,
+                                          Origin{attempt.client, *invocation, true});
+            (void)attempt.owner.service.begin(attempt.bound, baseline, desired,
+                                              attempt.captured->sample, attempt.captured->at,
+                                              std::move(fence));
+            if (!attempt.owner.service.status(attempt.bound))
+                attempt.owner.origins.erase(attempt.bound.transaction);
+            attempt.status();
+        } catch (...) {
+            // A retained reservation remains queryable. Memory/transport loss
+            // after entry never becomes a definite pre-dispatch rejection.
+            wl_client_post_no_memory(client);
+        }
+    }
     static void restoreOriginal(wl_client *client, wl_resource *resource, int descriptor,
                                 wl_resource *protection)
     {
@@ -583,7 +638,11 @@ class WireEndpoint::Impl final
     static void confirm(wl_client *, wl_resource *resource)
     {
         auto &attempt = object<Attempt>(resource);
-        if (attempt.invalid || attempt.owner.startup.phase() != 1 || !attempt.original()) {
+        const auto phase = attempt.owner.startup.phase();
+        const auto origin = attempt.owner.origins.find(attempt.bound.transaction);
+        const bool admitted = phase == 1 || (phase == 4 &&
+            origin != attempt.owner.origins.end() && origin->second.successor);
+        if (attempt.invalid || !admitted || !attempt.original()) {
             attempt.deny();
             return;
         }
@@ -641,7 +700,7 @@ const struct linura_display_head_v1_interface WireEndpoint::Impl::headImplementa
 };
 const struct linura_display_attempt_v1_interface WireEndpoint::Impl::attemptImplementation
 {
-    release, configure, enable, disable, apply, confirm, restore, status, restoreOriginal
+    release, configure, enable, disable, apply, confirm, restore, status, restoreOriginal, applySuccessor
 };
 
 WireEndpoint::WireEndpoint(wl_display &display, Backend &backend, CompositorDisplayService &service,

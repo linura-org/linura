@@ -152,7 +152,7 @@ impl DisplayTransactionPort for SessionExecutorClient {
         deadline_unix_ms: u64,
     ) -> Result<linura_provider_sdk::ExecutionOutcome, String> {
         let material = display_material(request)?;
-        let (authorization, native_guard) = application.into_executor_request();
+        let (authorization, native_guard, predecessor) = application.into_executor_request();
         let (effect, binding) = authorization.into_executor_request();
         if effect != linura_provider_sdk::display_layout_effect(material)? {
             return Err(
@@ -160,8 +160,22 @@ impl DisplayTransactionPort for SessionExecutorClient {
             );
         }
         binding.validate_for(&effect).map_err(|e| e.to_string())?;
-        self.channel
-            .handoff_prepared_display(material, &binding, deadline_unix_ms, &native_guard)
+        if let Some(predecessor) = predecessor {
+            self.channel.handoff_prepared_successor_display(
+                material,
+                &binding,
+                deadline_unix_ms,
+                &native_guard,
+                &predecessor,
+            )
+        } else {
+            self.channel.handoff_prepared_display(
+                material,
+                &binding,
+                deadline_unix_ms,
+                &native_guard,
+            )
+        }
     }
 
     fn observe_attempt(

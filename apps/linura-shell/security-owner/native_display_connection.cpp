@@ -182,7 +182,7 @@ class NativeDisplayConnection::Impl final
                 !integration || strnlen(instance, 37) != 36 ||
                 std::strcmp(upstream, Upstream) != 0 ||
                 std::strcmp(integration, HyprlandDisplay::IntegrationSourceDigest) != 0 ||
-                coverage > 3 || fenced > 1 || startupPhase > 4 ||
+                coverage > 3 || fenced > 1 || startupPhase > 5 ||
                 (startupPhase != 1 && fenced == 0)) {
                 capture.invalid = true;
                 return;
@@ -411,7 +411,9 @@ class NativeDisplayConnection::Impl final
                 !capture.sample.nativeCurrentPresentation.isEmpty() ||
                 !capture.sample.originalRestorationPresentation.isEmpty() ||
                 !capture.sample.nativeHandoffPresentation.isEmpty() || size == 0 ||
-                size > 16 * 1024 || capture.sample.startupPhase != 4 || !capture.sample.fenced) {
+                size > 16 * 1024 ||
+                (capture.sample.startupPhase != 4 && capture.sample.startupPhase != 5) ||
+                !capture.sample.fenced) {
                 capture.invalid = true;
                 return;
             }
@@ -546,7 +548,8 @@ bool NativeDisplayConnection::securityTransitionAllowed(bool currentlySecure)
     if (!advertised())
         return true;
     const auto current = sample();
-    return current && !current->fenced && current->coverage == (currentlySecure ? 1U : 0U);
+    return current && (!current->fenced || current->startupPhase == 5) &&
+           current->coverage == (currentlySecure ? 1U : 0U);
 }
 std::optional<NativePinnedDisplaySample> NativeDisplayConnection::sample()
 {
@@ -603,13 +606,25 @@ std::optional<quint32> NativeDisplayConnection::restoreOriginal(
     return submit(bound, intent.replacement.baseline, intent.replacement.desired, protection,
                   originalGrant);
 }
+std::optional<quint32> NativeDisplayConnection::applySuccessor(
+    const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,
+    const NativeDisplayLayout &desired, int preparation,
+    linura_protected_display_interaction_v1 *protection)
+{
+    if (preparation < 0) return std::nullopt;
+    return submit(bound, baseline, desired, protection, std::nullopt, preparation);
+}
 std::optional<quint32> NativeDisplayConnection::submit(
     const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,
     const NativeDisplayLayout &desired, linura_protected_display_interaction_v1 *protection,
-    std::optional<int> originalGrant)
+    std::optional<int> originalGrant, std::optional<int> successorPreparation)
 {
     if (!protection || !impl_->capture || impl_->capture->invalid || !impl_->capture->done ||
-        (originalGrant
+        (originalGrant && successorPreparation) ||
+        (successorPreparation
+             ? (!impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 5 ||
+                baseline.encode() == desired.encode())
+             : originalGrant
              ? (!impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 2)
              : (impl_->capture->sample.fenced || impl_->capture->sample.startupPhase != 1 ||
                 baseline.encode() == desired.encode())) ||
@@ -679,7 +694,9 @@ std::optional<quint32> NativeDisplayConnection::submit(
         }
     }
     attempt->phase.reset();
-    if (originalGrant)
+    if (successorPreparation)
+        linura_display_attempt_v1_apply_successor(attempt->native, *successorPreparation, protection);
+    else if (originalGrant)
         linura_display_attempt_v1_restore_original(attempt->native, *originalGrant, protection);
     else
         linura_display_attempt_v1_apply(attempt->native, protection);

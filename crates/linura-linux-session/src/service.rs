@@ -314,6 +314,96 @@ impl NativeSessionChannel {
         Ok(observation)
     }
 
+    pub(crate) fn observe_display_successor(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::{DisplaySuccessorFacts, DisplaySuccessorLineage};
+        use sha2::Digest;
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "original successor lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.replacement().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadSuccessor",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayb"
+            || reply.body().len() > crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64
+        {
+            return Err(invalid());
+        }
+        let (bytes, spent): (Vec<u8>, bool) = reply.body().deserialize().map_err(|_| invalid())?;
+        let record = crate::NativeDisplaySuccessorPreparation::decode(&bytes)?;
+        let old = record.parent().parent().parent().parent().parent().parent();
+        if old.frames().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.replacement().session().boot()
+        {
+            return Err(invalid());
+        }
+        let facts = DisplaySuccessorFacts::new(
+            scope.clone(),
+            DisplaySuccessorLineage {
+                record: record.record_digest().to_hex(),
+                released_parent: ComponentDigest::from_bytes(
+                    sha2::Sha256::digest(record.parent().canonical_bytes()).into(),
+                )
+                .to_hex(),
+                checkpoint: record.checkpoint_digest().to_hex(),
+                native_guard: record.source_guard().to_hex(),
+                transaction: record.binding().transaction_id.clone(),
+                effect: record.binding().effect_digest.to_hex(),
+                dispatch: record.binding().dispatch_digest.to_hex(),
+            },
+            spent,
+        )
+        .map_err(|_| invalid())?;
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_SUCCESSOR_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplaySuccessorFacts::from_envelope(&observation, scope, now).map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_original_display_final_retirement(
         &self,
         scope: &linura_core::DisplayRecoveryScope,
@@ -1532,6 +1622,57 @@ impl NativeSessionChannel {
             "ApplyDisplayLayout",
             &(
                 material,
+                deadline_unix_ms,
+                binding.transaction_id.as_str(),
+                binding.generation,
+                binding.state_version,
+                binding.authority_binding_digest.to_hex(),
+                binding.authority_use_digest.to_hex(),
+                binding.effect_digest.to_hex(),
+                binding.dispatch_digest.to_hex(),
+                native_baseline_guard.to_hex(),
+            ),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+        {
+            return Err(
+                "prepared display executor result has a different authenticated sender".into(),
+            );
+        }
+        self.decode_executor_outcome(&identity, reply, binding, Instant::now())
+    }
+
+    /// Fresh separately reviewed successor Apply with an exact retained parent.
+    pub fn handoff_prepared_successor_display(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
+        predecessor: &linura_core::DisplayRecoveryScope,
+    ) -> Result<ExecutionOutcome, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let effect = linura_provider_sdk::display_layout_effect(material)?;
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        let identity = self.trusted_service(NativeSessionRole::Executor, Instant::now())?;
+        // Separate fixed mechanism budget, including root's service policy and
+        // one native probe/dispatch. It cannot extend the human deadline or the
+        // native sample's freshness. Fault/timeout never requests redelivery.
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "ApplySuccessorDisplayLayout",
+            &(
+                material,
+                predecessor
+                    .resource_id()
+                    .map_err(|e| e.to_string())?
+                    .as_str(),
                 deadline_unix_ms,
                 binding.transaction_id.as_str(),
                 binding.generation,

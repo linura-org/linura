@@ -95,7 +95,8 @@ if(BUILD_TESTING)
         message(FATAL_ERROR "Missing or substituted canonical original finalization fixture")
     endif()
     add_executable(linura-hyprland-original-restoration-grant-tests tests/original_restoration_grant.cpp)
-    target_link_libraries(linura-hyprland-original-restoration-grant-tests PRIVATE OpenSSL::Crypto)
+    target_link_libraries(linura-hyprland-original-restoration-grant-tests PRIVATE
+        OpenSSL::Crypto linura-hyprland-display-mechanism)
     target_include_directories(linura-hyprland-original-restoration-grant-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(linura-hyprland-original-restoration-grant-tests PRIVATE
         -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)

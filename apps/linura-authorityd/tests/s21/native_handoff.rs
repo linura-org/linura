@@ -1117,6 +1117,33 @@ fn final_retirement_requires_original_review_independent_postconditions_and_dura
         ));
 
         value(control.commit_original_display_current(principal(), actor(true), &request));
+        if fault == 0 {
+            let challenge = SuccessorApproval {
+                machine: machine.clone(),
+                calls: AtomicUsize::new(0),
+            };
+            let mut successor_port = SuccessorPort {
+                calls: 0,
+                machine: machine.clone(),
+                attempt: None,
+            };
+            assert!(
+                control
+                    .begin_successor_display_layout(
+                        principal(),
+                        actor(true),
+                        &request,
+                        successor_request(&machine, "early-committed"),
+                        &challenge,
+                        &mut successor_port,
+                        &mut Verifier(machine.clone())
+                    )
+                    .is_err()
+            );
+            assert_eq!(challenge.calls.load(Ordering::SeqCst), 0);
+            assert_eq!(successor_port.calls, 0);
+        }
+
         value(control.dispatch_original_display_current_commit(
             principal(),
             actor(true),
@@ -1256,6 +1283,16 @@ fn final_retirement_requires_original_review_independent_postconditions_and_dura
                 &database,
                 &machine,
             );
+            if fault == 0 {
+                successor_ack_loss_is_not_replayed(
+                    &mut restarted,
+                    &database,
+                    &machine,
+                    &original,
+                    &input,
+                    &request,
+                );
+            }
         }
         assert!(
             restarted
@@ -2017,4 +2054,355 @@ fn verification_storage_failure_or_false_ack_keeps_terminal_indeterminate_and_sp
         let stored = journal.load(&value(PrincipalId::new(principal().as_str())), &key);
         assert_eq!(stored.is_ok(), fault == 3);
     }
+}
+
+// This is Control/SQLite component evidence. The port deliberately reports an
+// uncertain outcome; it does not manufacture a Root grant or physical success.
+#[derive(Debug)]
+struct SuccessorPort {
+    calls: usize,
+    machine: Arc<Mutex<Machine>>,
+    attempt: Option<(ExecutionBinding, u64)>,
+}
+impl DisplayTransactionPort for SuccessorPort {
+    fn dispatch_layout(
+        &mut self,
+        application: AuthorizedDisplayApplication,
+        request: &PlanDesiredStateRequest,
+        deadline: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        let (authorization, guard, predecessor) = application.into_executor_request();
+        let predecessor = predecessor.ok_or("successor has no sealed predecessor")?;
+        let next = value(linura_core::DisplayLayoutMaterial::decode(
+            &request.desired_state["layout"],
+        ));
+        assert_eq!(predecessor.replacement(), next.topology());
+        assert_ne!(
+            guard,
+            linura_provider_sdk::ComponentDigest::from_bytes([0; 32])
+        );
+        let (effect, binding) = authorization.into_executor_request();
+        assert_eq!(
+            effect,
+            value(linura_provider_sdk::display_layout_effect(
+                &request.desired_state["layout"]
+            ))
+        );
+        value(binding.validate_for(&effect));
+        self.calls += 1;
+        let mut machine = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        let parent = machine
+            .final_retirement
+            .as_ref()
+            .and_then(|v| v.completed())
+            .ok_or("no simulated released parent")?
+            .record
+            .clone();
+        machine.successor = Some(value(linura_observation::DisplaySuccessorFacts::new(
+            predecessor,
+            linura_observation::DisplaySuccessorLineage {
+                record: "8".repeat(64),
+                released_parent: parent,
+                checkpoint: "9".repeat(64),
+                native_guard: guard.to_hex(),
+                transaction: binding.transaction_id.clone(),
+                effect: binding.effect_digest.to_hex(),
+                dispatch: binding.dispatch_digest.to_hex(),
+            },
+            true,
+        )));
+        self.attempt = Some((binding, deadline));
+        Err("simulated lost successor acknowledgement".into())
+    }
+    fn observe_attempt(
+        &mut self,
+        query: &linura_control::DisplayAttemptQuery<'_>,
+    ) -> Result<ObservationEnvelope, String> {
+        let (binding, deadline) = self.attempt.as_ref().ok_or("no simulated successor")?;
+        let mut machine = self
+            .machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        if !machine.successor_native_available
+            || query.transaction_id() != binding.transaction_id
+            || query.dispatch_digest() != binding.dispatch_digest.to_hex()
+            || query.deadline_unix_ms() != *deadline
+        {
+            return Err("no independent successor completion in this fixture".into());
+        }
+        machine.sequence += 1;
+        Ok(ObservationEnvelope {
+            provider: value(ProviderId::new("hyprland")),
+            resource: value(ResourceId::new(format!(
+                "display:attempt:{}",
+                binding.transaction_id
+            ))),
+            capability: value(CapabilityId::new("display.layout-attempt.observe")),
+            authority: ObservationAuthority::NativeApi,
+            observed_at_unix_ms: now_unix_ms(),
+            valid_for_ms: 2000,
+            sequence: machine.sequence,
+            attributes: BTreeMap::from([
+                (
+                    "lock_resource".into(),
+                    ObservedValue::Text(
+                        value(s17_managed_lock::lock_id().resource_id())
+                            .as_str()
+                            .into(),
+                    ),
+                ),
+                (
+                    "topology_resource".into(),
+                    ObservedValue::Text(query.request().resource.as_str().into()),
+                ),
+                (
+                    "effect_digest".into(),
+                    ObservedValue::Text(binding.effect_digest.to_hex()),
+                ),
+                (
+                    "dispatch_digest".into(),
+                    ObservedValue::Text(binding.dispatch_digest.to_hex()),
+                ),
+                ("deadline_unix_ms".into(), ObservedValue::U64(*deadline)),
+                ("state".into(), ObservedValue::Text("pending".into())),
+            ]),
+        })
+    }
+    fn continue_layout(&mut self, _: AuthorizedDisplayContinuation) -> Result<(), String> {
+        unreachable!("uncertain handoff cannot authorize a decision")
+    }
+}
+#[derive(Debug)]
+struct SuccessorApproval {
+    machine: Arc<Mutex<Machine>>,
+    calls: AtomicUsize,
+}
+impl ManagedApprovalAuthorizer for SuccessorApproval {
+    fn authorize(
+        &self,
+        challenge: &ManagedApprovalChallenge,
+    ) -> Result<TrustedHumanApproval, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let approved = approval().authorize(challenge)?;
+        // The opaque next review covers the old ordinary frame. Reading that
+        // old frame as current after approval must not be necessary or accepted.
+        self.machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .current_fault = 1;
+        Ok(approved)
+    }
+}
+fn successor_request(machine: &Arc<Mutex<Machine>>, operation: &str) -> PlanDesiredStateRequest {
+    let state = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+    let text = state
+        .restoration_material
+        .as_ref()
+        .unwrap_or_else(|| unreachable!("restored"));
+    let restored = value(linura_core::DisplayRestorationMaterial::decode(text));
+    let topology = restored.replacement().topology().clone();
+    let output = value(DisplayOutputId::new(topology.clone(), 19, 3));
+    let inventory = value(DisplayOutputSet::new(topology, vec![output.clone()]));
+    let mode = value(DisplayMode::new(1920, 1080, 60000));
+    let caps = vec![value(NativeOutputCapabilities::new(
+        output.clone(),
+        vec![mode],
+        false,
+    ))];
+    let layout = |x| {
+        value(DisplayLayout::new(
+            &inventory,
+            &caps,
+            vec![DisplayOutputLayout::Enabled {
+                output: output.clone(),
+                mode,
+                scale: value(DisplayScale::new(1000)),
+                transform: DisplayTransform::Normal,
+                x,
+                y: 0,
+                mirror: None,
+            }],
+        ))
+    };
+    let mut next = value(
+        DisplayLayoutPlanRequest {
+            request_id: value(RequestId::new(
+                "request:v010:display-layout:successor-placeholder",
+            )),
+            baseline: layout(0),
+            layout: layout(200),
+            lock: restored.replacement().lock().clone(),
+            reason: display_request("successor-reason").reason,
+        }
+        .desired_request(),
+    );
+    next.request_id = value(managed_request_id(operation, &next));
+    next
+}
+fn successor_ack_loss_is_not_replayed(
+    control: &mut ManagedLifecycleControl<SqliteTransactionStore>,
+    database: &TestDatabase,
+    machine: &Arc<Mutex<Machine>>,
+    original: &PlanDesiredStateRequest,
+    input: &OriginalDisplayRestorationRequest,
+    predecessor: &RequestId,
+) {
+    let next = successor_request(machine, "same-invocation-successor");
+    let approved = SuccessorApproval {
+        machine: machine.clone(),
+        calls: AtomicUsize::new(0),
+    };
+    let mut port = SuccessorPort {
+        calls: 0,
+        machine: machine.clone(),
+        attempt: None,
+    };
+    let receipt = value(control.begin_successor_display_layout(
+        principal(),
+        actor(true),
+        predecessor,
+        next.clone(),
+        &approved,
+        &mut port,
+        &mut Verifier(machine.clone()),
+    ));
+    assert_eq!(receipt.state, DisplayLayoutState::Indeterminate);
+    assert_eq!(approved.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(port.calls, 1);
+    let receipt = value(control.begin_successor_display_layout(
+        principal(),
+        actor(true),
+        predecessor,
+        next.clone(),
+        &approved,
+        &mut port,
+        &mut Verifier(machine.clone()),
+    ));
+    assert_eq!(receipt.state, DisplayLayoutState::Indeterminate);
+    assert_eq!(approved.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(port.calls, 1);
+    let mut reopened = open_with_previews(
+        database.path(),
+        machine,
+        0,
+        replacement_previews(machine, original, input),
+    );
+    let receipt = value(reopened.begin_successor_display_layout(
+        principal(),
+        actor(true),
+        predecessor,
+        next.clone(),
+        &approved,
+        &mut port,
+        &mut Verifier(machine.clone()),
+    ));
+    assert_eq!(receipt.state, DisplayLayoutState::Indeterminate);
+    assert_eq!(approved.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(port.calls, 1);
+    {
+        let mut state = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        state.successor_native_available = true;
+        state.desired = false; // Root + native ACK without independent desired state is insufficient.
+    }
+    assert_eq!(
+        value(reopened.display_layout_status(
+            principal(),
+            actor(true),
+            &next.request_id,
+            &mut port,
+            &mut Verifier(machine.clone())
+        ))
+        .state,
+        DisplayLayoutState::Indeterminate
+    );
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .desired = true;
+    assert_eq!(
+        value(reopened.display_layout_status(
+            principal(),
+            actor(true),
+            &next.request_id,
+            &mut port,
+            &mut Verifier(machine.clone())
+        ))
+        .state,
+        DisplayLayoutState::AwaitingConfirmation
+    );
+    let retained = retained_recovery_bytes(database, machine);
+    for fault in 1..=14 {
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .successor_fault = fault;
+        assert_eq!(
+            value(reopened.display_layout_status(
+                principal(),
+                actor(true),
+                &next.request_id,
+                &mut port,
+                &mut Verifier(machine.clone())
+            ))
+            .state,
+            DisplayLayoutState::Indeterminate,
+            "successor evidence fault {fault}"
+        );
+        assert_eq!(retained_recovery_bytes(database, machine), retained);
+        assert_eq!(port.calls, 1);
+    }
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .successor_fault = 0;
+    assert_eq!(
+        value(reopened.display_layout_status(
+            principal(),
+            actor(true),
+            &next.request_id,
+            &mut port,
+            &mut Verifier(machine.clone())
+        ))
+        .state,
+        DisplayLayoutState::AwaitingConfirmation
+    );
+    assert_eq!(retained_recovery_bytes(database, machine), retained);
+    assert!(
+        reopened
+            .begin_successor_display_layout(
+                principal(),
+                actor(true),
+                &original.request_id,
+                next,
+                &approved,
+                &mut port,
+                &mut Verifier(machine.clone())
+            )
+            .is_err()
+    );
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+        .current_fault = 0;
+    assert!(
+        reopened
+            .begin_successor_display_layout(
+                principal(),
+                actor(true),
+                predecessor,
+                successor_request(machine, "competing-same-predecessor"),
+                &approved,
+                &mut port,
+                &mut Verifier(machine.clone())
+            )
+            .is_err()
+    );
+    assert_eq!(port.calls, 1);
 }

@@ -21,6 +21,13 @@ pub(crate) const MAX_DISPLAY_REPLY_BYTES: usize = 384 * 1024;
 pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
 
 fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &str) -> usize {
+    if path == "/org/linura/DisplayProtection1"
+        && interface == "org.linura.DisplayProtection1"
+        && ((role == NativeSessionRole::Executor && method == "ReserveSuccessor")
+            || (role == NativeSessionRole::Control && method == "ReadSuccessor"))
+    {
+        return crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64;
+    }
     let protection = path == "/org/linura/DisplayProtection1"
         && interface == "org.linura.DisplayProtection1"
         && role == NativeSessionRole::Control;
@@ -667,6 +674,8 @@ mod diagnostic_tests {
                         "ReadRootPower",
                         "ReadFinalRetirement",
                         "ReadOrdinaryOriginal",
+                        "ReserveSuccessor",
+                        "ReadSuccessor",
                     ] {
                         let admitted = path == "/org/linura/SecurityOwner1"
                             && interface == "org.linura.SecurityOwner1"
@@ -681,7 +690,16 @@ mod diagnostic_tests {
                                 && method == "ReadOriginal";
                         assert_eq!(
                             reply_limit(role, path, interface, method),
-                            if role == NativeSessionRole::Control
+                            if path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && matches!(
+                                    (role, method),
+                                    (NativeSessionRole::Control, "ReadSuccessor")
+                                        | (NativeSessionRole::Executor, "ReserveSuccessor")
+                                )
+                            {
+                                crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64
+                            } else if role == NativeSessionRole::Control
                                 && path == "/org/linura/DisplayProtection1"
                                 && interface == "org.linura.DisplayProtection1"
                                 && method == "ReadOrdinaryOriginal"

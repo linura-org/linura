@@ -83,6 +83,10 @@ class NativeRuntime final : public QObject
                             const NativeDisplayCorrelation &, const QString &sampleDigest,
                             quint64 sampledBootMs, const QString &nativeBaselineGuard);
     [[nodiscard]] std::optional<quint32>
+    dispatchPreparedSuccessorDisplay(const QDBusMessage &, const NativeDisplayIntent &,
+        const NativeDisplayCorrelation &, const QString &sampleDigest, quint64 sampledBootMs,
+        const QString &nativeBaselineGuard, const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
     restoreOriginalDisplay(const QDBusMessage &, const NativeDisplayRestorationIntent &,
                            const NativeDisplayCorrelation &, const QString &sampleDigest,
                            quint64 sampledBootMs, int originalGrant);

@@ -56,6 +56,9 @@ class WireSceneFixture final : public ProtectedScene
     {
         return false; // No original Root witness in this transport fixture.
     }
+    std::shared_ptr<MutationProtection> reserveSuccessorMutation(OwnedNativeFd,
+        const Correlation &, const Layout &, const Layout &, const Snapshot &, ClockSample) override
+    { return {}; } // A transport fixture cannot authenticate a successor grant.
     bool quiesceFinalization(OwnedNativeFd, const Correlation &, std::uint64_t) override
     {
         return false; // No actual Root channel or native safety-frame proof.

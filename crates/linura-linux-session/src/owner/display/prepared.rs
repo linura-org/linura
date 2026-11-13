@@ -112,6 +112,147 @@ impl NativeSessionChannel {
         }
         Ok(phase)
     }
+    pub fn dispatch_prepared_successor_display(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+        native_baseline_guard: &linura_provider_sdk::ComponentDigest,
+        scope: &linura_core::DisplayRecoveryScope,
+    ) -> Result<u32, String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
+        let sample = self.prepared_display_sample(material, 1)?;
+        if sample.native_baseline_guard.as_ref() != Some(native_baseline_guard) {
+            return Err(
+                "original canonical native baseline changed before executor dispatch".into(),
+            );
+        }
+        self.revalidate_observation(&sample.owner, &sample.boot, sample.started)?;
+        validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
+        let now_boot_ms = boot_ms()?;
+        if now_boot_ms < sample.sampled_boot_ms || now_boot_ms - sample.sampled_boot_ms >= 2000 {
+            return Err("prepared display sample expired before dispatch".into());
+        }
+        // Native preimages must survive independently BEFORE the first write.
+        // The fixed executor callback persists this validated opaque record and
+        // retains the operation's narrow recovery protections. It is not policy,
+        // an effect dispatcher or client-supplied orchestration. Failure never
+        // reaches native apply.
+        let record =
+            NativeDisplayRecoveryCheckpoint::capture(material, binding, deadline_unix_ms, &sample)?;
+        let preparation = self.reserve_successor_display_checkpoint(scope, &record)?;
+        if preparation.material() != material
+            || preparation.binding() != binding
+            || preparation.source_guard() != native_baseline_guard
+        {
+            return Err("successor preparation substituted the fresh canonical binding".into());
+        }
+        self.revalidate_observation(&sample.owner, &sample.boot, sample.started)?;
+        validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
+        let after_checkpoint_boot_ms = boot_ms()?;
+        if after_checkpoint_boot_ms < sample.sampled_boot_ms
+            || after_checkpoint_boot_ms - sample.sampled_boot_ms >= 2000
+        {
+            return Err("prepared display sample expired during durable checkpoint".into());
+        }
+        let query = (
+            material,
+            binding.transaction_id.as_str(),
+            binding.effect_digest.to_hex(),
+            binding.dispatch_digest.to_hex(),
+            deadline_unix_ms,
+        );
+        let reply = self.call_with_budget(
+            &sample.owner.unique_name,
+            ENDPOINT,
+            INTERFACE,
+            "DispatchPreparedSuccessorDisplay",
+            &(
+                query,
+                sample.digest.to_hex(),
+                sample.sampled_boot_ms,
+                native_baseline_guard.to_hex(),
+                preparation.canonical_bytes(),
+            ),
+            owner_reply_budget(sample.started.elapsed())?,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != sample.owner.unique_name)
+        {
+            return Err(
+                "prepared native display result has a different authenticated sender".into(),
+            );
+        }
+        if reply.body().signature().to_string() != "u" {
+            return Err("prepared native display result signature mismatch".into());
+        }
+        let (phase,): (u32,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "prepared native display result codec mismatch")?;
+        self.revalidate_observation(&sample.owner, &sample.boot, sample.started)?;
+        if !(1..=8).contains(&phase) {
+            return Err("prepared native display result is unsupported".into());
+        }
+        Ok(phase)
+    }
+    fn reserve_successor_display_checkpoint(
+        &self,
+        scope: &linura_core::DisplayRecoveryScope,
+        checkpoint: &NativeDisplayRecoveryCheckpoint,
+    ) -> Result<crate::NativeDisplaySuccessorPreparation, String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        let started = Instant::now();
+        let boot = current_boot()?;
+        if scope.replacement().session().boot() != &boot {
+            return Err("successor Root boot binding changed".into());
+        }
+        let root = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let key = scope.resource_id().map_err(|e| e.to_string())?;
+        let reply = self.call(
+            &root.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReserveSuccessor",
+            &(key.as_str(), checkpoint.canonical_bytes()),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != root.sender)
+            || reply.body().signature().to_string() != "ay"
+            || reply.body().len() > crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64
+        {
+            return Err("successor Root preparation reply unavailable".into());
+        }
+        let bytes = reply
+            .body()
+            .deserialize::<Vec<u8>>()
+            .map_err(|_| "successor Root preparation codec mismatch")?;
+        let record = crate::NativeDisplaySuccessorPreparation::decode(&bytes)?;
+        record.validate_checkpoint(checkpoint.canonical_bytes())?;
+        if record.parent().parent().frames().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != root
+            || current_boot()? != boot
+        {
+            return Err("successor Root owner or original parent changed".into());
+        }
+        let window = record.window();
+        let wall = unix_ms()?;
+        let now_boot = boot_ms()?;
+        if wall < window.observed_unix_ms
+            || wall >= window.deadline_unix_ms
+            || now_boot < window.observed_boot_ms
+            || now_boot >= window.deadline_boot_ms
+        {
+            return Err("successor Root preparation expired; no replay".into());
+        }
+        Ok(record)
+    }
 }
 
 #[cfg(test)]

@@ -109,8 +109,13 @@ class StartupFence final
             return 3U;
         if (ordinary_)
             return 1U;
-        if (currentAttempted_)
-            return currentAvailable() ? 4U : 3U;
+        if (currentAttempted_) {
+            if (!currentAvailable())
+                return 3U;
+            if (retiredAlive_)
+                return retiredAlive_() ? 5U : 3U;
+            return 4U;
+        }
         return 2U;
     }
     [[nodiscard]] int descriptor() const noexcept
@@ -124,6 +129,15 @@ class StartupFence final
 
   private:
     friend class OriginalCompletionGrant;
+    // A read-only phase selected only by the actual authenticated final Root
+    // spend. Signed Committed and a current lifetime alone remain phase four.
+    [[nodiscard]] bool markCurrentRetired(std::function<bool()> alive)
+    {
+        if (retiredAlive_ || !currentAvailable() || !alive || !alive())
+            return false;
+        retiredAlive_ = std::move(alive);
+        return true;
+    }
     // Only the authenticated, non-cloneable completion grant can publish a
     // current lifetime. Unknown loss never falls back into recovery admission.
     [[nodiscard]] bool admitCurrent(std::function<bool()> alive)
@@ -136,10 +150,28 @@ class StartupFence final
         currentAlive_ = std::move(alive);
         return currentAvailable();
     }
+    // Only the genuine original completion grant may replace this invocation's
+    // current callback, after its separately authenticated successor spend. The
+    // original startup descriptor and global exclusion are never reopened.
+    [[nodiscard]] bool transferCurrent(std::function<bool()> alive)
+    {
+        if (ordinary_ || !currentAttempted_ || successorAttempted_ || !guardAlive())
+            return false;
+        successorAttempted_ = true;
+        if (!alive || !alive()) {
+            lost_ = true;
+            return false;
+        }
+        currentAlive_ = std::move(alive);
+        retiredAlive_ = {}; // The successor is protected/pending, not released.
+        return currentAvailable();
+    }
     int descriptor_ = -1;
     bool attempted_ = false, ordinary_ = false;
     bool currentAttempted_ = false;
+    bool successorAttempted_ = false;
     std::function<bool()> currentAlive_;
+    std::function<bool()> retiredAlive_;
     mutable bool lost_ = false;
 };
 

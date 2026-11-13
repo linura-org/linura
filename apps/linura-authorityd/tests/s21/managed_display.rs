@@ -85,6 +85,9 @@ struct Machine {
     native_current_grant: Option<String>,
     native_final_retirement: Option<String>,
     final_retirement: Option<linura_observation::DisplayOriginalFinalRetirementFacts>,
+    successor: Option<linura_observation::DisplaySuccessorFacts>,
+    successor_native_available: bool,
+    successor_fault: u8,
     root_retirement: Option<linura_observation::DisplayOriginalRootRetirementFacts>,
     last_original_protection: Option<linura_observation::DisplayOriginalProtectionFacts>,
     native_power_retired: bool,
@@ -255,6 +258,16 @@ impl Observer for LiveFixtureObserver {
         if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
             capabilities.push(Capability {
                 id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_SUCCESSOR_CAPABILITY,
+                )),
+                support: SupportLevel::Supported,
+                provider: Some(self.template.provider.clone()),
+                reason: None,
+            });
+        }
+        if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
                     linura_observation::DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
                 )),
                 support: SupportLevel::Supported,
@@ -313,6 +326,9 @@ impl Observer for LiveFixtureObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        let successor = self.template.provider.as_str()
+            == linura_observation::DISPLAY_RECOVERY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_SUCCESSOR_CAPABILITY;
         let finalization = self.template.provider.as_str()
             == linura_observation::DISPLAY_RECOVERY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY;
@@ -337,7 +353,8 @@ impl Observer for LiveFixtureObserver {
                 && !completion
                 && !power
                 && !root_retirement
-                && !final_retirement)
+                && !final_retirement
+                && !successor)
         {
             return Err(ProviderError::Unsupported("fixture route mismatch".into()));
         }
@@ -356,6 +373,43 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if successor {
+            let root = machine.successor.as_ref().ok_or_else(|| {
+                ProviderError::Unavailable("no simulated successor Root record".into())
+            })?;
+            sample.capability = capability.clone();
+            sample.attributes = root.attributes();
+            let changed = match machine.successor_fault {
+                1 => Some(("spent", ObservedValue::Bool(false))),
+                2 => Some((
+                    "released_parent_digest",
+                    ObservedValue::Text("a".repeat(64)),
+                )),
+                3 => Some(("native_guard_digest", ObservedValue::Text("a".repeat(64)))),
+                4 => Some((
+                    "transaction",
+                    ObservedValue::Text("transaction:other".into()),
+                )),
+                5 => Some(("effect_digest", ObservedValue::Text("a".repeat(64)))),
+                6 => Some(("dispatch_digest", ObservedValue::Text("a".repeat(64)))),
+                7 => Some(("checkpoint_digest", ObservedValue::Text("a".repeat(64)))),
+                8 => Some(("record_digest", ObservedValue::Text("a".repeat(64)))),
+                11 => Some(("unknown", ObservedValue::Bool(true))),
+                _ => None,
+            };
+            if let Some((key, value)) = changed {
+                sample.attributes.insert(key.into(), value);
+            }
+            match machine.successor_fault {
+                9 => sample.sequence = 0,
+                10 => sample.observed_at_unix_ms = sample.observed_at_unix_ms.saturating_sub(2000),
+                12 => sample.authority = ObservationAuthority::SyntheticTest,
+                13 => sample.resource = value(ResourceId::new("display:foreign")),
+                14 => return Err(ProviderError::Unavailable("simulated Root loss".into())),
+                _ => (),
+            }
+            return Ok(sample);
+        }
         if final_retirement {
             let root = machine.final_retirement.as_ref().ok_or_else(|| {
                 ProviderError::Unavailable("no simulated final Root permission".into())
@@ -989,7 +1043,11 @@ impl DisplayTransactionPort for Port {
         request: &PlanDesiredStateRequest,
         deadline: u64,
     ) -> Result<ExecutionOutcome, String> {
-        let (authorization, native_guard) = application.into_executor_request();
+        let (authorization, native_guard, predecessor) = application.into_executor_request();
+        assert!(
+            predecessor.is_none(),
+            "ordinary fixture cannot claim a Root successor"
+        );
         assert_ne!(
             native_guard,
             linura_provider_sdk::ComponentDigest::from_bytes([0; 32])

@@ -8,6 +8,7 @@
 #include "original_power_retirement.h"
 #include "original_current_commit.h"
 #include "original_final_retirement.h"
+#include "original_successor_preparation.h"
 #include "sealed_native_material.h"
 #include "native_current_frame_gate.h"
 #include "protected_input_retirement.h"
@@ -238,6 +239,10 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::unique_ptr<OriginalCompletionGrant> completionGrant;
     std::unique_ptr<OriginalCompletionGrant::CommittedCurrent> committedCurrent;
     std::unique_ptr<OriginalCompletionGrant::RetiredCurrent> retiredCurrent;
+    std::unique_ptr<OriginalCompletionGrant> successorRoot;
+    std::unique_ptr<OriginalCompletionGrant::SuccessorCurrent> successorCurrent;
+    std::shared_ptr<NativeData> predecessor;
+    bool successorAttempted = false, successorPreparing = false;
     bool finalRetirementAttempted = false;
     bool currentCommitAttempted = false;
     std::string nativeReleaseParent;
@@ -404,6 +409,27 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         }
         return true;
     }
+    // Deliberately independent of StartupFence::currentAvailable: this is the
+    // new callback owned by that fence and must never recurse through it.
+    bool successorScopeAlive()
+    {
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        const bool valid = mutation && !closed && !ownerLost && !mutationFault &&
+            successorRoot && successorRoot->live() && originalAlive && originalAlive() &&
+            (successorPreparing || (successorCurrent && successorCurrent->live())) &&
+            facts && clock && devicesCurrent() && mutationScope(*facts) &&
+            ((writing && ownedModesetInProgress()) || *facts == stableInventory) &&
+            clock->unixMs >= mutationClock.unixMs && clock->bootMs >= mutationClock.bootMs;
+        if (!valid) {
+            mutationFault = true;
+            if (successorRoot) successorRoot->invalidate();
+            return false;
+        }
+        mutationClock = *clock;
+        return true;
+    }
     void cancelInput() noexcept
     {
         interaction.cancel();
@@ -460,6 +486,15 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     {
         if (closed)
             return;
+        // Every close route, including wl_surface destruction, reaches this
+        // boundary. Only the actual final-retirement lifetime detaches obsolete
+        // review ownership; early Committed/current transfer cannot do so.
+        try {
+            if (currentMode && retiredCurrent && retiredCurrent->live() && refreshCurrent())
+                return;
+        } catch (...) {
+            // Unknown current continuity still follows the faulting close path.
+        }
         if (mutation) {
             // Losing authentication/input resources cancels continuation, not
             // the opaque native fence. The independent transaction timer sees
@@ -685,7 +720,7 @@ class PinnedMutation final : public MutationProtection
     }
     void release() noexcept override
     {
-        if (!data_->mutation || wrote_)
+        if (!data_->mutation || wrote_ || data_->successorAttempted)
             return; // Any native write retains protection until qualified Control
                     // retirement. Ordinary Keep/Revert are not an exception.
                     // This path only clears never-written pre-effect scenes.
@@ -727,6 +762,75 @@ class PinnedScene final : public ProtectedScene
                     const Snapshot &captured, ClockSample capturedClock) override
     {
         return reserve(bound, baseline, desired, captured, capturedClock, false, {}, {}, {});
+    }
+    std::shared_ptr<MutationProtection> reserveSuccessorMutation(OwnedNativeFd descriptor,
+        const Correlation &bound, const Layout &baseline, const Layout &desired,
+        const Snapshot &captured, ClockSample capturedClock) override
+    {
+        const auto previous = mutationFence;
+        const auto bytes = SealedNativeMaterial::read<OriginalSuccessorCodec::MaxPreparation>(std::move(descriptor));
+        const auto now = compositorClock();
+        const auto facts = nativeBackend() ? nativeBackend()->snapshot() : std::nullopt;
+        if (!previous || previous == data || !bytes || !now || !facts || *facts != captured ||
+            !previous->retiredCurrent || !previous->retiredCurrent->live() ||
+            !previous->refreshCurrent() || !previous->sameReleasedSource(captured) ||
+            data->successorAttempted || data->mutation || !data->refresh() ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
+            data->surfaces.size() != captured.heads.size() || heldInput().any ||
+            capturedClock.unixMs == 0 || capturedClock.bootMs == 0 ||
+            bound.deadlineUnixMs <= capturedClock.unixMs ||
+            bound.deadlineUnixMs - capturedClock.unixMs > DisplayTransaction::WindowMs ||
+            capturedClock.bootMs > std::numeric_limits<std::uint64_t>::max() -
+                (bound.deadlineUnixMs - capturedClock.unixMs)) return {};
+        // The source guard is recomputed from this exact native inventory;
+        // neither the sealed bytes nor Root's acknowledgement can supply it.
+        auto materialBytes = std::string_view(*bytes);
+        const auto domain = OriginalGrantCodec::field(materialBytes,64);
+        const auto parent = OriginalGrantCodec::field(materialBytes,
+            OriginalFinalRetirementCodec::MaxPreparation + 512);
+        const auto material = OriginalGrantCodec::field(materialBytes,4096);
+        const auto intent = material ? OriginalGrantCodec::intent(*material) : std::nullopt;
+        const auto guard = intent ? nativeBaselineGuard(captured, intent->baselineText) : std::nullopt;
+        if (!domain || !parent || !intent || !guard ||
+            !OriginalSuccessorCodec::matches(*bytes, previous->retiredCurrent->comparisonDigest(),
+                bound, baseline, desired, captured, capturedClock, *now, *guard)) return {};
+        for (std::size_t i=0; i<captured.heads.size(); ++i)
+            if (!data->surfaces.contains(captured.heads[i].key) || baseline[i] != captured.heads[i].current)
+                return {};
+        const auto digest = nativeSha256(*bytes);
+        if (!digest) return {};
+        auto lease = std::make_shared<PinnedMutation>(data);
+        data->mutationInventory = data->stableInventory = captured;
+        data->baseline = baseline; data->desired = desired; data->bound = bound;
+        data->mutationEpoch = data->interaction.epoch();
+        data->mutationDeadlineBootMs = capturedClock.bootMs + bound.deadlineUnixMs - capturedClock.unixMs;
+        data->mutationClock = capturedClock; data->mutation = true;
+        data->successorAttempted = data->successorPreparing = true;
+        data->predecessor = previous; // Retain both sides through every ambiguous path.
+        data->successorRoot = std::move(previous->completionGrant);
+        data->originalAlive = std::move(previous->originalAlive);
+        mutationFence = data; // New opaque protection exists before the sole Root spend.
+        const auto refuse = [&]() -> std::shared_ptr<MutationProtection> {
+            data->successorPreparing = false; data->mutationFault = true;
+            data->successorRoot->invalidate(); data->damage(); return {};
+        };
+        std::weak_ptr<NativeData> successor = data;
+        auto current = data->successorRoot->transferSuccessor(*digest,[successor] {
+            const auto live = successor.lock(); return live && live->successorScopeAlive();
+        });
+        const auto finished = compositorClock();
+        const auto after = nativeBackend()->snapshot();
+        if (!current || !finished || !after || *after != captured || heldInput().any ||
+            !OriginalSuccessorCodec::matches(*bytes, previous->retiredCurrent->comparisonDigest(),
+                bound, baseline, desired, captured, capturedClock, *finished, *guard)) return refuse();
+        data->successorCurrent = std::move(current); data->successorPreparing = false;
+        // Only after the new actual protection and Root lifetime both exist may
+        // the obsolete scene/timer be retired. Recovery bytes stay in Root.
+        if (previous->timer) { wl_event_source_remove(previous->timer); previous->timer = nullptr; }
+        previous->mutation = false; previous->closed = true;
+        data->predecessor.reset();
+        return data->successorScopeAlive() && data->refresh() ? lease : refuse();
     }
     std::shared_ptr<MutationProtection>
     reserveOriginalRestoration(const Correlation &bound, const Layout &baseline,
@@ -1045,6 +1149,13 @@ class PinnedScene final : public ProtectedScene
         data->retiredCurrent = std::move(retired);
         // Retire only the obsolete physical input/review dependency. The live
         // original Root, source ownership, frame tracking and provenance remain.
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            surface.commit.reset();
+            surface.destroy.reset();
+        }
+        data->keyboards.clear();
+        data->pointers.clear();
         return data->refreshCurrent() ? true : refuse();
     }
     bool retirePower(OwnedNativeFd descriptor, std::string_view digest) override
@@ -1406,6 +1517,10 @@ void initializeProtectedDisplay(wl_display &display)
                                                 keyboard->m_allowed;
                                      }) ||
                 nextEpoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+                return nullptr;
+            if (scope.purpose == ProtectedInteraction::Purpose::Apply && mutationFence &&
+                (!mutationFence->currentMode || !mutationFence->retiredCurrent ||
+                 !mutationFence->retiredCurrent->live() || !mutationFence->refreshCurrent()))
                 return nullptr;
             const auto facts = nativeBackend()->snapshot();
             const auto clock = compositorClock();
@@ -1849,6 +1964,14 @@ std::optional<std::string> framePresentation(bool current)
     const auto data = mutationFence;
     if (!data || data->currentMode != current || !data->terminalBound || !data->nativeHandoffActive)
         return std::nullopt;
+    // A separately protected successor review deliberately covers ordinary
+    // frames. Do not report that coverage as the predecessor's ordinary proof
+    // or fault its still-held Root lifetime by sampling a different scene.
+    if (current) {
+        const auto review = active.lock();
+        if (review && review != data)
+            return std::nullopt;
+    }
     const auto terminal = OriginalFinalizationCodec::decode(data->terminalMaterial);
     const auto original = OriginalGrantCodec::materialFields(data->originalMaterial);
     const auto restored = original ? OriginalGrantCodec::intent((*original)[5]) : std::nullopt;

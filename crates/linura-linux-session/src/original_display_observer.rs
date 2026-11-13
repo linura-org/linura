@@ -9,8 +9,8 @@ use linura_observation::{
     DISPLAY_ORDINARY_ORIGINAL_CAPABILITY, DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
     DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
     DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
-    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, ObservationEnvelope,
-    ProviderAvailability, ProviderHealth,
+    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
+    DISPLAY_SUCCESSOR_CAPABILITY, ObservationEnvelope, ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 
@@ -37,6 +37,7 @@ impl Observer for NativeOriginalDisplayObserver {
     }
     fn observation_capabilities(&self) -> Vec<Capability> {
         [
+            DISPLAY_SUCCESSOR_CAPABILITY,
             DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
             DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
             DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
@@ -58,7 +59,8 @@ impl Observer for NativeOriginalDisplayObserver {
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
         matches!(
             capability.as_str(),
-            DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+            DISPLAY_SUCCESSOR_CAPABILITY
+                | DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
                 | DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY
                 | DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
                 | DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
@@ -118,6 +120,8 @@ impl Observer for NativeOriginalDisplayObserver {
         let result = if capability.as_str() == DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY {
             self.channel
                 .observe_original_display_root_retirement(&scope, sequence + 1)
+        } else if capability.as_str() == DISPLAY_SUCCESSOR_CAPABILITY {
+            self.channel.observe_display_successor(&scope, sequence + 1)
         } else if capability.as_str() == DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY {
             self.channel
                 .observe_original_display_final_retirement(&scope, sequence + 1)

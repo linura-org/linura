@@ -1049,7 +1049,9 @@ std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMess
         static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty());
-    if (!independent || !sample->fenced || sample->startupPhase != expectedPhase ||
+    const bool expectedStartup = sample->startupPhase == expectedPhase ||
+        (kind == DisplayPresentation::Current && sample->startupPhase == 5);
+    if (!independent || !sample->fenced || !expectedStartup ||
         presentation.isEmpty() || presentation.size() > 16 * 1024 || presentationCount != 1 ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
@@ -1155,6 +1157,41 @@ std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
     // response is ambiguity, never permission to invoke this call again.
     return impl_->backend->dispatchPreparedDisplay(intent, correlation, sampledBootMs,
                                                    nativeBaselineGuard);
+}
+
+std::optional<quint32> NativeRuntime::dispatchPreparedSuccessorDisplay(
+    const QDBusMessage &received, const NativeDisplayIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    const QString &nativeBaselineGuard, const QByteArray &preparation)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (preparation.isEmpty() || preparation.size() > 64 * 1024 || !peer || !clock || intent.lock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    // Root's strict Rust decoder validated this exact raw native sample, not
+    // merely a connector name, client layout, epoch or digest credential. Read
+    // again on the same owned connection; drift invalidates the handoff.
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs))
+        return std::nullopt;
+    if (!impl_->display || !impl_->display->redeem(intent, correlation))
+        return std::nullopt; // No exact live consumed human receipt, no native effect.
+    // No Qt/D-Bus event processing or caller callbacks intervene. The backend
+    // samples once more and reserves exactly one private native apply. A lost
+    // response is ambiguity, never permission to invoke this call again.
+    return impl_->backend->dispatchPreparedSuccessorDisplay(intent, correlation, sampledBootMs,
+                                                   nativeBaselineGuard, preparation);
 }
 
 std::optional<quint32> NativeRuntime::restoreOriginalDisplay(

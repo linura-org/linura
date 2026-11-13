@@ -981,6 +981,12 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
     assert(layout->available());
     class Scene final : public ProtectedScene
     {
+        std::shared_ptr<MutationProtection> reserveSuccessorMutation(
+            OwnedNativeFd, const Correlation &, const Layout &, const Layout &,
+            const Snapshot &, ClockSample) override
+        {
+            return {}; // No genuine final-retirement Root lifetime in this fixture.
+        }
       public:
         WireServer &owner;
         ProtectedInteraction::Scope scope;

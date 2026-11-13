@@ -152,6 +152,14 @@
       <arg name="native_baseline_guard" type="s" direction="in"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <method name="DispatchPreparedSuccessorDisplay">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="sample_digest" type="s" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="native_baseline_guard" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <!-- Distinct prepared Recovery purpose and one-use original Root endpoint.
          Complete LNRI material and original sample time remain bound. -->
     <method name="RestoreOriginalDisplay">

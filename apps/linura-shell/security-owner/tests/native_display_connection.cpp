@@ -113,6 +113,7 @@ class Harness final
         Oversized,
         Ordinary,
         Current,
+        CurrentRetired,
         CurrentRecovery,
         CurrentOrdinary,
         CurrentBoth,
@@ -150,6 +151,7 @@ class Harness final
                     return invocation;
                 },
                 NativeStartupPort{[presentation] {
+                                      if (presentation == PresentationFixture::CurrentRetired) return 5U;
                                       if (presentation == PresentationFixture::Current ||
                                           presentation == PresentationFixture::CurrentBoth ||
                                           presentation == PresentationFixture::CurrentEmpty ||
@@ -195,6 +197,7 @@ class Harness final
                         if (presentation == PresentationFixture::CurrentOversized)
                             return std::string(16 * 1024 + 1, 'x');
                         return presentation == PresentationFixture::Current ||
+                                       presentation == PresentationFixture::CurrentRetired ||
                                        presentation == PresentationFixture::CurrentRecovery ||
                                        presentation == PresentationFixture::CurrentOrdinary ||
                                        presentation == PresentationFixture::CurrentBoth
@@ -778,17 +781,21 @@ void firstOrdinaryFrameObservationStaysDistinctAndCannotReleaseFences()
 void currentScanoutRequiresDistinctCurrentAdmission()
 {
     using F = Harness::PresentationFixture;
-    for (const auto kind : {F::Current, F::CurrentRecovery, F::CurrentOrdinary, F::CurrentBoth,
+    for (const auto kind : {F::Current, F::CurrentRetired, F::CurrentRecovery, F::CurrentOrdinary, F::CurrentBoth,
                             F::CurrentEmpty, F::CurrentOversized}) {
         Harness harness(Harness::BuildMismatch::None, true, Instance, kind);
         Client owner(harness.descriptors[0]);
         const auto sample = owner.connection->sample();
-        if (kind == F::Current) {
-            assert(sample && sample->fenced && sample->startupPhase == 4);
+        if (kind == F::Current || kind == F::CurrentRetired) {
+            assert(sample && sample->fenced && sample->startupPhase == (kind == F::CurrentRetired ? 5U : 4U));
             assert(sample->nativeCurrentPresentation == QByteArray("{\"fixture\":\"current\"}"));
             assert(sample->nativeHandoffPresentation.isEmpty());
             assert(sample->originalRestorationPresentation.isEmpty());
-            assert(!owner.connection->securityTransitionAllowed(false));
+            assert(owner.connection->securityTransitionAllowed(false) == (kind == F::CurrentRetired));
+            auto desired = baseline(*sample);
+            desired.outputs[0].x = 100;
+            assert(!owner.connection->apply(bound(QStringLiteral("transaction:ordinary-over-current")),
+                baseline(*sample), desired, owner.protection()));
         } else {
             assert(!sample);
         }

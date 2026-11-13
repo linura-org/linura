@@ -18,7 +18,7 @@ use linura_linux_session::{
     NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
     NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
     NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
-    NativeSessionChannel, NativeSessionRole,
+    NativeDisplaySuccessorPreparation, NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -36,6 +36,7 @@ mod final_retirement;
 mod ordinary;
 mod power;
 mod root_power;
+mod successor;
 
 fn valid_dispatch_deadline(deadline: u64, now: u64) -> zbus::fdo::Result<()> {
     if now == 0 || deadline <= now || deadline - now > 15_000 {
@@ -132,6 +133,13 @@ struct Admission {
     root_power_retirements: BTreeMap<String, RootPowerRetirementReservation>,
     current_commits: BTreeMap<String, CurrentCommitReservation>,
     final_retirements: BTreeMap<String, FinalRetirementReservation>,
+    successors: BTreeMap<String, SuccessorReservation>,
+}
+
+struct SuccessorReservation {
+    record: ComponentDigest,
+    dispatch: ComponentDigest,
+    spent: bool,
 }
 
 struct FinalRetirementReservation {
@@ -352,6 +360,17 @@ fn retire_unused_startups<T>(
 type OriginalRootPowerRead = (Vec<u8>, Vec<u8>, Vec<u8>, bool);
 
 trait ProtectionPort: Clone + Send + Sync + 'static {
+    fn reserve_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+        checkpoint: &[u8],
+    ) -> zbus::fdo::Result<Vec<u8>>;
+    fn read_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)>;
     fn reserve_final_retirement(
         &self,
         sender: &str,
@@ -705,7 +724,7 @@ impl NativeProtection {
             .iter()
             .find(|v| v.peer.matches_preimage(&original, &integration))
             .ok_or_else(unavailable)?;
-        if !startup.ordinary {
+        if !self.startup_admits_original(admission, startup, &payload, &dispatch)? {
             return Err(unavailable());
         }
         startup.live().map_err(|_| unavailable())?;
@@ -739,7 +758,10 @@ impl NativeProtection {
             .iter()
             .find(|startup| startup.peer.matches_preimage(current, &integration))
             .ok_or_else(unavailable)?;
-        if !original.ordinary || !original.peer.definitely_exited() || current.ordinary {
+        if !self.startup_admits_original(admission, original, payload, &dispatch)?
+            || !original.peer.definitely_exited()
+            || current.ordinary
+        {
             return Err(unavailable());
         }
         current.live().map_err(|_| unavailable())?;
@@ -766,6 +788,21 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn reserve_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+        checkpoint: &[u8],
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        self.reserve_successor_mechanism(sender, scope, checkpoint)
+    }
+    fn read_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+        self.read_successor_mechanism(sender, scope)
+    }
     fn reserve_ordinary_release(
         &self,
         sender: &str,
@@ -1890,6 +1927,52 @@ impl ProtectionPort for NativeProtection {
 
 #[zbus::interface(name = "org.linura.DisplayProtection1")]
 impl<P: ProtectionPort> ProtectionService<P> {
+    #[zbus(out_args("preparation"))]
+    async fn reserve_successor(
+        &self,
+        recovery_scope: &str,
+        checkpoint: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 || checkpoint.len() > 384 * 1024 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let payload = checkpoint.to_vec();
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_successor(&sender, scope, &payload)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "spent"))]
+    async fn read_successor(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayRecoveryScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_successor(&sender, scope)
+        })
+        .await
+    }
     #[zbus(out_args("preparation", "phase", "completion"))]
     async fn read_final_retirement(
         &self,
@@ -2417,6 +2500,21 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn reserve_successor(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+            _: &[u8],
+        ) -> zbus::fdo::Result<Vec<u8>> {
+            Err(unavailable())
+        }
+        fn read_successor(
+            &self,
+            _: &str,
+            _: linura_core::DisplayRecoveryScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+            Err(unavailable())
+        }
         fn reserve_final_retirement(
             &self,
             _: &str,
@@ -2590,7 +2688,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 24);
+            assert_eq!(text.matches("<method ").count(), 26);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2615,6 +2713,8 @@ mod tests {
             }
         }
         for method in [
+            "ReserveSuccessor",
+            "ReadSuccessor",
             "Begin",
             "Reserve",
             "Verify",
