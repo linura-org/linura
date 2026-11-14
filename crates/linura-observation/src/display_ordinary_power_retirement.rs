@@ -45,6 +45,9 @@ impl DisplayOrdinaryPowerRetirementFacts {
             spent,
         })
     }
+    pub const fn scope(&self) -> &DisplayOrdinaryReleaseScope {
+        &self.scope
+    }
     pub fn attributes(&self) -> BTreeMap<String, ObservedValue> {
         BTreeMap::from([
             (

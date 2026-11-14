@@ -940,3 +940,33 @@ Ordinary Root-power retirement, signed/native current commit and matching final
 ReleasedCurrent completion remain implementation work. Stage 5 adoption,
 supersession and reference-aware retention and all applicable real compositor
 acceptance gates remain outstanding. Production mutations remain disabled.
+
+### Ordinary Root-power retirement
+
+After independently establishing native-power absence, the same live ordinary
+review can prepare one separate Root-power close. Control retains and reads back
+the exact original principal/request/signed-state, complete completion and native
+power lineage and observation digest, then repeats fresh independent observation
+and canonical plan/policy revalidation before dispatch. Every publication or
+transport uncertainty consumes that continuation.
+
+The private ordinary Root preparation embeds the complete spent native-power
+parent. Root admits only the original supervised Control owner and actual live
+completion channel, irreversibly reserves before LNOF publication, and revalidates
+full history and both current effect clocks immediately before closing its scoped
+inhibitor. The close and in-memory retired phase publish under one admission
+lock. Historical LNOF bytes alone cannot claim that phase. Kernel/startup/native
+lifetimes and the power-transition guard remain retained.
+
+Retired continuity has a separate `display.ordinary-root-retirement.observe`
+capability. Root independently checks scope-specific power absence, actual kernel
+and startup witnesses and complete retained ancestry before projecting it.
+Existing held-power observations remain held-only and refuse after the close.
+Control's retired-phase join authenticates the unchanged original terminal and
+checkpoint, fresh current layout/frames/logind/S17, actual completion and native
+power grants and the saved Root preparation; it cannot manufacture a held fence.
+Restart and missing ACKs permit these comparisons without execution replay.
+
+Signed/native ordinary current commit, matching final ReleasedCurrent completion
+and Stage 5 lifecycle remain separate required implementation gates. Early signed
+Committed state never grants permission for those effects, a successor or cleanup.

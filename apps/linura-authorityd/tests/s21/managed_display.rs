@@ -47,6 +47,11 @@ struct Machine {
     ordinary_completion_calls: usize,
     ordinary_completion_record: Option<Vec<u8>>,
     ordinary_power_record: Option<Vec<u8>>,
+    ordinary_root_power_record: Option<Vec<u8>>,
+    ordinary_root_power_calls: usize,
+    ordinary_root_power_retired: bool,
+    ordinary_root_power_store_fault: u8,
+    ordinary_root_power_read_fault: u8,
     ordinary_power_calls: usize,
     ordinary_native_power_retired: bool,
     ordinary_power_store_fault: u8,
@@ -1008,6 +1013,24 @@ impl ApprovedRequestJournal for FailingJournal {
                 .lose_restoration_dispatch
         {
             return Ok(()); // Acknowledged but absent correlation must never reach the native call.
+        }
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-ordinary-root-power-prepared:")
+        {
+            let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(m.checked_history_reads, 0);
+            match m.ordinary_root_power_store_fault {
+                1 => return Err(TransactionStoreError::CapacityExceeded),
+                2 => return Ok(()),
+                3 => {
+                    self.inner.retain(record)?;
+                    return Err(TransactionStoreError::CapacityExceeded);
+                }
+                4 => m.ordinary_current_fault = 6,
+                _ => (),
+            }
         }
         if record
             .request_id()

@@ -9,6 +9,7 @@ use super::*;
 mod completion;
 mod current;
 mod power;
+mod root_power;
 pub use completion::{
     AuthorizedOrdinaryDisplayCompletion, OrdinaryDisplayCompletionPort,
     OrdinaryDisplayCompletionReceipt,
@@ -17,6 +18,10 @@ pub use current::OrdinaryDisplayCurrentInspection;
 pub use power::{
     AuthorizedOrdinaryDisplayNativePowerRetirement, OrdinaryDisplayNativePowerInspection,
     OrdinaryDisplayNativePowerRetirementPort,
+};
+pub use root_power::{
+    AuthorizedOrdinaryDisplayRootPowerRetirement, OrdinaryDisplayRootPowerInspection,
+    OrdinaryDisplayRootPowerRetirementPort,
 };
 mod execution;
 mod original;

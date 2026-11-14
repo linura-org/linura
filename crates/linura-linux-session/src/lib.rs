@@ -80,3 +80,8 @@ pub use sleep_gate::NativeSleepEntry;
 pub use sleep_observer::{
     NativeSleepEntryBinding, NativeSleepEntryGuard, NativeSleepEntryObserver,
 };
+
+mod display_ordinary_root_preparation;
+pub use display_ordinary_root_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_ROOT, NativeDisplayOrdinaryRootPreparation,
+};

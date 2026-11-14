@@ -240,9 +240,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: &AuthenticatedPrincipal,
         inspection: &OrdinaryDisplayOriginalInspection,
     ) -> Result<(), ManagedLifecycleError> {
-        let request = inspection.request();
-        let snapshot = inspection.original_snapshot();
-        let eligibility = inspection.eligibility();
+        self.require_ordinary_terminal_history(
+            principal,
+            inspection.request(),
+            inspection.original_snapshot(),
+            inspection.eligibility(),
+        )
+    }
+    pub(super) fn require_ordinary_terminal_history(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        snapshot: &linura_transaction::TransactionSnapshot,
+        eligibility: &OrdinaryDisplayReleaseInspection,
+    ) -> Result<(), ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let checked = self.checked_display_history()?;
         if checked.original_request(principal, &request.request_id)? != *request

@@ -59,6 +59,9 @@ pub(super) enum DisplayReviewStage {
         preparation: linura_transaction::ContentDigest,
         checkpoint: linura_transaction::ContentDigest,
     },
+    OrdinaryRootPowerDispatched {
+        preparation: linura_transaction::ContentDigest,
+    },
     HandoffVerified {
         spend: linura_transaction::ContentDigest,
         verification: linura_transaction::ContentDigest,
@@ -125,13 +128,15 @@ pub use finalization::{
 };
 pub use release::{
     AuthorizedOrdinaryDisplayCompletion, AuthorizedOrdinaryDisplayNativePowerRetirement,
-    AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayCompletionPort,
-    OrdinaryDisplayCompletionReceipt, OrdinaryDisplayCurrentInspection,
-    OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
-    OrdinaryDisplayNativePowerInspection, OrdinaryDisplayNativePowerRetirementPort,
-    OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseAuthorizer,
-    OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort,
-    OrdinaryDisplayReleaseReceipt, OrdinaryDisplayReleaseRequest,
+    AuthorizedOrdinaryDisplayRelease, AuthorizedOrdinaryDisplayRootPowerRetirement,
+    OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt,
+    OrdinaryDisplayCurrentInspection, OrdinaryDisplayHandoffInspection,
+    OrdinaryDisplayHandoffVerification, OrdinaryDisplayNativePowerInspection,
+    OrdinaryDisplayNativePowerRetirementPort, OrdinaryDisplayOriginalInspection,
+    OrdinaryDisplayReleaseAuthorizer, OrdinaryDisplayReleaseChallenge,
+    OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
+    OrdinaryDisplayReleaseRequest, OrdinaryDisplayRootPowerInspection,
+    OrdinaryDisplayRootPowerRetirementPort,
 };
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,

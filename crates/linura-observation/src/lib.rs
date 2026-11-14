@@ -352,3 +352,8 @@ mod tests {
         );
     }
 }
+
+mod display_ordinary_root_retirement;
+pub use display_ordinary_root_retirement::{
+    DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY, DisplayOrdinaryRootRetirementFacts,
+};

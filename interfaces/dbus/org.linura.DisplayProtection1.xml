@@ -101,6 +101,16 @@
       <arg name="preparation" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <method name="RetireOrdinaryRootPower">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryRootPower">
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="preimage" type="ay" direction="out"/>
+      <arg name="retired" type="b" direction="out"/>
+    </method>
     <method name="ReserveOrdinaryPowerRetirement">
       <!-- Exact original Control only. LNPP before a separately authenticated
            LNPR spend. This retires no Root protection or startup barrier. -->

@@ -242,6 +242,111 @@ impl NativeSessionChannel {
         Ok(observation)
     }
 
+    pub(crate) fn observe_ordinary_display_root_retirement(
+        &self,
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::{
+            DisplayCompletionLineage, DisplayOrdinaryCompletionFacts,
+            DisplayOrdinaryRootRetirementFacts, DisplayRootRetirementLineage,
+        };
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "ordinary completion lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.topology().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadOrdinaryRootPower",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayayb"
+            || reply.body().len()
+                > crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT + crate::bus::MAX_DISPLAY_REPLY_BYTES + 64
+        {
+            return Err(invalid());
+        }
+        let (bytes, original, retired): (Vec<u8>, Vec<u8>, bool) =
+            reply.body().deserialize().map_err(|_| invalid())?;
+        if !retired {
+            return Err(invalid());
+        }
+        let record = crate::NativeDisplayOrdinaryRootPreparation::decode(&bytes)?;
+        let completion = record.parent().parent();
+        completion.validate_original(&original)?;
+        let facts = DisplayOrdinaryRootRetirementFacts::new(
+            DisplayRootRetirementLineage {
+                record: record.record_digest().to_hex(),
+                preparation: record.preparation_digest().to_hex(),
+                verification: record.verification_digest().to_hex(),
+                power_record: record.parent().record_digest().to_hex(),
+            },
+            DisplayOrdinaryCompletionFacts::new(
+                DisplayCompletionLineage {
+                    record: completion.record_digest().to_hex(),
+                    preparation: completion.preparation().to_hex(),
+                    verification: completion.verification().to_hex(),
+                    material: completion.parent().material().into(),
+                },
+                completion.frames().clone(),
+                completion.parent().window(),
+            )
+            .map_err(|_| invalid())?,
+            crate::NativeDisplayRecoveryCheckpoint::ordinary_original_facts(&original, scope)?
+                .comparison()
+                .clone(),
+        )
+        .map_err(|_| invalid())?;
+        if facts.completion().first().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.topology().session().boot()
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayOrdinaryRootRetirementFacts::from_envelope(&observation, scope, now)
+            .map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_ordinary_display_original(
         &self,
         scope: &linura_core::DisplayOrdinaryReleaseScope,

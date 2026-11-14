@@ -160,3 +160,82 @@ fn live_ordinary_completion_keeps_first_frames_historical_and_closed() {
     ));
     assert!(DisplayOrdinaryCompletionFacts::from_envelope(&relabelled, scope, 5001).is_err());
 }
+
+#[test]
+fn ordinary_root_retirement_has_separate_fresh_authority_and_historical_first() {
+    use crate::{
+        DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY, DisplayOrdinaryOriginalComparison,
+        DisplayOrdinaryRootRetirementFacts, DisplayRootRetirementLineage,
+    };
+    let (completion, mut sample) = fixture();
+    let scope = completion.first().scope().clone();
+    let original = value(DisplayOrdinaryReleaseMaterial::decode(
+        &completion.lineage().material,
+    ))
+    .original_text()
+    .to_owned();
+    let facts = value(DisplayOrdinaryRootRetirementFacts::new(
+        DisplayRootRetirementLineage {
+            record: "8".repeat(64),
+            preparation: "9".repeat(64),
+            verification: "a".repeat(64),
+            power_record: "b".repeat(64),
+        },
+        completion,
+        DisplayOrdinaryOriginalComparison {
+            material: original,
+            transaction: "transaction:original".into(),
+            checkpoint: "c".repeat(64),
+            native_guard: "d".repeat(64),
+            integration: "e".repeat(64),
+            sampled_boot_ms: 100,
+            original_deadline_unix_ms: 1200,
+        },
+    ));
+    sample.capability = value(CapabilityId::new(
+        DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY,
+    ));
+    sample.attributes = facts.attributes();
+    assert_eq!(
+        value(DisplayOrdinaryRootRetirementFacts::from_envelope(
+            &sample, &scope, 5001
+        )),
+        facts
+    );
+    assert!(facts.completion().first().window().deadline_unix_ms < sample.observed_at_unix_ms);
+    assert!(!sample.attributes.contains_key("root_power_held"));
+    for key in sample.attributes.keys() {
+        let mut wrong = sample.clone();
+        wrong.attributes.remove(key);
+        assert!(
+            DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err(),
+            "{key}"
+        );
+    }
+    for now in [0, 4999, 7000, u64::MAX] {
+        assert!(DisplayOrdinaryRootRetirementFacts::from_envelope(&sample, &scope, now).is_err());
+    }
+    for (key, v) in [
+        ("power_absent", ObservedValue::Bool(false)),
+        ("root_power_held", ObservedValue::Bool(true)),
+        ("original.native_guard", ObservedValue::Text("bad".into())),
+        ("completion.phase", ObservedValue::Text("prepared".into())),
+        ("ordinary_root_retirement_schema", ObservedValue::U64(2)),
+    ] {
+        let mut wrong = sample.clone();
+        wrong.attributes.insert(key.into(), v);
+        assert!(
+            DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err(),
+            "{key}"
+        );
+    }
+    let mut wrong = sample.clone();
+    wrong.capability = value(CapabilityId::new(DISPLAY_ORDINARY_COMPLETION_CAPABILITY));
+    assert!(DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err());
+    let mut wrong = sample.clone();
+    wrong.authority = ObservationAuthority::SyntheticTest;
+    assert!(DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err());
+    let mut wrong = sample;
+    wrong.sequence = 0;
+    assert!(DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err());
+}

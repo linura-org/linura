@@ -1228,3 +1228,15 @@ the native inhibitor. Root's independent power/kernel/startup protection remains
 Fresh post-effect native state and Root spend must independently agree with the
 retained before-effect checkpoint. Lost ACKs and restarts permit read-only
 comparison, never replay, successor admission, cleanup or signed completion.
+
+Ordinary Root-power retirement requires a further separately prepared, one-use
+continuation of the same live review after independent native-power absence.
+Control revalidates canonical policy and current sources after durable publication.
+Root requires exact complete native-power ancestry, the original Control owner,
+actual spent completion channel and held scoped inhibitor before its single close.
+LNOF is before-effect provenance; actual memory and kernel/startup witnesses
+remain necessary after the close. Retired continuity is exposed through a distinct
+capability with independent scope-specific power absence, never by claiming the
+old held-power capability. Restarts and lost acknowledgments allow read-only
+comparison; original signed state, remaining fences, successor exclusion and
+recovery references remain unchanged.

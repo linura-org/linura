@@ -493,6 +493,21 @@ impl linura_control::OriginalDisplayReleasedCurrentPort for SessionExecutorClien
     }
 }
 
+impl linura_control::OrdinaryDisplayRootPowerRetirementPort for SessionExecutorClient {
+    fn retire_ordinary_root_power(
+        &mut self,
+        permit: linura_control::AuthorizedOrdinaryDisplayRootPowerRetirement,
+    ) -> Result<(), String> {
+        self.channel.retire_ordinary_display_root_power(
+            permit.power(),
+            permit.frames(),
+            native_component_digest(permit.preparation())?,
+            native_component_digest(permit.verification())?,
+            permit.expires_at_unix_ms(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod digest_boundary_tests {
     #[test]

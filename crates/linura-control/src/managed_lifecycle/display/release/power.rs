@@ -49,7 +49,7 @@ pub trait OrdinaryDisplayNativePowerRetirementPort: Debug + Send {
 }
 #[derive(Debug)]
 pub struct OrdinaryDisplayNativePowerInspection {
-    current: OrdinaryDisplayCurrentInspection,
+    pub(super) current: OrdinaryDisplayCurrentInspection,
     grant: DisplayOrdinaryPowerRetirementFacts,
     preparation: ContentDigest,
 }
@@ -334,7 +334,7 @@ impl PowerPrepared {
     }
 }
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn require_ordinary_power_review(
+    pub(super) fn require_ordinary_power_review(
         &mut self,
         principal: &AuthenticatedPrincipal,
         current: &OrdinaryDisplayCurrentInspection,
@@ -483,6 +483,21 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         attempt: &mut P,
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayNativePowerInspection, ManagedLifecycleError> {
+        self.inspect_ordinary_display_native_power_retirement_phase(
+            principal, request, attempt, verifier, false,
+        )
+    }
+    pub(super) fn inspect_ordinary_display_native_power_retirement_phase<
+        P: DisplayTransactionPort,
+        V: IndependentDisplayVerifier,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        request: &RequestId,
+        attempt: &mut P,
+        verifier: &mut V,
+        root_retired: bool,
+    ) -> Result<OrdinaryDisplayNativePowerInspection, ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let current = self.inspect_current_ordinary_display_completion_phase(
             principal.clone(),
@@ -490,6 +505,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             attempt,
             verifier,
             false,
+            root_retired,
         )?;
         let query = linura_protocol::ObservationRequest {
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid_original())?,
@@ -546,7 +562,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(invalid_original());
         }
         let mut latest = self.inspect_current_ordinary_display_completion_phase(
-            principal, request, attempt, verifier, false,
+            principal,
+            request,
+            attempt,
+            verifier,
+            false,
+            root_retired,
         )?;
         if latest.root() != current.root()
             || latest.release() != current.release()

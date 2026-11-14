@@ -28,11 +28,12 @@ impl NativeProtection {
             .map_err(|_| unavailable())?;
         let scope = material.release_scope().map_err(|_| unavailable())?;
         let key = scope.resource_id().map_err(|_| unavailable())?;
-        let original = self.ordinary_original_for_scope(admission, &scope)?;
+        let original = self.ordinary_completion_original(admission, &scope)?;
         record
             .validate_original(&original)
             .map_err(|_| unavailable())?;
-        let (parent, spent) = self.ordinary_release_state(admission, &scope)?;
+        let (parent, spent) =
+            self.ordinary_release_state_for_original(admission, &scope, &original)?;
         let grant = admission
             .ordinary_grants
             .get(key.as_str())
@@ -183,7 +184,7 @@ impl NativeProtection {
                         super::super::protection_lock::BUDGET,
                     )
                     .map_err(|_| unavailable())?;
-                    service.ordinary_original_for_scope(&admission, &scope)?;
+                    service.ordinary_completion_original(&admission, &scope)?;
                     let startup = admission
                         .startups
                         .iter()

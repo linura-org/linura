@@ -11,10 +11,11 @@ use linura_linux_session::{
     NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
     NativeDisplayFinalRetirementPreparation, NativeDisplayFinalizationReservation,
     NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryPowerPreparation,
-    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayRootRetirementPreparation, NativeDisplaySuccessorPreparation,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryRootPreparation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplaySuccessorPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
@@ -42,6 +43,7 @@ const ROOT_POWER_PREPARED_MAGIC: &[u8] = b"LNFP:1\n";
 const POWER_PREPARED_MAGIC: &[u8] = b"LNPP:1\n";
 const POWER_SPENT_MAGIC: &[u8] = b"LNPS:1\n";
 const ORDINARY_COMPLETION_PREPARED_MAGIC: &[u8] = b"LNOQ:1\n";
+const ORDINARY_ROOT_PREPARED_MAGIC: &[u8] = b"LNOF:1\n";
 const ORDINARY_POWER_PREPARED_MAGIC: &[u8] = b"LNOY:1\n";
 const ORDINARY_POWER_SPENT_MAGIC: &[u8] = b"LNOZ:1\n";
 const ORDINARY_COMPLETION_SPENT_MAGIC: &[u8] = b"LNOC:1\n";
@@ -57,6 +59,7 @@ const HEADER: usize = MAGIC.len() + 32 + 8;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Kind {
     Original,
+    OrdinaryRootPrepared,
     OrdinaryPowerPrepared,
     OrdinaryPowerSpent,
     OrdinaryCompletionPrepared,
@@ -87,6 +90,7 @@ impl Kind {
     fn prefix(self) -> &'static str {
         match self {
             Self::Original => "attempt-",
+            Self::OrdinaryRootPrepared => "ordinary-root-prepared-",
             Self::OrdinaryPowerPrepared => "ordinary-power-prepared-",
             Self::OrdinaryPowerSpent => "ordinary-power-spent-",
             Self::OrdinaryCompletionPrepared => "ordinary-completion-prepared-",
@@ -117,6 +121,7 @@ impl Kind {
     fn magic(self) -> &'static [u8] {
         match self {
             Self::Original => MAGIC,
+            Self::OrdinaryRootPrepared => ORDINARY_ROOT_PREPARED_MAGIC,
             Self::OrdinaryPowerPrepared => ORDINARY_POWER_PREPARED_MAGIC,
             Self::OrdinaryPowerSpent => ORDINARY_POWER_SPENT_MAGIC,
             Self::OrdinaryCompletionPrepared => ORDINARY_COMPLETION_PREPARED_MAGIC,
@@ -148,6 +153,14 @@ impl Kind {
         match self {
             Self::SuccessorPrepared | Self::SuccessorSpent => {
                 Ok(NativeDisplaySuccessorPreparation::decode(payload)?
+                    .binding()
+                    .dispatch_digest)
+            }
+            Self::OrdinaryRootPrepared => {
+                Ok(NativeDisplayOrdinaryRootPreparation::decode(payload)?
+                    .parent()
+                    .parent()
+                    .parent()
                     .binding()
                     .dispatch_digest)
             }
@@ -251,6 +264,7 @@ impl Kind {
 /// structure grants neither current native authority nor permission to retire.
 #[derive(Default)]
 struct TerminalLineage {
+    ordinary_root_prepared: BTreeMap<String, NativeDisplayOrdinaryRootPreparation>,
     ordinary_power_prepared: BTreeMap<String, NativeDisplayOrdinaryPowerPreparation>,
     ordinary_power_spent: BTreeMap<String, NativeDisplayOrdinaryPowerPreparation>,
     originals: BTreeMap<String, Vec<u8>>,
@@ -299,6 +313,17 @@ impl TerminalLineage {
                     &mut self.successor_spent
                 };
                 if table.insert(key, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::OrdinaryRootPrepared => {
+                let record = NativeDisplayOrdinaryRootPreparation::decode(bytes)?;
+                if self
+                    .ordinary_root_prepared
+                    .insert(record.frames().scope().original_dispatch().into(), record)
+                    .is_some()
+                {
                     return Err(unavailable());
                 }
                 Ok(())
@@ -532,6 +557,15 @@ impl TerminalLineage {
     }
 
     fn verify(&self) -> Result<(), String> {
+        for (dispatch, record) in &self.ordinary_root_prepared {
+            let parent = self
+                .ordinary_power_spent
+                .get(dispatch)
+                .ok_or_else(unavailable)?;
+            if record.parent().canonical_bytes() != parent.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
         for (dispatch, record) in &self.ordinary_power_prepared {
             let parent = self
                 .ordinary_completion_spent
@@ -757,6 +791,7 @@ impl TerminalLineage {
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
     for kind in [
         Kind::Original,
+        Kind::OrdinaryRootPrepared,
         Kind::OrdinaryPowerPrepared,
         Kind::OrdinaryPowerSpent,
         Kind::OrdinaryCompletionPrepared,
@@ -1455,6 +1490,65 @@ fn read_ordinary_power_at(
                 .ordinary_power_spent
                 .contains_key(scope.original_dispatch()),
         )))
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
+/// Root preparation is before-effect provenance, never a closed-power claim.
+pub(super) fn reserve_ordinary_root(
+    record: &NativeDisplayOrdinaryRootPreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.parent().parent().parent().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::OrdinaryRootPrepared,
+    )
+}
+pub(super) fn read_ordinary_root(
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<NativeDisplayOrdinaryRootPreparation>, String> {
+    read_ordinary_root_at(&open()?, 0, scope)
+}
+fn read_ordinary_root_at(
+    fd: &OwnedFd,
+    uid: u32,
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<NativeDisplayOrdinaryRootPreparation>, String> {
+    directory(fd, uid, false)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, name)?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        let Some(record) = lineage
+            .ordinary_root_prepared
+            .remove(scope.original_dispatch())
+        else {
+            return Ok(None);
+        };
+        if record.frames().scope() != scope {
+            return Err(unavailable());
+        }
+        Ok(Some(record))
     })();
     let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
     match (result, unlocked) {

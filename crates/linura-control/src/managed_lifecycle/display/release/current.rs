@@ -68,6 +68,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             attempt,
             verifier,
             true,
+            false,
         )
     }
     pub(super) fn inspect_current_ordinary_display_completion_phase<
@@ -80,6 +81,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         attempt: &mut P,
         verifier: &mut V,
         power_held: bool,
+        root_retired: bool,
     ) -> Result<OrdinaryDisplayCurrentInspection, ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let checked = self.checked_display_history()?;
@@ -110,11 +112,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .map_err(|_| invalid_original())?;
         let scope = material.release_scope().map_err(|_| invalid_original())?;
         drop(checked);
-        let original = self.inspect_ordinary_display_original(
+        let original = self.inspect_ordinary_current_original(
             principal.clone(),
             &material.lineage().original_request,
             attempt,
             verifier,
+            root_retired,
         )?;
         let eligibility = original.eligibility();
         if material.original_text() != original.request().desired_state["layout"]
@@ -127,7 +130,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 != original.original_snapshot().binding_digest.hex()
             || material.lineage().generation != original.original_snapshot().current_generation
             || material.lineage().state_version != original.original_snapshot().state_version
-            || material.lineage().original_checkpoint != original.root().comparison().checkpoint
+            || material.lineage().original_checkpoint != original.checkpoint
         {
             return Err(unavailable_at("original signed terminal ancestry"));
         }
@@ -261,7 +264,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(unavailable_at("post-read frame and Root reconciliation"));
         }
-        self.require_ordinary_release_history(&principal, &original)?;
+        self.require_ordinary_terminal_history(
+            &principal,
+            original.request(),
+            original.original_snapshot(),
+            original.eligibility(),
+        )?;
         let checked = self.checked_display_history()?;
         if self
             .authority

@@ -15,11 +15,12 @@ use linura_linux_session::{
     NativeDisplayCurrentCommitPreparation, NativeDisplayFinalRetirementPreparation,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
     NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryPowerPreparation,
-    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
-    NativeDisplaySuccessorPreparation, NativeSessionChannel, NativeSessionRole,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryRootPreparation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeDisplaySuccessorPreparation,
+    NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -37,6 +38,7 @@ mod final_retirement;
 mod ordinary;
 mod ordinary_completion;
 mod ordinary_power;
+mod ordinary_root;
 mod power;
 mod root_power;
 mod successor;
@@ -140,6 +142,7 @@ struct Admission {
         ),
     >,
     completions: BTreeMap<String, CompletionReservation>,
+    ordinary_root_retirements: BTreeMap<String, RootPowerRetirementReservation>,
     ordinary_power_retirements: BTreeMap<String, PowerRetirementReservation>,
     power_retirements: BTreeMap<String, PowerRetirementReservation>,
     root_power_retirements: BTreeMap<String, RootPowerRetirementReservation>,
@@ -423,6 +426,16 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sender: &str,
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
+    fn retire_ordinary_root_power(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryRootPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn read_ordinary_root_power(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)>;
     fn reserve_ordinary_power_retirement(
         &self,
         sender: &str,
@@ -755,8 +768,18 @@ impl NativeProtection {
             .witnesses
             .read_original(&dispatch, &self.channel)
             .map_err(|_| unavailable())?;
+        self.ordinary_startup_for_original(admission, scope, &payload)?;
+        Ok(payload)
+    }
+    fn ordinary_startup_for_original(
+        &self,
+        admission: &Admission,
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+        payload: &[u8],
+    ) -> zbus::fdo::Result<()> {
+        let dispatch = dispatch(scope.original_dispatch())?;
         let (original, integration) =
-            NativeDisplayRecoveryCheckpoint::original_startup_scope(&payload, &dispatch)
+            NativeDisplayRecoveryCheckpoint::original_startup_scope(payload, &dispatch)
                 .map_err(|_| unavailable())?;
         if original != *scope.topology() {
             return Err(unavailable());
@@ -766,11 +789,11 @@ impl NativeProtection {
             .iter()
             .find(|v| v.peer.matches_preimage(&original, &integration))
             .ok_or_else(unavailable)?;
-        if !self.startup_admits_original(admission, startup, &payload, &dispatch)? {
+        if !self.startup_admits_original(admission, startup, payload, &dispatch)? {
             return Err(unavailable());
         }
         startup.live().map_err(|_| unavailable())?;
-        Ok(payload)
+        Ok(())
     }
     fn require_scope_startups(
         &self,
@@ -921,6 +944,20 @@ impl ProtectionPort for NativeProtection {
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
         self.read_power_mechanism(sender, scope)
+    }
+    fn retire_ordinary_root_power(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryRootPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.retire_ordinary_root_mechanism(sender, record)
+    }
+    fn read_ordinary_root_power(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+        self.read_ordinary_root_mechanism(sender, scope)
     }
     fn reserve_ordinary_power_retirement(
         &self,
@@ -2209,6 +2246,45 @@ impl<P: ProtectionPort> ProtectionService<P> {
         .await
     }
     #[zbus(out_args("accepted"))]
+    async fn retire_ordinary_root_power(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record =
+            NativeDisplayOrdinaryRootPreparation::decode(preparation).map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.retire_ordinary_root_power(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "preimage", "retired"))]
+    async fn read_ordinary_root_power(
+        &self,
+        ordinary_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_root_power(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
     async fn reserve_ordinary_power_retirement(
         &self,
         preparation: &[u8],
@@ -2776,6 +2852,20 @@ mod tests {
         ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
             Err(unavailable())
         }
+        fn retire_ordinary_root_power(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryRootPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
+        fn read_ordinary_root_power(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+            Err(unavailable())
+        }
         fn reserve_ordinary_power_retirement(
             &self,
             _: &str,
@@ -2935,7 +3025,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 32);
+            assert_eq!(text.matches("<method ").count(), 34);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2974,6 +3064,8 @@ mod tests {
             "ReadOrdinaryCompletion",
             "ReserveOrdinaryPowerRetirement",
             "ReadOrdinaryPowerRetirement",
+            "RetireOrdinaryRootPower",
+            "ReadOrdinaryRootPower",
             "ReserveOrdinaryCompletionGrant",
             "ReadCompletion",
             "ReserveCompletionGrant",

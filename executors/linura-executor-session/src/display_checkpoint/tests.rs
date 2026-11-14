@@ -2719,6 +2719,60 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     assert!(NativeDisplayOrdinaryPowerPreparation::decode(&trailing).is_err());
     assert!(NativeDisplayPowerRetirementPreparation::decode(&bytes).is_err());
     assert!(NativeDisplayOrdinaryPowerPreparation::decode(&completion.canonical_bytes()).is_err());
+    let after = DisplayOrdinaryCurrentFacts::new(
+        frames.scope().clone(),
+        frames.lineage().clone(),
+        frames.window(),
+        frames.outputs().clone(),
+        frames.completion_digest().into(),
+        true,
+        false,
+        None,
+        None,
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    let root = NativeDisplayOrdinaryRootPreparation::new(
+        &record,
+        ComponentDigest::from_bytes([17; 32]),
+        ComponentDigest::from_bytes([18; 32]),
+        &after,
+        3900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let root_bytes = root.canonical_bytes();
+    assert_eq!(
+        NativeDisplayOrdinaryRootPreparation::decode(&root_bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        root_bytes
+    );
+    for end in [
+        0,
+        1,
+        7,
+        8,
+        9,
+        64,
+        root_bytes.len() / 2,
+        root_bytes.len() - 1,
+    ] {
+        assert!(NativeDisplayOrdinaryRootPreparation::decode(&root_bytes[..end]).is_err());
+    }
+    let mut trailing = root_bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinaryRootPreparation::decode(&trailing).is_err());
+    assert!(NativeDisplayRootRetirementPreparation::decode(&root_bytes).is_err());
+    assert!(NativeDisplayOrdinaryRootPreparation::decode(&bytes).is_err());
+    assert!(
+        NativeDisplayOrdinaryRootPreparation::new(
+            &record,
+            ComponentDigest::from_bytes([17; 32]),
+            ComponentDigest::from_bytes([18; 32]),
+            &frames,
+            3900
+        )
+        .is_err()
+    );
     let publish = |kind, payload: &[u8]| {
         reserve_kind_at(
             &fixture.fd,
@@ -2762,6 +2816,7 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     )
     .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(publish(Kind::OrdinaryPowerSpent, &wrong.canonical_bytes()).is_err());
+    assert!(publish(Kind::OrdinaryRootPrepared, &root_bytes).is_err());
     publish(Kind::OrdinaryPowerSpent, &bytes).unwrap_or_else(|e| unreachable!("{e}"));
     assert!(publish(Kind::OrdinaryPowerSpent, &bytes).is_err());
     let (read, spent) = read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope())
@@ -2770,6 +2825,16 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     assert!(spent);
     assert_eq!(read.canonical_bytes(), bytes);
     assert!(read_ordinary_power_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
+    publish(Kind::OrdinaryRootPrepared, &root_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryRootPrepared, &root_bytes).is_err());
+    assert_eq!(
+        read_ordinary_root_at(&fixture.fd, fixture.uid, first.scope())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!("root preparation"))
+            .canonical_bytes(),
+        root_bytes
+    );
+    assert!(read_ordinary_root_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
     let path = fixture.path.join(format!(
         "ordinary-completion-spent-{}.checkpoint",
         parent.binding().dispatch_digest.to_hex()
@@ -2777,6 +2842,7 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     std::fs::rename(&path, fixture.path.join("missing-parent.backup"))
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope()).is_err());
+    assert!(read_ordinary_root_at(&fixture.fd, fixture.uid, first.scope()).is_err());
     assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
     assert!(
         fixture

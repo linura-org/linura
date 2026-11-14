@@ -21,6 +21,18 @@ impl NativeProtection {
         scope: &linura_core::DisplayOrdinaryReleaseScope,
     ) -> zbus::fdo::Result<(NativeDisplayOrdinaryReleasePreparation, bool)> {
         let original = self.ordinary_original_for_scope(admission, scope)?;
+        let result = self.ordinary_release_state_for_original(admission, scope, &original)?;
+        if self.ordinary_original_for_scope(admission, scope)? != original {
+            return Err(unavailable());
+        }
+        Ok(result)
+    }
+    pub(super) fn ordinary_release_state_for_original(
+        &self,
+        admission: &Admission,
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+        original: &[u8],
+    ) -> zbus::fdo::Result<(NativeDisplayOrdinaryReleasePreparation, bool)> {
         let key = scope.resource_id().map_err(|_| unavailable())?;
         let (record, spent) = super::super::display_checkpoint::read_ordinary_release_state(scope)
             .map_err(|_| unavailable())?
@@ -30,11 +42,10 @@ impl NativeProtection {
             .get(key.as_str())
             .ok_or_else(unavailable)?;
         record
-            .validate_original(&original)
+            .validate_original(original)
             .map_err(|_| unavailable())?;
         if record.record_digest() != memory.0
             || (spent && !admission.ordinary_grants.contains_key(key.as_str()))
-            || self.ordinary_original_for_scope(admission, scope)? != original
         {
             return Err(unavailable());
         }
