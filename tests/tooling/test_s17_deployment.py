@@ -248,6 +248,7 @@ class S17DeploymentTests(unittest.TestCase):
                     "ReadOrdinaryPowerRetirement",
                     "RetireOrdinaryRootPower",
                     "ReadOrdinaryRootPower",
+                    "ReserveOrdinaryCurrentCommit",
                 )
             ],
         )

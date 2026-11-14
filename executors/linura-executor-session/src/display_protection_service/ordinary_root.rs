@@ -62,6 +62,7 @@ impl NativeProtection {
             .parent()
             .validate_original(&payload)
             .map_err(|_| unavailable())?;
+        self.ordinary_current_record(admission, scope)?;
         self.ordinary_startup_for_original(admission, scope, &payload)?;
         Ok(payload)
     }
@@ -148,7 +149,7 @@ impl NativeProtection {
         &self,
         sender: &str,
         scope: linura_core::DisplayOrdinaryReleaseScope,
-    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+    ) -> zbus::fdo::Result<OrdinaryRootPowerRead> {
         self.admit_control(sender)?;
         let a = super::super::protection_lock::acquire(
             &self.admission,
@@ -179,6 +180,7 @@ impl NativeProtection {
             )
             .map_err(|_| unavailable())?;
         self.admit_control(sender)?;
-        Ok((record.canonical_bytes(), payload, true))
+        let current = self.ordinary_current_record(&a, &scope)?;
+        Ok((record.canonical_bytes(), payload, current, true))
     }
 }

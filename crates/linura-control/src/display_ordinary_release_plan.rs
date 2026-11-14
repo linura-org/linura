@@ -48,6 +48,114 @@ impl Drop for OrdinaryReleaseContextGuard {
     }
 }
 impl PlanPreviewControl {
+    /// Canonical NoChange derivation from Control's independently verified
+    /// retired-Root/current/layout/session/input/power join. This grants no
+    /// execution permission and cannot substitute for native qualification.
+    pub(crate) fn build_verified_ordinary_display_current_plan(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        actor: Actor,
+        request: &PlanDesiredStateRequest,
+        proof: &crate::OrdinaryDisplayRootPowerInspection,
+    ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        let current = proof.power().current();
+        let root = proof.root();
+        let observation = current.observation();
+        observation.require_current(now_ms()?).map_err(fail)?;
+        let pid = linura_core::PrincipalId::new(principal.as_str()).map_err(fail)?;
+        let material =
+            DisplayOrdinaryReleaseMaterial::decode(&root.completion().lineage().material)
+                .map_err(fail)?;
+        let effect = linura_provider_sdk::display_ordinary_release_effect(
+            &root.completion().lineage().material,
+        )
+        .map_err(fail)?;
+        let scope = material.release_scope().map_err(fail)?;
+        let mut expected = root.attributes();
+        let mut contributors = std::collections::BTreeSet::new();
+        for name in ["root_before", "native_power", "current"] {
+            let key = format!("control.ordinary-root.{name}_digest");
+            let Some(ObservedValue::Text(raw)) = observation.attributes.get(&key) else {
+                return Err(fail("ordinary current contributor missing"));
+            };
+            let digest = ContentDigest::new(raw).map_err(fail)?;
+            if digest == ContentDigest::zero() || !contributors.insert(digest) {
+                return Err(fail("ordinary current contributors ambiguous"));
+            }
+            expected.insert(key, ObservedValue::Text(raw.clone()));
+        }
+        if current.release().principal != pid
+            || current.release().request_id != request.request_id
+            || current.release().transaction_id
+                != linura_transaction::TransactionId::for_namespace(&pid, &request.request_id)
+            || current.comparison_release().state
+                != linura_transaction::TransactionState::Indeterminate
+            || current.request() != request
+            || !request
+                .request_id
+                .as_str()
+                .starts_with("request:v010:display-ordinary-release:")
+            || request.provider.as_str() != DISPLAY_RECOVERY_PROVIDER
+            || effect.provider.as_str() != DISPLAY_PROVIDER
+            || request.resource != effect.resource
+            || request.observation_capability.as_str() != DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
+            || request.desired_state.len() != 1
+            || request
+                .desired_state
+                .get("release_ordinary")
+                .map(String::as_bytes)
+                != Some(effect.canonical_payload.as_slice())
+            || observation.provider.as_str() != DISPLAY_RECOVERY_PROVIDER
+            || observation.capability.as_str()
+                != linura_observation::DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY
+            || observation.resource != request.resource
+            || observation.authority != linura_observation::ObservationAuthority::NativeApi
+            || observation.sequence == 0
+            || observation.valid_for_ms > 2000
+            || observation.attributes != expected
+            || current.frames().scope() != &scope
+            || current.root() != root.completion()
+            || current.frames().completion_digest() != root.completion().lineage().record
+            || !current.frames().follows_handoff(root.completion().first())
+            || current.frames().power_fence_held()
+            || !current.frames().input_retired()
+            || root.current_grant().is_some()
+            || current.frames().current_commit_digest().is_some()
+            || current.frames().final_retirement_digest().is_some()
+        {
+            return Err(fail("canonical ordinary current postcondition changed"));
+        }
+        let observed = PlanningObservation {
+            provider: observation.provider.clone(),
+            resource: observation.resource.clone(),
+            observation_capability: observation.capability.clone(),
+            authority: observation.authority.as_str().into(),
+            evidence_id: observation.evidence_id(),
+            freshness: PlanningFreshness::Current,
+            attributes: request.desired_state.clone(),
+        };
+        let desired = DesiredResource {
+            provider: request.provider.clone(),
+            resource: request.resource.clone(),
+            observation_capability: observation.capability.clone(),
+            state: request.desired_state.clone(),
+            reason: request.reason.clone(),
+        };
+        let mut plan = DeterministicPlanner
+            .plan_resource(request.request_id.clone(), actor, desired, &observed)
+            .map_err(fail)?;
+        if plan.status != linura_planner::PlanStatus::NoChange
+            || !plan.changes.is_empty()
+            || plan.execution_authorized()
+        {
+            return Err(fail(
+                "ordinary current verification cannot authorize execution",
+            ));
+        }
+        plan.findings.push(PlanFinding {code:"display-ordinary-current-postcondition".into(),level:PlanFindingLevel::Pass,message:"Independent ordinary Root/kernel/power absence, native scanout/input, source, login and S17 verified; final fences and provenance remain retained".into()});
+        observation.require_current(now_ms()?).map_err(fail)?;
+        Ok((plan, observation.clone()))
+    }
     pub(crate) fn enter_ordinary_display_release_context(
         &mut self,
         source: OrdinaryReleasePlanningContext,

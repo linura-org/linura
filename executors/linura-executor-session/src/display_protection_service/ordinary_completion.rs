@@ -235,6 +235,9 @@ impl NativeProtection {
                     &mut verify,
                     transfer,
                     |digest| service.spend_ordinary_power_mechanism(&owner, &key, &record, digest),
+                    |digest| {
+                        service.spend_ordinary_current_mechanism(&owner, &key, &record, digest)
+                    },
                 );
             })
             .map_err(|_| unavailable())?;

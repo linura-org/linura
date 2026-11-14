@@ -164,6 +164,7 @@ pub(super) fn observe_handoff(
 
 #[test]
 fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committing_on_inspection() {
+    ordinary_current_commit_requires_independent_native_qualification();
     let mut cases = vec![
         (DisplayContinuationAction::Confirm, None, 0),
         (DisplayContinuationAction::Revert, None, 0),
@@ -960,6 +961,14 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
         &mut verifier,
         &mut OrdinaryRootPowerPort(machine.clone(), 0),
     ));
+    value(restarted.dispatch_ordinary_display_current_commit(
+        principal(),
+        actor(true),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+        &mut OrdinaryCurrentPort(machine.clone(), 0),
+    ));
     drop(restarted);
     let mut restarted =
         open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
@@ -984,6 +993,28 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     assert!(!root.power().current().frames().power_fence_held());
     assert_eq!(
         root.power().current().release().state,
+        linura_transaction::TransactionState::Committed
+    );
+    value(restarted.verify_ordinary_display_qualified_current(
+        principal(),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+    ));
+    assert!(
+        restarted
+            .dispatch_ordinary_display_current_commit(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryCurrentPort(machine.clone(), 0)
+            )
+            .is_err()
+    );
+    assert_eq!(
+        root.power().current().comparison_release().state,
         linura_transaction::TransactionState::Indeterminate
     );
     assert!(
@@ -1002,6 +1033,7 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     assert_eq!(m.ordinary_completion_calls, 1);
     assert_eq!(m.ordinary_power_calls, 1);
     assert_eq!(m.ordinary_root_power_calls, 1);
+    assert_eq!(m.ordinary_current_commit_calls, 1);
     assert_eq!(m.ordinary_release_approvals, 1);
     assert_eq!(m.ordinary_release_calls, 1);
     assert_eq!(m.applies, 1);
@@ -1769,7 +1801,16 @@ pub(super) fn observe_current(
                             plane: old.plane,
                             framebuffer: if old.enabled { 9 } else { 0 },
                             handoff_commit: old.completed_commit,
-                            completed_commit: old.completed_commit + u64::from(old.enabled),
+                            // Advancing physical history is modeled separately
+                            // from probe sequence. The buffer-substitution case
+                            // deliberately has no newer commit, as before.
+                            completed_commit: old.completed_commit
+                                + u64::from(old.enabled)
+                                    * if m.ordinary_current_fault == 11 {
+                                        1
+                                    } else {
+                                        m.ordinary_current_reads as u64
+                                    },
                         },
                     )
                 })
@@ -1777,7 +1818,21 @@ pub(super) fn observe_current(
             record.record_digest().to_hex(),
             !m.ordinary_input_pending,
             !m.ordinary_native_power_retired,
-            None,
+            if m.ordinary_native_current_qualified {
+                Some(
+                    value(
+                        linura_linux_session::NativeDisplayOrdinaryCurrentPreparation::decode(
+                            m.ordinary_current_commit_record
+                                .as_ref()
+                                .unwrap_or_else(|| unreachable!()),
+                        ),
+                    )
+                    .record_digest()
+                    .to_hex(),
+                )
+            } else {
+                None
+            },
             None,
         )
         .map_err(|_| fail())?
@@ -1798,6 +1853,37 @@ pub(super) fn observe_current(
         sequence: m.sequence,
         attributes,
     };
+    if !root && m.ordinary_current_commit_grant_fault == 5 {
+        let prepared = value(
+            linura_linux_session::NativeDisplayOrdinaryCurrentPreparation::decode(
+                m.ordinary_current_commit_record
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!()),
+            ),
+        );
+        let before = prepared
+            .frames()
+            .outputs()
+            .values()
+            .next()
+            .unwrap_or_else(|| unreachable!())
+            .completed_commit;
+        assert!(
+            before
+                > record
+                    .frames()
+                    .outputs()
+                    .values()
+                    .next()
+                    .unwrap_or_else(|| unreachable!())
+                    .completed_commit
+                    + 1
+        );
+        sample.attributes.insert(
+            "output.0.completed_commit".into(),
+            ObservedValue::U64(before - 1),
+        );
+    }
     let fault = m.ordinary_current_fault;
     let changed = if root {
         match fault {
@@ -2004,8 +2090,47 @@ fn observe_root_power(
             sampled_boot_ms: 100,
             original_deadline_unix_ms: m.deadline,
         },
+        m.ordinary_current_commit_record.as_ref().map(|bytes| {
+            let grant =
+                value(linura_linux_session::NativeDisplayOrdinaryCurrentPreparation::decode(bytes));
+            (
+                linura_observation::DisplayCurrentGrantLineage {
+                    record: grant.record_digest().to_hex(),
+                    preparation: grant.preparation_digest().to_hex(),
+                    committed_record: grant.committed_record_digest().to_hex(),
+                },
+                grant.frames().clone(),
+            )
+        }),
     ));
     let mut attrs = facts.attributes();
+    match m.ordinary_current_commit_grant_fault {
+        1 => {
+            attrs.insert(
+                "current_grant_preparation".into(),
+                ObservedValue::Text("6".repeat(64)),
+            );
+        }
+        2 => {
+            attrs.insert(
+                "current_grant_committed_record".into(),
+                ObservedValue::Text("7".repeat(64)),
+            );
+        }
+        3 => {
+            attrs.insert(
+                "current_grant_digest".into(),
+                ObservedValue::Text("8".repeat(64)),
+            );
+        }
+        4 => {
+            attrs.insert(
+                "current_grant_digest".into(),
+                ObservedValue::Text("0".repeat(64)),
+            );
+        }
+        _ => (),
+    }
     match m.ordinary_root_power_read_fault {
         2 => {
             attrs.insert("power_absent".into(), ObservedValue::Bool(false));
@@ -2086,6 +2211,408 @@ impl linura_control::OrdinaryDisplayRootPowerRetirementPort for OrdinaryRootPowe
             Err("Root close ACK lost after effect".into())
         } else {
             Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OrdinaryCurrentPort(Arc<Mutex<Machine>>, u8);
+impl linura_control::OrdinaryDisplayCurrentCommitPort for OrdinaryCurrentPort {
+    fn commit_ordinary_current(
+        &mut self,
+        permit: linura_control::AuthorizedOrdinaryDisplayCurrentCommit,
+    ) -> Result<(), String> {
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(m.checked_history_reads, 0);
+        assert!(
+            m.ordinary_root_power_retired
+                && m.ordinary_native_power_retired
+                && !m.ordinary_native_current_qualified
+        );
+        assert_eq!(m.ordinary_current_commit_calls, 0);
+        m.ordinary_current_commit_calls += 1;
+        // The exact final preparation window, not the sum of earlier fresh
+        // read/CAS phases, bounds the one actual native dispatch.
+        assert!(
+            now_unix_ms() >= permit.frames().window().observed_unix_ms
+                && now_unix_ms() < permit.expires_at_unix_ms()
+        );
+        let committed = permit.committed().release();
+        assert_eq!(
+            committed.state,
+            linura_transaction::TransactionState::Committed
+        );
+        let parent = value(
+            linura_linux_session::NativeDisplayOrdinaryRootPreparation::decode(
+                m.ordinary_root_power_record
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!()),
+            ),
+        );
+        let record = value(
+            linura_linux_session::NativeDisplayOrdinaryCurrentPreparation::new(
+                &parent,
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    permit.preparation().hex(),
+                )),
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    permit.committed().record_digest().hex(),
+                )),
+                committed.current_generation,
+                committed.state_version,
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    committed.binding_digest.hex(),
+                )),
+                permit.frames(),
+                permit.expires_at_unix_ms(),
+            ),
+        );
+        m.ordinary_current_commit_record = Some(record.canonical_bytes());
+        m.ordinary_native_current_qualified = self.1 != 2;
+        if self.1 == 1 {
+            Err("native current ACK lost after physical effect".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn ordinary_current_commit_requires_independent_native_qualification() {
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
+    ] {
+        // Positive, lost ACK, false physical ACK, restart-before-dispatch,
+        // input/source faults, every publication phase/failure and early signed
+        // metadata without a native grant are independent cases.
+        for fault in 0..=22 {
+            let database = TestDatabase::new();
+            let machine = Arc::new(Mutex::new(Machine::default()));
+            let mut port = Port(machine.clone());
+            let mut verifier = Verifier(machine.clone());
+            let original = display_request("ordinary-current-original");
+            let mut control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                original.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier,
+            ));
+            value(control.decide_display_layout(
+                principal(),
+                actor(true),
+                &original.request_id,
+                action,
+                &Decision::approve(&machine),
+                &mut port,
+                &mut verifier,
+            ));
+            let original_before = value(control.inspect_ordinary_display_original(
+                principal(),
+                &original.request_id,
+                &mut port,
+                &mut verifier,
+            ))
+            .original_snapshot()
+            .clone();
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_handoff_enabled = true;
+            let receipt = value(control.begin_ordinary_display_release(
+                principal(),
+                actor(true),
+                linura_control::OrdinaryDisplayReleaseRequest {
+                    operation_id: "ordinary-current-release".into(),
+                    original_request: original.request_id.clone(),
+                    reason: original.reason.clone(),
+                },
+                &ReleaseApproval(machine.clone(), 0),
+                &mut port,
+                &mut verifier,
+                &mut ReleasePort(machine.clone(), 0),
+            ));
+            value(control.dispatch_ordinary_display_completion(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut CompletionPort(machine.clone(), false),
+            ));
+            value(control.retire_ordinary_display_native_power(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryPowerPort(machine.clone(), 0),
+            ));
+            let root = control.retire_ordinary_display_root_power(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryRootPowerPort(machine.clone(), u8::from(fault == 21)),
+            );
+            assert_eq!(root.is_ok(), fault != 21);
+            if fault == 3 || fault == 22 {
+                if fault == 22 {
+                    let signed = value(control.commit_ordinary_display_current(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                    ));
+                    assert_eq!(
+                        signed.release().state,
+                        linura_transaction::TransactionState::Committed
+                    );
+                    assert!(
+                        control
+                            .verify_ordinary_display_qualified_current(
+                                principal(),
+                                &receipt.request_id,
+                                &mut port,
+                                &mut verifier
+                            )
+                            .is_err()
+                    );
+                }
+                drop(control);
+                control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+            }
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                if fault == 4 {
+                    m.ordinary_current_fault = 6;
+                }
+                if (5..=16).contains(&fault) {
+                    m.ordinary_current_commit_store_phase = (fault - 5) / 3 + 1;
+                    m.ordinary_current_commit_store_fault = (fault - 5) % 3 + 1;
+                }
+                if fault == 17 {
+                    m.ordinary_current_commit_store_phase = 4;
+                    m.ordinary_current_commit_store_fault = 4;
+                }
+            }
+            let mut current =
+                OrdinaryCurrentPort(machine.clone(), if fault <= 2 { fault } else { 0 });
+            if (18..=20).contains(&fault) {
+                assert!(
+                    control
+                        .dispatch_ordinary_display_current_commit(
+                            if fault == 19 {
+                                value(AuthenticatedPrincipal::new("unix:uid:1001"))
+                            } else {
+                                principal()
+                            },
+                            actor(fault != 18),
+                            if fault == 20 {
+                                &original.request_id
+                            } else {
+                                &receipt.request_id
+                            },
+                            &mut port,
+                            &mut verifier,
+                            &mut current
+                        )
+                        .is_err()
+                );
+            }
+            let result = control.dispatch_ordinary_display_current_commit(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut current,
+            );
+            let dispatched = fault <= 2 || (18..=21).contains(&fault);
+            assert_eq!(
+                result.is_ok(),
+                dispatched && fault != 1,
+                "{action:?} current fault {fault}: {result:?}; stages {:?}",
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .journal_keys
+                    .iter()
+                    .filter(|(_, id)| id.as_str().contains("display-ordinary-current-"))
+                    .collect::<Vec<_>>()
+            );
+
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_current_fault = 0;
+                m.ordinary_current_commit_store_fault = 0;
+                if (5..=17).contains(&fault) {
+                    assert!(
+                        m.ordinary_current_commit_store_fault_hits > 0,
+                        "intended publication fault was not reached: {action:?}/{fault}"
+                    );
+                }
+                assert_eq!(m.ordinary_current_commit_calls, usize::from(dispatched));
+            }
+            assert!(
+                control
+                    .dispatch_ordinary_display_current_commit(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut current
+                    )
+                    .is_err()
+            );
+            drop(control);
+            let mut restarted =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            assert!(
+                restarted
+                    .dispatch_ordinary_display_current_commit(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut current
+                    )
+                    .is_err()
+            );
+            let qualified = restarted.verify_ordinary_display_qualified_current(
+                principal(),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+            );
+            assert_eq!(
+                qualified.is_ok(),
+                dispatched && fault != 2,
+                "{action:?} qualified fault {fault}: {qualified:?}"
+            );
+            if let Ok(qualified) = qualified {
+                assert_eq!(
+                    qualified.inspection().power().current().release().state,
+                    linura_transaction::TransactionState::Committed
+                );
+                let first = qualified.first_verified_at_unix_ms();
+                let digest = qualified.record_digest().clone();
+                let again = value(restarted.verify_ordinary_display_qualified_current(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                assert_eq!(again.first_verified_at_unix_ms(), first);
+                assert_eq!(again.record_digest(), &digest);
+            }
+            if (5..=17).contains(&fault) || fault == 22 {
+                let signed = value(restarted.commit_ordinary_display_current(
+                    principal(),
+                    actor(true),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                assert_eq!(
+                    signed.release().state,
+                    linura_transaction::TransactionState::Committed
+                );
+                assert!(
+                    restarted
+                        .verify_ordinary_display_qualified_current(
+                            principal(),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier
+                        )
+                        .is_err()
+                );
+                assert!(
+                    restarted
+                        .dispatch_ordinary_display_current_commit(
+                            principal(),
+                            actor(true),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier,
+                            &mut current
+                        )
+                        .is_err()
+                );
+            }
+            if fault == 0 {
+                for changed in 1..=5 {
+                    machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!())
+                        .ordinary_current_commit_grant_fault = changed;
+                    assert!(
+                        restarted
+                            .verify_ordinary_display_qualified_current(
+                                principal(),
+                                &receipt.request_id,
+                                &mut port,
+                                &mut verifier
+                            )
+                            .is_err()
+                    );
+                }
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_current_commit_grant_fault = 0;
+                value(restarted.verify_ordinary_display_qualified_current(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+            }
+            // Signed Committed without native qualification must still fence
+            // every competitor, restart and cleanup/adoption entry point.
+            assert!(
+                restarted
+                    .begin_display_layout(
+                        principal(),
+                        actor(true),
+                        display_request("current-competing"),
+                        &approval(),
+                        &mut port,
+                        &mut verifier
+                    )
+                    .is_err()
+            );
+            let (_, verify) = authority_material();
+            let store = value(SqliteTransactionStore::open(
+                database.path(),
+                verify,
+                value(SqliteIntegrityKey::new(fixture_key(5))),
+            ));
+            assert_eq!(
+                value(linura_transaction::TransactionStore::snapshot(
+                    &store,
+                    &original_before.transaction_id
+                )),
+                original_before
+            );
+            let m = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(
+                (m.applies, m.decisions, m.ordinary_current_commit_calls),
+                (1, 1, usize::from(dispatched))
+            );
         }
     }
 }

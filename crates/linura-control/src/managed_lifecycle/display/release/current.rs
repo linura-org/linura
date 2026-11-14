@@ -24,6 +24,7 @@ pub struct OrdinaryDisplayCurrentInspection {
     frames: DisplayOrdinaryCurrentFacts,
     root: DisplayOrdinaryCompletionFacts,
     release: TransactionSnapshot,
+    comparison_release: TransactionSnapshot,
     request: PlanDesiredStateRequest,
 }
 impl OrdinaryDisplayCurrentInspection {
@@ -44,6 +45,11 @@ impl OrdinaryDisplayCurrentInspection {
         &self.request
     }
     #[must_use]
+    /// Historical Indeterminate comparison authenticated against immutable
+    /// before-CAS records and the actual signed release. Never authority.
+    pub const fn comparison_release(&self) -> &TransactionSnapshot {
+        &self.comparison_release
+    }
     pub const fn release(&self) -> &TransactionSnapshot {
         &self.release
     }
@@ -97,14 +103,19 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         validate_request_identity(&request)?;
         let intent = OrdinaryReleaseIntent::load(self.display_journal()?, &principal_id, &request)?;
         intent.require_claim(self.display_journal()?, &principal_id, &request)?;
-        let receipt = self.ordinary_release_receipt(&principal, &request)?;
+        let actual = self
+            .authority
+            .matching_request_snapshot(&principal, &request)?;
+        let snapshot = if root_retired {
+            self.ordinary_current_comparison_snapshot(&principal, &request, &actual)?
+        } else {
+            actual.clone()
+        };
+        let receipt = self.ordinary_release_receipt_at(&principal, &request, &snapshot)?;
         let dispatch = receipt
             .dispatch_digest
             .as_deref()
             .ok_or_else(invalid_original)?;
-        let snapshot = self
-            .authority
-            .matching_request_snapshot(&principal, &request)?;
         if snapshot.state != TransactionState::Indeterminate {
             return Err(unavailable_at("signed release dispatch"));
         }
@@ -213,7 +224,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || !native.follows_handoff(root_facts.first())
             || native.completion_digest() != comparison.record
             || native.power_fence_held() != power_held
-            || native.current_commit_digest().is_some()
+            || native.current_commit_digest().is_some_and(|digest| {
+                !root_retired
+                    || actual.state != TransactionState::Committed
+                    || original
+                        .current_grant()
+                        .is_none_or(|grant| grant.record != digest)
+            })
             || native.final_retirement_digest().is_some()
             || native.lineage().original_transaction
                 != original.original_snapshot().transaction_id.as_str()
@@ -274,7 +291,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if self
             .authority
             .matching_request_snapshot(&principal, &request)?
-            != snapshot
+            != actual
             || self
                 .display_journal()?
                 .load(&principal_id, release_request)
@@ -282,7 +299,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 != retained
             || OrdinaryReleaseIntent::load(self.display_journal()?, &principal_id, &request)?
                 != intent
-            || self.ordinary_release_receipt(&principal, &request)? != receipt
+            || self.ordinary_release_receipt_at(&principal, &request, &snapshot)? != receipt
         {
             return Err(unavailable_at("post-read durable history"));
         }
@@ -322,7 +339,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             observation: root,
             frames: checked_frames,
             root: checked_root,
-            release: snapshot,
+            comparison_release: snapshot,
+            release: actual,
             request,
         })
     }

@@ -970,3 +970,36 @@ Restart and missing ACKs permit these comparisons without execution replay.
 Signed/native ordinary current commit, matching final ReleasedCurrent completion
 and Stage 5 lifecycle remain separate required implementation gates. Early signed
 Committed state never grants permission for those effects, a successor or cleanup.
+
+### Ordinary signed and native current commit
+
+Ordinary current completion separates signed bookkeeping from native
+qualification. The canonical post-effect NoChange factory binds Root's actual
+retired observation provider, Hyprland's distinct bounded effector, the retained
+ordinary intent and the complete current scanout/layout/session/input/power join.
+Original restoration and ordinary release share the deterministic recovery/CAS
+implementation, with separate typed factories and explicit purpose-specific
+committed-review revalidation. An ordinary review cannot satisfy the original
+finalization entry point.
+
+Immutable Ready/Verified/Committed records authenticate the before-CAS generation,
+version, binding, Root power close and canonical desired-state/graph/provenance
+digests. Restart compares that retained Indeterminate context with the actual
+signed Verified/Committed state; it cannot reconstruct a review. A lost
+post-commit correlation publication may be reconciled only while no native
+preparation or grant exists. Missing history after native dispatch fails closed.
+
+The genuine original review separately prepares native current commit after the
+signed transition, then re-observes every contributor and revalidates canonical
+policy. Root's LNOH/LNOI records preserve the complete ordinary Root-power parent
+and exact signed-generation/version/binding comparison. The original native peer
+spends a distinct LOCF frame once; acknowledgments do not prove physical
+qualification. Native current evidence must independently match the exact Root
+grant and saved preparation/committed record. Retained verification preserves its
+first timestamp across restart and lost ACKs without replay.
+
+Signed Committed never retires final protection, admits a successor or permits
+checkpoint cleanup. Matching ordinary final-retirement/ReleasedCurrent records
+and Stage 5 lifecycle work remain required. Public mutations remain Unsupported;
+component tests and pinned-source compilation do not qualify real compositor
+execution or physical release.

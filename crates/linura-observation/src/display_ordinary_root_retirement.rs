@@ -3,9 +3,10 @@
 //! grants current commit, final retirement, successor or cleanup authority.
 use crate::display::{boolean, canonical_digest, number, text};
 use crate::{
-    DISPLAY_RECOVERY_PROVIDER, DisplayEvidenceError, DisplayOrdinaryCompletionFacts,
-    DisplayOrdinaryOriginalComparison, DisplayOrdinaryOriginalFacts, DisplayRootRetirementLineage,
-    ObservationAuthority, ObservationEnvelope, ObservedValue,
+    DISPLAY_RECOVERY_PROVIDER, DisplayCurrentGrantLineage, DisplayEvidenceError,
+    DisplayOrdinaryCompletionFacts, DisplayOrdinaryCurrentFacts, DisplayOrdinaryOriginalComparison,
+    DisplayOrdinaryOriginalFacts, DisplayRootRetirementLineage, ObservationAuthority,
+    ObservationEnvelope, ObservedValue,
 };
 use linura_core::DisplayOrdinaryReleaseScope;
 use std::collections::BTreeMap;
@@ -18,14 +19,25 @@ pub struct DisplayOrdinaryRootRetirementFacts {
     lineage: DisplayRootRetirementLineage,
     completion: DisplayOrdinaryCompletionFacts,
     original: DisplayOrdinaryOriginalComparison,
+    current: Option<DisplayCurrentGrantLineage>,
+    current_frames: Option<DisplayOrdinaryCurrentFacts>,
 }
 impl DisplayOrdinaryRootRetirementFacts {
     pub fn new(
         lineage: DisplayRootRetirementLineage,
         completion: DisplayOrdinaryCompletionFacts,
         original: DisplayOrdinaryOriginalComparison,
+        current: Option<(DisplayCurrentGrantLineage, DisplayOrdinaryCurrentFacts)>,
     ) -> Result<Self, DisplayEvidenceError> {
-        if [
+        let (current, current_frames) = match current {
+            Some((grant, frames)) => (Some(grant), Some(frames)),
+            None => (None, None),
+        };
+        if current.as_ref().is_some_and(|v| {
+            [&v.record, &v.preparation, &v.committed_record]
+                .into_iter()
+                .any(|d| !canonical_digest(d))
+        }) || [
             &lineage.record,
             &lineage.preparation,
             &lineage.verification,
@@ -48,11 +60,29 @@ impl DisplayOrdinaryRootRetirementFacts {
         {
             return Err(DisplayEvidenceError::Identity);
         }
+        if current_frames.as_ref().is_some_and(|frames| {
+            !frames.follows_handoff(completion.first())
+                || frames.completion_digest() != completion.lineage().record
+                || !frames.input_retired()
+                || frames.power_fence_held()
+                || frames.current_commit_digest().is_some()
+                || frames.final_retirement_digest().is_some()
+        }) {
+            return Err(DisplayEvidenceError::Identity);
+        }
         Ok(Self {
             lineage,
             completion,
             original,
+            current,
+            current_frames,
         })
+    }
+    pub const fn current_frames(&self) -> Option<&DisplayOrdinaryCurrentFacts> {
+        self.current_frames.as_ref()
+    }
+    pub const fn current_grant(&self) -> Option<&DisplayCurrentGrantLineage> {
+        self.current.as_ref()
     }
     pub const fn original(&self) -> &DisplayOrdinaryOriginalComparison {
         &self.original
@@ -67,7 +97,7 @@ impl DisplayOrdinaryRootRetirementFacts {
         let mut a = BTreeMap::from([
             (
                 "ordinary_root_retirement_schema".into(),
-                ObservedValue::U64(1),
+                ObservedValue::U64(2),
             ),
             ("power_absent".into(), ObservedValue::Bool(true)),
             (
@@ -87,6 +117,41 @@ impl DisplayOrdinaryRootRetirementFacts {
                 ObservedValue::Text(self.lineage.power_record.clone()),
             ),
         ]);
+        for (key, value) in [
+            (
+                "current_grant_digest",
+                self.current.as_ref().map(|v| &v.record),
+            ),
+            (
+                "current_grant_preparation",
+                self.current.as_ref().map(|v| &v.preparation),
+            ),
+            (
+                "current_grant_committed_record",
+                self.current.as_ref().map(|v| &v.committed_record),
+            ),
+        ] {
+            a.insert(
+                key.into(),
+                ObservedValue::Text(value.cloned().unwrap_or_else(|| "0".repeat(64))),
+            );
+        }
+        a.insert(
+            "current_prepared_observed_unix_ms".into(),
+            ObservedValue::U64(
+                self.current_frames
+                    .as_ref()
+                    .map_or(0, |v| v.window().observed_unix_ms),
+            ),
+        );
+        if let Some(frames) = &self.current_frames {
+            a.extend(
+                frames
+                    .attributes()
+                    .into_iter()
+                    .map(|(k, v)| (format!("current_prepared.{k}"), v)),
+            );
+        }
         for (k, v) in [
             (
                 "original.material",
@@ -153,8 +218,8 @@ impl DisplayOrdinaryRootRetirementFacts {
             return Err(DisplayEvidenceError::Freshness);
         }
         let a = &sample.attributes;
-        if a.len() > 185
-            || number(a, "ordinary_root_retirement_schema")? != 1
+        if a.len() > 358
+            || number(a, "ordinary_root_retirement_schema")? != 2
             || !boolean(a, "power_absent")?
         {
             return Err(DisplayEvidenceError::Shape);
@@ -166,6 +231,39 @@ impl DisplayOrdinaryRootRetirementFacts {
                     .map(|k| (k.to_owned(), v.clone()))
             })
             .collect();
+        let raw = [
+            text(a, "current_grant_digest")?,
+            text(a, "current_grant_preparation")?,
+            text(a, "current_grant_committed_record")?,
+        ];
+        let observed = number(a, "current_prepared_observed_unix_ms")?;
+        let prepared = a
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_prefix("current_prepared.")
+                    .map(|k| (k.to_owned(), v.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let current = if raw.iter().all(|v| *v == "0".repeat(64)) {
+            if observed != 0 || !prepared.is_empty() {
+                return Err(DisplayEvidenceError::Shape);
+            }
+            None
+        } else {
+            if observed == 0 || observed > sample.observed_at_unix_ms {
+                return Err(DisplayEvidenceError::Shape);
+            }
+            Some((
+                DisplayCurrentGrantLineage {
+                    record: raw[0].into(),
+                    preparation: raw[1].into(),
+                    committed_record: raw[2].into(),
+                },
+                DisplayOrdinaryCurrentFacts::from_comparison_attributes(
+                    &prepared, scope, observed,
+                )?,
+            ))
+        };
         let facts = Self::new(
             DisplayRootRetirementLineage {
                 record: text(a, "record_digest")?.into(),
@@ -187,6 +285,7 @@ impl DisplayOrdinaryRootRetirementFacts {
                 sampled_boot_ms: number(a, "original.sampled_boot_ms")?,
                 original_deadline_unix_ms: number(a, "original.deadline_unix_ms")?,
             },
+            current,
         )?;
         if facts.attributes() != *a {
             return Err(DisplayEvidenceError::Shape);

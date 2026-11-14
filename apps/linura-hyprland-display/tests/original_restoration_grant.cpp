@@ -644,6 +644,49 @@ void terminalComparison(const std::string &material)
             return OriginalCurrentCommitCodec::matches(bytes, *fingerprint, current, now);
         };
         assert(committedMatches(committedBytes));
+        // Purpose-specific comparison framing only. The real Root separately
+        // authenticates the complete release material and every durable parent.
+        auto ordinaryCommitCompletion = ordinaryFields;
+        ordinaryCommitCompletion[1] =
+            framed({"linura.native-display.ordinary-release.v1", "comparison-only-material",
+                    restoration.transaction, "0", "7", controlBinding, std::string(64, 'b'),
+                    restoration.effectDigest, std::string(64, 'c'), "1000", "100", "1200", "300"});
+        const auto ordinaryCommitCompletionBytes = framed(ordinaryCommitCompletion);
+        const auto ordinaryCommitFingerprint = nativeSha256(ordinaryCommitCompletionBytes);
+        assert(ordinaryCommitFingerprint);
+        auto ordinaryCommitPower = ordinaryPowerFields;
+        ordinaryCommitPower[1] = ordinaryCommitCompletionBytes;
+        auto ordinaryRoot = rootFields;
+        ordinaryRoot[0] = "linura.native-display.ordinary-root-retirement.v1";
+        ordinaryRoot[1] = framed(ordinaryCommitPower);
+        auto ordinaryCommitted = committedFields;
+        ordinaryCommitted[0] = "linura.native-display.ordinary-current-commit.v1";
+        ordinaryCommitted[1] = framed(ordinaryRoot);
+        const auto ordinaryCommittedBytes = framed(ordinaryCommitted);
+        const auto matchesOrdinaryCommit = [&](std::string_view value,
+                                               ClockSample now = ClockSample{1100, 200}) {
+            return OriginalCurrentCommitCodec::matches(value, *ordinaryCommitFingerprint, current,
+                                                       now, true);
+        };
+        assert(matchesOrdinaryCommit(ordinaryCommittedBytes));
+        assert(!committedMatches(ordinaryCommittedBytes) && !matchesOrdinaryCommit(committedBytes));
+        assert(!matchesOrdinaryCommit(ordinaryCommittedBytes, {1149, 249}) &&
+               !matchesOrdinaryCommit(ordinaryCommittedBytes, {1148, 250}));
+        for (std::size_t size = 0; size < ordinaryCommittedBytes.size(); ++size)
+            assert(
+                !matchesOrdinaryCommit(std::string_view(ordinaryCommittedBytes).substr(0, size)));
+        assert(!matchesOrdinaryCommit(ordinaryCommittedBytes + 'x'));
+        for (const auto index : {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 12U, 13U, 14U, 15U, 16U, 17U,
+                                 18U, 19U, 20U, 21U}) {
+            auto wrong = ordinaryCommitted;
+            // Root validates full ancestry; here use a genuinely different
+            // purpose rather than an uninterpreted parent-tail mutation.
+            if (index == 1)
+                wrong[index] = committedFields[1];
+            else
+                wrong[index] += '1';
+            assert(!matchesOrdinaryCommit(framed(wrong)));
+        }
         assert(!committedMatches(committedBytes, {1149, 249}));
         assert(!committedMatches(committedBytes, {1148, 250}));
         for (std::size_t size = 0; size < committedBytes.size(); ++size)

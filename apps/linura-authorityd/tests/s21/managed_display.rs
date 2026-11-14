@@ -48,6 +48,13 @@ struct Machine {
     ordinary_completion_record: Option<Vec<u8>>,
     ordinary_power_record: Option<Vec<u8>>,
     ordinary_root_power_record: Option<Vec<u8>>,
+    ordinary_current_commit_record: Option<Vec<u8>>,
+    ordinary_current_commit_calls: usize,
+    ordinary_native_current_qualified: bool,
+    ordinary_current_commit_store_phase: u8,
+    ordinary_current_commit_store_fault: u8,
+    ordinary_current_commit_store_fault_hits: usize,
+    ordinary_current_commit_grant_fault: u8,
     ordinary_root_power_calls: usize,
     ordinary_root_power_retired: bool,
     ordinary_root_power_store_fault: u8,
@@ -1013,6 +1020,44 @@ impl ApprovedRequestJournal for FailingJournal {
                 .lose_restoration_dispatch
         {
             return Ok(()); // Acknowledged but absent correlation must never reach the native call.
+        }
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-ordinary-current-")
+        {
+            let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(m.checked_history_reads, 0);
+            let phase = [
+                "ready",
+                "verified",
+                "committed",
+                "native-prepared",
+                "native-verified",
+            ]
+            .iter()
+            .position(|phase| {
+                record
+                    .request_id()
+                    .as_str()
+                    .starts_with(&format!("request:v010:display-ordinary-current-{phase}:"))
+            })
+            .map(|v| v as u8 + 1);
+            if phase == Some(m.ordinary_current_commit_store_phase) {
+                if m.ordinary_current_commit_store_fault != 0 {
+                    m.ordinary_current_commit_store_fault_hits += 1;
+                }
+                match m.ordinary_current_commit_store_fault {
+                    1 => return Err(TransactionStoreError::CapacityExceeded),
+                    2 => return Ok(()),
+                    3 => {
+                        self.inner.retain(record)?;
+                        return Err(TransactionStoreError::CapacityExceeded);
+                    }
+                    4 => m.ordinary_current_fault = 6,
+                    _ => (),
+                }
+            }
         }
         if record
             .request_id()

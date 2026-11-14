@@ -191,6 +191,7 @@ fn ordinary_root_retirement_has_separate_fresh_authority_and_historical_first() 
             sampled_boot_ms: 100,
             original_deadline_unix_ms: 1200,
         },
+        None,
     ));
     sample.capability = value(CapabilityId::new(
         DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY,
@@ -204,6 +205,96 @@ fn ordinary_root_retirement_has_separate_fresh_authority_and_historical_first() 
     );
     assert!(facts.completion().first().window().deadline_unix_ms < sample.observed_at_unix_ms);
     assert!(!sample.attributes.contains_key("root_power_held"));
+    // The full before-native-current checkpoint stays historical under a fresh
+    // actual Root observation, and never becomes another effect permission.
+    let before = value(crate::DisplayOrdinaryCurrentFacts::new(
+        scope.clone(),
+        facts.completion().first().lineage().clone(),
+        DisplayNativeHandoffWindow {
+            observed_unix_ms: 3000,
+            observed_boot_ms: 2100,
+            deadline_unix_ms: 4000,
+            deadline_boot_ms: 3100,
+        },
+        facts
+            .completion()
+            .first()
+            .outputs()
+            .iter()
+            .map(|(id, row)| {
+                (
+                    id.clone(),
+                    crate::DisplayNativeCurrentOutput {
+                        enabled: row.enabled,
+                        connector: row.connector,
+                        crtc: row.crtc,
+                        plane: row.plane,
+                        framebuffer: if row.enabled { 9 } else { 0 },
+                        handoff_commit: row.completed_commit,
+                        completed_commit: row.completed_commit + u64::from(row.enabled) * 2,
+                    },
+                )
+            })
+            .collect(),
+        facts.completion().lineage().record.clone(),
+        true,
+        false,
+        None,
+        None,
+    ));
+    let current = value(DisplayOrdinaryRootRetirementFacts::new(
+        facts.lineage().clone(),
+        facts.completion().clone(),
+        facts.original().clone(),
+        Some((
+            crate::DisplayCurrentGrantLineage {
+                record: "f".repeat(64),
+                preparation: "8".repeat(64),
+                committed_record: "9".repeat(64),
+            },
+            before.clone(),
+        )),
+    ));
+    let mut with_current = sample.clone();
+    with_current.attributes = current.attributes();
+    assert_eq!(
+        value(DisplayOrdinaryRootRetirementFacts::from_envelope(
+            &with_current,
+            &scope,
+            5001
+        )),
+        current
+    );
+    assert!(
+        current
+            .current_frames()
+            .unwrap_or_else(|| unreachable!())
+            .window()
+            .deadline_unix_ms
+            < with_current.observed_at_unix_ms
+    );
+    for key in [
+        "current_prepared.output.0.completed_commit",
+        "current_grant_preparation",
+        "current_prepared_observed_unix_ms",
+    ] {
+        let mut wrong = with_current.clone();
+        wrong.attributes.remove(key);
+        assert!(DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err());
+    }
+    for (key, value) in [
+        (
+            "current_prepared.power_fence_held",
+            ObservedValue::Bool(true),
+        ),
+        ("current_prepared_observed_unix_ms", ObservedValue::U64(0)),
+        ("current_grant_digest", ObservedValue::Text("0".repeat(64))),
+    ] {
+        let mut wrong = with_current.clone();
+        wrong.attributes.insert(key.into(), value);
+        assert!(DisplayOrdinaryRootRetirementFacts::from_envelope(&wrong, &scope, 5001).is_err());
+    }
+
     for key in sample.attributes.keys() {
         let mut wrong = sample.clone();
         wrong.attributes.remove(key);
@@ -220,7 +311,7 @@ fn ordinary_root_retirement_has_separate_fresh_authority_and_historical_first() 
         ("root_power_held", ObservedValue::Bool(true)),
         ("original.native_guard", ObservedValue::Text("bad".into())),
         ("completion.phase", ObservedValue::Text("prepared".into())),
-        ("ordinary_root_retirement_schema", ObservedValue::U64(2)),
+        ("ordinary_root_retirement_schema", ObservedValue::U64(3)),
     ] {
         let mut wrong = sample.clone();
         wrong.attributes.insert(key.into(), v);

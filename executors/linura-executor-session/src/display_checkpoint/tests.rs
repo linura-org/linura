@@ -2773,6 +2773,53 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
         )
         .is_err()
     );
+    let native_current = NativeDisplayOrdinaryCurrentPreparation::new(
+        &root,
+        ComponentDigest::from_bytes([19; 32]),
+        ComponentDigest::from_bytes([20; 32]),
+        parent.binding().generation,
+        parent.binding().state_version + 2,
+        parent.binding().authority_binding_digest,
+        &after,
+        3900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let current_bytes = native_current.canonical_bytes();
+    assert_eq!(
+        NativeDisplayOrdinaryCurrentPreparation::decode(&current_bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        current_bytes
+    );
+    for end in [
+        0,
+        1,
+        7,
+        8,
+        9,
+        64,
+        current_bytes.len() / 2,
+        current_bytes.len() - 1,
+    ] {
+        assert!(NativeDisplayOrdinaryCurrentPreparation::decode(&current_bytes[..end]).is_err());
+    }
+    let mut trailing = current_bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinaryCurrentPreparation::decode(&trailing).is_err());
+    assert!(NativeDisplayCurrentCommitPreparation::decode(&current_bytes).is_err());
+    assert!(
+        NativeDisplayOrdinaryCurrentPreparation::new(
+            &root,
+            ComponentDigest::from_bytes([19; 32]),
+            ComponentDigest::from_bytes([20; 32]),
+            parent.binding().generation,
+            parent.binding().state_version + 1,
+            parent.binding().authority_binding_digest,
+            &after,
+            3900
+        )
+        .is_err()
+    );
     let publish = |kind, payload: &[u8]| {
         reserve_kind_at(
             &fixture.fd,
@@ -2825,6 +2872,7 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     assert!(spent);
     assert_eq!(read.canonical_bytes(), bytes);
     assert!(read_ordinary_power_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
+    assert!(publish(Kind::OrdinaryCurrentPrepared, &current_bytes).is_err());
     publish(Kind::OrdinaryRootPrepared, &root_bytes).unwrap_or_else(|e| unreachable!("{e}"));
     assert!(publish(Kind::OrdinaryRootPrepared, &root_bytes).is_err());
     assert_eq!(
@@ -2835,6 +2883,22 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
         root_bytes
     );
     assert!(read_ordinary_root_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
+    assert!(publish(Kind::OrdinaryCurrentSpent, &current_bytes).is_err());
+    publish(Kind::OrdinaryCurrentPrepared, &current_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCurrentPrepared, &current_bytes).is_err());
+    let (read, spent) = read_ordinary_current_at(&fixture.fd, fixture.uid, first.scope())
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("current preparation"));
+    assert!(!spent);
+    assert_eq!(read.canonical_bytes(), current_bytes);
+    publish(Kind::OrdinaryCurrentSpent, &current_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCurrentSpent, &current_bytes).is_err());
+    let (read, spent) = read_ordinary_current_at(&fixture.fd, fixture.uid, first.scope())
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("current spend"));
+    assert!(spent);
+    assert_eq!(read.canonical_bytes(), current_bytes);
+    assert!(read_ordinary_current_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
     let path = fixture.path.join(format!(
         "ordinary-completion-spent-{}.checkpoint",
         parent.binding().dispatch_digest.to_hex()
@@ -2843,6 +2907,7 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope()).is_err());
     assert!(read_ordinary_root_at(&fixture.fd, fixture.uid, first.scope()).is_err());
+    assert!(read_ordinary_current_at(&fixture.fd, fixture.uid, first.scope()).is_err());
     assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
     assert!(
         fixture

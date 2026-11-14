@@ -630,6 +630,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
         for method in (
             "revalidate_display_review",
             "revalidate_committed_display_review",
+            "revalidate_committed_ordinary_display_review",
         ):
             with (
                 self.subTest(method=method),
@@ -656,30 +657,41 @@ class OperationSemanticsContractTests(unittest.TestCase):
                         for failure in check_operation_semantics.validate(root)
                     )
                 )
-        for fragment in (
-            "current.state != TransactionState::Committed",
-            "before.state != TransactionState::Indeterminate",
-            "before.state_version.checked_add(2) != Some(current.state_version)",
-            "current.current_generation != before.current_generation",
-            "current.binding_digest != before.binding_digest",
-            "original.purpose != DisplayReviewPurpose::OriginalFinalization",
+        for method, purpose in (
+            ("revalidate_committed_display_review", "OriginalFinalization"),
+            ("revalidate_committed_ordinary_display_review", "OrdinaryRelease"),
         ):
-            with (
-                self.subTest(guard=fragment),
-                tempfile.TemporaryDirectory() as directory,
+            for fragment in (
+                "current.state != TransactionState::Committed",
+                "before.state != TransactionState::Indeterminate",
+                "before.state_version.checked_add(2) != Some(current.state_version)",
+                "current.current_generation != before.current_generation",
+                "current.binding_digest != before.binding_digest",
+                f"original.purpose != DisplayReviewPurpose::{purpose}",
             ):
-                root = Path(directory)
-                self._copy_fixture(root)
-                path = root / "crates/linura-control/src/durable_authority.rs"
-                text = path.read_text(encoding="utf-8")
-                self.assertEqual(text.count(fragment), 1)
-                path.write_text(text.replace(fragment, "false", 1), encoding="utf-8")
-                self.assertTrue(
-                    any(
-                        f"revalidate_committed_display_review: {fragment}" in failure
-                        for failure in check_operation_semantics.validate(root)
+                with (
+                    self.subTest(method=method, guard=fragment),
+                    tempfile.TemporaryDirectory() as directory,
+                ):
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / "crates/linura-control/src/durable_authority.rs"
+                    text = path.read_text(encoding="utf-8")
+                    marker = f"    pub(crate) fn {method}("
+                    self.assertEqual(text.count(marker), 1)
+                    prefix, tail = text.split(marker, 1)
+                    body, suffix = tail.split("\n    }", 1)
+                    self.assertEqual(body.count(fragment), 1)
+                    changed = body.replace(fragment, "false", 1)
+                    path.write_text(
+                        prefix + marker + changed + "\n    }" + suffix, encoding="utf-8"
                     )
-                )
+                    self.assertTrue(
+                        any(
+                            f"{method}: {fragment}" in failure
+                            for failure in check_operation_semantics.validate(root)
+                        )
+                    )
 
     def test_display_continuations_cannot_drop_purpose_binding(self) -> None:
         for fragment in (

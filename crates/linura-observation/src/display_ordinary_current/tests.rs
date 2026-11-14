@@ -230,6 +230,18 @@ fn power_transition_comparison_never_weakens_same_phase_or_inventory_checks() {
     assert!(retired.follows_native_power_retirement(&held));
     assert!(!held.follows_native_power_retirement(&retired));
     assert!(!retired.follows_native_power_retirement(&retired));
+    let mut qualified = retired.clone();
+    qualified.current_commit = Some("4".repeat(64));
+    assert!(!qualified.follows_native_power_retirement(&held));
+    assert!(qualified.retains_native_power_retirement(&held));
+    let mut wrong = qualified.clone();
+    wrong
+        .outputs
+        .values_mut()
+        .next()
+        .unwrap_or_else(|| unreachable!())
+        .connector += 1;
+    assert!(!wrong.retains_native_power_retirement(&held));
     for fault in 0..5 {
         let mut wrong = retired.clone();
         match fault {

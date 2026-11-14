@@ -508,6 +508,24 @@ impl linura_control::OrdinaryDisplayRootPowerRetirementPort for SessionExecutorC
     }
 }
 
+impl linura_control::OrdinaryDisplayCurrentCommitPort for SessionExecutorClient {
+    fn commit_ordinary_current(
+        &mut self,
+        permit: linura_control::AuthorizedOrdinaryDisplayCurrentCommit,
+    ) -> Result<(), String> {
+        self.channel.commit_ordinary_display_current(
+            permit.root(),
+            permit.frames(),
+            native_component_digest(permit.preparation())?,
+            native_component_digest(permit.committed().record_digest())?,
+            permit.committed().release().current_generation,
+            permit.committed().release().state_version,
+            native_component_digest(&permit.committed().release().binding_digest)?,
+            permit.expires_at_unix_ms(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod digest_boundary_tests {
     #[test]

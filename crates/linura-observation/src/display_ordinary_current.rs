@@ -444,8 +444,14 @@ impl DisplayOrdinaryCurrentFacts {
     #[must_use]
     pub fn follows_native_power_retirement(&self, previous: &Self) -> bool {
         self.current_commit.is_none()
-            && previous.current_commit.is_none()
             && self.final_retirement.is_none()
+            && self.retains_native_power_retirement(previous)
+    }
+    /// Comparison with the immutable before-power checkpoint across later
+    /// phases. Callers must separately authenticate every current/final grant;
+    /// this method supplies neither phase authority nor current observations.
+    pub fn retains_native_power_retirement(&self, previous: &Self) -> bool {
+        previous.current_commit.is_none()
             && previous.final_retirement.is_none()
             && self.input_retired
             && previous.input_retired

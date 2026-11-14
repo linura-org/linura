@@ -85,3 +85,8 @@ mod display_ordinary_root_preparation;
 pub use display_ordinary_root_preparation::{
     MAX_NATIVE_DISPLAY_ORDINARY_ROOT, NativeDisplayOrdinaryRootPreparation,
 };
+
+mod display_ordinary_current_preparation;
+pub use display_ordinary_current_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_CURRENT, NativeDisplayOrdinaryCurrentPreparation,
+};

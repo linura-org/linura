@@ -1240,3 +1240,21 @@ capability with independent scope-specific power absence, never by claiming the
 old held-power capability. Restarts and lost acknowledgments allow read-only
 comparison; original signed state, remaining fences, successor exclusion and
 recovery references remain unchanged.
+
+Ordinary signed current completion derives only from the canonical NoChange
+factory over Control's independent retired-Root/current/layout/session/input/power
+join. Root observation identity and native effector identity remain distinct and
+explicit. Deterministic recovery/CAS is shared with original restoration; each
+review entry point still requires its exact purpose. Immutable before-CAS and
+verified/committed records bind the actual signed state and graph/provenance.
+Metadata recovery after a lost publication cannot recreate review or native
+permission, and missing history after native dispatch cannot be manufactured.
+
+A separate original-review continuation prepares native ordinary current commit.
+Root LNOH/LNOI and the actual credential-bound LOCF exchange bind the full
+Root-power ancestry and signed generation/version/binding. Grant spend and ACK
+remain distinct from independently observed native qualification. Qualified
+comparison requires matching current Root permission, actual native current
+lifetime and retained preparation/committed evidence. Early signed Committed
+retains final fences, successor exclusion and recovery references across
+restart, lost acknowledgments and competing operations.

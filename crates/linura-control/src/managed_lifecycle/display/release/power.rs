@@ -119,7 +119,7 @@ impl PowerPrepared {
         current: &OrdinaryDisplayCurrentInspection,
     ) -> Result<Vec<u8>, ManagedLifecycleError> {
         let request = current.request();
-        let snapshot = current.release();
+        let snapshot = current.comparison_release();
         let root = current.root().lineage();
         let mut bytes = Vec::new();
         for value in [
@@ -538,9 +538,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || grant.completion_digest() != current.root().lineage().record
             || grant.preparation_digest() != prepared.preparation().hex()
             || grant.checkpoint_digest() != prepared.checkpoint().hex()
-            || !current
-                .frames()
-                .follows_native_power_retirement(&prepared.frames)
+            || !(if root_retired {
+                current
+                    .frames()
+                    .retains_native_power_retirement(&prepared.frames)
+            } else {
+                current
+                    .frames()
+                    .follows_native_power_retirement(&prepared.frames)
+            })
         {
             return Err(invalid_original());
         }

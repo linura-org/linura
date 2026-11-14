@@ -14,13 +14,13 @@ use linura_linux_session::{
     MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayCompletionPreparation,
     NativeDisplayCurrentCommitPreparation, NativeDisplayFinalRetirementPreparation,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
-    NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryPowerPreparation,
-    NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryRootPreparation,
-    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
-    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
-    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
-    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeDisplaySuccessorPreparation,
-    NativeSessionChannel, NativeSessionRole,
+    NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryCurrentPreparation,
+    NativeDisplayOrdinaryPowerPreparation, NativeDisplayOrdinaryReleasePreparation,
+    NativeDisplayOrdinaryRootPreparation, NativeDisplayPowerRetirementPreparation,
+    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
+    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
+    NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
+    NativeDisplaySuccessorPreparation, NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -37,6 +37,7 @@ mod current_commit;
 mod final_retirement;
 mod ordinary;
 mod ordinary_completion;
+mod ordinary_current;
 mod ordinary_power;
 mod ordinary_root;
 mod power;
@@ -142,6 +143,7 @@ struct Admission {
         ),
     >,
     completions: BTreeMap<String, CompletionReservation>,
+    ordinary_current_commits: BTreeMap<String, CurrentCommitReservation>,
     ordinary_root_retirements: BTreeMap<String, RootPowerRetirementReservation>,
     ordinary_power_retirements: BTreeMap<String, PowerRetirementReservation>,
     power_retirements: BTreeMap<String, PowerRetirementReservation>,
@@ -372,6 +374,7 @@ fn retire_unused_startups<T>(
     }
 }
 
+type OrdinaryRootPowerRead = (Vec<u8>, Vec<u8>, Vec<u8>, bool);
 type OriginalRootPowerRead = (Vec<u8>, Vec<u8>, Vec<u8>, bool);
 
 trait ProtectionPort: Clone + Send + Sync + 'static {
@@ -426,6 +429,11 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sender: &str,
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
+    fn reserve_ordinary_current_commit(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryCurrentPreparation,
+    ) -> zbus::fdo::Result<bool>;
     fn retire_ordinary_root_power(
         &self,
         sender: &str,
@@ -435,7 +443,7 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         &self,
         sender: &str,
         scope: linura_core::DisplayOrdinaryReleaseScope,
-    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)>;
+    ) -> zbus::fdo::Result<OrdinaryRootPowerRead>;
     fn reserve_ordinary_power_retirement(
         &self,
         sender: &str,
@@ -945,6 +953,13 @@ impl ProtectionPort for NativeProtection {
     ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
         self.read_power_mechanism(sender, scope)
     }
+    fn reserve_ordinary_current_commit(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryCurrentPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.reserve_ordinary_current_mechanism(sender, record)
+    }
     fn retire_ordinary_root_power(
         &self,
         sender: &str,
@@ -956,7 +971,7 @@ impl ProtectionPort for NativeProtection {
         &self,
         sender: &str,
         scope: linura_core::DisplayOrdinaryReleaseScope,
-    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+    ) -> zbus::fdo::Result<OrdinaryRootPowerRead> {
         self.read_ordinary_root_mechanism(sender, scope)
     }
     fn reserve_ordinary_power_retirement(
@@ -2246,6 +2261,25 @@ impl<P: ProtectionPort> ProtectionService<P> {
         .await
     }
     #[zbus(out_args("accepted"))]
+    async fn reserve_ordinary_current_commit(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayOrdinaryCurrentPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service
+                .port
+                .reserve_ordinary_current_commit(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
     async fn retire_ordinary_root_power(
         &self,
         preparation: &[u8],
@@ -2262,12 +2296,12 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
-    #[zbus(out_args("preparation", "preimage", "retired"))]
+    #[zbus(out_args("preparation", "preimage", "current_commit_record", "retired"))]
     async fn read_ordinary_root_power(
         &self,
         ordinary_scope: &str,
         #[zbus(header)] header: Header<'_>,
-    ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+    ) -> zbus::fdo::Result<OrdinaryRootPowerRead> {
         let sender = sender(&header)?;
         if ordinary_scope.len() > 256 {
             return Err(unavailable());
@@ -2852,6 +2886,13 @@ mod tests {
         ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
             Err(unavailable())
         }
+        fn reserve_ordinary_current_commit(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryCurrentPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
         fn retire_ordinary_root_power(
             &self,
             _: &str,
@@ -2863,7 +2904,7 @@ mod tests {
             &self,
             _: &str,
             _: linura_core::DisplayOrdinaryReleaseScope,
-        ) -> zbus::fdo::Result<(Vec<u8>, Vec<u8>, bool)> {
+        ) -> zbus::fdo::Result<OrdinaryRootPowerRead> {
             Err(unavailable())
         }
         fn reserve_ordinary_power_retirement(
@@ -3025,7 +3066,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 34);
+            assert_eq!(text.matches("<method ").count(), 35);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -3065,6 +3106,7 @@ mod tests {
             "ReserveOrdinaryPowerRetirement",
             "ReadOrdinaryPowerRetirement",
             "RetireOrdinaryRootPower",
+            "ReserveOrdinaryCurrentCommit",
             "ReadOrdinaryRootPower",
             "ReserveOrdinaryCompletionGrant",
             "ReadCompletion",

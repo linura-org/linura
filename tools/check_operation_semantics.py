@@ -621,6 +621,18 @@ def validate(root: Path) -> list[str]:
                     "original.purpose != DisplayReviewPurpose::OriginalFinalization",
                 ),
             ),
+            (
+                "revalidate_committed_ordinary_display_review",
+                (
+                    "current != *committed",
+                    "current.state != TransactionState::Committed",
+                    "before.state != TransactionState::Indeterminate",
+                    "before.state_version.checked_add(2) != Some(current.state_version)",
+                    "current.current_generation != before.current_generation",
+                    "current.binding_digest != before.binding_digest",
+                    "original.purpose != DisplayReviewPurpose::OrdinaryRelease",
+                ),
+            ),
         ):
             marker = f"    pub(crate) fn {method}("
             body = ""

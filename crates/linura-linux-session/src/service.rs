@@ -273,13 +273,16 @@ impl NativeSessionChannel {
             .header()
             .sender()
             .is_none_or(|sender| sender.as_str() != identity.sender)
-            || reply.body().signature().to_string() != "ayayb"
+            || reply.body().signature().to_string() != "ayayayb"
             || reply.body().len()
-                > crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT + crate::bus::MAX_DISPLAY_REPLY_BYTES + 64
+                > crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT
+                    + crate::MAX_NATIVE_DISPLAY_ORDINARY_CURRENT
+                    + crate::bus::MAX_DISPLAY_REPLY_BYTES
+                    + 96
         {
             return Err(invalid());
         }
-        let (bytes, original, retired): (Vec<u8>, Vec<u8>, bool) =
+        let (bytes, original, current, retired): (Vec<u8>, Vec<u8>, Vec<u8>, bool) =
             reply.body().deserialize().map_err(|_| invalid())?;
         if !retired {
             return Err(invalid());
@@ -287,6 +290,22 @@ impl NativeSessionChannel {
         let record = crate::NativeDisplayOrdinaryRootPreparation::decode(&bytes)?;
         let completion = record.parent().parent();
         completion.validate_original(&original)?;
+        let current = if current.is_empty() {
+            None
+        } else {
+            let grant = crate::NativeDisplayOrdinaryCurrentPreparation::decode(&current)?;
+            if grant.parent().canonical_bytes() != record.canonical_bytes() {
+                return Err(invalid());
+            }
+            Some((
+                linura_observation::DisplayCurrentGrantLineage {
+                    record: grant.record_digest().to_hex(),
+                    preparation: grant.preparation_digest().to_hex(),
+                    committed_record: grant.committed_record_digest().to_hex(),
+                },
+                grant.frames().clone(),
+            ))
+        };
         let facts = DisplayOrdinaryRootRetirementFacts::new(
             DisplayRootRetirementLineage {
                 record: record.record_digest().to_hex(),
@@ -308,6 +327,7 @@ impl NativeSessionChannel {
             crate::NativeDisplayRecoveryCheckpoint::ordinary_original_facts(&original, scope)?
                 .comparison()
                 .clone(),
+            current,
         )
         .map_err(|_| invalid())?;
         if facts.completion().first().scope() != scope

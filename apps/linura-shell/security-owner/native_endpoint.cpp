@@ -623,6 +623,27 @@ quint32 NativeEndpoint::CommitOriginalDisplayCurrent(const NativeDisplayAttemptQ
     return 7;
 }
 
+quint32 NativeEndpoint::CommitOrdinaryDisplayCurrent(const NativeDisplayAttemptQueryWire &query,
+                                                     const QString &digest,
+                                                     const QByteArray &preparation)
+{
+    if (calledFromDBus() && query.intent.size() <= 6 * 1024 && query.transaction.size() <= 256 &&
+        digest.size() == 64 && !preparation.isEmpty() && preparation.size() <= 49 * 1024) {
+        const auto intent = NativeDisplayOrdinaryReleaseIntent::parse(query.intent);
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent ? runtime_.commitOrdinaryDisplayCurrent(
+                                         message(), *intent, bound, digest, preparation)
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Ordinary committed-current handoff unavailable"));
+    return 7;
+}
+
 quint32 NativeEndpoint::RetireOriginalDisplayPower(const NativeDisplayAttemptQueryWire &query,
                                                    const QString &digest,
                                                    const QByteArray &preparation)

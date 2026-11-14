@@ -108,7 +108,7 @@ impl Prepared {
         power: &OrdinaryDisplayNativePowerInspection,
     ) -> Result<Vec<u8>, ManagedLifecycleError> {
         let c = power.current();
-        let s = c.release();
+        let s = c.comparison_release();
         let r = c.root().lineage();
         let mut b = Vec::new();
         for v in [

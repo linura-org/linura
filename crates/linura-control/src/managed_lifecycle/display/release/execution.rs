@@ -71,10 +71,26 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,
     ) -> Result<OrdinaryDisplayReleaseReceipt, ManagedLifecycleError> {
-        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let snapshot = self
             .authority
             .matching_request_snapshot(principal, request)?;
+        let comparison = if matches!(
+            snapshot.state,
+            TransactionState::Verified | TransactionState::Committed
+        ) {
+            self.ordinary_current_comparison_snapshot(principal, request, &snapshot)?
+        } else {
+            snapshot
+        };
+        self.ordinary_release_receipt_at(principal, request, &comparison)
+    }
+    pub(super) fn ordinary_release_receipt_at(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        snapshot: &linura_transaction::TransactionSnapshot,
+    ) -> Result<OrdinaryDisplayReleaseReceipt, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let intent = OrdinaryReleaseIntent::load(self.display_journal()?, &principal_id, request)?;
         intent.require_claim(self.display_journal()?, &principal_id, request)?;
         let digest = crate::durable_authority::digest_request(request)?;
@@ -110,7 +126,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         Ok(OrdinaryDisplayReleaseReceipt {
             request_id: request.request_id.clone(),
-            transaction_id: snapshot.transaction_id,
+            transaction_id: snapshot.transaction_id.clone(),
             dispatch_digest: dispatched.and_then(|record| record.dispatch_digest),
         })
     }

@@ -8,6 +8,12 @@
 use super::*;
 mod completion;
 mod current;
+mod current_commit;
+mod current_records;
+pub use current_commit::{
+    AuthorizedOrdinaryDisplayCurrentCommit, OrdinaryDisplayCurrentCommit,
+    OrdinaryDisplayCurrentCommitPort, OrdinaryDisplayQualifiedCurrent,
+};
 mod power;
 mod root_power;
 pub use completion::{

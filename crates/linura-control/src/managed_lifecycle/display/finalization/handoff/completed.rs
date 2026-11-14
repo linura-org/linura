@@ -395,7 +395,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         if actual.state == TransactionState::Verified {
             self.authority
-                .original_display_verified_material(principal, &request)?;
+                .display_verified_material(principal, &request)?;
         } else {
             let verified = Entry::load(
                 self.display_journal()?,
@@ -556,7 +556,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                     )?;
                 let material = self
                     .authority
-                    .original_display_verified_material(&principal, &context.request)?;
+                    .display_verified_material(&principal, &context.request)?;
                 self.retain_current_verified(&principal_id, &context.request, &ready, &material)?;
                 self.require_current_inspection_history_at(
                     &principal,
@@ -568,7 +568,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             TransactionState::Verified => {
                 let material = self
                     .authority
-                    .original_display_verified_material(&principal, &context.request)?;
+                    .display_verified_material(&principal, &context.request)?;
                 self.retain_current_verified(&principal_id, &context.request, &ready, &material)?;
                 self.require_current_inspection_history_at(
                     &principal,

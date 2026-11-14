@@ -35,7 +35,10 @@ fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &st
         return MAX_DISPLAY_REPLY_BYTES + 32;
     }
     if protection && method == "ReadOrdinaryRootPower" {
-        return crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT + MAX_DISPLAY_REPLY_BYTES + 64;
+        return crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT
+            + crate::MAX_NATIVE_DISPLAY_ORDINARY_CURRENT
+            + MAX_DISPLAY_REPLY_BYTES
+            + 96;
     }
     if protection && method == "ReadRootPower" {
         return crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
@@ -715,8 +718,9 @@ mod diagnostic_tests {
                                 && method == "ReadOrdinaryRootPower"
                             {
                                 crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT
+                                    + crate::MAX_NATIVE_DISPLAY_ORDINARY_CURRENT
                                     + MAX_DISPLAY_REPLY_BYTES
-                                    + 64
+                                    + 96
                             } else if role == NativeSessionRole::Control
                                 && path == "/org/linura/DisplayProtection1"
                                 && interface == "org.linura.DisplayProtection1"
@@ -766,6 +770,7 @@ mod diagnostic_tests {
             zbus::Message::method_call(scope, "ReadOrdinaryRootPower")?.build(&(
                 vec![0_u8; crate::MAX_NATIVE_DISPLAY_ORDINARY_ROOT],
                 vec![0_u8; MAX_DISPLAY_REPLY_BYTES],
+                vec![0_u8; crate::MAX_NATIVE_DISPLAY_ORDINARY_CURRENT],
                 true,
             ))?;
         for (message, method) in [

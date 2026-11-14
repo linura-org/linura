@@ -51,8 +51,12 @@ pub(super) struct OrdinaryCurrentOriginal {
     eligibility: OrdinaryDisplayReleaseInspection,
     pub(super) checkpoint: String,
     observation: ObservationEnvelope,
+    current_grant: Option<linura_observation::DisplayCurrentGrantLineage>,
 }
 impl OrdinaryCurrentOriginal {
+    pub(super) fn current_grant(&self) -> Option<&linura_observation::DisplayCurrentGrantLineage> {
+        self.current_grant.as_ref()
+    }
     pub(super) fn request(&self) -> &PlanDesiredStateRequest {
         &self.request
     }
@@ -87,6 +91,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 eligibility: original.eligibility,
                 checkpoint: original.root.comparison().checkpoint.clone(),
                 observation: original.observation,
+                current_grant: None,
             });
         }
         use linura_observation::{
@@ -200,6 +205,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             eligibility,
             checkpoint: original.checkpoint.clone(),
             observation: before,
+            current_grant: root.current_grant().cloned(),
         })
     }
     pub fn inspect_ordinary_display_original<

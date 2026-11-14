@@ -544,6 +544,38 @@ where
         original.revalidate(principal, floor, &self.approvals)
     }
 
+    pub(crate) fn revalidate_committed_ordinary_display_review(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        original: &DisplayRetainedReview,
+        floor: TrustedRiskFloor,
+        committed: &TransactionSnapshot,
+        before: &TransactionSnapshot,
+    ) -> Result<(), DurableAuthorityError> {
+        let _now = self.authority_now_unix_ms()?;
+        let current = self.transactions.snapshot(&original.transaction_id)?;
+        if current != *committed
+            || current.state != TransactionState::Committed
+            || before.state != TransactionState::Indeterminate
+            || current.transaction_id != before.transaction_id
+            || before.state_version.checked_add(2) != Some(current.state_version)
+            || current.current_generation != before.current_generation
+            || current.binding_digest != before.binding_digest
+            || current.current_generation != original.generation
+            || current.binding_digest != *original.binding.digest()
+            || principal.as_str() != original.binding.principal().as_str()
+            || current.principal != *original.binding.principal()
+            || current.request_id != request.request_id
+            || digest_request(request)? != *original.binding.request_digest()
+            || original.risk_floor != floor
+            || original.purpose != DisplayReviewPurpose::OrdinaryRelease
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        original.revalidate(principal, floor, &self.approvals)
+    }
+
     pub fn new(
         store: S,
         authority_signer: TransactionAuthoritySigner,
@@ -1471,19 +1503,53 @@ where
         request: &PlanDesiredStateRequest,
         inspection: &crate::OriginalDisplayRootPowerInspection,
     ) -> Result<VerifiedDurableAuthority, DurableAuthorityError> {
+        let (plan, observation) = previews
+            .build_verified_original_display_current_plan(principal, actor, request, inspection)?;
+        self.verify_display_current_plan_without_replay(
+            principal,
+            request,
+            inspection.current().terminal(),
+            plan,
+            observation,
+        )
+    }
+    pub(crate) fn verify_ordinary_display_current_without_replay(
+        &mut self,
+        previews: &PlanPreviewControl,
+        principal: &AuthenticatedPrincipal,
+        actor: Actor,
+        request: &PlanDesiredStateRequest,
+        inspection: &crate::OrdinaryDisplayRootPowerInspection,
+    ) -> Result<VerifiedDurableAuthority, DurableAuthorityError> {
+        let (plan, observation) = previews
+            .build_verified_ordinary_display_current_plan(principal, actor, request, inspection)?;
+        self.verify_display_current_plan_without_replay(
+            principal,
+            request,
+            inspection.power().current().comparison_release(),
+            plan,
+            observation,
+        )
+    }
+    fn verify_display_current_plan_without_replay(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        expected: &TransactionSnapshot,
+        plan: linura_planner::ReconciliationPlan,
+        observation: ObservationEnvelope,
+    ) -> Result<VerifiedDurableAuthority, DurableAuthorityError> {
         self.assert_request_matches(principal, request)?;
         let anchor = self
             .transactions
-            .recovery_anchor(&inspection.current().terminal().transaction_id)?;
-        if anchor.snapshot != *inspection.current().terminal()
+            .recovery_anchor(&expected.transaction_id)?;
+        if anchor.snapshot != *expected
             || anchor.snapshot.state != TransactionState::Indeterminate
             || anchor.snapshot.principal.as_str() != principal.as_str()
             || anchor.request_digest != digest_request(request)?
         {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
-        let (plan, observation) = previews
-            .build_verified_original_display_current_plan(principal, actor, request, inspection)?;
         if plan.status != linura_planner::PlanStatus::NoChange
             || !plan.changes.is_empty()
             || plan.execution_authorized()
@@ -1533,7 +1599,7 @@ where
         })
     }
 
-    pub(crate) fn original_display_verified_material(
+    pub(crate) fn display_verified_material(
         &self,
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,

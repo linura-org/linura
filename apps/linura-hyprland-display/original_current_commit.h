@@ -1,6 +1,7 @@
 #pragma once
 
 #include "original_power_retirement.h"
+#include "ordinary_release_intent.h"
 
 namespace Linura::HyprlandDisplay::OriginalCurrentCommitCodec {
 inline constexpr std::size_t MaxRoot = OriginalPowerRetirementCodec::MaxPreparation + 8 * 1024;
@@ -9,7 +10,7 @@ inline constexpr std::size_t MaxPreparation = MaxRoot + 8 * 1024;
 // checked Root channel can spend the digest after all local physical guards.
 inline std::optional<ClockSample> matches(std::string_view bytes, std::string_view completionDigest,
                                           const NativeFirstFrameGate::Receipt &physical,
-                                          ClockSample now)
+                                          ClockSample now, bool ordinary = false)
 {
     if (bytes.empty() || bytes.size() > MaxPreparation || !physical.completedCount ||
         physical.completedCount > DisplayTransaction::MaxHeads)
@@ -19,41 +20,74 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     };
     const auto domain = field(bytes, 64), root = field(bytes, MaxRoot), prepared = field(bytes, 64),
                committed = field(bytes, 64);
-    if (!domain || *domain != "linura.native-display.current-commit.v1" || !root || !prepared ||
-        !committed || !OriginalGrantCodec::digest(*prepared) ||
+    if (!domain ||
+        *domain != (ordinary ? "linura.native-display.ordinary-current-commit.v1"
+                             : "linura.native-display.current-commit.v1") ||
+        !root || !prepared || !committed || !OriginalGrantCodec::digest(*prepared) ||
         !OriginalGrantCodec::digest(*committed) || *prepared == *committed)
         return {};
     auto ancestry = *root;
     const auto rootDomain = field(ancestry, 64),
                power = field(ancestry, OriginalPowerRetirementCodec::MaxPreparation);
-    if (!rootDomain || *rootDomain != "linura.native-display.root-retirement.v1" || !power)
+    if (!rootDomain ||
+        *rootDomain != (ordinary ? "linura.native-display.ordinary-root-retirement.v1"
+                                 : "linura.native-display.root-retirement.v1") ||
+        !power)
         return {};
     ancestry = *power;
     const auto powerDomain = field(ancestry, 64),
                completion = field(ancestry, OriginalCompletionGrantCodec::MaxPreparation);
-    if (!powerDomain || *powerDomain != "linura.native-display.power-retirement.v1" ||
+    if (!powerDomain ||
+        *powerDomain != (ordinary ? "linura.native-display.ordinary-power-retirement.v1"
+                                  : "linura.native-display.power-retirement.v1") ||
         !completion || nativeSha256(*completion) != std::optional{std::string(completionDigest)})
         return {};
     ancestry = *completion;
     const auto completionDomain = field(ancestry, 64),
                retirement = field(ancestry, OriginalNativeReleaseGrantCodec::MaxReservation);
     if (!completionDomain ||
-        *completionDomain != "linura.native-display.completion-preparation.v1" || !retirement)
+        *completionDomain != (ordinary ? "linura.native-display.ordinary-completion.v1"
+                                       : "linura.native-display.completion-preparation.v1") ||
+        !retirement)
         return {};
-    ancestry = *retirement;
-    const auto retirementDomain = field(ancestry, 64), oldVersion = field(ancestry, 20),
-               oldBinding = field(ancestry, 64), oldObservation = field(ancestry, 64),
-               terminal = field(ancestry, OriginalGrantCodec::MaxReservation);
-    if (!retirementDomain ||
-        *retirementDomain != "linura.native-display.retirement-preparation.v1" || !oldVersion ||
-        !oldBinding || !oldObservation || !terminal || !ancestry.empty())
-        return {};
-    const auto previous = OriginalGrantCodec::number(*oldVersion);
-    ancestry = *terminal;
-    const auto terminalDomain = field(ancestry, 64), transaction = field(ancestry, 256),
-               oldGeneration = field(ancestry, 20);
-    if (!terminalDomain || *terminalDomain != "linura.native-display.finalization-reservation.v1" ||
-        !transaction || !oldGeneration || !previous ||
+    std::optional<std::uint64_t> previous, expectedGeneration;
+    std::string_view expectedBinding;
+    if (ordinary) {
+        ancestry = *retirement;
+        const auto releaseDomain = field(ancestry, 64),
+                   material = field(ancestry, OrdinaryReleaseCodec::MaxMaterial),
+                   transaction = field(ancestry, 256), oldGeneration = field(ancestry, 20),
+                   oldVersion = field(ancestry, 20), oldBinding = field(ancestry, 64);
+        if (!releaseDomain || *releaseDomain != "linura.native-display.ordinary-release.v1" ||
+            !material || !transaction || !oldGeneration || !oldVersion || !oldBinding ||
+            !OriginalGrantCodec::digest(*oldBinding))
+            return {};
+        previous = OriginalGrantCodec::number(*oldVersion);
+        expectedGeneration = OriginalGrantCodec::number(*oldGeneration);
+        expectedBinding = *oldBinding;
+    } else {
+        ancestry = *retirement;
+        const auto retirementDomain = field(ancestry, 64), oldVersion = field(ancestry, 20),
+                   oldBinding = field(ancestry, 64), oldObservation = field(ancestry, 64),
+                   terminal = field(ancestry, OriginalGrantCodec::MaxReservation);
+        if (!retirementDomain ||
+            *retirementDomain != "linura.native-display.retirement-preparation.v1" || !oldVersion ||
+            !oldBinding || !oldObservation || !terminal || !ancestry.empty())
+            return {};
+        const auto oldPrevious = OriginalGrantCodec::number(*oldVersion);
+        ancestry = *terminal;
+        const auto terminalDomain = field(ancestry, 64), transaction = field(ancestry, 256),
+                   oldGeneration = field(ancestry, 20);
+        if (!terminalDomain ||
+            *terminalDomain != "linura.native-display.finalization-reservation.v1" ||
+            !transaction || !oldGeneration || !oldPrevious ||
+            *oldPrevious > std::numeric_limits<std::uint64_t>::max() - 2)
+            return {};
+        previous = oldPrevious;
+        expectedGeneration = OriginalGrantCodec::number(*oldGeneration);
+        expectedBinding = *oldBinding;
+    }
+    if (!previous || !expectedGeneration ||
         *previous > std::numeric_limits<std::uint64_t>::max() - 2)
         return {};
     const auto number = [&]() -> std::optional<std::uint64_t> {
@@ -62,9 +96,8 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     };
     const auto generation = number(), version = number();
     const auto binding = field(bytes, 64);
-    if (!generation || !version || !binding ||
-        OriginalGrantCodec::number(*oldGeneration) != generation || *version != *previous + 2 ||
-        *binding != *oldBinding)
+    if (!generation || !version || !binding || expectedGeneration != generation ||
+        *version != *previous + 2 || *binding != expectedBinding)
         return {};
     const auto expiry = number(), wall = number(), boot = number(), wallEnd = number(),
                bootEnd = number(), count = number();
