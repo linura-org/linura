@@ -15,7 +15,7 @@ fn check_clocks(
 }
 
 impl NativeProtection {
-    fn ordinary_release_state(
+    pub(super) fn ordinary_release_state(
         &self,
         admission: &Admission,
         scope: &linura_core::DisplayOrdinaryReleaseScope,
@@ -134,7 +134,7 @@ impl NativeProtection {
                     )
                     .map_err(|_| unavailable())?;
                     let (actual, spent) = service.ordinary_release_state(&admission, &scope)?;
-                    if !state.pending()
+                    if !(state.pending() || state.held())
                         || actual.canonical_bytes() != encoded
                         || spent != persisted.load(Ordering::Acquire)
                         || admission.ordinary_releases.get(&key).map(|v| v.1.as_str())
@@ -214,7 +214,7 @@ impl NativeProtection {
                     persisted.store(true, Ordering::Release);
                     Ok(())
                 };
-                let _result = super::super::display_native_release_grant::serve_ordinary(
+                let result = super::super::display_native_release_grant::serve_ordinary(
                     &mut writer,
                     &digest,
                     lifetime,
@@ -222,6 +222,32 @@ impl NativeProtection {
                     &mut verify,
                     persist,
                 );
+                let Ok(_lifetime) = result else {
+                    return;
+                };
+                // Read no new commands on the original spend endpoint. Keep
+                // its genuine lifetime and witnesses until a distinct prepared
+                // completion transfers it within the SAME producer window.
+                use std::io::Read;
+                if writer
+                    .set_read_timeout(Some(Duration::from_millis(50)))
+                    .is_err()
+                {
+                    return;
+                }
+                while state.held() {
+                    if verify().is_err() {
+                        return;
+                    }
+                    match writer.read(&mut [0_u8; 1]) {
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                            ) => {}
+                        _ => return,
+                    }
+                }
             })
             .map_err(|_| unavailable())?;
         Ok(OwnedFd::from(std::os::fd::OwnedFd::from(native)))

@@ -2473,3 +2473,179 @@ fn successor_checkpoint(use_byte: u8) -> Vec<u8> {
         .unwrap_or_else(|e| unreachable!("{e}"));
     encoded
 }
+
+fn ordinary_completion_fixture(
+    parent: &NativeDisplayOrdinaryReleasePreparation,
+) -> NativeDisplayOrdinaryCompletionPreparation {
+    use linura_observation::{
+        DisplayNativeHandoffOutput, DisplayOrdinaryHandoffFacts, DisplayOrdinaryHandoffLineage,
+    };
+    let material = parent
+        .decoded_material()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let scope = material
+        .release_scope()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let frames = DisplayOrdinaryHandoffFacts::new(
+        scope.clone(),
+        DisplayOrdinaryHandoffLineage {
+            original_transaction: "transaction:ordinary-original".into(),
+            original_effect: linura_provider_sdk::display_layout_effect(material.original_text())
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .digest()
+                .to_hex(),
+            release_transaction: parent.binding().transaction_id.clone(),
+            release_effect: parent.binding().effect_digest.to_hex(),
+            release_dispatch: parent.binding().dispatch_digest.to_hex(),
+            preparation_digest: parent.record_digest().to_hex(),
+            terminal_record: material.lineage().terminal_record.into(),
+            checkpoint: material.lineage().original_checkpoint.into(),
+            signed_binding: material.lineage().signed_binding.into(),
+            source_guard: material.lineage().current_source_guard.into(),
+            outcome: material.outcome().as_str().into(),
+            post_write_epoch: 1,
+            security_epoch: 4,
+        },
+        linura_observation::DisplayNativeHandoffWindow {
+            observed_unix_ms: 1010,
+            observed_boot_ms: 110,
+            ..parent.window()
+        },
+        BTreeMap::from([(
+            linura_core::DisplayOutputId::new(scope.topology().clone(), 1, 2)
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            DisplayNativeHandoffOutput {
+                enabled: true,
+                connector: 1,
+                crtc: 2,
+                plane: 3,
+                framebuffer: 4,
+                spend_high_water: 5,
+                completed_commit: 6,
+            },
+        )]),
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    NativeDisplayOrdinaryCompletionPreparation::new(
+        parent,
+        ComponentDigest::from_bytes([4; 32]),
+        ComponentDigest::from_bytes([5; 32]),
+        &frames,
+        1900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"))
+}
+#[test]
+fn ordinary_completion_needs_exact_spent_parent_preserves_history_and_cannot_replay() {
+    let fixture = Fixture::new();
+    let (payload, parent) = ordinary_release_fixture(7);
+    let record = ordinary_completion_fixture(&parent);
+    record
+        .validate_original(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let bytes = record.canonical_bytes();
+    assert_eq!(
+        NativeDisplayOrdinaryCompletionPreparation::decode(&bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        bytes
+    );
+    for end in 0..bytes.len() {
+        assert!(NativeDisplayOrdinaryCompletionPreparation::decode(&bytes[..end]).is_err());
+    }
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinaryCompletionPreparation::decode(&trailing).is_err());
+    assert!(NativeDisplayCompletionPreparation::decode(&bytes).is_err());
+    assert!(NativeDisplayOrdinaryReleasePreparation::decode(&bytes).is_err());
+    assert!(NativeDisplayOrdinaryCompletionPreparation::decode(&parent.canonical_bytes()).is_err());
+    assert!(
+        NativeDisplayOrdinaryCompletionPreparation::new(
+            &parent,
+            *record.preparation(),
+            *record.preparation(),
+            record.frames(),
+            1900
+        )
+        .is_err()
+    );
+    for expiry in [0, 1010, 2001] {
+        assert!(
+            NativeDisplayOrdinaryCompletionPreparation::new(
+                &parent,
+                *record.preparation(),
+                *record.verification(),
+                record.frames(),
+                expiry
+            )
+            .is_err()
+        );
+    }
+    let publish = |kind, bytes: &[u8]| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &parent.binding().dispatch_digest,
+            bytes,
+            kind,
+        )
+    };
+    assert!(publish(Kind::OrdinaryCompletionPrepared, &bytes).is_err());
+    let original = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    reserve_at(&fixture.fd, fixture.uid, &original, &payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCompletionPrepared, &bytes).is_err());
+    publish(Kind::OrdinaryReleasePrepared, &parent.canonical_bytes())
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCompletionPrepared, &bytes).is_err());
+    publish(Kind::OrdinaryReleaseSpent, &parent.canonical_bytes())
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCompletionSpent, &bytes).is_err());
+    publish(Kind::OrdinaryCompletionPrepared, &bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCompletionPrepared, &bytes).is_err());
+    let different = NativeDisplayOrdinaryCompletionPreparation::new(
+        &parent,
+        ComponentDigest::from_bytes([6; 32]),
+        *record.verification(),
+        record.frames(),
+        1900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCompletionSpent, &different.canonical_bytes()).is_err());
+    publish(Kind::OrdinaryCompletionSpent, &bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryCompletionSpent, &bytes).is_err());
+    let scope = parent
+        .decoded_material()
+        .and_then(|m| m.release_scope().map_err(|e| e.to_string()))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let (read, spent) = read_ordinary_completion_at(&reopened, fixture.uid, &scope)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!());
+    assert!(spent);
+    assert_eq!(read.canonical_bytes(), bytes);
+    assert!(read_ordinary_completion_at(&reopened, fixture.uid + 1, &scope).is_err());
+    assert_eq!(startup_clear_at(&reopened, fixture.uid), Ok(false));
+    // Losing any parent quarantines completion and all future startup. No
+    // automatic repair/deletion, even with an intact completion spend marker.
+    std::fs::remove_file(
+        fixture
+            .path
+            .join(Kind::OrdinaryReleaseSpent.name(&parent.binding().dispatch_digest)),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_ordinary_completion_at(&reopened, fixture.uid, &scope).is_err());
+    assert_eq!(startup_clear_at(&reopened, fixture.uid), Ok(false));
+    assert!(
+        fixture
+            .path
+            .join(Kind::OrdinaryCompletionSpent.name(&parent.binding().dispatch_digest))
+            .exists()
+    );
+}

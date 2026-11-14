@@ -10,10 +10,11 @@ use std::path::Component;
 use linura_linux_session::{
     NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
     NativeDisplayFinalRetirementPreparation, NativeDisplayFinalizationReservation,
-    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayRootRetirementPreparation, NativeDisplaySuccessorPreparation,
+    NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryReleasePreparation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplaySuccessorPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
@@ -40,6 +41,8 @@ const RELEASED_CURRENT_MAGIC: &[u8] = b"LNCZ:1\n";
 const ROOT_POWER_PREPARED_MAGIC: &[u8] = b"LNFP:1\n";
 const POWER_PREPARED_MAGIC: &[u8] = b"LNPP:1\n";
 const POWER_SPENT_MAGIC: &[u8] = b"LNPS:1\n";
+const ORDINARY_COMPLETION_PREPARED_MAGIC: &[u8] = b"LNOQ:1\n";
+const ORDINARY_COMPLETION_SPENT_MAGIC: &[u8] = b"LNOC:1\n";
 const ORDINARY_RELEASE_PREPARED_MAGIC: &[u8] = b"LNOP:1\n";
 // Authenticated native spend only. This is not physical-release evidence.
 const ORDINARY_RELEASE_SPENT_MAGIC: &[u8] = b"LNOS:1\n";
@@ -52,6 +55,8 @@ const HEADER: usize = MAGIC.len() + 32 + 8;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Kind {
     Original,
+    OrdinaryCompletionPrepared,
+    OrdinaryCompletionSpent,
     OrdinaryReleasePrepared,
     OrdinaryReleaseSpent,
     SuccessorPrepared,
@@ -78,6 +83,8 @@ impl Kind {
     fn prefix(self) -> &'static str {
         match self {
             Self::Original => "attempt-",
+            Self::OrdinaryCompletionPrepared => "ordinary-completion-prepared-",
+            Self::OrdinaryCompletionSpent => "ordinary-completion-spent-",
             Self::OrdinaryReleasePrepared => "ordinary-release-prepared-",
             Self::OrdinaryReleaseSpent => "ordinary-release-spent-",
             Self::SuccessorPrepared => "successor-prepared-",
@@ -104,6 +111,8 @@ impl Kind {
     fn magic(self) -> &'static [u8] {
         match self {
             Self::Original => MAGIC,
+            Self::OrdinaryCompletionPrepared => ORDINARY_COMPLETION_PREPARED_MAGIC,
+            Self::OrdinaryCompletionSpent => ORDINARY_COMPLETION_SPENT_MAGIC,
             Self::OrdinaryReleasePrepared => ORDINARY_RELEASE_PREPARED_MAGIC,
             Self::OrdinaryReleaseSpent => ORDINARY_RELEASE_SPENT_MAGIC,
             Self::SuccessorPrepared => SUCCESSOR_PREPARED_MAGIC,
@@ -131,6 +140,12 @@ impl Kind {
         match self {
             Self::SuccessorPrepared | Self::SuccessorSpent => {
                 Ok(NativeDisplaySuccessorPreparation::decode(payload)?
+                    .binding()
+                    .dispatch_digest)
+            }
+            Self::OrdinaryCompletionPrepared | Self::OrdinaryCompletionSpent => {
+                Ok(NativeDisplayOrdinaryCompletionPreparation::decode(payload)?
+                    .parent()
                     .binding()
                     .dispatch_digest)
             }
@@ -222,6 +237,8 @@ impl Kind {
 #[derive(Default)]
 struct TerminalLineage {
     originals: BTreeMap<String, Vec<u8>>,
+    ordinary_completion_prepared: BTreeMap<String, NativeDisplayOrdinaryCompletionPreparation>,
+    ordinary_completion_spent: BTreeMap<String, NativeDisplayOrdinaryCompletionPreparation>,
     ordinary_releases: BTreeMap<String, NativeDisplayOrdinaryReleasePreparation>,
     ordinary_spent: BTreeMap<String, NativeDisplayOrdinaryReleasePreparation>,
     successor_prepared: BTreeMap<String, NativeDisplaySuccessorPreparation>,
@@ -263,6 +280,24 @@ impl TerminalLineage {
                     &mut self.successor_prepared
                 } else {
                     &mut self.successor_spent
+                };
+                if table.insert(key, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::OrdinaryCompletionPrepared | Kind::OrdinaryCompletionSpent => {
+                let record = NativeDisplayOrdinaryCompletionPreparation::decode(bytes)?;
+                let key = record
+                    .parent()
+                    .decoded_material()?
+                    .lineage()
+                    .original_dispatch
+                    .to_owned();
+                let table = if kind == Kind::OrdinaryCompletionPrepared {
+                    &mut self.ordinary_completion_prepared
+                } else {
+                    &mut self.ordinary_completion_spent
                 };
                 if table.insert(key, record).is_some() {
                     return Err(unavailable());
@@ -467,6 +502,22 @@ impl TerminalLineage {
     }
 
     fn verify(&self) -> Result<(), String> {
+        for (dispatch, record) in &self.ordinary_completion_prepared {
+            let parent = self.ordinary_spent.get(dispatch).ok_or_else(unavailable)?;
+            if record.parent().canonical_bytes() != parent.canonical_bytes() {
+                return Err(unavailable());
+            }
+            record.validate_original(self.originals.get(dispatch).ok_or_else(unavailable)?)?;
+        }
+        for (dispatch, record) in &self.ordinary_completion_spent {
+            let prepared = self
+                .ordinary_completion_prepared
+                .get(dispatch)
+                .ok_or_else(unavailable)?;
+            if record.canonical_bytes() != prepared.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
         for (dispatch, spent) in &self.ordinary_spent {
             let prepared = self
                 .ordinary_releases
@@ -658,6 +709,8 @@ impl TerminalLineage {
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
     for kind in [
         Kind::Original,
+        Kind::OrdinaryCompletionPrepared,
+        Kind::OrdinaryCompletionSpent,
         Kind::OrdinaryReleasePrepared,
         Kind::OrdinaryReleaseSpent,
         Kind::SuccessorPrepared,
@@ -1207,6 +1260,86 @@ fn read_ordinary_release_state_at(
     let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
     match (result, unlocked) {
         (Ok(bytes), Ok(())) => Ok(bytes),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
+pub(super) fn reserve_ordinary_completion(
+    record: &NativeDisplayOrdinaryCompletionPreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.parent().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::OrdinaryCompletionPrepared,
+    )
+}
+pub(super) fn spend_ordinary_completion(
+    record: &NativeDisplayOrdinaryCompletionPreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.parent().binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::OrdinaryCompletionSpent,
+    )
+}
+pub(super) fn read_ordinary_completion(
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<(NativeDisplayOrdinaryCompletionPreparation, bool)>, String> {
+    read_ordinary_completion_at(&open()?, 0, scope)
+}
+fn read_ordinary_completion_at(
+    fd: &OwnedFd,
+    uid: u32,
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<(NativeDisplayOrdinaryCompletionPreparation, bool)>, String> {
+    directory(fd, uid, false)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, name)?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        let Some(record) = lineage
+            .ordinary_completion_prepared
+            .remove(scope.original_dispatch())
+        else {
+            return Ok(None);
+        };
+        if record
+            .parent()
+            .decoded_material()?
+            .release_scope()
+            .map_err(|_| unavailable())?
+            != *scope
+        {
+            return Err(unavailable());
+        }
+        Ok(Some((
+            record,
+            lineage
+                .ordinary_completion_spent
+                .contains_key(scope.original_dispatch()),
+        )))
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
         (Err(error), _) | (_, Err(error)) => Err(error),
     }
 }

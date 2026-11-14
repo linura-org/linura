@@ -123,6 +123,25 @@ impl linura_control::OriginalDisplayNativeReleaseSpendPort for SessionExecutorCl
     }
 }
 
+impl linura_control::OrdinaryDisplayCompletionPort for SessionExecutorClient {
+    fn dispatch_ordinary_completion(
+        &mut self,
+        completion: linura_control::AuthorizedOrdinaryDisplayCompletion,
+    ) -> Result<(), String> {
+        self.channel.transfer_ordinary_display_completion(
+            completion.material(),
+            completion.release().transaction_id.as_str(),
+            completion.dispatch(),
+            completion.root_preparation(),
+            linura_provider_sdk::ComponentDigest::parse_hex(completion.preparation().hex())
+                .map_err(|_| "ordinary completion digest unavailable".to_owned())?,
+            linura_provider_sdk::ComponentDigest::parse_hex(completion.verification().hex())
+                .map_err(|_| "ordinary completion digest unavailable".to_owned())?,
+            completion.frames(),
+            completion.expires_at_unix_ms(),
+        )
+    }
+}
 impl linura_control::OriginalDisplayCompletionPort for SessionExecutorClient {
     fn dispatch_completion(
         &mut self,

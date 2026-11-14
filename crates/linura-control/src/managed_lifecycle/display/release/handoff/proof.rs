@@ -13,6 +13,33 @@ pub struct OrdinaryDisplayHandoffVerification {
     first_valid_until_unix_ms: u64,
 }
 impl OrdinaryDisplayHandoffVerification {
+    pub(crate) fn require_retained(
+        &self,
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        request: &RequestId,
+    ) -> Result<(), ManagedLifecycleError> {
+        let key = RequestId::new(format!(
+            "request:v010:display-ordinary-physical-verified:{}",
+            digest_bytes(
+                "linura.display.ordinary-handoff-verified-key.v1",
+                request.as_str().as_bytes()
+            )
+            .hex()
+        ))
+        .map_err(|_| invalid_original())?;
+        let retained = journal
+            .load(principal, &key)
+            .map_err(|_| invalid_original())?;
+        if retained.principal() != principal
+            || retained.request_id() != &key
+            || retained.canonical().len() > MAX_BYTES
+            || digest_bytes(DOMAIN, retained.canonical()) != self.record_digest
+        {
+            return Err(invalid_original());
+        }
+        Ok(())
+    }
     #[must_use]
     pub const fn inspection(&self) -> &OrdinaryDisplayHandoffInspection {
         &self.inspection

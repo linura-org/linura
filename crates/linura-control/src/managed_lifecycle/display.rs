@@ -51,6 +51,10 @@ const MAX_TOTAL_DISPLAY_REVIEW_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, Eq, PartialEq)]
 pub(super) enum DisplayReviewStage {
     Initial,
+    OrdinaryCompletionDispatched {
+        preparation: linura_transaction::ContentDigest,
+        verification: linura_transaction::ContentDigest,
+    },
     HandoffVerified {
         spend: linura_transaction::ContentDigest,
         verification: linura_transaction::ContentDigest,
@@ -116,11 +120,12 @@ pub use finalization::{
     OriginalDisplayRootPowerRetirementPort,
 };
 pub use release::{
-    AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayHandoffInspection,
-    OrdinaryDisplayHandoffVerification, OrdinaryDisplayOriginalInspection,
-    OrdinaryDisplayReleaseAuthorizer, OrdinaryDisplayReleaseChallenge,
-    OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
-    OrdinaryDisplayReleaseRequest,
+    AuthorizedOrdinaryDisplayCompletion, AuthorizedOrdinaryDisplayRelease,
+    OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt,
+    OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
+    OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseAuthorizer,
+    OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort,
+    OrdinaryDisplayReleaseReceipt, OrdinaryDisplayReleaseRequest,
 };
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,

@@ -40,6 +40,10 @@ consumeOriginalNativeReleaseGrant(OwnedNativeFd, const Correlation &terminal,
 receiveOriginalCompletionGrant(OwnedNativeFd, std::string_view digest, std::string_view parent,
                                const Correlation &restoration,
                                const NativeFirstFrameGate::Receipt &);
+[[nodiscard]] std::unique_ptr<OriginalCompletionGrant>
+receiveOrdinaryCompletionGrant(OwnedNativeFd, std::string_view digest, std::string_view parent,
+                               const Correlation &, const NativeFirstFrameGate::Receipt &);
+
 // Read-only actual DRM/KMS connector observations from the SAME pinned
 // compositor, original supervised Root channel and unchanged output inventory.
 // This is NOT a native release attempt, grant, frame-completion receipt, or

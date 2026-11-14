@@ -374,11 +374,27 @@ bool NativeDisplayFlow::continuesFinalization(const NativeDisplayFinalizationInt
            scope_.display->material == intent.encode() && bound.continues(*dispatched_) &&
            window() && revalidate_();
 }
+bool NativeDisplayFlow::continuesOrdinaryRelease(const NativeDisplayOrdinaryReleaseIntent &intent,
+                                                 const NativeDisplayCorrelation &bound,
+                                                 const NativePeerIdentity &peer)
+{
+    return !failed_ && scope_.purpose == ApprovalPurpose::ReleaseOrdinaryDisplay && consumed_ &&
+           spent_ && dispatched_ && control_ == peer && scope_.display &&
+           scope_.display->material == intent.encode() &&
+           NativeDisplayOrdinaryReleaseIntent::parse(intent.encode()) &&
+           bound.continues(*dispatched_) &&
+           consumedTerminalGeneration_ == backend_.protectedInteractionGeneration() &&
+           inputGeneration_ == backend_.protectedInputGeneration() && window() && revalidate_();
+}
 bool NativeDisplayFlow::retireAfterCurrentHandoff(const NativeDisplayCorrelation &bound)
 {
-    if (failed_ || scope_.purpose != ApprovalPurpose::FinalizeOriginalDisplay || !consumed_ ||
-        !spent_ || !dispatched_ || !bound.continues(*dispatched_) ||
-        !backend_.currentOriginalDisplayHandoff(bound))
+    if (failed_ ||
+        (scope_.purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
+         scope_.purpose != ApprovalPurpose::ReleaseOrdinaryDisplay) ||
+        !consumed_ || !spent_ || !dispatched_ || !bound.continues(*dispatched_) ||
+        (scope_.purpose == ApprovalPurpose::ReleaseOrdinaryDisplay
+             ? !backend_.currentOrdinaryDisplayHandoff(bound)
+             : !backend_.currentOriginalDisplayHandoff(bound)))
         return false;
     // No further receipt/continuation survives. cancel() retires authentication
     // and the UI timer but must not destroy the native endpoint now owned by

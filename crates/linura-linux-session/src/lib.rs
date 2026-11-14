@@ -22,6 +22,10 @@ mod display_retirement_preparation;
 pub use display_retirement_preparation::{
     MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION, NativeDisplayRetirementPreparation,
 };
+mod display_ordinary_completion_preparation;
+pub use display_ordinary_completion_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_COMPLETION, NativeDisplayOrdinaryCompletionPreparation,
+};
 mod display_ordinary_release_preparation;
 mod display_successor_preparation;
 pub use display_ordinary_release_preparation::{

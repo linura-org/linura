@@ -111,6 +111,9 @@ class NativeRuntime final : public QObject
                                       quint64 sampledBootMs, quint64 controlVersion,
                                       const QString &controlBinding,
                                       const QString &controlObservation, int nativeGrant);
+    [[nodiscard]] std::optional<quint32> transferOrdinaryDisplayCompletion(
+        const QDBusMessage &, const NativeDisplayOrdinaryReleaseIntent &,
+        const NativeDisplayCorrelation &, const QString &digest, int grant);
     [[nodiscard]] std::optional<quint32>
     transferOriginalDisplayCompletion(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
                                       const NativeDisplayCorrelation &, const QString &digest,

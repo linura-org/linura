@@ -1117,8 +1117,9 @@ bool NativeWaylandLock::heldOrdinaryDisplayRelease(const NativeDisplayCorrelatio
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
         impl_->pumping || !impl_->ordinaryReleaseAccepted ||
-        impl_->ordinaryReleaseDispatched != std::optional{bound} || !impl_->protectedInteraction ||
-        !impl_->protectedConsumed || !impl_->protectedScope ||
+        (!impl_->ordinaryReleaseDispatched ||
+         !bound.continues(*impl_->ordinaryReleaseDispatched)) ||
+        !impl_->protectedInteraction || !impl_->protectedConsumed || !impl_->protectedScope ||
         impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::OrdinaryRelease)
         return false;
     const auto status = protectedDisplayStatus();
@@ -1312,6 +1313,14 @@ bool NativeWaylandLock::heldOriginalDisplayFinalization(const NativeDisplayCorre
     const auto status = protectedDisplayStatus();
     return status && status->phase == NativeDisplayPromptStatus::Phase::Consumed &&
            impl_->displayConnection->status(*impl_->heldRestoration) == 3;
+}
+bool NativeWaylandLock::currentOrdinaryDisplayHandoff(const NativeDisplayCorrelation &bound)
+{
+    if (!impl_->completionAttempted || !heldOrdinaryDisplayRelease(bound))
+        return false;
+    const auto sample = displayStartupSample();
+    return sample && sample->fenced && sample->startupPhase == 4 &&
+           sample->compositor == displayInvocation();
 }
 bool NativeWaylandLock::currentOriginalDisplayHandoff(const NativeDisplayCorrelation &bound)
 {
@@ -1586,18 +1595,20 @@ NativeWaylandLock::retireOriginalDisplayPower(const NativeDisplayFinalizationInt
 }
 
 std::optional<quint32>
-NativeWaylandLock::transferOriginalDisplayCompletion(const NativeDisplayCorrelation &bound,
-                                                     const QString &digest, int grant)
+NativeWaylandLock::transferDisplayCompletion(const NativeDisplayCorrelation &bound,
+                                             const QString &digest, int grant)
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
-        impl_->pumping || impl_->completionAttempted || !impl_->nativeReleaseAttempted ||
-        grant < 0 || digest.size() != 64 || digest == QString(64, QLatin1Char('0')) ||
+        impl_->pumping || impl_->completionAttempted ||
+        (!impl_->nativeReleaseAttempted && !impl_->ordinaryReleaseAccepted) || grant < 0 ||
+        digest.size() != 64 || digest == QString(64, QLatin1Char('0')) ||
         !std::all_of(digest.begin(), digest.end(),
                      [](QChar character) {
                          return (character >= QLatin1Char('0') && character <= QLatin1Char('9')) ||
                                 (character >= QLatin1Char('a') && character <= QLatin1Char('f'));
                      }) ||
-        !heldOriginalDisplayFinalization(bound) || requestedSecure() != secureCoverage())
+        (!heldOriginalDisplayFinalization(bound) && !heldOrdinaryDisplayRelease(bound)) ||
+        requestedSecure() != secureCoverage())
         return std::nullopt;
     const auto clock = NativeDisplayClock::sample();
     if (!clock || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||

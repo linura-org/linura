@@ -1400,11 +1400,33 @@ std::optional<quint32> NativeRuntime::transferOriginalDisplayCompletion(
         !impl_->backend->heldOriginalDisplayFinalization(bound) ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return std::nullopt;
-    const auto phase = impl_->backend->transferOriginalDisplayCompletion(bound, digest, grant);
+    const auto phase = impl_->backend->transferDisplayCompletion(bound, digest, grant);
     // A missing transfer reply may still have performed the handoff. Observe
     // the exact native lifetime once; never retry the effect or infer Control
     // completion from phase 8. Old Control retirement cannot destroy a lifetime
     // that the actual native compositor has already handed off to Root.
+    const bool observed = impl_->display->retireAfterCurrentHandoff(bound);
+    return observed ? phase : std::nullopt;
+}
+
+std::optional<quint32> NativeRuntime::transferOrdinaryDisplayCompletion(
+    const QDBusMessage &received, const NativeDisplayOrdinaryReleaseIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, int grant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || grant < 0 || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||
+        bound.deadlineUnixMs - clock->unixMs > 2000 || intent.currentLock != identity() ||
+        !impl_->currentSession() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest ||
+        !impl_->backend || !impl_->display ||
+        !impl_->display->continuesOrdinaryRelease(intent, bound, *peer) ||
+        !impl_->backend->heldOrdinaryDisplayRelease(bound) ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return {};
+    const auto phase = impl_->backend->transferDisplayCompletion(bound, digest, grant);
     const bool observed = impl_->display->retireAfterCurrentHandoff(bound);
     return observed ? phase : std::nullopt;
 }

@@ -1171,7 +1171,6 @@ an invalid scoped MAC poisons the journal lifetime. No validation result or row
 is reused as current authority after the scope ends, and the original native
 spend/first-frame deadlines are unchanged.
 
-
 ### Completed display ownership and a protected successor
 
 Early signed display Committed is not protection-release, successor-admission or
@@ -1190,3 +1189,20 @@ through reads without replay or first-proof rewriting. Every ancestor and global
 future-startup exclusion remains retained. Cross-invocation adoption and
 reference-aware cleanup require separate qualified protocols; public production
 display mutations remain unsupported. See ADR 0048 and the S21 recovery matrix.
+
+Ordinary display completion uses a separate same-invocation continuation of the
+live purpose-13 review. Control consumes that review before any fallible probe,
+retains an exclusive before-effect preparation and authenticates its readback and
+unchanged first proof after fresh independent observation. Root requires the
+actual original LNOW lifetime, complete original/LNOP/LNOS ancestry and the same
+supervised Control owner. Its immutable LNOQ/LNOC records retain distinct meanings
+from replacement-recovery LNCP/LNCS; none is an executable credential. Every
+LOCH/LOCV fragment requires the actual admitted native process credentials.
+The initial transfer and durable spend share the original first-frame wall and
+BOOTTIME limits. Moving the original anchor cannot be repeated or reconstructed
+after restart/uncertainty; subsequent continuity cannot renew an effect window.
+Native startup admission moves only inside the same actual compositor under its
+authenticated grant, exact immutable first KMS/buffer/commit comparison and input
+quarantine. ACKs leave Control Indeterminate and all power/final-retirement fences
+held. Independent ordinary current verification and ordered retirement remain
+unfinished, and production display mutation stays disabled.

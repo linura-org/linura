@@ -473,6 +473,24 @@ void terminalComparison(const std::string &material)
         const auto match = [&](std::string_view bytes) {
             return OriginalCompletionGrantCodec::matches(bytes, releaseBytes, restoration, actual);
         };
+        auto ordinaryFields = fields;
+        ordinaryFields[0] = "linura.native-display.ordinary-completion.v1";
+        ordinaryFields.insert(ordinaryFields.begin() + 10, "13");
+        const auto ordinary = framed(ordinaryFields);
+        const auto matchesOrdinary = [&](std::string_view bytes) {
+            return OriginalCompletionGrantCodec::matches(bytes, releaseBytes, restoration, actual,
+                                                         true);
+        };
+        assert(matchesOrdinary(ordinary));
+        assert(!match(ordinary) && !matchesOrdinary(original));
+        for (std::size_t size = 0; size < ordinary.size(); ++size)
+            assert(!matchesOrdinary(std::string_view(ordinary).substr(0, size)));
+        assert(!matchesOrdinary(ordinary + 'x'));
+        for (const auto index : {0U, 1U, 4U, 5U, 8U, 9U, 10U, 11U, 13U, 14U, 15U, 18U, 20U, 22U}) {
+            auto changed = ordinaryFields;
+            changed[index] += '1';
+            assert(!matchesOrdinary(framed(changed)));
+        }
         const auto limit = match(original);
         assert(limit && limit->unixMs == 1150 && limit->bootMs == 300);
         for (std::size_t size = 0; size < original.size(); ++size)

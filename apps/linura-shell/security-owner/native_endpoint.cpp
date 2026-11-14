@@ -651,6 +651,29 @@ NativeEndpoint::TransferOriginalDisplayCompletion(const NativeDisplayAttemptQuer
     return 7;
 }
 
+quint32
+NativeEndpoint::TransferOrdinaryDisplayCompletion(const NativeDisplayAttemptQueryWire &query,
+                                                  const QString &digest,
+                                                  const QDBusUnixFileDescriptor &grant)
+{
+    if (calledFromDBus() && query.intent.size() <= NativeDisplayOrdinaryReleaseIntent::MaxBytes &&
+        query.transaction.size() <= 256 && query.effectDigest.size() == 64 &&
+        query.dispatchDigest.size() == 64 && digest.size() == 64 && grant.isValid()) {
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto intent = NativeDisplayOrdinaryReleaseIntent::parse(query.intent);
+        const auto result = intent ? runtime_.transferOrdinaryDisplayCompletion(
+                                         message(), *intent, bound, digest, grant.fileDescriptor())
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Ordinary display completion transfer unavailable"));
+    return 7;
+}
+
 quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &query,
                                                 const QString &decisionDigest,
                                                 const QString &protectedDecisionDigest,

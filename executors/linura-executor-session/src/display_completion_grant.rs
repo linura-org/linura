@@ -85,14 +85,74 @@ impl Drop for Lifetime {
 /// Every fragment is authenticated against the original admitted native PID,
 /// start identity and immutable executable. Idle continuity cannot renew the
 /// original first-effect window. Partial messages have one absolute budget.
+pub(super) trait CompletionAnchor {
+    fn live(&self) -> zbus::fdo::Result<()>;
+}
+impl CompletionAnchor for Transferred {
+    fn live(&self) -> zbus::fdo::Result<()> {
+        Transferred::live(self)
+    }
+}
 #[allow(clippy::too_many_arguments)]
 pub(super) fn serve(
     stream: &mut UnixStream,
     digest: &[u8; 32],
     lifetime: Lifetime,
+    authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
+    verify: impl FnMut(bool) -> zbus::fdo::Result<()>,
+    spend_and_transfer: impl FnMut() -> zbus::fdo::Result<Transferred>,
+    retire_power: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+    commit_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+    retire_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+    transfer_successor: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+) -> zbus::fdo::Result<()> {
+    serve_with_anchor(
+        stream,
+        digest,
+        lifetime,
+        false,
+        authenticate,
+        verify,
+        spend_and_transfer,
+        retire_power,
+        commit_current,
+        retire_current,
+        transfer_successor,
+    )
+}
+// Ordinary completion uses its genuine original-spend anchor and purpose. The
+// remaining retirement purposes stay unavailable until separately prepared.
+pub(super) fn serve_ordinary(
+    stream: &mut UnixStream,
+    digest: &[u8; 32],
+    lifetime: Lifetime,
+    authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
+    verify: impl FnMut(bool) -> zbus::fdo::Result<()>,
+    transfer: impl FnMut() -> zbus::fdo::Result<super::display_native_release_grant::Transferred>,
+) -> zbus::fdo::Result<()> {
+    serve_with_anchor(
+        stream,
+        digest,
+        lifetime,
+        true,
+        authenticate,
+        verify,
+        transfer,
+        |_| Err(unavailable()),
+        |_| Err(unavailable()),
+        |_| Err(unavailable()),
+        |_| Err(unavailable()),
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn serve_with_anchor<A: CompletionAnchor>(
+    stream: &mut UnixStream,
+    digest: &[u8; 32],
+    lifetime: Lifetime,
+    ordinary: bool,
     mut authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     mut verify: impl FnMut(bool) -> zbus::fdo::Result<()>,
-    mut spend_and_transfer: impl FnMut() -> zbus::fdo::Result<Transferred>,
+    mut spend_and_transfer: impl FnMut() -> zbus::fdo::Result<A>,
     mut retire_power: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
     mut commit_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
     mut retire_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
@@ -100,7 +160,7 @@ pub(super) fn serve(
 ) -> zbus::fdo::Result<()> {
     stream.set_nonblocking(false).map_err(|_| unavailable())?;
     let mut sequence = 1_u64;
-    let mut transferred: Option<Transferred> = None;
+    let mut transferred: Option<A> = None;
     loop {
         if let Some(anchor) = &transferred {
             anchor.live()?;
@@ -147,10 +207,10 @@ pub(super) fn serve(
                 Err(_) => return Err(unavailable()),
             }
         }
-        let power = sequence > 1 && &bytes[..8] == b"LNPR:1\n\0";
-        let current = sequence > 1 && &bytes[..8] == b"LNCF:1\n\0";
-        let retirement = sequence > 1 && &bytes[..8] == b"LNCA:1\n\0";
-        let successor = sequence > 1 && &bytes[..8] == b"LNSA:1\n\0";
+        let power = !ordinary && sequence > 1 && &bytes[..8] == b"LNPR:1\n\0";
+        let current = !ordinary && sequence > 1 && &bytes[..8] == b"LNCF:1\n\0";
+        let retirement = !ordinary && sequence > 1 && &bytes[..8] == b"LNCA:1\n\0";
+        let successor = !ordinary && sequence > 1 && &bytes[..8] == b"LNSA:1\n\0";
         let purpose = if successor {
             b"LNSA:1\n\0"
         } else if retirement {
@@ -160,9 +220,17 @@ pub(super) fn serve(
         } else if power {
             b"LNPR:1\n\0"
         } else if sequence == 1 {
-            b"LNCH:1\n\0"
+            if ordinary {
+                b"LOCH:1\n\0"
+            } else {
+                b"LNCH:1\n\0"
+            }
         } else {
-            b"LNCV:1\n\0"
+            if ordinary {
+                b"LOCV:1\n\0"
+            } else {
+                b"LNCV:1\n\0"
+            }
         };
         let end = deadline.ok_or_else(unavailable)?;
         if bytes[..8] != purpose[..]
@@ -808,6 +876,129 @@ mod tests {
                 usize::from(!matches!(fault, 1 | 4 | 5))
             );
             assert!(!state.transferred()); // Closure revokes liveness, never the spent history.
+        }
+    }
+    #[test]
+    fn ordinary_completion_moves_the_actual_spend_anchor_and_rejects_other_purposes() {
+        use super::super::display_native_release_grant as ordinary;
+        for fault in 0..=9 {
+            let (mut old_root, mut old_native) = pair();
+            let old = ordinary::ChannelState::reserved();
+            let old_lifetime = ordinary::Lifetime::new(old.clone());
+            let old_worker = std::thread::spawn(move || {
+                value(ordinary::serve_ordinary(
+                    &mut old_root,
+                    &[6; 32],
+                    old_lifetime,
+                    identity,
+                    || Ok(()),
+                    || Ok(()),
+                ))
+            });
+            value(old_native.write_all(&frame(b"LNOW:1\n\0", 1, [6; 32])));
+            value(old_native.read_exact(&mut [0; FRAME_BYTES]));
+            let held = value(old_worker.join());
+            assert!(old.held());
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let anchor = old.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let spent = calls.clone();
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (lost_tx, lost_rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let mut fragments = 0;
+                assert!(
+                    serve_ordinary(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        |sender| {
+                            identity(sender)?;
+                            fragments += 1;
+                            if fault == 3 || (fault == 9 && fragments > 1) {
+                                Err(unavailable())
+                            } else {
+                                Ok(())
+                            }
+                        },
+                        |_| if fault == 5 {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        },
+                        || {
+                            spent.fetch_add(1, Ordering::AcqRel);
+                            if fault == 4 {
+                                Err(unavailable())
+                            } else {
+                                let moved = anchor.transfer()?;
+                                if fault == 8 {
+                                    value(entered_tx.send(()));
+                                    value(lost_rx.recv_timeout(Duration::from_secs(1)));
+                                }
+                                Ok(moved)
+                            }
+                        }
+                    )
+                    .is_err()
+                );
+            });
+            let request = frame(
+                if fault == 1 {
+                    b"LNCH:1\n\0"
+                } else {
+                    b"LOCH:1\n\0"
+                },
+                if fault == 7 { 0 } else { 1 },
+                if fault == 2 { [8; 32] } else { [7; 32] },
+            );
+            value(native.write_all(&request));
+            if fault == 8 {
+                value(entered_rx.recv_timeout(Duration::from_secs(1)));
+                drop(native);
+                drop(held);
+                value(lost_tx.send(()));
+                value(worker.join());
+                assert!(!old.transferred() && !state.transferred());
+                assert_eq!(calls.load(Ordering::Acquire), 1);
+                assert!(old.transfer().is_err());
+                continue;
+            }
+            if fault == 0 || fault == 6 {
+                value(native.read_exact(&mut [0; FRAME_BYTES]));
+                assert!(old.transferred() && state.transferred());
+                assert!(
+                    !state.power_spent() && !state.current_spent() && !state.retirement_spent()
+                );
+                drop(held); // Closing the old endpoint cannot revoke a moved anchor.
+                assert!(old.transferred());
+                let probe = frame(b"LOCV:1\n\0", 2, [7; 32]);
+                value(native.write_all(&probe));
+                value(native.read_exact(&mut [0; FRAME_BYTES]));
+                value(native.write_all(&frame(
+                    if fault == 0 {
+                        b"LOCH:1\n\0"
+                    } else {
+                        b"LNPR:1\n\0"
+                    },
+                    3,
+                    [7; 32],
+                )));
+                assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+            } else {
+                assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+                drop(held);
+            }
+            drop(native);
+            value(worker.join());
+            assert!(!old.transferred() && !state.transferred());
+            assert_eq!(
+                calls.load(Ordering::Acquire),
+                usize::from(matches!(fault, 0 | 4 | 6))
+            );
+            assert!(old.transfer().is_err());
         }
     }
 }

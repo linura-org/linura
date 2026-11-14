@@ -44,6 +44,8 @@ struct Machine {
     ordinary_checkpoint_unavailable: bool,
     ordinary_release_approvals: usize,
     ordinary_release_calls: usize,
+    ordinary_completion_calls: usize,
+    ordinary_completion_store_fault: u8,
     ordinary_release_write_fault: u8,
     ordinary_handoff_enabled: bool,
     ordinary_release_record: Option<Vec<u8>>,
@@ -985,6 +987,27 @@ impl ApprovedRequestJournal for FailingJournal {
                 .lose_restoration_dispatch
         {
             return Ok(()); // Acknowledged but absent correlation must never reach the native call.
+        }
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-ordinary-completion-prepared:")
+        {
+            let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(
+                m.checked_history_reads, 0,
+                "completion publication crossed read scope"
+            );
+            match m.ordinary_completion_store_fault {
+                1 => return Err(TransactionStoreError::CapacityExceeded),
+                2 => return Ok(()),
+                3 => {
+                    self.inner.retain(record)?;
+                    return Err(TransactionStoreError::CapacityExceeded);
+                }
+                4 => m.ordinary_handoff_fault = 7,
+                _ => (),
+            }
         }
         self.writes += 1;
         if self.writes == self.fail_at {

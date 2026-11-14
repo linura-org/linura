@@ -1022,6 +1022,21 @@ receiveOriginalCompletionGrant(OwnedNativeFd descriptor, std::string_view digest
                                             restoration, physical);
 }
 
+std::unique_ptr<OriginalCompletionGrant>
+receiveOrdinaryCompletionGrant(OwnedNativeFd descriptor, std::string_view digest,
+                               std::string_view parent, const Correlation &original,
+                               const NativeFirstFrameGate::Receipt &physical)
+{
+    const auto phase = service ? service->status(original) : std::nullopt;
+    if (!backend || backend->originalRecovery || backend->writing || backend->commitFailed ||
+        !backend->powerInhibitor.held() || !startupFence.ordinaryAllowed() || !phase ||
+        (*phase != CompositorDisplayService::Phase::Confirmed &&
+         *phase != CompositorDisplayService::Phase::Restored))
+        return {};
+    return OriginalCompletionGrant::receiveOrdinary(startupFence, std::move(descriptor), digest,
+                                                    parent, original, physical);
+}
+
 bool originalRestorationPresented(const Correlation &bound)
 {
     return backend && backend->originalStatus(bound) == std::optional<std::uint32_t>{3} &&
@@ -1060,7 +1075,8 @@ bool frameSourceLive(const Correlation &original, FrameScope scope)
 {
     if (!backend || backend->writing || backend->commitFailed || !frameScopeLive(scope))
         return false;
-    if (scope == FrameScope::OrdinaryFirst) {
+    if (scope == FrameScope::OrdinaryFirst ||
+        (scope == FrameScope::Current && !backend->originalRecovery)) {
         const auto phase = service ? service->status(original) : std::nullopt;
         return phase && (*phase == CompositorDisplayService::Phase::Confirmed ||
                          *phase == CompositorDisplayService::Phase::Restored);

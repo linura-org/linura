@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 const RESERVED: u8 = 1;
 const SPENT: u8 = 2;
+const TRANSFERRED: u8 = 3;
 const FRAME_BYTES: usize = 48;
 const PURPOSE: &[u8; 8] = b"LNRW:1\n\0";
 const ORDINARY_PURPOSE: &[u8; 8] = b"LNOW:1\n\0";
@@ -30,6 +31,18 @@ impl ChannelState {
     pub(super) fn pending(&self) -> bool {
         self.0.load(Ordering::Acquire) == RESERVED
     }
+    pub(super) fn held(&self) -> bool {
+        self.0.load(Ordering::Acquire) == SPENT
+    }
+    pub(super) fn transferred(&self) -> bool {
+        self.0.load(Ordering::Acquire) == TRANSFERRED
+    }
+    pub(super) fn transfer(self: &Arc<Self>) -> zbus::fdo::Result<Transferred> {
+        self.0
+            .compare_exchange(SPENT, TRANSFERRED, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| unavailable())?;
+        Ok(Transferred(self.clone()))
+    }
     fn spend(&self) -> zbus::fdo::Result<()> {
         self.0
             .compare_exchange(RESERVED, SPENT, Ordering::AcqRel, Ordering::Acquire)
@@ -45,6 +58,33 @@ impl Lifetime {
     }
 }
 impl Drop for Lifetime {
+    fn drop(&mut self) {
+        // The transferred guard becomes the sole lifetime owner. Closing the
+        // old spend endpoint must not revoke its correctly moved anchor.
+        let mut phase = self.0.0.load(Ordering::Acquire);
+        while phase != TRANSFERRED {
+            match self
+                .0
+                .0
+                .compare_exchange(phase, 0, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => break,
+                Err(current) => phase = current,
+            }
+        }
+    }
+}
+pub(super) struct Transferred(Arc<ChannelState>);
+impl super::display_completion_grant::CompletionAnchor for Transferred {
+    fn live(&self) -> zbus::fdo::Result<()> {
+        if self.0.transferred() {
+            Ok(())
+        } else {
+            Err(unavailable())
+        }
+    }
+}
+impl Drop for Transferred {
     fn drop(&mut self) {
         self.0.0.store(0, Ordering::Release);
     }
@@ -72,6 +112,7 @@ pub(super) fn serve(
         verify,
         persist_spent,
     )
+    .map(drop)
 }
 
 /// Same bounded credential transport, with a distinct ordinary-release purpose.
@@ -83,7 +124,7 @@ pub(super) fn serve_ordinary(
     authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     verify: impl FnMut() -> zbus::fdo::Result<()>,
     persist_spent: impl FnMut() -> zbus::fdo::Result<()>,
-) -> zbus::fdo::Result<()> {
+) -> zbus::fdo::Result<Lifetime> {
     serve_purpose(
         stream,
         digest,
@@ -103,7 +144,7 @@ fn serve_purpose(
     mut authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     mut verify: impl FnMut() -> zbus::fdo::Result<()>,
     mut persist_spent: impl FnMut() -> zbus::fdo::Result<()>,
-) -> zbus::fdo::Result<()> {
+) -> zbus::fdo::Result<Lifetime> {
     stream.set_nonblocking(false).map_err(|_| unavailable())?;
     let deadline = Instant::now().checked_add(BUDGET).ok_or_else(unavailable)?;
     let mut bytes = [0_u8; FRAME_BYTES];
@@ -157,7 +198,7 @@ fn serve_purpose(
     if Instant::now() >= deadline {
         return Err(unavailable());
     }
-    Ok(())
+    Ok(lifetime)
 }
 
 #[cfg(test)]

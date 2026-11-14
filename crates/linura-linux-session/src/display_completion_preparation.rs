@@ -33,7 +33,7 @@ fn invalid() -> String {
     "native display completion preparation is inconsistent or unavailable".into()
 }
 
-fn field<'a>(rest: &mut &'a [u8], bound: usize) -> Result<&'a [u8], String> {
+pub(super) fn field<'a>(rest: &mut &'a [u8], bound: usize) -> Result<&'a [u8], String> {
     let (size, tail) = rest.split_at_checked(8).ok_or_else(invalid)?;
     let size = usize::try_from(u64::from_be_bytes(size.try_into().map_err(|_| invalid())?))
         .map_err(|_| invalid())?;
@@ -44,10 +44,10 @@ fn field<'a>(rest: &mut &'a [u8], bound: usize) -> Result<&'a [u8], String> {
     *rest = tail;
     Ok(value)
 }
-fn text<'a>(rest: &mut &'a [u8], bound: usize) -> Result<&'a str, String> {
+pub(super) fn text<'a>(rest: &mut &'a [u8], bound: usize) -> Result<&'a str, String> {
     std::str::from_utf8(field(rest, bound)?).map_err(|_| invalid())
 }
-fn number(rest: &mut &[u8]) -> Result<u64, String> {
+pub(super) fn number(rest: &mut &[u8]) -> Result<u64, String> {
     let raw = text(rest, 20)?;
     let value = raw.parse::<u64>().map_err(|_| invalid())?;
     if value.to_string() != raw {
@@ -55,7 +55,7 @@ fn number(rest: &mut &[u8]) -> Result<u64, String> {
     }
     Ok(value)
 }
-fn digest(rest: &mut &[u8]) -> Result<ComponentDigest, String> {
+pub(super) fn digest(rest: &mut &[u8]) -> Result<ComponentDigest, String> {
     let raw = text(rest, 64)?;
     let parsed = ComponentDigest::parse_hex(raw).map_err(|_| invalid())?;
     if parsed.to_hex() != raw || parsed == ComponentDigest::from_bytes([0; 32]) {
@@ -63,7 +63,7 @@ fn digest(rest: &mut &[u8]) -> Result<ComponentDigest, String> {
     }
     Ok(parsed)
 }
-fn append(out: &mut Vec<u8>, value: &[u8]) {
+pub(super) fn append(out: &mut Vec<u8>, value: &[u8]) {
     out.extend_from_slice(&(value.len() as u64).to_be_bytes());
     out.extend_from_slice(value);
 }

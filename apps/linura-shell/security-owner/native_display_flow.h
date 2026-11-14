@@ -51,6 +51,9 @@ class NativeDisplayFlow final : public QObject
                                              const NativeDisplayCorrelation &);
     [[nodiscard]] bool redeemFinalization(const NativeDisplayFinalizationIntent &,
                                           const NativeDisplayCorrelation &);
+    [[nodiscard]] bool continuesOrdinaryRelease(const NativeDisplayOrdinaryReleaseIntent &,
+                                                const NativeDisplayCorrelation &,
+                                                const NativePeerIdentity &);
     [[nodiscard]] bool continuesFinalization(const NativeDisplayFinalizationIntent &,
                                              const NativeDisplayCorrelation &,
                                              const NativePeerIdentity &);

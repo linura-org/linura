@@ -6,6 +6,11 @@
 //! separate requirements before any protective fence can be released.
 
 use super::*;
+mod completion;
+pub use completion::{
+    AuthorizedOrdinaryDisplayCompletion, OrdinaryDisplayCompletionPort,
+    OrdinaryDisplayCompletionReceipt,
+};
 mod execution;
 mod original;
 pub use execution::{

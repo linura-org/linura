@@ -23,6 +23,7 @@ use super::{
 mod approval;
 mod attempt;
 mod ordinary;
+mod ordinary_completion;
 mod ordinary_handoff;
 pub use approval::{NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest};
 mod continuation;

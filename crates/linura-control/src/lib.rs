@@ -87,10 +87,10 @@ pub use durable_authority::{
 };
 pub use managed_lifecycle::{
     AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
-    AuthorizedEffectExecutor, AuthorizedOrdinaryDisplayRelease,
-    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
-    AuthorizedOriginalDisplayFinalRetirement, AuthorizedOriginalDisplayFinalization,
-    AuthorizedOriginalDisplayNativePowerRetirement,
+    AuthorizedEffectExecutor, AuthorizedOrdinaryDisplayCompletion,
+    AuthorizedOrdinaryDisplayRelease, AuthorizedOriginalDisplayCompletion,
+    AuthorizedOriginalDisplayCurrentCommit, AuthorizedOriginalDisplayFinalRetirement,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativePowerRetirement,
     AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
     AuthorizedOriginalDisplayRestoration, AuthorizedOriginalDisplayRetirementPreparation,
     AuthorizedOriginalDisplayRootPowerRetirement, DISPLAY_CONFIRMATION_WINDOW_MS,
@@ -101,6 +101,7 @@ pub use managed_lifecycle::{
     MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
     ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
     ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt,
     OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
     OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseAuthorizer,
     OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort,

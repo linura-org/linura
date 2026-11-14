@@ -224,6 +224,11 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"in\"/>"
         "<arg name=\"completion_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
+        "<method name=\"TransferOrdinaryDisplayCompletion\"><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"preparation_digest\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"completion_grant\" type=\"h\" direction=\"in\"/>"
+        "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"ContinuePreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" direction=\"in\"/>"
         "<arg name=\"protected_decision_digest\" type=\"s\" direction=\"in\"/>"
@@ -332,6 +337,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     quint32 RetireOriginalDisplayPower(const NativeDisplayAttemptQueryWire &,
                                        const QString &preparationDigest,
                                        const QByteArray &preparation);
+    quint32 TransferOrdinaryDisplayCompletion(const NativeDisplayAttemptQueryWire &,
+                                              const QString &, const QDBusUnixFileDescriptor &);
     quint32 TransferOriginalDisplayCompletion(const NativeDisplayAttemptQueryWire &,
                                               const QString &preparationDigest,
                                               const QDBusUnixFileDescriptor &completionGrant);

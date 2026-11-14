@@ -26,7 +26,7 @@ pub struct OrdinaryDisplayHandoffInspection {
     frames: DisplayOrdinaryHandoffFacts,
     root: DisplayOrdinaryReleaseFacts,
     release: TransactionSnapshot,
-    request: PlanDesiredStateRequest,
+    pub(super) request: PlanDesiredStateRequest,
 }
 impl OrdinaryDisplayHandoffInspection {
     #[must_use]

@@ -397,6 +397,7 @@ fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committin
             (1, 1, 1, 1)
         );
     }
+    ordinary_completion_requires_original_review_and_cannot_replay();
 }
 #[derive(Debug)]
 pub(super) struct OriginalObserver(pub(super) Arc<Mutex<Machine>>);
@@ -1239,6 +1240,311 @@ pub(super) fn ordinary_release_dispatch_is_separately_approved_durable_and_never
                 assert_eq!(m.applies, 1);
                 assert_eq!(m.decisions, 1);
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CompletionPort(Arc<Mutex<Machine>>, bool);
+impl linura_control::OrdinaryDisplayCompletionPort for CompletionPort {
+    fn dispatch_ordinary_completion(
+        &mut self,
+        completion: linura_control::AuthorizedOrdinaryDisplayCompletion,
+    ) -> Result<(), String> {
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(
+            m.checked_history_reads, 0,
+            "completion effect crossed read scope"
+        );
+        m.ordinary_completion_calls += 1;
+        let record = value(
+            linura_linux_session::NativeDisplayOrdinaryReleasePreparation::decode(
+                m.ordinary_release_record
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!()),
+            ),
+        );
+        assert_eq!(completion.material(), record.material());
+        assert_eq!(
+            completion.dispatch(),
+            record.binding().dispatch_digest.to_hex()
+        );
+        assert_eq!(
+            completion.root_preparation(),
+            record.record_digest().to_hex()
+        );
+        assert_eq!(
+            completion.release().transaction_id.as_str(),
+            record.binding().transaction_id
+        );
+        assert_eq!(
+            completion.release().state,
+            linura_transaction::TransactionState::Indeterminate
+        );
+        assert_eq!(
+            completion.frames().lineage().preparation_digest,
+            record.record_digest().to_hex()
+        );
+        assert!(
+            completion
+                .frames()
+                .matches_material(&value(record.decoded_material()))
+        );
+        assert_ne!(completion.preparation(), completion.verification());
+        assert_ne!(
+            completion.preparation(),
+            &linura_transaction::ContentDigest::zero()
+        );
+        assert!(now_unix_ms() < completion.expires_at_unix_ms());
+        assert!(completion.expires_at_unix_ms() <= record.window().deadline_unix_ms);
+        if self.1 {
+            Err("simulated completion ACK loss".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn ordinary_completion_requires_original_review_and_cannot_replay() {
+    // Real Control + SQLite; this port and its Root/native facts are simulated.
+    // Each case owns a separate original producer window, never renewed.
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
+    ] {
+        for fault in 0..=12 {
+            let database = TestDatabase::new();
+            let machine = Arc::new(Mutex::new(Machine::default()));
+            let mut port = Port(machine.clone());
+            let mut verifier = Verifier(machine.clone());
+            let original = display_request("ordinary-completion-original");
+            let mut control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                original.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier,
+            ));
+            value(control.decide_display_layout(
+                principal(),
+                actor(true),
+                &original.request_id,
+                action,
+                &Decision::approve(&machine),
+                &mut port,
+                &mut verifier,
+            ));
+            let original_before = value(control.inspect_ordinary_display_original(
+                principal(),
+                &original.request_id,
+                &mut port,
+                &mut verifier,
+            ))
+            .original_snapshot()
+            .clone();
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_handoff_enabled = true;
+            let mut release_port = ReleasePort(machine.clone(), u8::from(fault == 2));
+            let receipt = value(control.begin_ordinary_display_release(
+                principal(),
+                actor(true),
+                linura_control::OrdinaryDisplayReleaseRequest {
+                    operation_id: "ordinary-completion-release".into(),
+                    original_request: original.request_id.clone(),
+                    reason: original.reason.clone(),
+                },
+                &ReleaseApproval(machine.clone(), 0),
+                &mut port,
+                &mut verifier,
+                &mut release_port,
+            ));
+            if fault == 3 {
+                drop(control);
+                control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+                // Successfully reconstructed first-frame proof cannot recreate review.
+                value(control.verify_ordinary_display_handoff(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+            }
+            let mut completion = CompletionPort(machine.clone(), fault == 1);
+            if fault == 4 {
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_handoff_fault = 7;
+            }
+            if (5..=8).contains(&fault) {
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_completion_store_fault = fault - 4;
+            }
+            // Denied callers and unrelated requests cannot consume the owner's review.
+            if fault == 9 {
+                assert!(
+                    control
+                        .dispatch_ordinary_display_completion(
+                            principal(),
+                            actor(false),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier,
+                            &mut completion
+                        )
+                        .is_err()
+                );
+            } else if fault == 10 {
+                assert!(
+                    control
+                        .dispatch_ordinary_display_completion(
+                            value(AuthenticatedPrincipal::new("unix:uid:1001")),
+                            actor(true),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier,
+                            &mut completion
+                        )
+                        .is_err()
+                );
+            } else if fault == 11 {
+                assert!(
+                    control
+                        .dispatch_ordinary_display_completion(
+                            principal(),
+                            actor(true),
+                            &original.request_id,
+                            &mut port,
+                            &mut verifier,
+                            &mut completion
+                        )
+                        .is_err()
+                );
+            } else if fault == 12 {
+                assert!(
+                    control
+                        .dispatch_ordinary_display_completion(
+                            principal(),
+                            actor(true),
+                            &value(RequestId::new(
+                                "request:v010:display-ordinary-release:competing"
+                            )),
+                            &mut port,
+                            &mut verifier,
+                            &mut completion
+                        )
+                        .is_err()
+                );
+            }
+            let outcome = control.dispatch_ordinary_display_completion(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut completion,
+            );
+            let dispatched = fault == 0 || fault == 1 || fault >= 9;
+            assert_eq!(
+                outcome.is_ok(),
+                fault == 0 || fault >= 9,
+                "{action:?} fault {fault}: {outcome:?}"
+            );
+            if let Ok(result) = outcome {
+                assert_eq!(result.request(), &receipt.request_id);
+                assert_eq!(result.transaction(), &receipt.transaction_id);
+                assert_ne!(
+                    result.preparation(),
+                    &linura_transaction::ContentDigest::zero()
+                );
+            }
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_handoff_fault = 0;
+                m.ordinary_completion_store_fault = 0;
+                assert_eq!(m.ordinary_completion_calls, usize::from(dispatched));
+                let prep = value(
+                    linura_linux_session::NativeDisplayOrdinaryReleasePreparation::decode(
+                        m.ordinary_release_record
+                            .as_ref()
+                            .unwrap_or_else(|| unreachable!()),
+                    ),
+                );
+                assert!(
+                    now_unix_ms() < prep.window().deadline_unix_ms,
+                    "fault must reject within original window: {action:?}/{fault}"
+                );
+            }
+            assert!(
+                control
+                    .dispatch_ordinary_display_completion(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut completion
+                    )
+                    .is_err()
+            );
+            drop(control);
+            let mut restarted =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            assert!(
+                restarted
+                    .dispatch_ordinary_display_completion(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut completion
+                    )
+                    .is_err()
+            );
+            let proof = value(restarted.verify_ordinary_display_handoff(
+                principal(),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+            ));
+            assert_eq!(
+                proof.inspection().release().state,
+                linura_transaction::TransactionState::Indeterminate
+            );
+            assert_eq!(
+                value(restarted.inspect_ordinary_display_original(
+                    principal(),
+                    &original.request_id,
+                    &mut port,
+                    &mut verifier
+                ))
+                .original_snapshot(),
+                &original_before
+            );
+            let m = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(m.ordinary_completion_calls, usize::from(dispatched));
+            assert_eq!(
+                (
+                    m.applies,
+                    m.decisions,
+                    m.ordinary_release_calls,
+                    m.ordinary_release_approvals
+                ),
+                (1, 1, 1, 1)
+            );
         }
     }
 }

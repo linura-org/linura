@@ -13,7 +13,8 @@ inline constexpr std::size_t MaxPreparation =
 // newly sampled physical receipt. Parsing cannot mint a live Root lifetime.
 inline std::optional<ClockSample> matches(std::string_view bytes, std::string_view parent,
                                           const Correlation &restoration,
-                                          const NativeFirstFrameGate::Receipt &physical)
+                                          const NativeFirstFrameGate::Receipt &physical,
+                                          bool ordinary = false)
 {
     if (bytes.empty() || bytes.size() > MaxPreparation || parent.empty() ||
         !physical.completedCount || physical.completedCount > DisplayTransaction::MaxHeads)
@@ -22,8 +23,10 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     const auto domain = next(64), retained = next(OriginalNativeReleaseGrantCodec::MaxReservation);
     const auto preparation = next(64), verification = next(64);
     const auto transaction = next(256), effect = next(64);
-    if (!domain || *domain != "linura.native-display.completion-preparation.v1" || !retained ||
-        *retained != parent || !preparation || !verification ||
+    if (!domain ||
+        *domain != (ordinary ? "linura.native-display.ordinary-completion.v1"
+                             : "linura.native-display.completion-preparation.v1") ||
+        !retained || *retained != parent || !preparation || !verification ||
         !OriginalGrantCodec::digest(*preparation) || !OriginalGrantCodec::digest(*verification) ||
         *preparation == *verification || !transaction || *transaction != restoration.transaction ||
         !effect || *effect != restoration.effectDigest)
@@ -33,6 +36,8 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
         return value ? OriginalGrantCodec::number(*value) : std::nullopt;
     };
     const auto wall = number(), boot = number(), wallEnd = number(), bootEnd = number();
+    if (ordinary && number() != std::optional{physical.postWriteEpoch})
+        return {};
     const auto security = number(), expires = number(), count = number();
     if (!wall || !boot || !wallEnd || !bootEnd || !security || !expires || !count || !*wall ||
         !*boot || *wall > physical.observedUnixMs || *boot > physical.observedBootMs ||
@@ -140,22 +145,31 @@ class OriginalCompletionGrant final
     OriginalCompletionGrant(const OriginalCompletionGrant &) = delete;
     OriginalCompletionGrant &operator=(const OriginalCompletionGrant &) = delete;
     [[nodiscard]] static std::unique_ptr<OriginalCompletionGrant>
+    receiveOrdinary(StartupFence &fence, OwnedNativeFd descriptor, std::string_view expectedDigest,
+                    std::string_view parent, const Correlation &original,
+                    const NativeFirstFrameGate::Receipt &physical)
+    {
+        return receive(fence, std::move(descriptor), expectedDigest, parent, original, physical,
+                       true);
+    }
+    [[nodiscard]] static std::unique_ptr<OriginalCompletionGrant>
     receive(StartupFence &fence, OwnedNativeFd descriptor, std::string_view expectedDigest,
             std::string_view parent, const Correlation &restoration,
-            const NativeFirstFrameGate::Receipt &physical)
+            const NativeFirstFrameGate::Receipt &physical, bool ordinary = false)
     {
         auto result = std::unique_ptr<OriginalCompletionGrant>(
-            new OriginalCompletionGrant(fence, std::move(descriptor)));
+            new OriginalCompletionGrant(fence, std::move(descriptor), ordinary));
         const auto now = result->clock();
-        if (!now || !fence.recoveryAvailable() || !OriginalGrantCodec::digest(expectedDigest) ||
+        if (!now || (!ordinary && !fence.recoveryAvailable()) ||
+            !OriginalGrantCodec::digest(expectedDigest) ||
             now->bootMs > std::numeric_limits<std::uint64_t>::max() - 2000 ||
-            !fence.authenticatesGrantPeer(result->descriptor_.get()) ||
-            now->unixMs < physical.observedUnixMs || now->bootMs < physical.observedBootMs ||
-            now->unixMs >= physical.deadlineUnixMs || now->bootMs >= physical.deadlineBootMs)
+            !result->authenticatesPeer() || now->unixMs < physical.observedUnixMs ||
+            now->bootMs < physical.observedBootMs || now->unixMs >= physical.deadlineUnixMs ||
+            now->bootMs >= physical.deadlineBootMs)
             return {};
         const auto deadline = std::min(now->bootMs + 2000, physical.deadlineBootMs);
         std::string header(7, '\0'), length(8, '\0');
-        if (!result->read(header, deadline) || header != "LNCG:1\n" ||
+        if (!result->read(header, deadline) || header != (ordinary ? "LOCG:1\n" : "LNCG:1\n") ||
             !result->read(length, deadline))
             return {};
         const auto size = OriginalGrantCodec::clockField(length);
@@ -163,11 +177,11 @@ class OriginalCompletionGrant final
             return {};
         std::string record(static_cast<std::size_t>(*size), '\0'), end(11, '\0');
         if (!result->read(record, deadline) || !result->read(end, deadline) ||
-            end != "LNCG-END:1\n")
+            end != (ordinary ? "LOCG-END:1\n" : "LNCG-END:1\n"))
             return {};
         const auto digest = nativeSha256(record);
         const auto bound =
-            OriginalCompletionGrantCodec::matches(record, parent, restoration, physical);
+            OriginalCompletionGrantCodec::matches(record, parent, restoration, physical, ordinary);
         if (!digest || *digest != expectedDigest || !bound)
             return {};
         result->digest_ = *digest;
@@ -244,7 +258,7 @@ class OriginalCompletionGrant final
     }
     [[nodiscard]] bool live()
     {
-        if (failed_ || sequence_ <= 1 || !fence_.authenticatesGrantPeer(descriptor_.get()))
+        if (failed_ || sequence_ <= 1 || !authenticatesPeer())
             return fail();
         pollfd event{descriptor_.get(), POLLIN, 0};
         return poll(&event, 1, 0) == 0 && event.revents == 0 ? true : fail();
@@ -304,7 +318,7 @@ class OriginalCompletionGrant final
             return fail();
         currentAttempted_ = true;
         std::weak_ptr<Liveness> weak = liveness_;
-        const bool admitted = fence_.admitCurrent([weak, scopeAlive = std::move(scopeAlive)] {
+        auto alive = [weak, scopeAlive = std::move(scopeAlive)] {
             const auto retained = weak.lock();
             if (!retained || !retained->owner || !retained->owner->live())
                 return false;
@@ -316,8 +330,11 @@ class OriginalCompletionGrant final
             }
             retained->owner->invalidate();
             return false;
-        });
-        return admitted ? true : fail();
+        };
+        return (ordinary_ ? fence_.admitOrdinaryCurrent(std::move(alive))
+                          : fence_.admitCurrent(std::move(alive)))
+                   ? true
+                   : fail();
     }
     void invalidate() noexcept
     {
@@ -329,10 +346,15 @@ class OriginalCompletionGrant final
     {
         OriginalCompletionGrant *owner;
     };
-    OriginalCompletionGrant(StartupFence &fence, OwnedNativeFd descriptor)
-        : fence_(fence), descriptor_(std::move(descriptor)),
+    OriginalCompletionGrant(StartupFence &fence, OwnedNativeFd descriptor, bool ordinary)
+        : fence_(fence), descriptor_(std::move(descriptor)), ordinary_(ordinary),
           liveness_(std::make_shared<Liveness>(this))
     {}
+    bool authenticatesPeer() const noexcept
+    {
+        return ordinary_ ? fence_.authenticatesOrdinaryGrantPeer(descriptor_.get())
+                         : fence_.authenticatesGrantPeer(descriptor_.get());
+    }
     bool fail() noexcept
     {
         failed_ = true;
@@ -363,8 +385,7 @@ class OriginalCompletionGrant final
     {
         while (size) {
             const auto now = clock();
-            if (!now || now->bootMs >= deadline ||
-                !fence_.authenticatesGrantPeer(descriptor_.get()))
+            if (!now || now->bootMs >= deadline || !authenticatesPeer())
                 return fail();
             const auto count =
                 write ? send(descriptor_.get(), bytes, size, MSG_DONTWAIT | MSG_NOSIGNAL)
@@ -382,9 +403,7 @@ class OriginalCompletionGrant final
             }
         }
         const auto end = clock();
-        return end && end->bootMs < deadline && fence_.authenticatesGrantPeer(descriptor_.get())
-                   ? true
-                   : fail();
+        return end && end->bootMs < deadline && authenticatesPeer() ? true : fail();
     }
     bool read(std::string &bytes, std::uint64_t deadline)
     {
@@ -405,8 +424,8 @@ class OriginalCompletionGrant final
                               : !retirement.empty() ? "LNCA:1\n"
                               : !committed.empty()  ? "LNCF:1\n"
                               : !power.empty()      ? "LNPR:1\n"
-                              : initial             ? "LNCH:1\n"
-                                                    : "LNCV:1\n";
+                              : initial             ? (ordinary_ ? "LOCH:1\n" : "LNCH:1\n")
+                                                    : (ordinary_ ? "LOCV:1\n" : "LNCV:1\n");
         request += '\0';
         for (unsigned shift = 64; shift; shift -= 8)
             request += static_cast<char>((sequence_ >> (shift - 8)) & 255U);
@@ -432,6 +451,7 @@ class OriginalCompletionGrant final
     }
     StartupFence &fence_;
     OwnedNativeFd descriptor_;
+    const bool ordinary_;
     std::string digest_, committedDigest_, retirementDigest_, successorDigest_;
     std::shared_ptr<Liveness> liveness_;
     ClockSample last_{}, expires_{};

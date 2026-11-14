@@ -50,6 +50,10 @@
 
 namespace Linura::HyprlandDisplay {
 namespace {
+std::optional<NativeFirstFrameGate::Receipt> readHandoffComparison(const Correlation &, bool);
+}
+
+namespace {
 class PrivateRole final : public ISurfaceRole
 {
   public:
@@ -319,6 +323,18 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         }
         return true;
     }
+    bool ordinarySourceCurrent() const
+    {
+        const auto intent = OrdinaryReleaseCodec::decode(terminalMaterial);
+        const auto phase =
+            nativeTransactions() ? nativeTransactions()->status(bound) : std::nullopt;
+        const auto expected = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                                  ? CompositorDisplayService::Phase::Confirmed
+                                  : CompositorDisplayService::Phase::Restored;
+        return intent && phase == std::optional{expected} &&
+               OrdinaryReleaseCodec::matchesHeld(*intent, bound, baseline, desired,
+                                                 stableInventory);
+    }
     bool refreshCurrent()
     {
         auto *backend = nativeBackend();
@@ -329,7 +345,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             completionGrant->live() &&
             (nativePowerRetired ? !nativePowerFenceHeld() : nativePowerFenceHeld()) &&
             currentFrames && currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
-            originalAlive && originalAlive() && facts && clock &&
+            (ordinaryRelease ? ordinarySourceCurrent() : originalAlive && originalAlive()) &&
+            facts && clock &&
             (retiredCurrent ? (retiredCurrent->live() && sameReleasedSource(*facts))
                             : (devicesCurrent() && *facts == stableInventory)) &&
             clock->unixMs >= mutationClock.unixMs && clock->bootMs >= mutationClock.bootMs &&
@@ -1343,20 +1360,31 @@ class PinnedScene final : public ProtectedScene
         if (data->completionAttempted)
             return refuse();
         data->completionAttempted = true; // Consume before reading or sending.
-        if (!data->terminalBound || !data->terminalGrant || data->completionGrant ||
-            !data->nativeReleaseSpent || data->nativeReleaseParent.empty() ||
-            !OriginalGrantCodec::digest(digest) || data->writing || heldInput().any)
+        if (!data->terminalBound ||
+            (data->ordinaryRelease ? !data->ordinaryGrant : !data->terminalGrant) ||
+            data->completionGrant || !data->nativeReleaseSpent ||
+            data->nativeReleaseParent.empty() || !OriginalGrantCodec::digest(digest) ||
+            data->writing || heldInput().any)
             return refuse();
-        const auto physical = readNativeHandoffComparison(*data->terminalBound);
+        const auto physical = readHandoffComparison(*data->terminalBound, data->ordinaryRelease);
         if (!physical || !data->refresh() || data->mutationFault || data->ownerLost)
             return refuse();
-        auto grant = receiveOriginalCompletionGrant(
-            std::move(descriptor), digest, data->nativeReleaseParent, data->bound, *physical);
-        const auto before =
-            grant ? readNativeHandoffComparison(*data->terminalBound) : std::nullopt;
+        auto grant =
+            data->ordinaryRelease
+                ? receiveOrdinaryCompletionGrant(std::move(descriptor), digest,
+                                                 data->nativeReleaseParent, data->bound, *physical)
+                : receiveOriginalCompletionGrant(std::move(descriptor), digest,
+                                                 data->nativeReleaseParent, data->bound, *physical);
+        const auto before = grant
+                                ? readHandoffComparison(*data->terminalBound, data->ordinaryRelease)
+                                : std::nullopt;
         const auto clock = compositorClock();
-        const auto history = nativeOutputHighWater(data->bound, data->stableInventory);
-        const auto kernel = nativeFirstFrameKernel(data->bound, data->stableInventory);
+        const auto history = data->ordinaryRelease
+                                 ? nativeOrdinaryOutputHighWater(data->bound, data->stableInventory)
+                                 : nativeOutputHighWater(data->bound, data->stableInventory);
+        const auto kernel = data->ordinaryRelease
+                                ? nativeOrdinaryFrameKernel(data->bound, data->stableInventory)
+                                : nativeFirstFrameKernel(data->bound, data->stableInventory);
         auto current = before && clock && history && kernel
                            ? NativeCurrentFrameGate::arm(
                                  {data->stableInventory, *before, *clock, *history, *kernel})
@@ -1371,9 +1399,15 @@ class PinnedScene final : public ProtectedScene
         // thread before the old channel's expected EOF is observed.
         data->completionGrant = std::move(grant);
         data->terminalGrant.reset();
+        data->ordinaryGrant.reset();
         const auto activated = compositorClock();
-        const auto afterCommits = nativeOutputHighWater(data->bound, data->stableInventory);
-        const auto afterKernel = nativeFirstFrameKernel(data->bound, data->stableInventory);
+        const auto afterCommits =
+            data->ordinaryRelease
+                ? nativeOrdinaryOutputHighWater(data->bound, data->stableInventory)
+                : nativeOutputHighWater(data->bound, data->stableInventory);
+        const auto afterKernel = data->ordinaryRelease
+                                     ? nativeOrdinaryFrameKernel(data->bound, data->stableInventory)
+                                     : nativeFirstFrameKernel(data->bound, data->stableInventory);
         if (!activated || !afterCommits || !afterKernel || heldInput().any ||
             !data->completionGrant->handoffWindowCurrent() ||
             !current->activate(data->stableInventory, *activated, *afterCommits, *afterKernel))

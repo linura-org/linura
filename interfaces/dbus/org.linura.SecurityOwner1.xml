@@ -230,6 +230,12 @@
       <arg name="completion_grant" type="h" direction="in"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <method name="TransferOrdinaryDisplayCompletion">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="preparation_digest" type="s" direction="in"/>
+      <arg name="completion_grant" type="h" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <!-- Current attested executor only, following Control's consumed/durable
          protected decision. Original connection/reservation, layout, lock/input
          coverage and original deadline remain mandatory. No new apply, replay,

@@ -846,3 +846,41 @@ cache approval, provider state or execution authority. Test guards reject scopes
 that cross independent observation/verification boundaries. Each adversarial
 source case uses its own original producer window and must finish before that
 unchanged deadline, so expiry cannot substitute for rejection of its fault.
+
+### One-use ordinary completion lifetime
+
+The ordinary operation now has a distinct completion continuation. Control
+consumes only its actual process-local purpose-13 review before independent
+probes or writes. It verifies the immutable first frame, publishes and reads back
+`ordinary-completion-prepared.v1`, then re-observes every contributor. The first
+proof and deadline remain unchanged. Missing initial release acknowledgment,
+restart, failed preparation or a second completion cannot recreate that review.
+The one-use sealed completion port leaves signed authority Indeterminate.
+
+The original LNOW worker retains its genuine spent anchor only within the
+original two-second producer window. Root's separate supervised-Control
+`ReserveOrdinaryCompletionGrant` claims the attempt in memory before storage,
+requires complete LNOS ancestry, publishes `LNOQ:1`, and sends `LOCG:1` to the
+actual original native peer. The ordinary-purpose `LOCH:1` frame requires kernel
+credentials on every fragment. Root durably publishes and reads back `LNOC:1`
+before moving the genuine original-spend anchor and acknowledging it. The
+previous worker's expected close cannot invalidate the moved anchor; completion
+loss invalidates it, and no file can reconstruct it. `LOCV:1` provides bounded
+continuity only. Recovery finalization purposes cannot substitute for these
+ordinary purposes; input, power, current commit, final retirement and successor
+messages remain refused on this channel pending their separate implementations.
+
+The compositor compares full parent/preparation, immutable first buffers, KMS,
+commit high waters, source and both clocks before and after transfer, arms its
+actual current-frame tracker and consumes only this invocation's original startup
+admission. It quarantines physical input and moves the same Root lifetime before
+retiring the spent approval scene. The owner authenticates the original Control
+peer, same material, native input/interaction generations and session; a missing
+reply is observed once and never redelivered. A new startup cannot inherit this
+admission. Every error retains opacity/protection or invalidates the lifetime.
+
+This is completion-lifetime transfer, not ReleasedCurrent. Independent ordinary
+current observation/verification, ordered native/Root power retirement, signed
+current completion and final matching records remain required. Stage 5 adoption,
+supersession and reference-aware cleanup are also outstanding. Existing public
+mutation prohibition and Level A/B/C qualification gates are unchanged.

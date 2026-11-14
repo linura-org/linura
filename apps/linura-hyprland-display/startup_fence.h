@@ -163,6 +163,16 @@ class StartupFence final
         currentAlive_ = std::move(alive);
         return currentAvailable();
     }
+    // Same original invocation only. The authenticated ordinary completion
+    // constructor consumes the initial admission before publishing current;
+    // failure cannot fall back into ordinary startup or recovery admission.
+    [[nodiscard]] bool admitOrdinaryCurrent(std::function<bool()> alive)
+    {
+        if (!ordinary_ || currentAttempted_ || !guardAlive())
+            return false;
+        ordinary_ = false;
+        return admitCurrent(std::move(alive));
+    }
     // Only the genuine original completion grant may replace this invocation's
     // current callback, after its separately authenticated successor spend. The
     // original startup descriptor and global exclusion are never reopened.

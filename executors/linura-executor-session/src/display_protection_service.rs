@@ -14,11 +14,12 @@ use linura_linux_session::{
     MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayCompletionPreparation,
     NativeDisplayCurrentCommitPreparation, NativeDisplayFinalRetirementPreparation,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
-    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
-    NativeDisplaySuccessorPreparation, NativeSessionChannel, NativeSessionRole,
+    NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryReleasePreparation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeDisplaySuccessorPreparation,
+    NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -34,6 +35,7 @@ mod completion;
 mod current_commit;
 mod final_retirement;
 mod ordinary;
+mod ordinary_completion;
 mod power;
 mod root_power;
 mod successor;
@@ -129,6 +131,13 @@ struct Admission {
     // Exclusively reserved in Root memory before a fallible native grant
     // transfer; a lost descriptor cannot be recreated from the LNRN file.
     native_release_grants: BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
+    ordinary_completions: BTreeMap<
+        String,
+        (
+            ComponentDigest,
+            Arc<super::display_completion_grant::ChannelState>,
+        ),
+    >,
     completions: BTreeMap<String, CompletionReservation>,
     power_retirements: BTreeMap<String, PowerRetirementReservation>,
     root_power_retirements: BTreeMap<String, RootPowerRetirementReservation>,
@@ -413,6 +422,16 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
 
+    fn reserve_ordinary_completion_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryCompletionPreparation,
+    ) -> zbus::fdo::Result<OwnedFd>;
+    fn read_ordinary_completion(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
     fn reserve_completion_grant(
         &self,
         sender: &str,
@@ -892,6 +911,20 @@ impl ProtectionPort for NativeProtection {
         self.read_power_mechanism(sender, scope)
     }
 
+    fn reserve_ordinary_completion_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryCompletionPreparation,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        self.reserve_ordinary_completion_mechanism(sender, record)
+    }
+    fn read_ordinary_completion(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        self.read_ordinary_completion_mechanism(sender, scope)
+    }
     fn reserve_completion_grant(
         &self,
         sender: &str,
@@ -2151,6 +2184,47 @@ impl<P: ProtectionPort> ProtectionService<P> {
     }
 
     #[zbus(out_args("grant"))]
+    async fn reserve_ordinary_completion_grant(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayOrdinaryCompletionPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service
+                .port
+                .reserve_ordinary_completion_grant(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "phase"))]
+    async fn read_ordinary_completion(
+        &self,
+        ordinary_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_completion(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("grant"))]
     async fn reserve_completion_grant(
         &self,
         preparation: &[u8],
@@ -2635,6 +2709,20 @@ mod tests {
         ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
             Err(unavailable())
         }
+        fn reserve_ordinary_completion_grant(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryCompletionPreparation,
+        ) -> zbus::fdo::Result<OwnedFd> {
+            Err(unavailable())
+        }
+        fn read_ordinary_completion(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+            Err(unavailable())
+        }
         fn reserve_completion_grant(
             &self,
             _: &str,
@@ -2766,7 +2854,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 28);
+            assert_eq!(text.matches("<method ").count(), 30);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2802,6 +2890,8 @@ mod tests {
             "ReadOrdinaryRelease",
             "ReadOriginal",
             "ReadFinalization",
+            "ReadOrdinaryCompletion",
+            "ReserveOrdinaryCompletionGrant",
             "ReadCompletion",
             "ReserveCompletionGrant",
             "ReservePowerRetirement",

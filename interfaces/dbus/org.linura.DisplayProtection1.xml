@@ -101,6 +101,15 @@
       <arg name="preparation" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <method name="ReadOrdinaryCompletion">
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
+    <method name="ReserveOrdinaryCompletionGrant">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
     <method name="ReadCompletion">
       <!-- Live original Root only. Prepared (1) or transferred lifetime (2)
            comparison; neither phase proves input/power retirement or
