@@ -64,11 +64,25 @@
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
+    <method name="ReserveOrdinaryFinalRetirement">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="CompleteReleasedCurrent">
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
+    <method name="CompleteOrdinaryReleasedCurrent">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="ReadFinalRetirement">
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+      <arg name="completion" type="ay" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryFinalRetirement">
       <arg name="recovery_scope" type="s" direction="in"/>
       <arg name="preparation" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>

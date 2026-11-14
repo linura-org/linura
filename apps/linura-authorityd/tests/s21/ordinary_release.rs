@@ -164,6 +164,7 @@ pub(super) fn observe_handoff(
 
 #[test]
 fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committing_on_inspection() {
+    ordinary_final_retirement_requires_matching_physical_and_durable_completion();
     ordinary_current_commit_requires_independent_native_qualification();
     let mut cases = vec![
         (DisplayContinuationAction::Confirm, None, 0),
@@ -416,6 +417,7 @@ impl Observer for OriginalObserver {
             linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_COMPLETION_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY,
+            linura_observation::DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY,
         ]
         .into_iter()
@@ -455,6 +457,13 @@ impl Observer for OriginalObserver {
             0,
             "history snapshot crossed Root observation"
         );
+        if capability.as_str() == linura_observation::DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY {
+            return observe_final(
+                &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         if capability.as_str() == linura_observation::DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY {
             return observe_root_power(
                 &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
@@ -969,6 +978,21 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
         &mut verifier,
         &mut OrdinaryCurrentPort(machine.clone(), 0),
     ));
+    value(restarted.dispatch_ordinary_display_final_retirement(
+        principal(),
+        actor(true),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+        &mut OrdinaryFinalPort(machine.clone(), 0),
+    ));
+    value(restarted.complete_ordinary_display_released_current(
+        principal(),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+        &mut OrdinaryReleasedPort(machine.clone(), 0),
+    ));
     drop(restarted);
     let mut restarted =
         open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
@@ -1033,6 +1057,8 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     assert_eq!(m.ordinary_completion_calls, 1);
     assert_eq!(m.ordinary_power_calls, 1);
     assert_eq!(m.ordinary_root_power_calls, 1);
+    assert_eq!(m.ordinary_final_calls, 1);
+    assert_eq!(m.ordinary_released_calls, 1);
     assert_eq!(m.ordinary_current_commit_calls, 1);
     assert_eq!(m.ordinary_release_approvals, 1);
     assert_eq!(m.ordinary_release_calls, 1);
@@ -1833,7 +1859,15 @@ pub(super) fn observe_current(
             } else {
                 None
             },
-            None,
+            if m.ordinary_native_final_retired {
+                Some(final_digest(
+                    m.ordinary_final_record
+                        .as_ref()
+                        .unwrap_or_else(|| unreachable!()),
+                ))
+            } else {
+                None
+            },
         )
         .map_err(|_| fail())?
         .attributes()
@@ -3141,6 +3175,478 @@ fn ordinary_power_requires_original_review_and_independent_physical_postconditio
                 ),
                 (1, 1, 1, 1, usize::from(dispatched))
             );
+        }
+    }
+}
+
+fn final_digest(bytes: &[u8]) -> String {
+    if let Ok(record) = linura_linux_session::NativeDisplayOrdinaryFinalPreparation::decode(bytes) {
+        record.record_digest().to_hex()
+    } else {
+        value(linura_linux_session::NativeDisplayOrdinaryReleasedRecord::decode(bytes))
+            .record_digest()
+            .to_hex()
+    }
+}
+
+fn observe_final(
+    m: &mut Machine,
+    resource: &ResourceId,
+    capability: &CapabilityId,
+) -> Result<ObservationEnvelope, ProviderError> {
+    let fail = || ProviderError::Unavailable("simulated ordinary final unavailable".into());
+    let bytes = m.ordinary_final_record.as_ref().ok_or_else(fail)?;
+    let record = linura_linux_session::NativeDisplayOrdinaryFinalPreparation::decode(bytes)
+        .map_err(|_| fail())?;
+    let scope = record.frames().scope();
+    if value(scope.resource_id()) != *resource {
+        return Err(fail());
+    }
+    let completed = m.ordinary_released_record.as_ref().map(|bytes| {
+        let r = value(linura_linux_session::NativeDisplayOrdinaryReleasedRecord::decode(bytes));
+        linura_observation::DisplayReleasedCurrentLineage {
+            record: final_digest(bytes),
+            verification: r.verification_digest().to_hex(),
+        }
+    });
+    let mut facts = value(
+        linura_observation::DisplayOrdinaryFinalRetirementFacts::new(
+            scope.clone(),
+            record.frames().clone(),
+            linura_observation::DisplayFinalRetirementLineage {
+                record: final_digest(bytes),
+                preparation: record.preparation_digest().to_hex(),
+                verification: record.verification_digest().to_hex(),
+                current_grant: record.parent().record_digest().to_hex(),
+                committed_record: record.parent().committed_record_digest().to_hex(),
+            },
+            if completed.is_some() { 3 } else { 2 },
+            completed,
+        ),
+    )
+    .attributes();
+    if m.ordinary_final_observation_fault == 1 {
+        facts.insert(
+            "verification_digest".into(),
+            ObservedValue::Text("d".repeat(64)),
+        );
+    }
+    if m.ordinary_final_observation_fault == 2 {
+        facts.insert(
+            "prepared.output.0.completed_commit".into(),
+            ObservedValue::U64(u64::MAX),
+        );
+    }
+    m.sequence += 1;
+    Ok(ObservationEnvelope {
+        provider: value(ProviderId::new(
+            linura_observation::DISPLAY_RECOVERY_PROVIDER,
+        )),
+        capability: capability.clone(),
+        resource: resource.clone(),
+        authority: ObservationAuthority::NativeApi,
+        sequence: m.sequence,
+        observed_at_unix_ms: now_unix_ms(),
+        valid_for_ms: 2000,
+        attributes: facts,
+    })
+}
+#[derive(Debug)]
+struct OrdinaryFinalPort(Arc<Mutex<Machine>>, u8);
+impl linura_control::OrdinaryDisplayFinalRetirementPort for OrdinaryFinalPort {
+    fn retire_ordinary_current(
+        &mut self,
+        p: linura_control::AuthorizedOrdinaryDisplayFinalRetirement,
+    ) -> Result<(), String> {
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(m.checked_history_reads, 0);
+        assert_eq!(m.ordinary_final_calls, 0);
+        assert!(
+            m.ordinary_native_current_qualified
+                && m.ordinary_root_power_retired
+                && !m.ordinary_native_final_retired
+        );
+        assert!(
+            now_unix_ms() >= p.frames().window().observed_unix_ms
+                && now_unix_ms() < p.expires_at_unix_ms()
+        );
+        m.ordinary_final_calls += 1;
+        let parent = value(
+            linura_linux_session::NativeDisplayOrdinaryCurrentPreparation::decode(
+                m.ordinary_current_commit_record
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!()),
+            ),
+        );
+        let record = value(
+            linura_linux_session::NativeDisplayOrdinaryFinalPreparation::new(
+                &parent,
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    p.preparation().hex(),
+                )),
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    p.qualification().hex(),
+                )),
+                p.frames(),
+                p.expires_at_unix_ms(),
+            ),
+        );
+        m.ordinary_final_record = Some(record.canonical_bytes());
+        m.ordinary_native_final_retired = self.1 != 2;
+        if self.1 == 1 {
+            Err("simulated lost final ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+#[derive(Debug)]
+struct OrdinaryReleasedPort(Arc<Mutex<Machine>>, u8);
+impl linura_control::OrdinaryDisplayReleasedCurrentPort for OrdinaryReleasedPort {
+    fn complete_ordinary_released_current(
+        &mut self,
+        p: linura_control::OrdinaryDisplayReleasedCurrentCompletion,
+    ) -> Result<(), String> {
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(m.checked_history_reads, 0);
+        assert!(m.ordinary_native_final_retired);
+        m.ordinary_released_calls += 1;
+        let bytes = m
+            .ordinary_final_record
+            .as_ref()
+            .unwrap_or_else(|| unreachable!());
+        let parent =
+            value(linura_linux_session::NativeDisplayOrdinaryFinalPreparation::decode(bytes));
+        assert_eq!(parent.frames().scope(), p.scope());
+        assert_eq!(final_digest(bytes), p.final_record().to_hex());
+        let record = value(
+            linura_linux_session::NativeDisplayOrdinaryReleasedRecord::new(
+                &parent,
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    p.verification().hex(),
+                )),
+                p.first_window(),
+            ),
+        );
+        if self.1 != 2 {
+            m.ordinary_released_record = Some(record.canonical_bytes());
+        }
+        if self.1 == 1 {
+            Err("simulated lost ReleasedCurrent ACK".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn ordinary_final_retirement_requires_matching_physical_and_durable_completion() {
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
+    ] {
+        for fault in std::iter::once(18).chain(0..=17) {
+            let database = TestDatabase::new();
+            let machine = Arc::new(Mutex::new(Machine::default()));
+            let mut port = Port(machine.clone());
+            let mut verifier = Verifier(machine.clone());
+            let original = display_request("ordinary-final-original");
+            let mut control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                original.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier,
+            ));
+            value(control.decide_display_layout(
+                principal(),
+                actor(true),
+                &original.request_id,
+                action,
+                &Decision::approve(&machine),
+                &mut port,
+                &mut verifier,
+            ));
+            let original_before = value(control.inspect_ordinary_display_original(
+                principal(),
+                &original.request_id,
+                &mut port,
+                &mut verifier,
+            ))
+            .original_snapshot()
+            .clone();
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_handoff_enabled = true;
+            let receipt = value(control.begin_ordinary_display_release(
+                principal(),
+                actor(true),
+                linura_control::OrdinaryDisplayReleaseRequest {
+                    operation_id: "ordinary-final-release".into(),
+                    original_request: original.request_id.clone(),
+                    reason: original.reason.clone(),
+                },
+                &ReleaseApproval(machine.clone(), 0),
+                &mut port,
+                &mut verifier,
+                &mut ReleasePort(machine.clone(), 0),
+            ));
+            value(control.dispatch_ordinary_display_completion(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut CompletionPort(machine.clone(), false),
+            ));
+            value(control.retire_ordinary_display_native_power(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryPowerPort(machine.clone(), 0),
+            ));
+
+            value(control.retire_ordinary_display_root_power(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryRootPowerPort(machine.clone(), 0),
+            ));
+            value(control.dispatch_ordinary_display_current_commit(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryCurrentPort(machine.clone(), 0),
+            ));
+            let signed = value(control.verify_ordinary_display_qualified_current(
+                principal(),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+            ))
+            .inspection()
+            .power()
+            .current()
+            .release()
+            .clone();
+            assert_eq!(
+                signed.state,
+                linura_transaction::TransactionState::Committed
+            );
+            if fault == 3 {
+                drop(control);
+                control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+            }
+            if fault == 16 {
+                for (who, human) in [
+                    (principal(), actor(false)),
+                    (
+                        value(AuthenticatedPrincipal::new("dbus:uid:1001")),
+                        actor(true),
+                    ),
+                ] {
+                    assert!(
+                        control
+                            .dispatch_ordinary_display_final_retirement(
+                                who,
+                                human,
+                                &receipt.request_id,
+                                &mut port,
+                                &mut verifier,
+                                &mut OrdinaryFinalPort(machine.clone(), 0)
+                            )
+                            .is_err()
+                    );
+                }
+            }
+            if (5..=13).contains(&fault) {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_current_commit_store_phase = 6 + (fault - 5) / 3;
+                m.ordinary_current_commit_store_fault = 1 + (fault - 5) % 3;
+            }
+            if fault == 18 {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_current_commit_store_phase = 6;
+                m.ordinary_current_commit_store_fault = 4;
+            }
+            let final_ack = control.dispatch_ordinary_display_final_retirement(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryFinalPort(
+                    machine.clone(),
+                    if fault == 1 {
+                        1
+                    } else if fault == 2 {
+                        2
+                    } else {
+                        0
+                    },
+                ),
+            );
+            assert_eq!(
+                final_ack.is_ok(),
+                fault != 1 && fault != 3 && fault != 18 && !(5..=7).contains(&fault),
+                "final dispatch {action:?}/{fault}"
+            );
+            if fault == 15 || fault == 17 {
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_final_observation_fault = if fault == 15 { 1 } else { 2 };
+            }
+            let result = control.complete_ordinary_display_released_current(
+                principal(),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryReleasedPort(
+                    machine.clone(),
+                    if fault == 14 {
+                        1
+                    } else if fault == 4 {
+                        2
+                    } else {
+                        0
+                    },
+                ),
+            );
+            let success = matches!(fault, 0 | 1 | 16);
+            assert_eq!(
+                result.is_ok(),
+                success,
+                "completion {action:?}/{fault}: {error:?}",
+                error = result.as_ref().err()
+            );
+            let first_complete = result
+                .as_ref()
+                .ok()
+                .map(|v| (v.record_digest().clone(), v.verification().first_window()));
+            if let Ok(completed) = result {
+                assert_eq!(completed.verification().root().phase(), 3);
+                assert_eq!(
+                    completed
+                        .verification()
+                        .qualified()
+                        .inspection()
+                        .power()
+                        .current()
+                        .release(),
+                    &signed
+                );
+            }
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                if (5..=13).contains(&fault) || fault == 18 {
+                    assert!(
+                        m.ordinary_current_commit_store_fault_hits > 0,
+                        "targeted final fault not reached {action:?}/{fault}"
+                    );
+                }
+                m.ordinary_current_commit_store_fault = 0;
+                m.ordinary_final_observation_fault = 0;
+                m.ordinary_current_fault = 0;
+            }
+            drop(control);
+            let mut restarted =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            assert!(
+                restarted
+                    .dispatch_ordinary_display_final_retirement(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut OrdinaryFinalPort(machine.clone(), 0)
+                    )
+                    .is_err()
+            );
+            if fault != 2 && fault != 3 && fault != 18 && !(5..=7).contains(&fault) {
+                let completed = value(restarted.complete_ordinary_display_released_current(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                    &mut OrdinaryReleasedPort(machine.clone(), 0),
+                ));
+                assert_eq!(
+                    completed
+                        .verification()
+                        .qualified()
+                        .inspection()
+                        .power()
+                        .current()
+                        .release(),
+                    &signed
+                );
+                if let Some((record, window)) = &first_complete {
+                    assert_eq!(completed.record_digest(), record);
+                    assert_eq!(&completed.verification().first_window(), window);
+                }
+                if fault == 0 {
+                    let again = value(restarted.complete_ordinary_display_released_current(
+                        principal(),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut OrdinaryReleasedPort(machine.clone(), 0),
+                    ));
+                    assert_eq!(again.record_digest(), completed.record_digest());
+                    assert_eq!(
+                        again.verification().first_window(),
+                        completed.verification().first_window()
+                    );
+                }
+            }
+            let (_, verify) = authority_material();
+            let store = value(SqliteTransactionStore::open(
+                database.path(),
+                verify,
+                value(SqliteIntegrityKey::new(fixture_key(5))),
+            ));
+            assert_eq!(
+                value(linura_transaction::TransactionStore::snapshot(
+                    &store,
+                    &original_before.transaction_id
+                )),
+                original_before
+            );
+            assert!(
+                restarted
+                    .begin_display_layout(
+                        principal(),
+                        actor(true),
+                        display_request("ordinary-final-competing"),
+                        &approval(),
+                        &mut port,
+                        &mut verifier
+                    )
+                    .is_err()
+            );
+            let m = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(m.ordinary_current_commit_calls, 1);
+            assert_eq!(
+                m.ordinary_final_calls,
+                usize::from(fault != 3 && fault != 18 && !(5..=7).contains(&fault))
+            );
+            assert_eq!(m.applies, 1);
         }
     }
 }

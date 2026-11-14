@@ -215,6 +215,41 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let target = material
             .validate_native(current.inventory(), current.capabilities())
             .map_err(|_| invalid_original())?;
+        let final_sample = if let Some(digest) = native.final_retirement_digest() {
+            if !root_retired || actual.state != TransactionState::Committed {
+                return Err(invalid_original());
+            }
+            let final_sample = observe(
+                self,
+                &query(
+                    DISPLAY_RECOVERY_PROVIDER,
+                    linura_observation::DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY,
+                    scope.resource_id().map_err(|_| invalid_original())?,
+                )?,
+            )?;
+            let final_root =
+                linura_observation::DisplayOrdinaryFinalRetirementFacts::from_envelope(
+                    &final_sample,
+                    &scope,
+                    now_ms()?,
+                )
+                .map_err(|_| invalid_original())?;
+            if final_root.phase() < 2
+                || final_root.lineage().record != digest
+                || Some(final_root.lineage().current_grant.as_str())
+                    != native.current_commit_digest()
+                || original.current_grant().is_none_or(|g| {
+                    g.record != final_root.lineage().current_grant
+                        || g.committed_record != final_root.lineage().committed_record
+                })
+                || !native.follows_final_retirement(final_root.checkpoint())
+            {
+                return Err(invalid_original());
+            }
+            Some(final_sample)
+        } else {
+            None
+        };
         let lineage = root_facts.first().lineage();
         let comparison = root_facts.lineage();
         if comparison.material != intent.material()
@@ -231,7 +266,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                         .current_grant()
                         .is_none_or(|grant| grant.record != digest)
             })
-            || native.final_retirement_digest().is_some()
             || native.lineage().original_transaction
                 != original.original_snapshot().transaction_id.as_str()
             || native.lineage().original_effect
@@ -328,6 +362,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 format!("control.ordinary-current.{label}_digest"),
                 ObservedValue::Text(
                     crate::durable_authority::digest_observation(source)?
+                        .as_str()
+                        .into(),
+                ),
+            );
+        }
+        if let Some(sample) = &final_sample {
+            crate::plan_preview::restrict_session_validity(&mut root, sample, now_ms()?)
+                .map_err(|_| invalid_original())?;
+            root.attributes.insert(
+                "control.ordinary-current.final_grant_digest".into(),
+                ObservedValue::Text(
+                    crate::durable_authority::digest_observation(sample)?
                         .as_str()
                         .into(),
                 ),

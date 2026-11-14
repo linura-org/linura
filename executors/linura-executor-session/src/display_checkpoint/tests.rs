@@ -2899,6 +2899,209 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     assert!(spent);
     assert_eq!(read.canonical_bytes(), current_bytes);
     assert!(read_ordinary_current_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
+    let qualified = DisplayOrdinaryCurrentFacts::new(
+        after.scope().clone(),
+        after.lineage().clone(),
+        after.window(),
+        after.outputs().clone(),
+        after.completion_digest().into(),
+        true,
+        false,
+        Some(native_current.record_digest().to_hex()),
+        None,
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    let final_record = NativeDisplayOrdinaryFinalPreparation::new(
+        &native_current,
+        ComponentDigest::from_bytes([21; 32]),
+        ComponentDigest::from_bytes([22; 32]),
+        &qualified,
+        3900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let final_bytes = final_record.canonical_bytes();
+    assert_eq!(
+        NativeDisplayOrdinaryFinalPreparation::decode(&final_bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        final_bytes
+    );
+    for end in [
+        0,
+        1,
+        7,
+        8,
+        9,
+        64,
+        final_bytes.len() / 2,
+        final_bytes.len() - 1,
+    ] {
+        assert!(NativeDisplayOrdinaryFinalPreparation::decode(&final_bytes[..end]).is_err());
+    }
+    let mut trailing = final_bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinaryFinalPreparation::decode(&trailing).is_err());
+    assert!(NativeDisplayFinalRetirementPreparation::decode(&final_bytes).is_err());
+    assert!(
+        NativeDisplayOrdinaryFinalPreparation::new(
+            &native_current,
+            ComponentDigest::from_bytes([21; 32]),
+            ComponentDigest::from_bytes([22; 32]),
+            &after,
+            3900
+        )
+        .is_err()
+    );
+    let released = NativeDisplayOrdinaryReleasedRecord::new(
+        &final_record,
+        ComponentDigest::from_bytes([23; 32]),
+        qualified.window(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let released_bytes = released.canonical_bytes();
+    // Every nested parent remains validated even when decoding consumes the
+    // already validated parent instead of recursively decoding it a second time.
+    for domain in [
+        "linura.native-display.ordinary-release.v1",
+        "linura.native-display.ordinary-completion.v1",
+        "linura.native-display.ordinary-power-retirement.v1",
+        "linura.native-display.ordinary-root-retirement.v1",
+        "linura.native-display.ordinary-current-commit.v1",
+        "linura.native-display.ordinary-final-retirement.v1",
+    ] {
+        let offset = released_bytes
+            .windows(domain.len())
+            .position(|v| v == domain.as_bytes())
+            .unwrap_or_else(|| unreachable!("missing retained parent domain {domain}"));
+        let mut substituted = released_bytes.clone();
+        substituted[offset] = b'X';
+        assert!(
+            NativeDisplayOrdinaryReleasedRecord::decode(&substituted).is_err(),
+            "{domain}"
+        );
+    }
+    assert_eq!(
+        NativeDisplayOrdinaryReleasedRecord::decode(&released_bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        released_bytes
+    );
+    let mut trailing = released_bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinaryReleasedRecord::decode(&trailing).is_err());
+    assert!(NativeDisplayReleasedCurrentRecord::decode(&released_bytes).is_err());
+    assert!(publish(Kind::OrdinaryFinalSpent, &final_bytes).is_err());
+    assert!(publish(Kind::OrdinaryReleased, &released_bytes).is_err());
+    publish(Kind::OrdinaryFinalPrepared, &final_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryFinalPrepared, &final_bytes).is_err());
+    assert!(
+        !read_ordinary_final_at(&fixture.fd, fixture.uid, first.scope())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!())
+            .1
+    );
+    publish(Kind::OrdinaryFinalSpent, &final_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryFinalSpent, &final_bytes).is_err());
+    assert!(
+        read_ordinary_final_at(&fixture.fd, fixture.uid, first.scope())
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!())
+            .1
+    );
+    publish(Kind::OrdinaryReleased, &released_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryReleased, &released_bytes).is_err());
+    // The ordinary Root producer carries the immutable full before-final frame
+    // checkpoint. A new outer sample never renews its historical window.
+    for phase in 1..=3 {
+        let facts = linura_observation::DisplayOrdinaryFinalRetirementFacts::new(
+            first.scope().clone(),
+            qualified.clone(),
+            linura_observation::DisplayFinalRetirementLineage {
+                record: ComponentDigest::from_bytes(Sha256::digest(&final_bytes).into()).to_hex(),
+                preparation: final_record.preparation_digest().to_hex(),
+                verification: final_record.verification_digest().to_hex(),
+                current_grant: native_current.record_digest().to_hex(),
+                committed_record: native_current.committed_record_digest().to_hex(),
+            },
+            phase,
+            (phase == 3).then(|| linura_observation::DisplayReleasedCurrentLineage {
+                record: ComponentDigest::from_bytes(Sha256::digest(&released_bytes).into())
+                    .to_hex(),
+                verification: released.verification_digest().to_hex(),
+            }),
+        )
+        .unwrap_or_else(|e| unreachable!("{e:?}"));
+        let sample = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY,
+            )
+            .unwrap_or_else(|e| unreachable!("{e}")),
+            resource: first
+                .scope()
+                .resource_id()
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            sequence: 1,
+            observed_at_unix_ms: 8000,
+            valid_for_ms: 2000,
+            attributes: facts.attributes(),
+        };
+        assert_eq!(
+            linura_observation::DisplayOrdinaryFinalRetirementFacts::from_envelope(
+                &sample,
+                first.scope(),
+                8001
+            )
+            .unwrap_or_else(|e| unreachable!("{e:?}")),
+            facts
+        );
+        for fault in 0..7 {
+            let mut changed = sample.clone();
+            match fault {
+                0 => {
+                    changed.attributes.insert(
+                        "extra".into(),
+                        linura_observation::ObservedValue::Bool(true),
+                    );
+                }
+                1 => {
+                    changed.attributes.remove("prepared_observed_unix_ms");
+                }
+                2 => changed.valid_for_ms = 2001,
+                3 => changed.sequence = 0,
+                4 => changed.authority = linura_observation::ObservationAuthority::SyntheticTest,
+                5 => {
+                    changed.attributes.insert(
+                        "current_grant_digest".into(),
+                        linura_observation::ObservedValue::Text("0".repeat(64)),
+                    );
+                }
+                _ => {
+                    changed
+                        .attributes
+                        .insert("phase".into(), linura_observation::ObservedValue::U64(4));
+                }
+            }
+            assert!(
+                linura_observation::DisplayOrdinaryFinalRetirementFacts::from_envelope(
+                    &changed,
+                    first.scope(),
+                    8001
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            linura_observation::DisplayOrdinaryFinalRetirementFacts::from_envelope(
+                &sample,
+                first.scope(),
+                10000
+            )
+            .is_err()
+        );
+    }
     let path = fixture.path.join(format!(
         "ordinary-completion-spent-{}.checkpoint",
         parent.binding().dispatch_digest.to_hex()
@@ -2908,6 +3111,7 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     assert!(read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope()).is_err());
     assert!(read_ordinary_root_at(&fixture.fd, fixture.uid, first.scope()).is_err());
     assert!(read_ordinary_current_at(&fixture.fd, fixture.uid, first.scope()).is_err());
+    assert!(read_ordinary_final_at(&fixture.fd, fixture.uid, first.scope()).is_err());
     assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
     assert!(
         fixture

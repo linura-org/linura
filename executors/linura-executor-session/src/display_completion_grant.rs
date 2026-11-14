@@ -132,6 +132,7 @@ pub(super) fn serve_ordinary(
     transfer: impl FnMut() -> zbus::fdo::Result<super::display_native_release_grant::Transferred>,
     retire_power: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
     commit_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
+    retire_current: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     serve_with_anchor(
         stream,
@@ -143,7 +144,7 @@ pub(super) fn serve_ordinary(
         transfer,
         retire_power,
         commit_current,
-        |_| Err(unavailable()),
+        retire_current,
         |_| Err(unavailable()),
     )
 }
@@ -224,12 +225,22 @@ fn serve_with_anchor<A: CompletionAnchor>(
                 } else {
                     b"LNCF:1\n\0"
                 };
-        let retirement = !ordinary && sequence > 1 && &bytes[..8] == b"LNCA:1\n\0";
+        let retirement = sequence > 1
+            && &bytes[..8]
+                == if ordinary {
+                    b"LOCA:1\n\0"
+                } else {
+                    b"LNCA:1\n\0"
+                };
         let successor = !ordinary && sequence > 1 && &bytes[..8] == b"LNSA:1\n\0";
         let purpose = if successor {
             b"LNSA:1\n\0"
         } else if retirement {
-            b"LNCA:1\n\0"
+            if ordinary {
+                b"LOCA:1\n\0"
+            } else {
+                b"LNCA:1\n\0"
+            }
         } else if current {
             if ordinary {
                 b"LOCF:1\n\0"
@@ -966,6 +977,7 @@ mod tests {
                         },
                         |_| Err(unavailable()),
                         |_| Err(unavailable()),
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -1078,6 +1090,7 @@ mod tests {
                             Ok(())
                         },
                         |_| Err(unavailable()),
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -1179,7 +1192,8 @@ mod tests {
                                 value(closed_rx.recv_timeout(Duration::from_secs(1)));
                             }
                             Ok(())
-                        }
+                        },
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -1222,6 +1236,115 @@ mod tests {
                 spends.load(Ordering::Acquire),
                 usize::from(matches!(fault, 0 | 2 | 4))
             );
+        }
+    }
+    #[test]
+    fn ordinary_final_requires_actual_current_and_never_replays_lost_ack() {
+        use super::super::display_native_release_grant as ordinary;
+        for fault in 0..=5 {
+            let (mut old_root, mut old_native) = pair();
+            let old = ordinary::ChannelState::reserved();
+            let old_lifetime = ordinary::Lifetime::new(old.clone());
+            let old_worker = std::thread::spawn(move || {
+                value(ordinary::serve_ordinary(
+                    &mut old_root,
+                    &[6; 32],
+                    old_lifetime,
+                    identity,
+                    || Ok(()),
+                    || Ok(()),
+                ))
+            });
+            value(old_native.write_all(&frame(b"LNOW:1\n\0", 1, [6; 32])));
+            value(old_native.read_exact(&mut [0; FRAME_BYTES]));
+            let held = value(old_worker.join());
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let anchor = old.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let effects = calls.clone();
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (closed_tx, closed_rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let _held = held;
+                assert!(
+                    serve_ordinary(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        identity,
+                        |_| Ok(()),
+                        || anchor.transfer(),
+                        |digest| if digest == &[8; 32] {
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        },
+                        |digest| if digest == &[9; 32] {
+                            Ok(())
+                        } else {
+                            Err(unavailable())
+                        },
+                        |digest| {
+                            if digest != &[10; 32] {
+                                return Err(unavailable());
+                            }
+                            effects.fetch_add(1, Ordering::AcqRel);
+                            if fault == 2 {
+                                return Err(unavailable());
+                            }
+                            if fault == 4 {
+                                value(entered_tx.send(()));
+                                value(closed_rx.recv_timeout(Duration::from_secs(1)));
+                            }
+                            Ok(())
+                        }
+                    )
+                    .is_err()
+                );
+            });
+            value(native.write_all(&frame(b"LOCH:1\n\0", 1, [7; 32])));
+            value(native.read_exact(&mut [0; FRAME_BYTES]));
+            value(native.write_all(&frame(b"LOPR:1\n\0", 2, [8; 32])));
+            value(native.read_exact(&mut [0; FRAME_BYTES]));
+            if fault == 5 {
+                value(native.write_all(&frame(b"LOCA:1\n\0", 3, [10; 32])));
+                assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+            } else {
+                value(native.write_all(&frame(b"LOCF:1\n\0", 3, [9; 32])));
+                value(native.read_exact(&mut [0; FRAME_BYTES]));
+                assert!(state.current_spent() && !state.retirement_spent());
+                value(native.write_all(&frame(
+                    if fault == 1 {
+                        b"LNCA:1\n\0"
+                    } else {
+                        b"LOCA:1\n\0"
+                    },
+                    4,
+                    if fault == 3 { [11; 32] } else { [10; 32] },
+                )));
+                if fault == 4 {
+                    value(entered_rx.recv_timeout(Duration::from_secs(1)));
+                    drop(native);
+                    value(closed_tx.send(()));
+                } else if fault == 0 {
+                    value(native.read_exact(&mut [0; FRAME_BYTES]));
+                    assert!(state.retirement_spent());
+                    value(native.write_all(&frame(b"LOCV:1\n\0", 5, [7; 32])));
+                    value(native.read_exact(&mut [0; FRAME_BYTES]));
+                    value(native.write_all(&frame(b"LOCA:1\n\0", 6, [10; 32])));
+                    assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+                } else {
+                    assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+                }
+            }
+            value(worker.join());
+            assert_eq!(
+                calls.load(Ordering::Acquire),
+                usize::from(matches!(fault, 0 | 2 | 4))
+            );
+            assert!(!state.transferred());
         }
     }
 }

@@ -1319,7 +1319,9 @@ bool NativeWaylandLock::currentOrdinaryDisplayHandoff(const NativeDisplayCorrela
     if (!impl_->completionAttempted || !heldOrdinaryDisplayRelease(bound))
         return false;
     const auto sample = displayStartupSample();
-    return sample && sample->fenced && sample->startupPhase == 4 &&
+    // Phase five is published only by the actual final Root/native spend. It
+    // retains the same current lifetime for independent post-retirement reads.
+    return sample && sample->fenced && (sample->startupPhase == 4 || sample->startupPhase == 5) &&
            sample->compositor == displayInvocation();
 }
 bool NativeWaylandLock::currentOriginalDisplayHandoff(const NativeDisplayCorrelation &bound)
@@ -1470,6 +1472,50 @@ std::optional<quint32> NativeWaylandLock::retireOriginalDisplayCurrent(
         requestedSecure() != secureCoverage() || thread() != QThread::currentThread() ||
         impl_->finalRetirementAttempted || !impl_->currentCommitAttempted ||
         !currentOriginalDisplayHandoff(bound) || !impl_->protectedInteraction ||
+        digest.size() != 64 || digest == QString(64, QLatin1Char('0')) ||
+        !std::all_of(digest.begin(), digest.end(), [](QChar c) {
+            return (c >= QLatin1Char('0') && c <= QLatin1Char('9')) ||
+                   (c >= QLatin1Char('a') && c <= QLatin1Char('f'));
+        }))
+        return std::nullopt;
+    const auto now = NativeDisplayClock::sample();
+    if (!now || !bound.valid() || now->unixMs >= bound.deadlineUnixMs ||
+        bound.deadlineUnixMs - now->unixMs > 2000)
+        return std::nullopt;
+    namespace Codec = Linura::HyprlandDisplay::OriginalFinalRetirementCodec;
+    const auto descriptor =
+        Linura::HyprlandDisplay::SealedNativeMaterial::create<Codec::MaxPreparation>(
+            std::string_view(preparation.constData(),
+                             static_cast<std::size_t>(preparation.size())));
+    if (!descriptor)
+        return std::nullopt;
+    impl_->finalRetirementAttempted = true;
+    const auto epoch = impl_->protectedStatus->epoch;
+    impl_->protectedStatus.reset();
+    const auto bytes = digest.toLatin1();
+    linura_protected_display_interaction_v1_retire_current(impl_->protectedInteraction,
+                                                           descriptor->get(), bytes.constData());
+    impl_->flush();
+    if (!waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(1000)) ||
+        !impl_->protectedStatus || impl_->protectedStatus->epoch != epoch ||
+        impl_->protectedStatus->phase != NativeDisplayPromptStatus::Phase::Consumed)
+        return std::nullopt;
+    const auto after = NativeDisplayClock::sample();
+    if (!after || after->unixMs < now->unixMs || after->bootMs < now->bootMs ||
+        after->unixMs >= bound.deadlineUnixMs || after->bootMs - now->bootMs >= 1000)
+        return std::nullopt;
+    return 11; // Attempt ACK only; independent Root/native qualification is still required.
+}
+
+std::optional<quint32> NativeWaylandLock::retireOrdinaryDisplayCurrent(
+    const NativeDisplayOrdinaryReleaseIntent &intent, const NativeDisplayCorrelation &bound,
+    const QString &digest, const QByteArray &preparation)
+{
+    if (!impl_->initialized || impl_->painting || impl_->pumping ||
+        impl_->ordinaryReleaseMaterial != intent.encode() ||
+        requestedSecure() != secureCoverage() || thread() != QThread::currentThread() ||
+        impl_->finalRetirementAttempted || !impl_->currentCommitAttempted ||
+        !currentOrdinaryDisplayHandoff(bound) || !impl_->protectedInteraction ||
         digest.size() != 64 || digest == QString(64, QLatin1Char('0')) ||
         !std::all_of(digest.begin(), digest.end(), [](QChar c) {
             return (c >= QLatin1Char('0') && c <= QLatin1Char('9')) ||

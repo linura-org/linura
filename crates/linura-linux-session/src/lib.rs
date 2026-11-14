@@ -90,3 +90,9 @@ mod display_ordinary_current_preparation;
 pub use display_ordinary_current_preparation::{
     MAX_NATIVE_DISPLAY_ORDINARY_CURRENT, NativeDisplayOrdinaryCurrentPreparation,
 };
+
+mod display_ordinary_final_preparation;
+pub use display_ordinary_final_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_FINAL, NativeDisplayOrdinaryFinalPreparation,
+    NativeDisplayOrdinaryReleasedRecord,
+};

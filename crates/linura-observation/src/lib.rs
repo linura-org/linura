@@ -357,3 +357,8 @@ mod display_ordinary_root_retirement;
 pub use display_ordinary_root_retirement::{
     DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY, DisplayOrdinaryRootRetirementFacts,
 };
+
+mod display_ordinary_final_retirement;
+pub use display_ordinary_final_retirement::{
+    DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY, DisplayOrdinaryFinalRetirementFacts,
+};

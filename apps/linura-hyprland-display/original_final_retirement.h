@@ -8,7 +8,7 @@ inline constexpr std::size_t MaxPreparation = OriginalCurrentCommitCodec::MaxPre
 // complete preparation before any obsolete native lifetime can be retired.
 inline std::optional<ClockSample> matches(std::string_view bytes, std::string_view currentDigest,
                                           const NativeFirstFrameGate::Receipt &physical,
-                                          ClockSample now)
+                                          ClockSample now, bool ordinary = false)
 {
     if (bytes.empty() || bytes.size() > MaxPreparation || !physical.completedCount ||
         physical.completedCount > DisplayTransaction::MaxHeads)
@@ -16,9 +16,11 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     const auto field = [&](std::size_t bound) { return OriginalGrantCodec::field(bytes, bound); };
     const auto domain = field(64), parent = field(OriginalCurrentCommitCodec::MaxPreparation),
                prepared = field(64), verification = field(64);
-    if (!domain || *domain != "linura.native-display.final-retirement.v1" || !parent ||
-        nativeSha256(*parent) != std::optional{std::string(currentDigest)} || !prepared ||
-        !verification || !OriginalGrantCodec::digest(*prepared) ||
+    if (!domain ||
+        *domain != (ordinary ? "linura.native-display.ordinary-final-retirement.v1"
+                             : "linura.native-display.final-retirement.v1") ||
+        !parent || nativeSha256(*parent) != std::optional{std::string(currentDigest)} ||
+        !prepared || !verification || !OriginalGrantCodec::digest(*prepared) ||
         !OriginalGrantCodec::digest(*verification) || *prepared == *verification)
         return {};
     const auto number = [&]() -> std::optional<std::uint64_t> {

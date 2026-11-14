@@ -408,3 +408,10 @@ mod tests {
         assert!(terminal_for_inspection(&h, TransactionState::Committed).is_err());
     }
 }
+
+mod final_retirement;
+pub use final_retirement::{
+    AuthorizedOrdinaryDisplayFinalRetirement, OrdinaryDisplayFinalRetirementPort,
+    OrdinaryDisplayFinalRetirementVerification, OrdinaryDisplayReleasedCurrent,
+    OrdinaryDisplayReleasedCurrentCompletion, OrdinaryDisplayReleasedCurrentPort,
+};

@@ -602,6 +602,27 @@ quint32 NativeEndpoint::RetireOriginalDisplayCurrent(const NativeDisplayAttemptQ
     return 7;
 }
 
+quint32 NativeEndpoint::RetireOrdinaryDisplayCurrent(const NativeDisplayAttemptQueryWire &query,
+                                                     const QString &digest,
+                                                     const QByteArray &preparation)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        digest.size() == 64 && !preparation.isEmpty() && preparation.size() <= 57 * 1024) {
+        const auto intent = NativeDisplayOrdinaryReleaseIntent::parse(query.intent);
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent ? runtime_.retireOrdinaryDisplayCurrent(
+                                         message(), *intent, bound, digest, preparation)
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Ordinary final display retirement unavailable"));
+    return 7;
+}
+
 quint32 NativeEndpoint::CommitOriginalDisplayCurrent(const NativeDisplayAttemptQueryWire &query,
                                                      const QString &digest,
                                                      const QByteArray &preparation)

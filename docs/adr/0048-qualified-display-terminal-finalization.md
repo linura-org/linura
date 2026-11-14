@@ -71,6 +71,23 @@ unbounded retention or loss of provenance is permitted.
 
 ## Implementation and qualification limits
 
+Current source boundary: original final retirement/ReleasedCurrent and its
+separately authorized same-invocation successor are implemented. Ordinary release
+now also has its complete purpose-separated continuation through signed/native
+current commit, final retirement and matching completion; the final increment is
+under validation. Stage 5 adoption, supersession/shared ownership and reference-aware
+cleanup remain unimplemented. Real display Level A/B acceptance and independent
+signoff remain outstanding. Maintained physical Level C/Q11 is a future production
+activation gate. No public display mutation is enabled by these source changes.
+
+The initial implementation description and later progress subsections retain
+historical source boundaries. Later continuation sections supersede earlier
+statements that those source paths were missing; none supplies qualification or
+independent acceptance evidence. The current ordinary final protocol is described
+in the final section of this ADR.
+
+**Historical initial implementation boundary:**
+
 The initial implementation includes bounded core/SDK/adapter comparison codecs
 and a read-only Control prerequisite inspection. The query authenticates both
 actual requests, exact linked snapshots, phase records and original checkpoint
@@ -1003,3 +1020,34 @@ checkpoint cleanup. Matching ordinary final-retirement/ReleasedCurrent records
 and Stage 5 lifecycle work remain required. Public mutations remain Unsupported;
 component tests and pinned-source compilation do not qualify real compositor
 execution or physical release.
+
+
+### Ordinary final-retirement and ReleasedCurrent continuation
+
+Ordinary current qualification has a separate final-retirement continuation. The
+actual retained OrdinaryRelease review is consumed before final preparation;
+Control durably correlates the signed committed record, independent native-current
+proof, actual Root current grant, complete current observation and original effect
+window. A separate Root/native `LOCA` spend can retire only the obsolete native
+current input/review dependency. Original-finalization `LNCA` is a different
+purpose. The native and Root power closes must already be independently observed.
+
+Root authenticates the complete ordinary current parent and original credential
+channel, reserves before publication and spends before ACK. Its final observation
+projects the entire immutable before-final frame checkpoint. Control joins that
+with independently observed native final state, exact current-grant/committed
+ancestry, layout, logind and protected input/power facts before retaining the first
+post-effect proof and both original producer clocks. Neither signed Committed nor
+an ACK supplies final qualification. The new proof can be recovered by comparison;
+it cannot reconstruct a review or replay either current or final effects.
+
+Root ReleasedCurrent completion is retryable immutable metadata only. Root first
+retains and syncs the exact full final parent and Control proof, then transitions
+its actual scoped witness under serialized admission. Its phase-three observation
+requires matching actual channel/memory, retained records and released-power
+absence; files alone cannot invent that state. Control re-observes the final state
+and matching Root completion before retaining its own ReleasedCurrent correlation.
+Competing ordinary Begin and provenance deletion remain excluded until the
+separate qualified Stage 5 lifecycle transition. Production display mutations
+remain Unsupported. Component results do not substitute for real source-pinned
+Level A, applicable interactive Level B or maintained physical Level C evidence.

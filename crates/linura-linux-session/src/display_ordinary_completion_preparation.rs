@@ -31,7 +31,23 @@ impl NativeDisplayOrdinaryCompletionPreparation {
         frames: &DisplayOrdinaryHandoffFacts,
         expiry: u64,
     ) -> Result<Self, String> {
-        let parent = NativeDisplayOrdinaryReleasePreparation::decode(&parent.canonical_bytes())?;
+        Self::from_parent(
+            NativeDisplayOrdinaryReleasePreparation::decode(&parent.canonical_bytes())?,
+            preparation,
+            verification,
+            frames,
+            expiry,
+        )
+    }
+    // The private factory consumes an already validated parent. Re-decoding it
+    // here would multiply validation work at every level of the retained chain.
+    fn from_parent(
+        parent: NativeDisplayOrdinaryReleasePreparation,
+        preparation: ComponentDigest,
+        verification: ComponentDigest,
+        frames: &DisplayOrdinaryHandoffFacts,
+        expiry: u64,
+    ) -> Result<Self, String> {
         let material = parent.decoded_material()?;
         let binding = parent.binding();
         let lineage = frames.lineage();
@@ -157,7 +173,7 @@ impl NativeDisplayOrdinaryCompletionPreparation {
         }
         let frames = DisplayOrdinaryHandoffFacts::new(scope, lineage, window, outputs)
             .map_err(|_| invalid())?;
-        let result = Self::new(&parent, preparation, verification, &frames, expiry)?;
+        let result = Self::from_parent(parent, preparation, verification, &frames, expiry)?;
         if result.canonical_bytes() != bytes {
             return Err(invalid());
         }

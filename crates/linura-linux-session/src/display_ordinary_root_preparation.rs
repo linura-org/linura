@@ -33,7 +33,23 @@ impl NativeDisplayOrdinaryRootPreparation {
         frames: &DisplayOrdinaryCurrentFacts,
         expiry: u64,
     ) -> Result<Self, String> {
-        let parent = NativeDisplayOrdinaryPowerPreparation::decode(&parent.canonical_bytes())?;
+        Self::from_parent(
+            NativeDisplayOrdinaryPowerPreparation::decode(&parent.canonical_bytes())?,
+            preparation,
+            verification,
+            frames,
+            expiry,
+        )
+    }
+    // The private factory consumes an already validated parent. Re-decoding it
+    // here would multiply validation work at every level of the retained chain.
+    fn from_parent(
+        parent: NativeDisplayOrdinaryPowerPreparation,
+        preparation: ComponentDigest,
+        verification: ComponentDigest,
+        frames: &DisplayOrdinaryCurrentFacts,
+        expiry: u64,
+    ) -> Result<Self, String> {
         let window = frames.window();
         let end = window
             .observed_unix_ms
@@ -130,7 +146,7 @@ impl NativeDisplayOrdinaryRootPreparation {
             None,
         )
         .map_err(|_| invalid())?;
-        let result = Self::new(&parent, preparation, verification, &frames, expiry)?;
+        let result = Self::from_parent(parent, preparation, verification, &frames, expiry)?;
         if result.canonical_bytes() != bytes {
             return Err(invalid());
         }

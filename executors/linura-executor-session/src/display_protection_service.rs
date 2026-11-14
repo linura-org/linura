@@ -15,7 +15,8 @@ use linura_linux_session::{
     NativeDisplayCurrentCommitPreparation, NativeDisplayFinalRetirementPreparation,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
     NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryCurrentPreparation,
-    NativeDisplayOrdinaryPowerPreparation, NativeDisplayOrdinaryReleasePreparation,
+    NativeDisplayOrdinaryFinalPreparation, NativeDisplayOrdinaryPowerPreparation,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryReleasedRecord,
     NativeDisplayOrdinaryRootPreparation, NativeDisplayPowerRetirementPreparation,
     NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
     NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
@@ -38,6 +39,7 @@ mod final_retirement;
 mod ordinary;
 mod ordinary_completion;
 mod ordinary_current;
+mod ordinary_final;
 mod ordinary_power;
 mod ordinary_root;
 mod power;
@@ -143,6 +145,7 @@ struct Admission {
         ),
     >,
     completions: BTreeMap<String, CompletionReservation>,
+    ordinary_final_retirements: BTreeMap<String, FinalRetirementReservation>,
     ordinary_current_commits: BTreeMap<String, CurrentCommitReservation>,
     ordinary_root_retirements: BTreeMap<String, RootPowerRetirementReservation>,
     ordinary_power_retirements: BTreeMap<String, PowerRetirementReservation>,
@@ -403,6 +406,21 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         &self,
         sender: &str,
         scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)>;
+    fn reserve_ordinary_final_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryFinalPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn complete_ordinary_released_current(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryReleasedRecord,
+    ) -> zbus::fdo::Result<bool>;
+    fn read_ordinary_final_retirement(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)>;
     fn reserve_current_commit(
         &self,
@@ -917,6 +935,27 @@ impl ProtectionPort for NativeProtection {
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
         self.read_final_retirement_mechanism(sender, scope)
+    }
+    fn reserve_ordinary_final_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryFinalPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.reserve_ordinary_final_mechanism(sender, record)
+    }
+    fn complete_ordinary_released_current(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryReleasedRecord,
+    ) -> zbus::fdo::Result<bool> {
+        self.complete_ordinary_released_mechanism(sender, record)
+    }
+    fn read_ordinary_final_retirement(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
+        self.read_ordinary_final_mechanism(sender, scope)
     }
     fn reserve_current_commit(
         &self,
@@ -2165,6 +2204,66 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
+    #[zbus(out_args("preparation", "phase", "completion"))]
+    async fn read_ordinary_final_retirement(
+        &self,
+        recovery_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
+        let sender = sender(&header)?;
+        if recovery_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(recovery_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_final_retirement(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
+    async fn reserve_ordinary_final_retirement(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayOrdinaryFinalPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service
+                .port
+                .reserve_ordinary_final_retirement(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("accepted"))]
+    async fn complete_ordinary_released_current(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record =
+            NativeDisplayOrdinaryReleasedRecord::decode(preparation).map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service
+                .port
+                .complete_ordinary_released_current(&sender, record)
+        })
+        .await
+    }
     #[zbus(out_args("accepted"))]
     async fn reserve_current_commit(
         &self,
@@ -2851,6 +2950,27 @@ mod tests {
         ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
             Err(unavailable())
         }
+        fn reserve_ordinary_final_retirement(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryFinalPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(zbus::fdo::Error::AccessDenied("untrusted peer".into()))
+        }
+        fn complete_ordinary_released_current(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryReleasedRecord,
+        ) -> zbus::fdo::Result<bool> {
+            Err(zbus::fdo::Error::AccessDenied("untrusted peer".into()))
+        }
+        fn read_ordinary_final_retirement(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, u32, Vec<u8>)> {
+            Err(unavailable())
+        }
         fn reserve_current_commit(
             &self,
             _: &str,
@@ -3066,7 +3186,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 35);
+            assert_eq!(text.matches("<method ").count(), 38);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -3115,6 +3235,9 @@ mod tests {
             "ReadPowerRetirement",
             "ReserveCurrentCommit",
             "ReserveFinalRetirement",
+            "ReserveOrdinaryFinalRetirement",
+            "CompleteOrdinaryReleasedCurrent",
+            "ReadOrdinaryFinalRetirement",
             "CompleteReleasedCurrent",
             "ReadFinalRetirement",
             "RetireRootPower",

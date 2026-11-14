@@ -11,6 +11,9 @@ pub(super) enum Kind {
     Committed,
     NativePrepared,
     NativeVerified,
+    FinalPrepared,
+    FinalVerified,
+    Released,
 }
 impl Kind {
     fn name(self) -> &'static str {
@@ -20,6 +23,9 @@ impl Kind {
             Self::Committed => "committed",
             Self::NativePrepared => "native-prepared",
             Self::NativeVerified => "native-verified",
+            Self::FinalPrepared => "final-prepared",
+            Self::FinalVerified => "final-verified",
+            Self::Released => "released",
         }
     }
     fn domain(self) -> String {
@@ -44,6 +50,9 @@ impl Kind {
             Self::Committed => 11,
             Self::NativePrepared => 10,
             Self::NativeVerified => 8,
+            Self::FinalPrepared => 11,
+            Self::FinalVerified => 14,
+            Self::Released => 10,
         }
     }
 }

@@ -46,6 +46,9 @@ fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &st
             + MAX_DISPLAY_REPLY_BYTES
             + 160;
     }
+    if protection && method == "ReadOrdinaryFinalRetirement" {
+        return 2 * crate::MAX_NATIVE_DISPLAY_ORDINARY_FINAL + 1024;
+    }
     if protection && method == "ReadFinalRetirement" {
         return 2 * crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 1024;
     }
@@ -680,6 +683,7 @@ mod diagnostic_tests {
                         "ReadRootPower",
                         "ReadOrdinaryRootPower",
                         "ReadFinalRetirement",
+                        "ReadOrdinaryFinalRetirement",
                         "ReadOrdinaryOriginal",
                         "ReserveSuccessor",
                         "ReadSuccessor",
@@ -733,6 +737,12 @@ mod diagnostic_tests {
                             } else if role == NativeSessionRole::Control
                                 && path == "/org/linura/DisplayProtection1"
                                 && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadOrdinaryFinalRetirement"
+                            {
+                                2 * crate::MAX_NATIVE_DISPLAY_ORDINARY_FINAL + 1024
+                            } else if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
                                 && method == "ReadFinalRetirement"
                             {
                                 2 * crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 1024
@@ -764,6 +774,12 @@ mod diagnostic_tests {
             3_u32,
             vec![0_u8; crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 512],
         ))?;
+        let ordinary_final = zbus::Message::method_call(scope, "ReadOrdinaryFinalRetirement")?
+            .build(&(
+                vec![0_u8; crate::MAX_NATIVE_DISPLAY_ORDINARY_FINAL],
+                3_u32,
+                vec![0_u8; crate::MAX_NATIVE_DISPLAY_ORDINARY_FINAL + 512],
+            ))?;
         let ordinary = zbus::Message::method_call(scope, "ReadOrdinaryOriginal")?
             .build(&(vec![0_u8; MAX_DISPLAY_REPLY_BYTES],))?;
         let ordinary_root =
@@ -777,6 +793,7 @@ mod diagnostic_tests {
             (ordinary_root, "ReadOrdinaryRootPower"),
             (root, "ReadRootPower"),
             (final_record, "ReadFinalRetirement"),
+            (ordinary_final, "ReadOrdinaryFinalRetirement"),
             (ordinary, "ReadOrdinaryOriginal"),
         ] {
             assert!(message.body().len() > MAX_REPLY_BYTES);

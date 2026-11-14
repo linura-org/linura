@@ -526,6 +526,34 @@ impl linura_control::OrdinaryDisplayCurrentCommitPort for SessionExecutorClient 
     }
 }
 
+impl linura_control::OrdinaryDisplayFinalRetirementPort for SessionExecutorClient {
+    fn retire_ordinary_current(
+        &mut self,
+        permit: linura_control::AuthorizedOrdinaryDisplayFinalRetirement,
+    ) -> Result<(), String> {
+        self.channel.retire_ordinary_display_current(
+            permit.root(),
+            permit.frames(),
+            native_component_digest(permit.preparation())?,
+            native_component_digest(permit.qualification())?,
+            permit.expires_at_unix_ms(),
+        )
+    }
+}
+impl linura_control::OrdinaryDisplayReleasedCurrentPort for SessionExecutorClient {
+    fn complete_ordinary_released_current(
+        &mut self,
+        metadata: linura_control::OrdinaryDisplayReleasedCurrentCompletion,
+    ) -> Result<(), String> {
+        self.channel.complete_ordinary_display_released_current(
+            metadata.scope(),
+            *metadata.final_record(),
+            native_component_digest(metadata.verification())?,
+            metadata.first_window(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod digest_boundary_tests {
     #[test]

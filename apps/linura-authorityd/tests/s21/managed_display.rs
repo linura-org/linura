@@ -48,6 +48,12 @@ struct Machine {
     ordinary_completion_record: Option<Vec<u8>>,
     ordinary_power_record: Option<Vec<u8>>,
     ordinary_root_power_record: Option<Vec<u8>>,
+    ordinary_final_record: Option<Vec<u8>>,
+    ordinary_final_calls: usize,
+    ordinary_native_final_retired: bool,
+    ordinary_released_record: Option<Vec<u8>>,
+    ordinary_released_calls: usize,
+    ordinary_final_observation_fault: u8,
     ordinary_current_commit_record: Option<Vec<u8>>,
     ordinary_current_commit_calls: usize,
     ordinary_native_current_qualified: bool,
@@ -1034,6 +1040,9 @@ impl ApprovedRequestJournal for FailingJournal {
                 "committed",
                 "native-prepared",
                 "native-verified",
+                "final-prepared",
+                "final-verified",
+                "released",
             ]
             .iter()
             .position(|phase| {

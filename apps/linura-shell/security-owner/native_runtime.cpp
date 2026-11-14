@@ -1433,6 +1433,27 @@ std::optional<quint32> NativeRuntime::commitOrdinaryDisplayCurrent(
                : std::nullopt;
 }
 
+std::optional<quint32> NativeRuntime::retireOrdinaryDisplayCurrent(
+    const QDBusMessage &received, const NativeDisplayOrdinaryReleaseIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, const QByteArray &preparation)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->backend || !impl_->backend->currentOrdinaryDisplayHandoff(bound) ||
+        !impl_->currentSession() || intent.currentLock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    if (!impl_->backend->heldOrdinaryDisplayRelease(bound))
+        return std::nullopt;
+    const auto result =
+        impl_->backend->retireOrdinaryDisplayCurrent(intent, bound, digest, preparation);
+    return impl_->currentSession() &&
+                   impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer)
+               ? result
+               : std::nullopt;
+}
+
 std::optional<quint32> NativeRuntime::transferOriginalDisplayCompletion(
     const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
     const NativeDisplayCorrelation &bound, const QString &digest, int grant)

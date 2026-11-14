@@ -49,14 +49,28 @@ impl NativeProtection {
         {
             return Err(unavailable());
         }
-        let payload = self
-            .witnesses
-            .read_retired_original(
+        let final_state = self.ordinary_final_state(admission, scope)?;
+        let completed = final_state
+            .as_ref()
+            .and_then(|(_, phase, record)| (*phase == 3).then_some(record.as_ref()).flatten());
+        let payload = if let Some(completed) = completed {
+            let digest = ComponentDigest::from_bytes(
+                sha2::Sha256::digest(completed.canonical_bytes()).into(),
+            );
+            self.witnesses.read_released_original(
+                &dispatch(scope.original_dispatch())?,
+                &retired.digest,
+                &digest,
+                &self.channel,
+            )
+        } else {
+            self.witnesses.read_retired_original(
                 &dispatch(scope.original_dispatch())?,
                 &retired.digest,
                 &self.channel,
             )
-            .map_err(|_| unavailable())?;
+        }
+        .map_err(|_| unavailable())?;
         record
             .parent()
             .parent()
@@ -172,13 +186,24 @@ impl NativeProtection {
         }
         // The power service must independently report this exact original fence
         // absent. A close ACK or remembered boolean cannot replace this check.
-        self.witnesses
-            .verify_retired_power_absent(
+        if let Some((_, 3, Some(completed))) = self.ordinary_final_state(&a, &scope)? {
+            let digest = ComponentDigest::from_bytes(
+                sha2::Sha256::digest(completed.canonical_bytes()).into(),
+            );
+            self.witnesses.verify_released_power_absent(
+                &dispatch(scope.original_dispatch())?,
+                &memory.digest,
+                &digest,
+                &self.channel,
+            )
+        } else {
+            self.witnesses.verify_retired_power_absent(
                 &dispatch(scope.original_dispatch())?,
                 &memory.digest,
                 &self.channel,
             )
-            .map_err(|_| unavailable())?;
+        }
+        .map_err(|_| unavailable())?;
         self.admit_control(sender)?;
         let current = self.ordinary_current_record(&a, &scope)?;
         Ok((record.canonical_bytes(), payload, current, true))

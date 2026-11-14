@@ -604,7 +604,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 44 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 45 && signals == 1 && annotations == 3);
     assert(introspection.contains(QStringLiteral("DispatchPreparedSuccessorDisplay")));
     for (const char *method :
          {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
@@ -622,6 +622,7 @@ int main(int argc, char **argv)
     assert(introspection.contains(QStringLiteral("RetireOrdinaryDisplayPower")));
     assert(introspection.contains(QStringLiteral("CommitOriginalDisplayCurrent")));
     assert(introspection.contains(QStringLiteral("CommitOrdinaryDisplayCurrent")));
+    assert(introspection.contains(QStringLiteral("RetireOrdinaryDisplayCurrent")));
     assert(introspection.contains(QStringLiteral("RetireOriginalDisplayCurrent")));
     assert(introspection.contains(QStringLiteral("ObserveNativeDisplayHandoff")));
     assert(introspection.contains(QStringLiteral("ObserveOrdinaryDisplayHandoff")));

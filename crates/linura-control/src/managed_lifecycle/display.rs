@@ -71,6 +71,7 @@ pub(super) enum DisplayReviewStage {
         expires_at_unix_ms: u64,
     },
     PowerDispatched,
+    OrdinaryFinalRetirementDispatched,
     CurrentCommitDispatched,
     FinalRetirementDispatched,
     RootPowerDispatched {
@@ -131,17 +132,19 @@ pub use finalization::{
 };
 pub use release::{
     AuthorizedOrdinaryDisplayCompletion, AuthorizedOrdinaryDisplayCurrentCommit,
-    AuthorizedOrdinaryDisplayNativePowerRetirement, AuthorizedOrdinaryDisplayRelease,
-    AuthorizedOrdinaryDisplayRootPowerRetirement, OrdinaryDisplayCompletionPort,
-    OrdinaryDisplayCompletionReceipt, OrdinaryDisplayCurrentCommit,
+    AuthorizedOrdinaryDisplayFinalRetirement, AuthorizedOrdinaryDisplayNativePowerRetirement,
+    AuthorizedOrdinaryDisplayRelease, AuthorizedOrdinaryDisplayRootPowerRetirement,
+    OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt, OrdinaryDisplayCurrentCommit,
     OrdinaryDisplayCurrentCommitPort, OrdinaryDisplayCurrentInspection,
+    OrdinaryDisplayFinalRetirementPort, OrdinaryDisplayFinalRetirementVerification,
     OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
     OrdinaryDisplayNativePowerInspection, OrdinaryDisplayNativePowerRetirementPort,
     OrdinaryDisplayOriginalInspection, OrdinaryDisplayQualifiedCurrent,
     OrdinaryDisplayReleaseAuthorizer, OrdinaryDisplayReleaseChallenge,
     OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
-    OrdinaryDisplayReleaseRequest, OrdinaryDisplayRootPowerInspection,
-    OrdinaryDisplayRootPowerRetirementPort,
+    OrdinaryDisplayReleaseRequest, OrdinaryDisplayReleasedCurrent,
+    OrdinaryDisplayReleasedCurrentCompletion, OrdinaryDisplayReleasedCurrentPort,
+    OrdinaryDisplayRootPowerInspection, OrdinaryDisplayRootPowerRetirementPort,
 };
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,

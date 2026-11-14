@@ -76,7 +76,7 @@ impl OrdinaryDisplayQualifiedCurrent {
     }
 }
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn require_ordinary_current_review(
+    pub(super) fn require_ordinary_current_review(
         &mut self,
         principal: &AuthenticatedPrincipal,
         proof: &OrdinaryDisplayRootPowerInspection,
@@ -110,7 +110,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             )?;
         Ok(())
     }
-    fn ordinary_committed_record(
+    pub(super) fn ordinary_committed_record(
         &self,
         principal: &AuthenticatedPrincipal,
         proof: &OrdinaryDisplayRootPowerInspection,
@@ -621,11 +621,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || expiry - first > 2000
             || grant.preparation != prepared.digest().hex()
             || grant.committed_record != committed.digest().hex()
-            || !c.frames().follows_current_qualification(
+            || !c.frames().retains_current_qualification(
                 proof.root().current_frames().ok_or_else(invalid_original)?,
             )
             || c.frames().current_commit_digest() != Some(grant.record.as_str())
-            || c.frames().final_retirement_digest().is_some()
             || c.observation().observed_at_unix_ms < first
             || c.frames().window().observed_unix_ms < first
         {

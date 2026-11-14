@@ -1300,8 +1300,9 @@ class PinnedScene final : public ProtectedScene
             const auto frame = readNativeCurrentComparison();
             const auto now = compositorClock();
             return frame && now &&
-                   OriginalFinalRetirementCodec::matches(
-                       *bytes, data->committedCurrent->comparisonDigest(), *frame, *now)
+                   OriginalFinalRetirementCodec::matches(*bytes,
+                                                         data->committedCurrent->comparisonDigest(),
+                                                         *frame, *now, data->ordinaryRelease)
                        .has_value();
         };
         if (!current())

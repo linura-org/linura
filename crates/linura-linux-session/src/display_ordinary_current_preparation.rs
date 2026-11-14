@@ -38,7 +38,28 @@ impl NativeDisplayOrdinaryCurrentPreparation {
         frames: &DisplayOrdinaryCurrentFacts,
         expiry: u64,
     ) -> Result<Self, String> {
-        let parent = NativeDisplayOrdinaryRootPreparation::decode(&parent.canonical_bytes())?;
+        Self::from_parent(
+            NativeDisplayOrdinaryRootPreparation::decode(&parent.canonical_bytes())?,
+            preparation,
+            committed_record,
+            control_generation,
+            control_version,
+            control_binding,
+            frames,
+            expiry,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn from_parent(
+        parent: NativeDisplayOrdinaryRootPreparation,
+        preparation: ComponentDigest,
+        committed_record: ComponentDigest,
+        control_generation: u64,
+        control_version: u64,
+        control_binding: ComponentDigest,
+        frames: &DisplayOrdinaryCurrentFacts,
+        expiry: u64,
+    ) -> Result<Self, String> {
         let window = frames.window();
         let end = window
             .observed_unix_ms
@@ -145,8 +166,8 @@ impl NativeDisplayOrdinaryCurrentPreparation {
             None,
         )
         .map_err(|_| invalid())?;
-        let result = Self::new(
-            &parent,
+        let result = Self::from_parent(
+            parent,
             preparation,
             committed_record,
             control_generation,

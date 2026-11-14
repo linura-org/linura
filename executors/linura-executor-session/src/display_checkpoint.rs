@@ -11,7 +11,8 @@ use linura_linux_session::{
     NativeDisplayCompletionPreparation, NativeDisplayCurrentCommitPreparation,
     NativeDisplayFinalRetirementPreparation, NativeDisplayFinalizationReservation,
     NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryCurrentPreparation,
-    NativeDisplayOrdinaryPowerPreparation, NativeDisplayOrdinaryReleasePreparation,
+    NativeDisplayOrdinaryFinalPreparation, NativeDisplayOrdinaryPowerPreparation,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryReleasedRecord,
     NativeDisplayOrdinaryRootPreparation, NativeDisplayPowerRetirementPreparation,
     NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
     NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
@@ -43,6 +44,9 @@ const ROOT_POWER_PREPARED_MAGIC: &[u8] = b"LNFP:1\n";
 const POWER_PREPARED_MAGIC: &[u8] = b"LNPP:1\n";
 const POWER_SPENT_MAGIC: &[u8] = b"LNPS:1\n";
 const ORDINARY_COMPLETION_PREPARED_MAGIC: &[u8] = b"LNOQ:1\n";
+const ORDINARY_FINAL_PREPARED_MAGIC: &[u8] = b"LNOJ:1\n";
+const ORDINARY_FINAL_SPENT_MAGIC: &[u8] = b"LNOK:1\n";
+const ORDINARY_RELEASED_MAGIC: &[u8] = b"LNOL:1\n";
 const ORDINARY_CURRENT_PREPARED_MAGIC: &[u8] = b"LNOH:1\n";
 const ORDINARY_CURRENT_SPENT_MAGIC: &[u8] = b"LNOI:1\n";
 const ORDINARY_ROOT_PREPARED_MAGIC: &[u8] = b"LNOF:1\n";
@@ -61,6 +65,9 @@ const HEADER: usize = MAGIC.len() + 32 + 8;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Kind {
     Original,
+    OrdinaryFinalPrepared,
+    OrdinaryFinalSpent,
+    OrdinaryReleased,
     OrdinaryCurrentPrepared,
     OrdinaryCurrentSpent,
     OrdinaryRootPrepared,
@@ -94,6 +101,9 @@ impl Kind {
     fn prefix(self) -> &'static str {
         match self {
             Self::Original => "attempt-",
+            Self::OrdinaryFinalPrepared => "ordinary-final-prepared-",
+            Self::OrdinaryFinalSpent => "ordinary-final-spent-",
+            Self::OrdinaryReleased => "ordinary-released-",
             Self::OrdinaryCurrentPrepared => "ordinary-current-prepared-",
             Self::OrdinaryCurrentSpent => "ordinary-current-spent-",
             Self::OrdinaryRootPrepared => "ordinary-root-prepared-",
@@ -127,6 +137,9 @@ impl Kind {
     fn magic(self) -> &'static [u8] {
         match self {
             Self::Original => MAGIC,
+            Self::OrdinaryFinalPrepared => ORDINARY_FINAL_PREPARED_MAGIC,
+            Self::OrdinaryFinalSpent => ORDINARY_FINAL_SPENT_MAGIC,
+            Self::OrdinaryReleased => ORDINARY_RELEASED_MAGIC,
             Self::OrdinaryCurrentPrepared => ORDINARY_CURRENT_PREPARED_MAGIC,
             Self::OrdinaryCurrentSpent => ORDINARY_CURRENT_SPENT_MAGIC,
             Self::OrdinaryRootPrepared => ORDINARY_ROOT_PREPARED_MAGIC,
@@ -164,6 +177,25 @@ impl Kind {
                     .binding()
                     .dispatch_digest)
             }
+            Self::OrdinaryFinalPrepared | Self::OrdinaryFinalSpent => {
+                Ok(NativeDisplayOrdinaryFinalPreparation::decode(payload)?
+                    .parent()
+                    .parent()
+                    .parent()
+                    .parent()
+                    .parent()
+                    .binding()
+                    .dispatch_digest)
+            }
+            Self::OrdinaryReleased => Ok(NativeDisplayOrdinaryReleasedRecord::decode(payload)?
+                .parent()
+                .parent()
+                .parent()
+                .parent()
+                .parent()
+                .parent()
+                .binding()
+                .dispatch_digest),
             Self::OrdinaryCurrentPrepared | Self::OrdinaryCurrentSpent => {
                 Ok(NativeDisplayOrdinaryCurrentPreparation::decode(payload)?
                     .parent()
@@ -281,6 +313,9 @@ impl Kind {
 /// structure grants neither current native authority nor permission to retire.
 #[derive(Default)]
 struct TerminalLineage {
+    ordinary_final_prepared: BTreeMap<String, NativeDisplayOrdinaryFinalPreparation>,
+    ordinary_final_spent: BTreeMap<String, NativeDisplayOrdinaryFinalPreparation>,
+    ordinary_released: BTreeMap<String, NativeDisplayOrdinaryReleasedRecord>,
     ordinary_current_prepared: BTreeMap<String, NativeDisplayOrdinaryCurrentPreparation>,
     ordinary_current_spent: BTreeMap<String, NativeDisplayOrdinaryCurrentPreparation>,
     ordinary_root_prepared: BTreeMap<String, NativeDisplayOrdinaryRootPreparation>,
@@ -332,6 +367,32 @@ impl TerminalLineage {
                     &mut self.successor_spent
                 };
                 if table.insert(key, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::OrdinaryFinalPrepared | Kind::OrdinaryFinalSpent => {
+                let record = NativeDisplayOrdinaryFinalPreparation::decode(bytes)?;
+                let key = record.frames().scope().original_dispatch().to_owned();
+                let table = if kind == Kind::OrdinaryFinalPrepared {
+                    &mut self.ordinary_final_prepared
+                } else {
+                    &mut self.ordinary_final_spent
+                };
+                if table.insert(key, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
+            Kind::OrdinaryReleased => {
+                let record = NativeDisplayOrdinaryReleasedRecord::decode(bytes)?;
+                let key = record
+                    .parent()
+                    .frames()
+                    .scope()
+                    .original_dispatch()
+                    .to_owned();
+                if self.ordinary_released.insert(key, record).is_some() {
                     return Err(unavailable());
                 }
                 Ok(())
@@ -589,6 +650,33 @@ impl TerminalLineage {
     }
 
     fn verify(&self) -> Result<(), String> {
+        for (key, record) in &self.ordinary_final_prepared {
+            if self
+                .ordinary_current_spent
+                .get(key)
+                .is_none_or(|p| p.canonical_bytes() != record.parent().canonical_bytes())
+            {
+                return Err(unavailable());
+            }
+        }
+        for (key, record) in &self.ordinary_final_spent {
+            if self
+                .ordinary_final_prepared
+                .get(key)
+                .is_none_or(|p| p.canonical_bytes() != record.canonical_bytes())
+            {
+                return Err(unavailable());
+            }
+        }
+        for (key, record) in &self.ordinary_released {
+            if self
+                .ordinary_final_spent
+                .get(key)
+                .is_none_or(|p| p.canonical_bytes() != record.parent().canonical_bytes())
+            {
+                return Err(unavailable());
+            }
+        }
         for (key, record) in &self.ordinary_current_prepared {
             let parent = self
                 .ordinary_root_prepared
@@ -841,6 +929,9 @@ impl TerminalLineage {
 fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
     for kind in [
         Kind::Original,
+        Kind::OrdinaryFinalPrepared,
+        Kind::OrdinaryFinalSpent,
+        Kind::OrdinaryReleased,
         Kind::OrdinaryCurrentPrepared,
         Kind::OrdinaryCurrentSpent,
         Kind::OrdinaryRootPrepared,
@@ -1540,6 +1631,82 @@ fn read_ordinary_power_at(
             record,
             lineage
                 .ordinary_power_spent
+                .contains_key(scope.original_dispatch()),
+        )))
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(record), Ok(())) => Ok(record),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
+/// Preparation/spend provenance only, not native current qualification.
+pub(super) fn reserve_ordinary_final(
+    record: &NativeDisplayOrdinaryFinalPreparation,
+    spent: bool,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record
+            .parent()
+            .parent()
+            .parent()
+            .parent()
+            .parent()
+            .binding()
+            .dispatch_digest,
+        &record.canonical_bytes(),
+        if spent {
+            Kind::OrdinaryFinalSpent
+        } else {
+            Kind::OrdinaryFinalPrepared
+        },
+    )
+}
+pub(super) fn read_ordinary_final(
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<(NativeDisplayOrdinaryFinalPreparation, bool)>, String> {
+    read_ordinary_final_at(&open()?, 0, scope)
+}
+fn read_ordinary_final_at(
+    fd: &OwnedFd,
+    uid: u32,
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<(NativeDisplayOrdinaryFinalPreparation, bool)>, String> {
+    directory(fd, uid, false)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, name)?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        let Some(record) = lineage
+            .ordinary_final_prepared
+            .remove(scope.original_dispatch())
+        else {
+            return Ok(None);
+        };
+        if record.frames().scope() != scope {
+            return Err(unavailable());
+        }
+        Ok(Some((
+            record,
+            lineage
+                .ordinary_final_spent
                 .contains_key(scope.original_dispatch()),
         )))
     })();
@@ -2554,6 +2721,103 @@ pub(super) fn read_released_current(
     read_final_lineage_at(&open()?, 0, retained, |lineage, scope| {
         lineage.released_current.remove(scope)
     })
+}
+
+pub(super) fn reserve_ordinary_released(
+    record: &NativeDisplayOrdinaryReleasedRecord,
+) -> Result<(), String> {
+    let bytes = record.canonical_bytes();
+    let directory_fd = open()?;
+    let digest = Kind::OrdinaryReleased.dispatch(&bytes)?;
+    if reserve_kind_at(&directory_fd, 0, &digest, &bytes, Kind::OrdinaryReleased).is_ok() {
+        return Ok(());
+    }
+    // Metadata completion may recover a failed sync, never rewrite conflicting
+    // bytes or replay a native grant. Confirm every immutable parent under the
+    // directory lock, then sync the exact retained file AND directory again.
+    fs::flock(&directory_fd, FlockOperation::NonBlockingLockExclusive)
+        .map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(&directory_fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, payload) = read_named_record(&directory_fd, 0, entry.file_name())?;
+            lineage.observe(kind, &payload)?;
+        }
+        lineage.verify()?;
+        let scope = record.parent().frames().scope().original_dispatch();
+        if lineage
+            .ordinary_released
+            .get(scope)
+            .is_none_or(|old| old.canonical_bytes() != bytes)
+        {
+            return Err(unavailable());
+        }
+        let fd = fs::openat(
+            &directory_fd,
+            Kind::OrdinaryReleased.name(&digest),
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .map_err(|_| unavailable())?;
+        record_metadata(&fs::fstat(&fd).map_err(|_| unavailable())?, 0)?;
+        fs::fsync(&fd).map_err(|_| unavailable())?;
+        fs::fsync(&directory_fd).map_err(|_| unavailable())?;
+        if check_kind_record(fd, 0, &digest, Kind::OrdinaryReleased)? != bytes {
+            return Err(unavailable());
+        }
+        Ok(())
+    })();
+    let unlocked = fs::flock(&directory_fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(()), Ok(())) => Ok(()),
+        _ => Err(unavailable()),
+    }
+}
+pub(super) fn read_ordinary_released(
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<NativeDisplayOrdinaryReleasedRecord>, String> {
+    let fd = open()?;
+    directory(&fd, 0, false)?;
+    fs::flock(&fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(&fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(&fd, 0, entry.file_name())?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        let result = lineage.ordinary_released.remove(scope.original_dispatch());
+        if result
+            .as_ref()
+            .is_some_and(|r| r.parent().frames().scope() != scope)
+        {
+            return Err(unavailable());
+        }
+        Ok(result)
+    })();
+    let unlocked = fs::flock(&fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(v), Ok(())) => Ok(v),
+        (Err(e), _) | (_, Err(e)) => Err(e),
+    }
 }
 
 /// Both phases are exclusive before-effect records. Neither can authorize a

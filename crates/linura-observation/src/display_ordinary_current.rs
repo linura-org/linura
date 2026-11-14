@@ -394,9 +394,13 @@ impl DisplayOrdinaryCurrentFacts {
     /// Phase transition comparison only. The independently observed Root grant
     /// must still match current_commit_digest; this cannot create a lifetime.
     pub fn follows_current_qualification(&self, pending: &Self) -> bool {
+        self.final_retirement.is_none() && self.retains_current_qualification(pending)
+    }
+    /// Historical comparison only. A later final digest requires a separate
+    /// actual Root/native final-retirement join; this grants no phase authority.
+    pub fn retains_current_qualification(&self, pending: &Self) -> bool {
         if self.current_commit.is_none()
             || pending.current_commit.is_some()
-            || self.final_retirement.is_some()
             || pending.final_retirement.is_some()
             || !self.input_retired
             || self.power_fence_held
@@ -405,6 +409,7 @@ impl DisplayOrdinaryCurrentFacts {
         }
         let mut comparison = self.clone();
         comparison.current_commit = None;
+        comparison.final_retirement = None;
         comparison.reconciles(pending)
     }
     pub fn final_retirement_digest(&self) -> Option<&str> {

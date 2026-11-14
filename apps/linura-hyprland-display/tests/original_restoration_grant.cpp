@@ -728,6 +728,34 @@ void terminalComparison(const std::string &material)
         const auto finalBytes = framed(finalFields);
         assert(finalMatches(finalBytes));
         successorComparison(finalBytes);
+        auto ordinaryFinalFields = finalFields;
+        ordinaryFinalFields[0] = "linura.native-display.ordinary-final-retirement.v1";
+        ordinaryFinalFields[1] = ordinaryCommittedBytes;
+        const auto ordinaryCurrentDigest = nativeSha256(ordinaryCommittedBytes);
+        assert(ordinaryCurrentDigest);
+        const auto ordinaryFinalMatches = [&](std::string_view bytes,
+                                              ClockSample now = ClockSample{1100, 200}) {
+            return OriginalFinalRetirementCodec::matches(bytes, *ordinaryCurrentDigest, current,
+                                                         now, true);
+        };
+        const auto ordinaryFinalBytes = framed(ordinaryFinalFields);
+        assert(ordinaryFinalMatches(ordinaryFinalBytes));
+        assert(!ordinaryFinalMatches(finalBytes) && !finalMatches(ordinaryFinalBytes));
+        assert(!ordinaryFinalMatches(ordinaryFinalBytes, {1149, 249}) &&
+               !ordinaryFinalMatches(ordinaryFinalBytes, {1148, 250}));
+        for (std::size_t size = 0; size < ordinaryFinalBytes.size(); ++size)
+            assert(!ordinaryFinalMatches(std::string_view(ordinaryFinalBytes).substr(0, size)));
+        assert(!ordinaryFinalMatches(ordinaryFinalBytes + 'x'));
+        for (const auto index : {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U,
+                                 15U, 16U, 17U, 18U}) {
+            auto changed = ordinaryFinalFields;
+            if (index == 1)
+                changed[index] = committedBytes;
+            else
+                changed[index] += '1';
+            assert(!ordinaryFinalMatches(framed(changed)));
+        }
+
         for (const auto now : {ClockSample{1149, 249}, ClockSample{1148, 250},
                                ClockSample{1089, 200}, ClockSample{1100, 189}})
             assert(!finalMatches(finalBytes, now));

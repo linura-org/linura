@@ -121,6 +121,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                  const NativeDisplayCorrelation &, const QString &digest,
                                  const QByteArray &preparation);
     [[nodiscard]] std::optional<quint32>
+    retireOrdinaryDisplayCurrent(const NativeDisplayOrdinaryReleaseIntent &intent,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
     commitOriginalDisplayCurrent(const NativeDisplayFinalizationIntent &intent,
                                  const NativeDisplayCorrelation &, const QString &digest,
                                  const QByteArray &preparation);

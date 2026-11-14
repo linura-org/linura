@@ -1258,3 +1258,17 @@ comparison requires matching current Root permission, actual native current
 lifetime and retained preparation/committed evidence. Early signed Committed
 retains final fences, successor exclusion and recovery references across
 restart, lost acknowledgments and competing operations.
+
+
+Ordinary final display retirement uses a separate, actual-channel `LOCA` purpose
+and full ordinary-current parent. Control consumes the retained ordinary review
+before durable preparation and revalidates its canonical plan/policy at the final
+effect boundary. Root and native ACKs are comparison milestones; independent
+current/lock/input/power verification must match Root's full before-final frame
+checkpoint before Control records a first immutable final proof. Restart and lost
+ACK paths can reconcile that proof and ReleasedCurrent metadata but cannot rebuild
+an effect grant. Root publishes phase three only after durable full-parent
+completion and the actual witness transition; Control then independently matches
+Root/native and durable signed history. Early signed Committed does not admit a
+successor or authorize recovery-history deletion. The later adoption/supersession
+and reference-aware cleanup gates remain separate.
