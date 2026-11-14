@@ -9,7 +9,7 @@ inline constexpr std::size_t MaxPreparation =
 // spends the digest of THESE bytes; every post-ACK physical guard still runs.
 inline std::optional<ClockSample> matches(std::string_view bytes, std::string_view parentDigest,
                                           const NativeFirstFrameGate::Receipt &physical,
-                                          ClockSample now)
+                                          ClockSample now, bool ordinary = false)
 {
     if (bytes.empty() || bytes.size() > MaxPreparation || !physical.completedCount ||
         physical.completedCount > DisplayTransaction::MaxHeads)
@@ -17,9 +17,11 @@ inline std::optional<ClockSample> matches(std::string_view bytes, std::string_vi
     const auto next = [&](std::size_t limit) { return OriginalGrantCodec::field(bytes, limit); };
     const auto domain = next(64), parent = next(OriginalCompletionGrantCodec::MaxPreparation);
     const auto preparation = next(64), checkpoint = next(64);
-    if (!domain || *domain != "linura.native-display.power-retirement.v1" || !parent ||
-        nativeSha256(*parent) != std::optional{std::string(parentDigest)} || !preparation ||
-        !checkpoint || !OriginalGrantCodec::digest(*preparation) ||
+    if (!domain ||
+        *domain != (ordinary ? "linura.native-display.ordinary-power-retirement.v1"
+                             : "linura.native-display.power-retirement.v1") ||
+        !parent || nativeSha256(*parent) != std::optional{std::string(parentDigest)} ||
+        !preparation || !checkpoint || !OriginalGrantCodec::digest(*preparation) ||
         !OriginalGrantCodec::digest(*checkpoint) || *preparation == *checkpoint)
         return {};
     const auto number = [&]() -> std::optional<std::uint64_t> {

@@ -7,6 +7,10 @@ use linura_core::{CapabilityId, ProviderId, ResourceId};
 
 mod display_ordinary_completion;
 mod display_ordinary_current;
+mod display_ordinary_power_retirement;
+pub use display_ordinary_power_retirement::{
+    DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY, DisplayOrdinaryPowerRetirementFacts,
+};
 mod display_ordinary_handoff;
 mod display_ordinary_original;
 mod display_ordinary_release;

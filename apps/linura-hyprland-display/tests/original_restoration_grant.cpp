@@ -561,6 +561,32 @@ void terminalComparison(const std::string &material)
         };
         const auto powerBytes = framed(powerFields);
         assert(powerMatches(powerBytes));
+        // Ordinary and recovery comparisons have separate complete parents and
+        // domains. These fixture bytes cannot construct a Root lifetime.
+        auto ordinaryPowerFields = powerFields;
+        ordinaryPowerFields[0] = "linura.native-display.ordinary-power-retirement.v1";
+        ordinaryPowerFields[1] = ordinary;
+        const auto ordinaryPowerBytes = framed(ordinaryPowerFields);
+        const auto ordinaryFingerprint = nativeSha256(ordinary);
+        assert(ordinaryFingerprint);
+        const auto ordinaryPowerMatches = [&](std::string_view value) {
+            return OriginalPowerRetirementCodec::matches(value, *ordinaryFingerprint, current,
+                                                         {1100, 200}, true);
+        };
+        assert(ordinaryPowerMatches(ordinaryPowerBytes));
+        assert(!powerMatches(ordinaryPowerBytes) && !ordinaryPowerMatches(powerBytes));
+        assert(!OriginalPowerRetirementCodec::matches(ordinaryPowerBytes, *fingerprint, current,
+                                                      {1100, 200}, true));
+        for (std::size_t size = 0; size < ordinaryPowerBytes.size(); ++size)
+            assert(!ordinaryPowerMatches(std::string_view(ordinaryPowerBytes).substr(0, size)));
+        assert(!ordinaryPowerMatches(ordinaryPowerBytes + 'x'));
+        for (const auto index : {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U,
+                                 15U, 16U, 17U, 18U}) {
+            auto changed = ordinaryPowerFields;
+            changed[index] += '1';
+            assert(!ordinaryPowerMatches(framed(changed)));
+        }
+
         assert(!powerMatches(powerBytes, {1149, 249}));
         assert(!powerMatches(powerBytes, {1148, 250}));
         assert(!powerMatches(powerBytes, {1089, 200}));

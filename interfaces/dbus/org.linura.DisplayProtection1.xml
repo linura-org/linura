@@ -101,6 +101,18 @@
       <arg name="preparation" type="ay" direction="out"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <method name="ReserveOrdinaryPowerRetirement">
+      <!-- Exact original Control only. LNPP before a separately authenticated
+           LNPR spend. This retires no Root protection or startup barrier. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryPowerRetirement">
+      <!-- Prepared (1) or grant-spent (2), never physical retirement proof. -->
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <method name="ReadOrdinaryCompletion">
       <arg name="ordinary_scope" type="s" direction="in"/>
       <arg name="preparation" type="ay" direction="out"/>

@@ -911,3 +911,32 @@ Indeterminate, the original terminal is unchanged, and no review, effect,
 successor or cleanup permission is recreated. Ordered ordinary native/Root power
 retirement and matching ReleasedCurrent/final-retirement records remain required
 before implementation acceptance.
+
+### Ordinary native-power retirement
+
+Ordinary completion now carries its own one-use native-power continuation. Control
+consumes the same live authenticated review, independently verifies current
+ordinary scanout and input retirement, and durably retains the complete
+before-effect current-frame checkpoint before its single dispatch. Publication
+and readback failures consume that attempt; fresh observation and canonical
+plan/policy revalidation occur again after publication.
+
+The private ordinary-power preparation embeds its complete ordinary completion
+parent. Root requires the actual transferred lifetime, original Control owner and
+exact retained ancestry. Its LNOY/LNOZ records and ordinary-purpose LOPR channel
+cannot alias original-restoration power permission. The native compositor checks
+its actual ordinary lifetime, current frame state and drained input before
+retiring only its own power inhibitor. Root's independent power, kernel, startup
+and final-retirement fences remain held.
+
+A spent Root permission or native ACK is insufficient evidence of physical
+retirement. Control independently compares fresh native absence and Root spend
+with the immutable before-effect checkpoint. Restart and lost-ACK recovery
+provide comparison only; neither can recreate the review or replay the effect.
+Signed release state remains Indeterminate, and the earlier signed original
+Committed terminal cannot permit a successor or recovery cleanup.
+
+Ordinary Root-power retirement, signed/native current commit and matching final
+ReleasedCurrent completion remain implementation work. Stage 5 adoption,
+supersession and reference-aware retention and all applicable real compositor
+acceptance gates remain outstanding. Production mutations remain disabled.

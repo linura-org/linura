@@ -1595,6 +1595,51 @@ NativeWaylandLock::retireOriginalDisplayPower(const NativeDisplayFinalizationInt
 }
 
 std::optional<quint32>
+NativeWaylandLock::retireOrdinaryDisplayPower(const NativeDisplayOrdinaryReleaseIntent &intent,
+                                              const NativeDisplayCorrelation &bound,
+                                              const QString &digest, const QByteArray &preparation)
+{
+    if (!impl_->initialized || impl_->painting || impl_->pumping ||
+        impl_->ordinaryReleaseMaterial != intent.encode() ||
+        requestedSecure() != secureCoverage() || thread() != QThread::currentThread() ||
+        impl_->powerRetirementAttempted || !currentOrdinaryDisplayHandoff(bound) ||
+        !impl_->protectedInteraction || digest.size() != 64 ||
+        digest == QString(64, QLatin1Char('0')) ||
+        !std::all_of(digest.begin(), digest.end(), [](QChar c) {
+            return (c >= QLatin1Char('0') && c <= QLatin1Char('9')) ||
+                   (c >= QLatin1Char('a') && c <= QLatin1Char('f'));
+        }))
+        return std::nullopt;
+    const auto now = NativeDisplayClock::sample();
+    if (!now || !bound.valid() || now->unixMs >= bound.deadlineUnixMs ||
+        bound.deadlineUnixMs - now->unixMs > 2000)
+        return std::nullopt;
+    namespace Codec = Linura::HyprlandDisplay::OriginalPowerRetirementCodec;
+    const auto descriptor =
+        Linura::HyprlandDisplay::SealedNativeMaterial::create<Codec::MaxPreparation>(
+            std::string_view(preparation.constData(),
+                             static_cast<std::size_t>(preparation.size())));
+    if (!descriptor)
+        return std::nullopt;
+    impl_->powerRetirementAttempted = true;
+    const auto epoch = impl_->protectedStatus->epoch;
+    impl_->protectedStatus.reset();
+    const auto bytes = digest.toLatin1();
+    linura_protected_display_interaction_v1_retire_power(impl_->protectedInteraction,
+                                                         descriptor->get(), bytes.constData());
+    impl_->flush();
+    if (!waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(1000)) ||
+        !impl_->protectedStatus || impl_->protectedStatus->epoch != epoch ||
+        impl_->protectedStatus->phase != NativeDisplayPromptStatus::Phase::Consumed)
+        return std::nullopt;
+    const auto after = NativeDisplayClock::sample();
+    if (!after || after->unixMs < now->unixMs || after->bootMs < now->bootMs ||
+        after->unixMs >= bound.deadlineUnixMs || after->bootMs - now->bootMs >= 1000)
+        return std::nullopt;
+    return 9; // Effect ACK; Control independently verifies the actual power state.
+}
+
+std::optional<quint32>
 NativeWaylandLock::transferDisplayCompletion(const NativeDisplayCorrelation &bound,
                                              const QString &digest, int grant)
 {

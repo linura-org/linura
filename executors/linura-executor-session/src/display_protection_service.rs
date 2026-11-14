@@ -14,12 +14,12 @@ use linura_linux_session::{
     MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayCompletionPreparation,
     NativeDisplayCurrentCommitPreparation, NativeDisplayFinalRetirementPreparation,
     NativeDisplayFinalizationReservation, NativeDisplayKernelSubscription,
-    NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryReleasePreparation,
-    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
-    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
-    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
-    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeDisplaySuccessorPreparation,
-    NativeSessionChannel, NativeSessionRole,
+    NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryPowerPreparation,
+    NativeDisplayOrdinaryReleasePreparation, NativeDisplayPowerRetirementPreparation,
+    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
+    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
+    NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
+    NativeDisplaySuccessorPreparation, NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -36,6 +36,7 @@ mod current_commit;
 mod final_retirement;
 mod ordinary;
 mod ordinary_completion;
+mod ordinary_power;
 mod power;
 mod root_power;
 mod successor;
@@ -139,6 +140,7 @@ struct Admission {
         ),
     >,
     completions: BTreeMap<String, CompletionReservation>,
+    ordinary_power_retirements: BTreeMap<String, PowerRetirementReservation>,
     power_retirements: BTreeMap<String, PowerRetirementReservation>,
     root_power_retirements: BTreeMap<String, RootPowerRetirementReservation>,
     current_commits: BTreeMap<String, CurrentCommitReservation>,
@@ -420,6 +422,16 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         &self,
         sender: &str,
         scope: linura_core::DisplayRecoveryScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
+    fn reserve_ordinary_power_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryPowerPreparation,
+    ) -> zbus::fdo::Result<bool>;
+    fn read_ordinary_power_retirement(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32)>;
 
     fn reserve_ordinary_completion_grant(
@@ -909,6 +921,20 @@ impl ProtectionPort for NativeProtection {
         scope: linura_core::DisplayRecoveryScope,
     ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
         self.read_power_mechanism(sender, scope)
+    }
+    fn reserve_ordinary_power_retirement(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryPowerPreparation,
+    ) -> zbus::fdo::Result<bool> {
+        self.reserve_ordinary_power_mechanism(sender, record)
+    }
+    fn read_ordinary_power_retirement(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        self.read_ordinary_power_mechanism(sender, scope)
     }
 
     fn reserve_ordinary_completion_grant(
@@ -2182,6 +2208,47 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
+    #[zbus(out_args("accepted"))]
+    async fn reserve_ordinary_power_retirement(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayOrdinaryPowerPreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service
+                .port
+                .reserve_ordinary_power_retirement(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "phase"))]
+    async fn read_ordinary_power_retirement(
+        &self,
+        ordinary_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_power_retirement(&sender, scope)
+        })
+        .await
+    }
 
     #[zbus(out_args("grant"))]
     async fn reserve_ordinary_completion_grant(
@@ -2709,6 +2776,20 @@ mod tests {
         ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
             Err(unavailable())
         }
+        fn reserve_ordinary_power_retirement(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryPowerPreparation,
+        ) -> zbus::fdo::Result<bool> {
+            Err(unavailable())
+        }
+        fn read_ordinary_power_retirement(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, u32)> {
+            Err(unavailable())
+        }
         fn reserve_ordinary_completion_grant(
             &self,
             _: &str,
@@ -2854,7 +2935,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 30);
+            assert_eq!(text.matches("<method ").count(), 32);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2891,6 +2972,8 @@ mod tests {
             "ReadOriginal",
             "ReadFinalization",
             "ReadOrdinaryCompletion",
+            "ReserveOrdinaryPowerRetirement",
+            "ReadOrdinaryPowerRetirement",
             "ReserveOrdinaryCompletionGrant",
             "ReadCompletion",
             "ReserveCompletionGrant",

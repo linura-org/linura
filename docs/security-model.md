@@ -1216,3 +1216,15 @@ source, logind and S17 state and rechecks every immutable preparation/proof befo
 returning comparison evidence. Neither this read nor an earlier signed Committed
 original state can retire another fence, admit a successor or delete recovery
 history. Uncertain or substituted ancestry fails closed.
+
+Ordinary native-power retirement has a distinct full-parent preparation and
+actual credential-bound LOPR lifetime, separate from original-restoration LNPR.
+Control consumes the existing live review before fallible work and retains a
+complete immutable current-frame checkpoint before dispatch. Root's bounded
+LNOY/LNOZ publication requires actual original Control ownership, transferred
+lifetime and full retained ancestry; disk records cannot recreate authority.
+Native execution checks current ordinary scanout and retired input and drops only
+the native inhibitor. Root's independent power/kernel/startup protection remains.
+Fresh post-effect native state and Root spend must independently agree with the
+retained before-effect checkpoint. Lost ACKs and restarts permit read-only
+comparison, never replay, successor admission, cleanup or signed completion.

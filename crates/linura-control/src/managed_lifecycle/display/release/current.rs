@@ -20,7 +20,7 @@ fn unavailable_at(stage: &str) -> ManagedLifecycleError {
 
 #[derive(Debug)]
 pub struct OrdinaryDisplayCurrentInspection {
-    observation: ObservationEnvelope,
+    pub(super) observation: ObservationEnvelope,
     frames: DisplayOrdinaryCurrentFacts,
     root: DisplayOrdinaryCompletionFacts,
     release: TransactionSnapshot,
@@ -61,6 +61,25 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         release_request: &RequestId,
         attempt: &mut P,
         verifier: &mut V,
+    ) -> Result<OrdinaryDisplayCurrentInspection, ManagedLifecycleError> {
+        self.inspect_current_ordinary_display_completion_phase(
+            principal,
+            release_request,
+            attempt,
+            verifier,
+            true,
+        )
+    }
+    pub(super) fn inspect_current_ordinary_display_completion_phase<
+        P: DisplayTransactionPort,
+        V: IndependentDisplayVerifier,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        release_request: &RequestId,
+        attempt: &mut P,
+        verifier: &mut V,
+        power_held: bool,
     ) -> Result<OrdinaryDisplayCurrentInspection, ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let checked = self.checked_display_history()?;
@@ -190,7 +209,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || lineage.release_dispatch != dispatch
             || !native.follows_handoff(root_facts.first())
             || native.completion_digest() != comparison.record
-            || !native.power_fence_held()
+            || native.power_fence_held() != power_held
             || native.current_commit_digest().is_some()
             || native.final_retirement_digest().is_some()
             || native.lineage().original_transaction

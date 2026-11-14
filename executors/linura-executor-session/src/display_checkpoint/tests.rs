@@ -2649,3 +2649,142 @@ fn ordinary_completion_needs_exact_spent_parent_preserves_history_and_cannot_rep
             .exists()
     );
 }
+
+#[test]
+fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncertainty() {
+    use linura_observation::{
+        DisplayNativeCurrentOutput, DisplayNativeHandoffWindow, DisplayOrdinaryCurrentFacts,
+    };
+    let fixture = Fixture::new();
+    let (original, parent) = ordinary_release_fixture(11);
+    let completion = ordinary_completion_fixture(&parent);
+    let first = completion.frames();
+    let frames = DisplayOrdinaryCurrentFacts::new(
+        first.scope().clone(),
+        first.lineage().clone(),
+        DisplayNativeHandoffWindow {
+            observed_unix_ms: 3000,
+            observed_boot_ms: 2100,
+            deadline_unix_ms: 4000,
+            deadline_boot_ms: 3100,
+        },
+        first
+            .outputs()
+            .iter()
+            .map(|(id, old)| {
+                (
+                    id.clone(),
+                    DisplayNativeCurrentOutput {
+                        enabled: old.enabled,
+                        connector: old.connector,
+                        crtc: old.crtc,
+                        plane: old.plane,
+                        framebuffer: if old.enabled { 12 } else { 0 },
+                        handoff_commit: old.completed_commit,
+                        completed_commit: old.completed_commit + u64::from(old.enabled),
+                    },
+                )
+            })
+            .collect(),
+        completion.record_digest().to_hex(),
+        true,
+        true,
+        None,
+        None,
+    )
+    .unwrap_or_else(|e| unreachable!("{e:?}"));
+    // Fresh comparison follows the immutable first tuple; it does not renew its
+    // old effect window or recreate any live Root/native peer.
+    assert!(frames.window().observed_unix_ms > first.window().deadline_unix_ms);
+    let record = NativeDisplayOrdinaryPowerPreparation::new(
+        &completion,
+        ComponentDigest::from_bytes([14; 32]),
+        ComponentDigest::from_bytes([15; 32]),
+        &frames,
+        3900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let bytes = record.canonical_bytes();
+    assert_eq!(
+        NativeDisplayOrdinaryPowerPreparation::decode(&bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        bytes
+    );
+    for end in [0, 1, 7, 8, 9, 64, bytes.len() / 2, bytes.len() - 1] {
+        assert!(NativeDisplayOrdinaryPowerPreparation::decode(&bytes[..end]).is_err());
+    }
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinaryPowerPreparation::decode(&trailing).is_err());
+    assert!(NativeDisplayPowerRetirementPreparation::decode(&bytes).is_err());
+    assert!(NativeDisplayOrdinaryPowerPreparation::decode(&completion.canonical_bytes()).is_err());
+    let publish = |kind, payload: &[u8]| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &parent.binding().dispatch_digest,
+            payload,
+            kind,
+        )
+    };
+    assert!(publish(Kind::OrdinaryPowerPrepared, &bytes).is_err());
+    let original_dispatch = NativeDisplayRecoveryCheckpoint::stored_dispatch(&original)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    reserve_at(&fixture.fd, fixture.uid, &original_dispatch, &original)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    for (kind, payload) in [
+        (Kind::OrdinaryReleasePrepared, parent.canonical_bytes()),
+        (Kind::OrdinaryReleaseSpent, parent.canonical_bytes()),
+        (
+            Kind::OrdinaryCompletionPrepared,
+            completion.canonical_bytes(),
+        ),
+    ] {
+        publish(kind, &payload).unwrap_or_else(|e| unreachable!("{e}"));
+    }
+    assert!(publish(Kind::OrdinaryPowerPrepared, &bytes).is_err());
+    publish(Kind::OrdinaryCompletionSpent, &completion.canonical_bytes())
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryPowerSpent, &bytes).is_err());
+    publish(Kind::OrdinaryPowerPrepared, &bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    let (_, spent) = read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope())
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("prepared"));
+    assert!(!spent);
+    assert!(publish(Kind::OrdinaryPowerPrepared, &bytes).is_err());
+    let wrong = NativeDisplayOrdinaryPowerPreparation::new(
+        &completion,
+        ComponentDigest::from_bytes([16; 32]),
+        ComponentDigest::from_bytes([15; 32]),
+        &frames,
+        3900,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryPowerSpent, &wrong.canonical_bytes()).is_err());
+    publish(Kind::OrdinaryPowerSpent, &bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(Kind::OrdinaryPowerSpent, &bytes).is_err());
+    let (read, spent) = read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope())
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!("spent"));
+    assert!(spent);
+    assert_eq!(read.canonical_bytes(), bytes);
+    assert!(read_ordinary_power_at(&fixture.fd, fixture.uid + 1, first.scope()).is_err());
+    let path = fixture.path.join(format!(
+        "ordinary-completion-spent-{}.checkpoint",
+        parent.binding().dispatch_digest.to_hex()
+    ));
+    std::fs::rename(&path, fixture.path.join("missing-parent.backup"))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(read_ordinary_power_at(&fixture.fd, fixture.uid, first.scope()).is_err());
+    assert!(!startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}")));
+    assert!(
+        fixture
+            .path
+            .join(format!(
+                "ordinary-power-spent-{}.checkpoint",
+                parent.binding().dispatch_digest.to_hex()
+            ))
+            .exists()
+    );
+}

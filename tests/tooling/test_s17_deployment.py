@@ -244,6 +244,8 @@ class S17DeploymentTests(unittest.TestCase):
                     "ReserveCompletionGrant",
                     "ReserveOrdinaryCompletionGrant",
                     "ReadOrdinaryCompletion",
+                    "ReserveOrdinaryPowerRetirement",
+                    "ReadOrdinaryPowerRetirement",
                 )
             ],
         )

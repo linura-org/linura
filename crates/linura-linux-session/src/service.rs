@@ -401,6 +401,94 @@ impl NativeSessionChannel {
         Ok(observation)
     }
 
+    pub(crate) fn observe_ordinary_display_power_retirement(
+        &self,
+        scope: &linura_core::DisplayOrdinaryReleaseScope,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::DisplayOrdinaryPowerRetirementFacts;
+        use sha2::Digest;
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "original completion lifetime unavailable; no reconstruction".to_owned();
+        if sequence == 0 || crate::owner::current_boot()? != *scope.topology().session().boot() {
+            return Err(invalid());
+        }
+        let started = Instant::now();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let resource = scope.resource_id().map_err(|_| invalid())?;
+        let reply = self.call(
+            &identity.sender,
+            "/org/linura/DisplayProtection1",
+            "org.linura.DisplayProtection1",
+            "ReadOrdinaryPowerRetirement",
+            &(resource.as_str(),),
+            started,
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "ayu"
+            || reply.body().len() > crate::MAX_NATIVE_DISPLAY_ORDINARY_POWER + 32
+        {
+            return Err(invalid());
+        }
+        let (bytes, phase): (Vec<u8>, u32) = reply.body().deserialize().map_err(|_| invalid())?;
+        if !matches!(phase, 1 | 2) {
+            return Err(invalid());
+        }
+        let record = crate::NativeDisplayOrdinaryPowerPreparation::decode(&bytes)?;
+        let facts = DisplayOrdinaryPowerRetirementFacts::new(
+            scope.clone(),
+            ComponentDigest::from_bytes(sha2::Sha256::digest(&bytes).into()).to_hex(),
+            ComponentDigest::from_bytes(
+                sha2::Sha256::digest(record.parent().canonical_bytes()).into(),
+            )
+            .to_hex(),
+            record.preparation_digest().to_hex(),
+            record.checkpoint_digest().to_hex(),
+            phase == 2,
+        )
+        .map_err(|_| invalid())?;
+        if record.parent().frames().scope() != scope
+            || self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *scope.topology().session().boot()
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let observation = linura_observation::ObservationEnvelope {
+            provider: linura_core::ProviderId::new(linura_observation::DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(
+                linura_observation::DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            resource,
+            authority: linura_observation::ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayOrdinaryPowerRetirementFacts::from_envelope(&observation, scope, now)
+            .map_err(|_| invalid())?;
+        Ok(observation)
+    }
+
     pub(crate) fn observe_display_successor(
         &self,
         scope: &linura_core::DisplayRecoveryScope,

@@ -129,6 +129,7 @@ pub(super) fn serve_ordinary(
     authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     verify: impl FnMut(bool) -> zbus::fdo::Result<()>,
     transfer: impl FnMut() -> zbus::fdo::Result<super::display_native_release_grant::Transferred>,
+    retire_power: impl FnMut(&[u8; 32]) -> zbus::fdo::Result<()>,
 ) -> zbus::fdo::Result<()> {
     serve_with_anchor(
         stream,
@@ -138,7 +139,7 @@ pub(super) fn serve_ordinary(
         authenticate,
         verify,
         transfer,
-        |_| Err(unavailable()),
+        retire_power,
         |_| Err(unavailable()),
         |_| Err(unavailable()),
         |_| Err(unavailable()),
@@ -207,7 +208,13 @@ fn serve_with_anchor<A: CompletionAnchor>(
                 Err(_) => return Err(unavailable()),
             }
         }
-        let power = !ordinary && sequence > 1 && &bytes[..8] == b"LNPR:1\n\0";
+        let power = sequence > 1
+            && &bytes[..8]
+                == if ordinary {
+                    b"LOPR:1\n\0"
+                } else {
+                    b"LNPR:1\n\0"
+                };
         let current = !ordinary && sequence > 1 && &bytes[..8] == b"LNCF:1\n\0";
         let retirement = !ordinary && sequence > 1 && &bytes[..8] == b"LNCA:1\n\0";
         let successor = !ordinary && sequence > 1 && &bytes[..8] == b"LNSA:1\n\0";
@@ -218,7 +225,11 @@ fn serve_with_anchor<A: CompletionAnchor>(
         } else if current {
             b"LNCF:1\n\0"
         } else if power {
-            b"LNPR:1\n\0"
+            if ordinary {
+                b"LOPR:1\n\0"
+            } else {
+                b"LNPR:1\n\0"
+            }
         } else if sequence == 1 {
             if ordinary {
                 b"LOCH:1\n\0"
@@ -940,7 +951,8 @@ mod tests {
                                 }
                                 Ok(moved)
                             }
-                        }
+                        },
+                        |_| Err(unavailable()),
                     )
                     .is_err()
                 );
@@ -999,6 +1011,101 @@ mod tests {
                 usize::from(matches!(fault, 0 | 4 | 6))
             );
             assert!(old.transfer().is_err());
+        }
+    }
+    #[test]
+    fn ordinary_power_has_distinct_one_use_spend_and_lost_ack_cannot_replay() {
+        use super::super::display_native_release_grant as ordinary;
+        for fault in 0..=5 {
+            let (mut old_root, mut old_native) = pair();
+            let old = ordinary::ChannelState::reserved();
+            let old_lifetime = ordinary::Lifetime::new(old.clone());
+            let old_worker = std::thread::spawn(move || {
+                value(ordinary::serve_ordinary(
+                    &mut old_root,
+                    &[6; 32],
+                    old_lifetime,
+                    identity,
+                    || Ok(()),
+                    || Ok(()),
+                ))
+            });
+            value(old_native.write_all(&frame(b"LNOW:1\n\0", 1, [6; 32])));
+            value(old_native.read_exact(&mut [0; FRAME_BYTES]));
+            let held = value(old_worker.join());
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let anchor = old.clone();
+            let spends = Arc::new(AtomicUsize::new(0));
+            let effects = spends.clone();
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (closed_tx, closed_rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                assert!(
+                    serve_ordinary(
+                        &mut root,
+                        &[7; 32],
+                        lifetime,
+                        identity,
+                        |_| Ok(()),
+                        || anchor.transfer(),
+                        |digest| {
+                            if digest != &[8; 32] {
+                                return Err(unavailable());
+                            }
+                            effects.fetch_add(1, Ordering::AcqRel);
+                            if fault == 2 {
+                                return Err(unavailable());
+                            }
+                            if fault == 4 {
+                                value(entered_tx.send(()));
+                                value(closed_rx.recv_timeout(Duration::from_secs(1)));
+                            }
+                            Ok(())
+                        }
+                    )
+                    .is_err()
+                );
+            });
+            if fault == 5 {
+                value(native.write_all(&frame(b"LOPR:1\n\0", 1, [8; 32])));
+                assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+            } else {
+                value(native.write_all(&frame(b"LOCH:1\n\0", 1, [7; 32])));
+                value(native.read_exact(&mut [0; FRAME_BYTES]));
+                drop(held); // The genuine anchor moved; old-worker exit cannot revoke it.
+                assert!(state.transferred());
+                value(native.write_all(&frame(
+                    if fault == 1 {
+                        b"LNPR:1\n\0"
+                    } else {
+                        b"LOPR:1\n\0"
+                    },
+                    2,
+                    if fault == 3 { [9; 32] } else { [8; 32] },
+                )));
+                if fault == 4 {
+                    value(entered_rx.recv_timeout(Duration::from_secs(1)));
+                    drop(native);
+                    value(closed_tx.send(()));
+                } else if fault == 0 {
+                    value(native.read_exact(&mut [0; FRAME_BYTES]));
+                    assert!(state.power_spent());
+                    value(native.write_all(&frame(b"LOCV:1\n\0", 3, [7; 32])));
+                    value(native.read_exact(&mut [0; FRAME_BYTES]));
+                    value(native.write_all(&frame(b"LOPR:1\n\0", 4, [8; 32])));
+                    assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+                } else {
+                    assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+                }
+            }
+            value(worker.join());
+            assert_eq!(
+                spends.load(Ordering::Acquire),
+                usize::from(matches!(fault, 0 | 2 | 4))
+            );
+            assert!(!state.transferred());
         }
     }
 }

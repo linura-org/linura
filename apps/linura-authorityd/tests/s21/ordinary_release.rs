@@ -398,6 +398,7 @@ fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committin
         );
     }
     ordinary_completion_requires_original_review_and_cannot_replay();
+    ordinary_power_requires_original_review_and_independent_physical_postconditions();
 }
 #[derive(Debug)]
 pub(super) struct OriginalObserver(pub(super) Arc<Mutex<Machine>>);
@@ -412,6 +413,7 @@ impl Observer for OriginalObserver {
             linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_COMPLETION_CAPABILITY,
+            linura_observation::DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY,
         ]
         .into_iter()
         .map(|id| Capability {
@@ -450,6 +452,13 @@ impl Observer for OriginalObserver {
             0,
             "history snapshot crossed Root observation"
         );
+        if capability.as_str() == linura_observation::DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY {
+            return observe_power(
+                &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         if capability.as_str() == linura_observation::DISPLAY_ORDINARY_COMPLETION_CAPABILITY {
             return observe_current(
                 &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
@@ -901,6 +910,10 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     assert_eq!(m.decisions, 0);
     assert_eq!(m.deadline, deadline);
     drop(m);
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .ordinary_handoff_enabled = true;
     let receipt = value(restarted.begin_ordinary_display_release(
         principal(),
         actor(true),
@@ -911,6 +924,25 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
         &mut release_port,
     ));
     assert!(receipt.dispatch_digest.is_some());
+    // Expiry has its own durable terminal. Continue the same authenticated
+    // ordinary review through actual completion/power ports, then only inspect
+    // after restart; timer expiry must never recreate execution authority.
+    value(restarted.dispatch_ordinary_display_completion(
+        principal(),
+        actor(true),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+        &mut CompletionPort(machine.clone(), false),
+    ));
+    value(restarted.retire_ordinary_display_native_power(
+        principal(),
+        actor(true),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+        &mut OrdinaryPowerPort(machine.clone(), 0),
+    ));
     drop(restarted);
     let mut restarted =
         open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
@@ -918,7 +950,7 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
         value(restarted.begin_ordinary_display_release(
             principal(),
             actor(true),
-            input,
+            input.clone(),
             &ReleaseApproval(machine.clone(), 1),
             &mut port,
             &mut verifier,
@@ -926,7 +958,32 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
         )),
         receipt
     );
+    let power = value(restarted.inspect_ordinary_display_native_power_retirement(
+        principal(),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+    ));
+    assert!(!power.current().frames().power_fence_held());
+    assert_eq!(
+        power.current().release().state,
+        linura_transaction::TransactionState::Indeterminate
+    );
+    assert!(
+        restarted
+            .retire_ordinary_display_native_power(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut OrdinaryPowerPort(machine.clone(), 0),
+            )
+            .is_err()
+    );
     let m = machine.lock().unwrap_or_else(|_| unreachable!());
+    assert_eq!(m.ordinary_completion_calls, 1);
+    assert_eq!(m.ordinary_power_calls, 1);
     assert_eq!(m.ordinary_release_approvals, 1);
     assert_eq!(m.ordinary_release_calls, 1);
     assert_eq!(m.applies, 1);
@@ -1700,8 +1757,8 @@ pub(super) fn observe_current(
                 })
                 .collect(),
             record.record_digest().to_hex(),
-            true,
-            true,
+            !m.ordinary_input_pending,
+            !m.ordinary_native_power_retired,
             None,
             None,
         )
@@ -1753,4 +1810,379 @@ pub(super) fn observe_current(
         sample.attributes.insert(key.into(), value);
     }
     Ok(sample)
+}
+
+// Real Control/SQLite with purpose-specific simulated Root/native power facts.
+pub(super) fn observe_power(
+    m: &mut Machine,
+    resource: &ResourceId,
+    capability: &CapabilityId,
+) -> Result<ObservationEnvelope, ProviderError> {
+    use linura_observation::{
+        DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
+        DisplayOrdinaryPowerRetirementFacts,
+    };
+    let fail = || ProviderError::Unavailable("simulated ordinary power source unavailable".into());
+    assert_eq!(m.checked_history_reads, 0);
+    if capability.as_str() != DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY {
+        return Err(fail());
+    }
+    let record = linura_linux_session::NativeDisplayOrdinaryPowerPreparation::decode(
+        m.ordinary_power_record.as_ref().ok_or_else(fail)?,
+    )
+    .map_err(|_| fail())?;
+    if record.frames().scope().resource_id().map_err(|_| fail())? != *resource {
+        return Err(fail());
+    }
+    let mut attrs = DisplayOrdinaryPowerRetirementFacts::new(
+        record.frames().scope().clone(),
+        record.record_digest().to_hex(),
+        record.parent().record_digest().to_hex(),
+        record.preparation_digest().to_hex(),
+        record.checkpoint_digest().to_hex(),
+        true,
+    )
+    .map_err(|_| fail())?
+    .attributes();
+    match m.ordinary_power_grant_fault {
+        1 => {
+            attrs.insert("grant_spent".into(), ObservedValue::Bool(false));
+        }
+        2 => {
+            attrs.insert(
+                "preparation_digest".into(),
+                ObservedValue::Text("9".repeat(64)),
+            );
+        }
+        3 => {
+            attrs.insert(
+                "checkpoint_digest".into(),
+                ObservedValue::Text("8".repeat(64)),
+            );
+        }
+        4 => {
+            attrs.insert(
+                "completion_digest".into(),
+                ObservedValue::Text("7".repeat(64)),
+            );
+        }
+        5 => return Err(fail()),
+        _ => (),
+    }
+    m.sequence += 1;
+    Ok(ObservationEnvelope {
+        provider: value(ProviderId::new(DISPLAY_RECOVERY_PROVIDER)),
+        capability: capability.clone(),
+        resource: resource.clone(),
+        authority: if m.ordinary_power_grant_fault == 6 {
+            ObservationAuthority::SyntheticTest
+        } else {
+            ObservationAuthority::NativeApi
+        },
+        observed_at_unix_ms: now_unix_ms(),
+        valid_for_ms: 2000,
+        sequence: m.sequence,
+        attributes: attrs,
+    })
+}
+#[derive(Debug)]
+struct OrdinaryPowerPort(Arc<Mutex<Machine>>, u8);
+impl linura_control::OrdinaryDisplayNativePowerRetirementPort for OrdinaryPowerPort {
+    fn retire_ordinary_native_power(
+        &mut self,
+        permit: linura_control::AuthorizedOrdinaryDisplayNativePowerRetirement,
+    ) -> Result<(), String> {
+        let mut m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(m.checked_history_reads, 0);
+        m.ordinary_power_calls += 1;
+        let parent = value(
+            linura_linux_session::NativeDisplayOrdinaryCompletionPreparation::decode(
+                m.ordinary_completion_record
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!()),
+            ),
+        );
+        assert_eq!(parent.frames(), permit.root().first());
+        assert!(permit.frames().input_retired() && permit.frames().power_fence_held());
+        assert_eq!(
+            permit.frames().completion_digest(),
+            parent.record_digest().to_hex()
+        );
+        assert!(now_unix_ms() < permit.expires_at_unix_ms());
+        let record = value(
+            linura_linux_session::NativeDisplayOrdinaryPowerPreparation::new(
+                &parent,
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    permit.preparation().hex(),
+                )),
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    permit.checkpoint().hex(),
+                )),
+                permit.frames(),
+                permit.expires_at_unix_ms(),
+            ),
+        );
+        m.ordinary_power_record = Some(record.canonical_bytes());
+        m.ordinary_native_power_retired = self.1 != 2;
+        if self.1 == 1 {
+            Err("simulated power ACK loss".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+fn ordinary_power_requires_original_review_and_independent_physical_postconditions() {
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
+    ] {
+        for fault in 0..=13 {
+            let database = TestDatabase::new();
+            let machine = Arc::new(Mutex::new(Machine::default()));
+            let mut port = Port(machine.clone());
+            let mut verifier = Verifier(machine.clone());
+            let original = display_request("ordinary-power-original");
+            let mut control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                original.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier,
+            ));
+            value(control.decide_display_layout(
+                principal(),
+                actor(true),
+                &original.request_id,
+                action,
+                &Decision::approve(&machine),
+                &mut port,
+                &mut verifier,
+            ));
+            let original_before = value(control.inspect_ordinary_display_original(
+                principal(),
+                &original.request_id,
+                &mut port,
+                &mut verifier,
+            ))
+            .original_snapshot()
+            .clone();
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_handoff_enabled = true;
+            let receipt = value(control.begin_ordinary_display_release(
+                principal(),
+                actor(true),
+                linura_control::OrdinaryDisplayReleaseRequest {
+                    operation_id: "ordinary-power-release".into(),
+                    original_request: original.request_id.clone(),
+                    reason: original.reason.clone(),
+                },
+                &ReleaseApproval(machine.clone(), 0),
+                &mut port,
+                &mut verifier,
+                &mut ReleasePort(machine.clone(), 0),
+            ));
+            let completion = control.dispatch_ordinary_display_completion(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut CompletionPort(machine.clone(), fault == 12),
+            );
+            assert_eq!(completion.is_ok(), fault != 12);
+            if fault == 3 {
+                drop(control);
+                control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+            }
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                if fault == 4 {
+                    m.ordinary_current_fault = 6;
+                }
+                if (5..=8).contains(&fault) {
+                    m.ordinary_power_store_fault = fault - 4;
+                }
+                if fault == 11 {
+                    m.ordinary_input_pending = true;
+                }
+            }
+            let mut power = OrdinaryPowerPort(
+                machine.clone(),
+                if fault == 1 {
+                    1
+                } else if fault == 2 {
+                    2
+                } else {
+                    0
+                },
+            );
+            if fault == 9 || fault == 10 || fault == 13 {
+                assert!(
+                    control
+                        .retire_ordinary_display_native_power(
+                            if fault == 10 {
+                                value(AuthenticatedPrincipal::new("unix:uid:1001"))
+                            } else {
+                                principal()
+                            },
+                            actor(fault != 9),
+                            if fault == 13 {
+                                &original.request_id
+                            } else {
+                                &receipt.request_id
+                            },
+                            &mut port,
+                            &mut verifier,
+                            &mut power
+                        )
+                        .is_err()
+                );
+            }
+            let start = now_unix_ms();
+            let result = control.retire_ordinary_display_native_power(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+                &mut power,
+            );
+            let dispatched = fault <= 2 || fault == 9 || fault == 10 || fault >= 12;
+            assert_eq!(
+                result.is_ok(),
+                dispatched && fault != 1,
+                "{action:?} power fault {fault}: {result:?}"
+            );
+            assert!(
+                now_unix_ms().saturating_sub(start) < 1900,
+                "fault must finish inside its independent original power window, not expire: {action:?}/{fault}"
+            );
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_current_fault = 0;
+                m.ordinary_power_store_fault = 0;
+                m.ordinary_input_pending = false;
+                assert_eq!(m.ordinary_power_calls, usize::from(dispatched));
+            }
+            assert!(
+                control
+                    .retire_ordinary_display_native_power(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut power
+                    )
+                    .is_err()
+            );
+            drop(control);
+            let mut restarted =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            assert!(
+                restarted
+                    .retire_ordinary_display_native_power(
+                        principal(),
+                        actor(true),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                        &mut power
+                    )
+                    .is_err()
+            );
+            let post = restarted.inspect_ordinary_display_native_power_retirement(
+                principal(),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+            );
+            assert_eq!(
+                post.is_ok(),
+                dispatched && fault != 2,
+                "{action:?} power post {fault}: {post:?}"
+            );
+            if let Ok(post) = post {
+                assert!(
+                    post.current().frames().input_retired()
+                        && !post.current().frames().power_fence_held()
+                );
+                assert_eq!(
+                    post.current().release().state,
+                    linura_transaction::TransactionState::Indeterminate
+                );
+            }
+            if fault == 0 {
+                for changed in 1..=6 {
+                    machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!())
+                        .ordinary_power_grant_fault = changed;
+                    assert!(
+                        restarted
+                            .inspect_ordinary_display_native_power_retirement(
+                                principal(),
+                                &receipt.request_id,
+                                &mut port,
+                                &mut verifier
+                            )
+                            .is_err()
+                    );
+                }
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_power_grant_fault = 0;
+                value(restarted.inspect_ordinary_display_native_power_retirement(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                assert!(
+                    restarted
+                        .begin_display_layout(
+                            principal(),
+                            actor(true),
+                            display_request("power-competing"),
+                            &approval(),
+                            &mut port,
+                            &mut verifier
+                        )
+                        .is_err()
+                );
+            }
+            assert_eq!(
+                value(restarted.inspect_ordinary_display_original(
+                    principal(),
+                    &original.request_id,
+                    &mut port,
+                    &mut verifier
+                ))
+                .original_snapshot(),
+                &original_before
+            );
+            let m = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert_eq!(
+                (
+                    m.applies,
+                    m.decisions,
+                    m.ordinary_release_calls,
+                    m.ordinary_completion_calls,
+                    m.ordinary_power_calls
+                ),
+                (1, 1, 1, 1, usize::from(dispatched))
+            );
+        }
+    }
 }

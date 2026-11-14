@@ -128,6 +128,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     retireOriginalDisplayPower(const NativeDisplayFinalizationIntent &intent,
                                const NativeDisplayCorrelation &, const QString &digest,
                                const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    retireOrdinaryDisplayPower(const NativeDisplayOrdinaryReleaseIntent &,
+                               const NativeDisplayCorrelation &, const QString &,
+                               const QByteArray &);
     [[nodiscard]] bool currentOrdinaryDisplayHandoff(const NativeDisplayCorrelation &);
     [[nodiscard]] bool currentOriginalDisplayHandoff(const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,

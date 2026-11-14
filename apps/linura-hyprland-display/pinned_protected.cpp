@@ -1341,8 +1341,9 @@ class PinnedScene final : public ProtectedScene
             const auto frame = readNativeCurrentComparison();
             const auto now = compositorClock();
             return frame && now &&
-                   OriginalPowerRetirementCodec::matches(
-                       *bytes, data->completionGrant->comparisonDigest(), *frame, *now)
+                   OriginalPowerRetirementCodec::matches(*bytes,
+                                                         data->completionGrant->comparisonDigest(),
+                                                         *frame, *now, data->ordinaryRelease)
                        .has_value();
         };
         if (!current() || !data->completionGrant->retirePower(digest) || !data->refreshCurrent() ||

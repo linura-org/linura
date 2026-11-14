@@ -8,11 +8,16 @@
 use super::*;
 mod completion;
 mod current;
+mod power;
 pub use completion::{
     AuthorizedOrdinaryDisplayCompletion, OrdinaryDisplayCompletionPort,
     OrdinaryDisplayCompletionReceipt,
 };
 pub use current::OrdinaryDisplayCurrentInspection;
+pub use power::{
+    AuthorizedOrdinaryDisplayNativePowerRetirement, OrdinaryDisplayNativePowerInspection,
+    OrdinaryDisplayNativePowerRetirementPort,
+};
 mod execution;
 mod original;
 pub use execution::{

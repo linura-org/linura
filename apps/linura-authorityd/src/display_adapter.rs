@@ -142,6 +142,22 @@ impl linura_control::OrdinaryDisplayCompletionPort for SessionExecutorClient {
         )
     }
 }
+impl linura_control::OrdinaryDisplayNativePowerRetirementPort for SessionExecutorClient {
+    fn retire_ordinary_native_power(
+        &mut self,
+        permit: linura_control::AuthorizedOrdinaryDisplayNativePowerRetirement,
+    ) -> Result<(), String> {
+        self.channel.retire_ordinary_display_native_power(
+            permit.root(),
+            permit.frames(),
+            linura_provider_sdk::ComponentDigest::parse_hex(permit.preparation().hex())
+                .map_err(|_| "ordinary power preparation invalid")?,
+            linura_provider_sdk::ComponentDigest::parse_hex(permit.checkpoint().hex())
+                .map_err(|_| "ordinary power checkpoint invalid")?,
+            permit.expires_at_unix_ms(),
+        )
+    }
+}
 impl linura_control::OriginalDisplayCompletionPort for SessionExecutorClient {
     fn dispatch_completion(
         &mut self,

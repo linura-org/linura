@@ -7,11 +7,12 @@ use linura_core::{
 };
 use linura_observation::{
     DISPLAY_ORDINARY_COMPLETION_CAPABILITY, DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
-    DISPLAY_ORDINARY_RELEASE_CAPABILITY, DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
-    DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
-    DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
-    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
-    DISPLAY_SUCCESSOR_CAPABILITY, ObservationEnvelope, ProviderAvailability, ProviderHealth,
+    DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY, DISPLAY_ORDINARY_RELEASE_CAPABILITY,
+    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
+    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY,
+    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
+    DISPLAY_RECOVERY_PROVIDER, DISPLAY_SUCCESSOR_CAPABILITY, ObservationEnvelope,
+    ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 
@@ -42,6 +43,7 @@ impl Observer for NativeOriginalDisplayObserver {
             DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
             DISPLAY_ORDINARY_RELEASE_CAPABILITY,
             DISPLAY_ORDINARY_COMPLETION_CAPABILITY,
+            DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY,
             DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY,
             DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
             DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY,
@@ -66,6 +68,7 @@ impl Observer for NativeOriginalDisplayObserver {
                 | DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
                 | DISPLAY_ORDINARY_RELEASE_CAPABILITY
                 | DISPLAY_ORDINARY_COMPLETION_CAPABILITY
+                | DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY
                 | DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY
                 | DISPLAY_ORIGINAL_PROTECTION_CAPABILITY
                 | DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY
@@ -118,6 +121,14 @@ impl Observer for NativeOriginalDisplayObserver {
             return self
                 .channel
                 .observe_ordinary_display_original(&scope, sequence + 1)
+                .map_err(ProviderError::Unavailable);
+        }
+        if capability.as_str() == DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY {
+            let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(resource)
+                .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
+            return self
+                .channel
+                .observe_ordinary_display_power_retirement(&scope, sequence + 1)
                 .map_err(ProviderError::Unavailable);
         }
         if capability.as_str() == DISPLAY_ORDINARY_COMPLETION_CAPABILITY {

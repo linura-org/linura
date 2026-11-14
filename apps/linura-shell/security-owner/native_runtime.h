@@ -132,6 +132,10 @@ class NativeRuntime final : public QObject
     retireOriginalDisplayPower(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
                                const NativeDisplayCorrelation &, const QString &digest,
                                const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    retireOrdinaryDisplayPower(const QDBusMessage &, const NativeDisplayOrdinaryReleaseIntent &,
+                               const NativeDisplayCorrelation &, const QString &,
+                               const QByteArray &);
     [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const QDBusMessage &,
                                                                  const NativeDisplayIntent &,
                                                                  const NativeDisplayDecision &);

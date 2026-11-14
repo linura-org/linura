@@ -26,6 +26,7 @@ mod ordinary;
 mod ordinary_completion;
 mod ordinary_current;
 mod ordinary_handoff;
+mod ordinary_power;
 pub use approval::{NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest};
 mod continuation;
 mod decision;

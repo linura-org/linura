@@ -51,6 +51,10 @@ pub use display_completion_preparation::root_retirement::{
 pub use display_completion_preparation::{
     MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION, NativeDisplayCompletionPreparation,
 };
+mod display_ordinary_power_preparation;
+pub use display_ordinary_power_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_POWER, NativeDisplayOrdinaryPowerPreparation,
+};
 mod original_display_observer;
 pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;

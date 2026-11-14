@@ -16,7 +16,7 @@ fn current(record: &NativeDisplayOrdinaryCompletionPreparation) -> zbus::fdo::Re
     Ok(())
 }
 impl NativeProtection {
-    fn ordinary_completion_scope(
+    pub(super) fn ordinary_completion_scope(
         &self,
         admission: &Admission,
         record: &NativeDisplayOrdinaryCompletionPreparation,
@@ -233,6 +233,7 @@ impl NativeProtection {
                     authenticate,
                     &mut verify,
                     transfer,
+                    |digest| service.spend_ordinary_power_mechanism(&owner, &key, &record, digest),
                 );
             })
             .map_err(|_| unavailable())?;

@@ -423,7 +423,7 @@ class OriginalCompletionGrant final
         std::string request = !successor.empty()    ? "LNSA:1\n"
                               : !retirement.empty() ? "LNCA:1\n"
                               : !committed.empty()  ? "LNCF:1\n"
-                              : !power.empty()      ? "LNPR:1\n"
+                              : !power.empty()      ? (ordinary_ ? "LOPR:1\n" : "LNPR:1\n")
                               : initial             ? (ordinary_ ? "LOCH:1\n" : "LNCH:1\n")
                                                     : (ordinary_ ? "LOCV:1\n" : "LNCV:1\n");
         request += '\0';

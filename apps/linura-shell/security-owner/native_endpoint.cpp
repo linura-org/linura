@@ -690,6 +690,27 @@ NativeEndpoint::TransferOrdinaryDisplayCompletion(const NativeDisplayAttemptQuer
     return 7;
 }
 
+quint32 NativeEndpoint::RetireOrdinaryDisplayPower(const NativeDisplayAttemptQueryWire &query,
+                                                   const QString &digest,
+                                                   const QByteArray &preparation)
+{
+    if (calledFromDBus() && query.intent.size() <= 14 * 1024 && query.transaction.size() <= 256 &&
+        digest.size() == 64 && !preparation.isEmpty() && preparation.size() <= 33 * 1024) {
+        const auto intent = NativeDisplayOrdinaryReleaseIntent::parse(query.intent);
+        const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                             query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent ? runtime_.retireOrdinaryDisplayPower(message(), *intent, bound,
+                                                                         digest, preparation)
+                                   : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Ordinary display power retirement unavailable"));
+    return 7;
+}
+
 quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &query,
                                                 const QString &decisionDigest,
                                                 const QString &protectedDecisionDigest,
