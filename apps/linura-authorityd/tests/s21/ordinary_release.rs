@@ -411,6 +411,7 @@ impl Observer for OriginalObserver {
         [
             linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY,
+            linura_observation::DISPLAY_ORDINARY_COMPLETION_CAPABILITY,
         ]
         .into_iter()
         .map(|id| Capability {
@@ -449,6 +450,13 @@ impl Observer for OriginalObserver {
             0,
             "history snapshot crossed Root observation"
         );
+        if capability.as_str() == linura_observation::DISPLAY_ORDINARY_COMPLETION_CAPABILITY {
+            return observe_current(
+                &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         if capability.as_str() == linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY {
             return observe_handoff(
                 &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
@@ -1297,6 +1305,20 @@ impl linura_control::OrdinaryDisplayCompletionPort for CompletionPort {
         );
         assert!(now_unix_ms() < completion.expires_at_unix_ms());
         assert!(completion.expires_at_unix_ms() <= record.window().deadline_unix_ms);
+        let transferred = value(
+            linura_linux_session::NativeDisplayOrdinaryCompletionPreparation::new(
+                &record,
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    completion.preparation().hex(),
+                )),
+                value(linura_provider_sdk::ComponentDigest::parse_hex(
+                    completion.verification().hex(),
+                )),
+                completion.frames(),
+                completion.expires_at_unix_ms(),
+            ),
+        );
+        m.ordinary_completion_record = Some(transferred.canonical_bytes());
         if self.1 {
             Err("simulated completion ACK loss".into())
         } else {
@@ -1514,16 +1536,70 @@ fn ordinary_completion_requires_original_review_and_cannot_replay() {
                     )
                     .is_err()
             );
-            let proof = value(restarted.verify_ordinary_display_handoff(
-                principal(),
-                &receipt.request_id,
-                &mut port,
-                &mut verifier,
-            ));
-            assert_eq!(
-                proof.inspection().release().state,
-                linura_transaction::TransactionState::Indeterminate
-            );
+            if dispatched {
+                let inspect = value(restarted.inspect_current_ordinary_display_completion(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                assert_eq!(
+                    inspect.release().state,
+                    linura_transaction::TransactionState::Indeterminate
+                );
+                assert!(inspect.frames().input_retired() && inspect.frames().power_fence_held());
+                if fault == 0 {
+                    for changed in 1..=11 {
+                        {
+                            let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                            m.ordinary_current_fault = changed;
+                            m.ordinary_current_reads = 0;
+                        }
+                        assert!(
+                            restarted
+                                .inspect_current_ordinary_display_completion(
+                                    principal(),
+                                    &receipt.request_id,
+                                    &mut port,
+                                    &mut verifier
+                                )
+                                .is_err(),
+                            "{action:?} current fault {changed}"
+                        );
+                    }
+                    machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!())
+                        .ordinary_current_fault = 0;
+                    value(restarted.inspect_current_ordinary_display_completion(
+                        principal(),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                    ));
+                }
+            } else {
+                let proof = value(restarted.verify_ordinary_display_handoff(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                assert_eq!(
+                    proof.inspection().release().state,
+                    linura_transaction::TransactionState::Indeterminate
+                );
+                assert!(
+                    restarted
+                        .inspect_current_ordinary_display_completion(
+                            principal(),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier
+                        )
+                        .is_err()
+                );
+            }
             assert_eq!(
                 value(restarted.inspect_ordinary_display_original(
                     principal(),
@@ -1547,4 +1623,134 @@ fn ordinary_completion_requires_original_review_and_cannot_replay() {
             );
         }
     }
+}
+
+// Simulated live Root/native current sources. The immutable first tuple comes
+// from the actual sealed dispatch in this test; the fresh read has its own
+// bounded window and advancing output commit, never renewed effect authority.
+pub(super) fn observe_current(
+    m: &mut Machine,
+    resource: &ResourceId,
+    capability: &CapabilityId,
+) -> Result<ObservationEnvelope, ProviderError> {
+    use linura_observation::{
+        DISPLAY_ORDINARY_COMPLETION_CAPABILITY, DISPLAY_ORDINARY_CURRENT_CAPABILITY,
+        DISPLAY_PROVIDER, DISPLAY_RECOVERY_PROVIDER, DisplayCompletionLineage,
+        DisplayNativeCurrentOutput, DisplayNativeHandoffWindow, DisplayOrdinaryCompletionFacts,
+        DisplayOrdinaryCurrentFacts,
+    };
+    assert_eq!(m.checked_history_reads, 0);
+    let fail = || ProviderError::Unavailable("simulated current source unavailable".into());
+    let record = linura_linux_session::NativeDisplayOrdinaryCompletionPreparation::decode(
+        m.ordinary_completion_record.as_ref().ok_or_else(fail)?,
+    )
+    .map_err(|_| fail())?;
+    let scope = record.frames().scope();
+    if scope.resource_id().map_err(|_| fail())? != *resource {
+        return Err(fail());
+    }
+    let root = capability.as_str() == DISPLAY_ORDINARY_COMPLETION_CAPABILITY;
+    if !root && capability.as_str() != DISPLAY_ORDINARY_CURRENT_CAPABILITY {
+        return Err(fail());
+    }
+    let wall = now_unix_ms();
+    let boot = record.frames().window().observed_boot_ms
+        + wall.saturating_sub(record.frames().window().observed_unix_ms);
+    let attributes = if root {
+        DisplayOrdinaryCompletionFacts::new(
+            DisplayCompletionLineage {
+                record: record.record_digest().to_hex(),
+                preparation: record.preparation().to_hex(),
+                verification: record.verification().to_hex(),
+                material: record.parent().material().into(),
+            },
+            record.frames().clone(),
+            record.parent().window(),
+        )
+        .map_err(|_| fail())?
+        .attributes()
+    } else {
+        m.ordinary_current_reads += 1;
+        DisplayOrdinaryCurrentFacts::new(
+            scope.clone(),
+            record.frames().lineage().clone(),
+            DisplayNativeHandoffWindow {
+                observed_unix_ms: wall,
+                observed_boot_ms: boot,
+                deadline_unix_ms: wall + 2000,
+                deadline_boot_ms: boot + 2000,
+            },
+            record
+                .frames()
+                .outputs()
+                .iter()
+                .map(|(id, old)| {
+                    (
+                        id.clone(),
+                        DisplayNativeCurrentOutput {
+                            enabled: old.enabled,
+                            connector: old.connector,
+                            crtc: old.crtc,
+                            plane: old.plane,
+                            framebuffer: if old.enabled { 9 } else { 0 },
+                            handoff_commit: old.completed_commit,
+                            completed_commit: old.completed_commit + u64::from(old.enabled),
+                        },
+                    )
+                })
+                .collect(),
+            record.record_digest().to_hex(),
+            true,
+            true,
+            None,
+            None,
+        )
+        .map_err(|_| fail())?
+        .attributes()
+    };
+    m.sequence += 1;
+    let mut sample = ObservationEnvelope {
+        provider: value(ProviderId::new(if root {
+            DISPLAY_RECOVERY_PROVIDER
+        } else {
+            DISPLAY_PROVIDER
+        })),
+        capability: capability.clone(),
+        resource: resource.clone(),
+        authority: ObservationAuthority::NativeApi,
+        observed_at_unix_ms: wall,
+        valid_for_ms: 2000,
+        sequence: m.sequence,
+        attributes,
+    };
+    let fault = m.ordinary_current_fault;
+    let changed = if root {
+        match fault {
+            1 => Some(("phase", ObservedValue::Text("prepared".into()))),
+            2 => Some(("verification_digest", ObservedValue::Text("9".repeat(64)))),
+            3 => Some(("preparation_digest", ObservedValue::Text("8".repeat(64)))),
+            _ => None,
+        }
+    } else {
+        match fault {
+            4 => Some(("output.0.handoff_commit", ObservedValue::U64(90))),
+            5 => Some(("output.0.completed_commit", ObservedValue::U64(91))),
+            6 => Some(("completion_digest", ObservedValue::Text("8".repeat(64)))),
+            7 => Some(("power_fence_held", ObservedValue::Bool(false))),
+            8 => Some(("signed_binding", ObservedValue::Text("8".repeat(64)))),
+            9 => Some(("outcome", ObservedValue::Text("expired".into()))),
+            10 => {
+                sample.authority = ObservationAuthority::SyntheticTest;
+                None
+            }
+            11 if m.ordinary_current_reads.is_multiple_of(2) => {
+                Some(("output.0.framebuffer", ObservedValue::U64(10)))
+            }
+            _ => None,
+        }
+    };
+    if let Some((key, value)) = changed {
+        sample.attributes.insert(key.into(), value);
+    }
+    Ok(sample)
 }

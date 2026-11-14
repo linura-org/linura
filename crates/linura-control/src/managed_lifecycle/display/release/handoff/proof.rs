@@ -259,3 +259,88 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         })
     }
 }
+
+/// Authenticate the immutable first proof against a separately observed live
+/// Root completion record. Historical expiry is checked as ancestry only;
+/// it cannot satisfy a current observation or recreate a consumed review.
+pub(in crate::managed_lifecycle::display::release) fn require_historical(
+    journal: &dyn ApprovedRequestJournal,
+    principal: &PrincipalId,
+    request: &PlanDesiredStateRequest,
+    snapshot: &TransactionSnapshot,
+    root: &linura_observation::DisplayOrdinaryCompletionFacts,
+) -> Result<(u64, u64), ManagedLifecycleError> {
+    let first = root.first();
+    let lineage = first.lineage();
+    let comparison = DisplayOrdinaryReleaseFacts::new(
+        first.scope().clone(),
+        linura_observation::DisplayOrdinaryReleaseComparison {
+            material: root.lineage().material.clone(),
+            transaction: lineage.release_transaction.clone(),
+            effect: lineage.release_effect.clone(),
+            dispatch: lineage.release_dispatch.clone(),
+            preparation_digest: lineage.preparation_digest.clone(),
+            spent: true,
+            producer: root.producer(),
+            sampled_boot_ms: root.producer().observed_boot_ms,
+        },
+    )
+    .map_err(|_| invalid_original())?;
+    let inspection = OrdinaryDisplayHandoffInspection {
+        observation: ObservationEnvelope {
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid_original())?,
+            capability: CapabilityId::new(DISPLAY_ORDINARY_RELEASE_CAPABILITY)
+                .map_err(|_| invalid_original())?,
+            resource: first
+                .scope()
+                .resource_id()
+                .map_err(|_| invalid_original())?,
+            authority: ObservationAuthority::NativeApi,
+            observed_at_unix_ms: root.producer().observed_unix_ms,
+            valid_for_ms: root
+                .producer()
+                .valid_for_ms()
+                .map_err(|_| invalid_original())?,
+            sequence: 1,
+            attributes: comparison.attributes(),
+        },
+        frames: first.clone(),
+        root: comparison,
+        release: snapshot.clone(),
+        request: request.clone(),
+    };
+    let immutable = identity(principal, &inspection)?;
+    let key = RequestId::new(format!(
+        "request:v010:display-ordinary-physical-verified:{}",
+        digest_bytes(
+            "linura.display.ordinary-handoff-verified-key.v1",
+            request.request_id.as_str().as_bytes()
+        )
+        .hex()
+    ))
+    .map_err(|_| invalid_original())?;
+    let retained = journal
+        .load(principal, &key)
+        .map_err(|_| invalid_original())?;
+    if retained.principal() != principal
+        || retained.request_id() != &key
+        || retained.canonical().len() > MAX_BYTES
+        || digest_bytes(DOMAIN, retained.canonical()).hex() != root.lineage().verification
+    {
+        return Err(invalid_original());
+    }
+    let mut rest = retained.canonical();
+    let verified = number(&mut rest)?;
+    let expiry = number(&mut rest)?;
+    if ContentDigest::new(field(&mut rest, 256)?).map_err(|_| invalid_original())?
+        == ContentDigest::zero()
+        || rest != immutable
+        || verified < root.producer().observed_unix_ms
+        || verified >= expiry
+        || verified > now_ms()?
+        || expiry > root.producer().deadline_unix_ms
+    {
+        return Err(invalid_original());
+    }
+    Ok((verified, expiry))
+}

@@ -346,3 +346,86 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         })
     }
 }
+
+/// Authenticate the before-effect publication. This reads existing history;
+/// absence, restart or acknowledgement loss never creates a continuation.
+pub(super) fn require_current_preparation(
+    journal: &dyn ApprovedRequestJournal,
+    principal: &PrincipalId,
+    request: &PlanDesiredStateRequest,
+    snapshot: &TransactionSnapshot,
+    root: &linura_observation::DisplayOrdinaryCompletionFacts,
+) -> Result<(), ManagedLifecycleError> {
+    let (verified, proof_expiry) =
+        handoff::proof::require_historical(journal, principal, request, snapshot, root)?;
+    let key = key(&request.request_id)?;
+    let retained = journal
+        .load(principal, &key)
+        .map_err(|_| invalid_original())?;
+    if retained.principal() != principal
+        || retained.request_id() != &key
+        || retained.canonical().len() > MAX_BYTES
+        || linura_transaction::digest_bytes(DOMAIN, retained.canonical()).hex()
+            != root.lineage().preparation
+    {
+        return Err(invalid_original());
+    }
+    let mut rest = retained.canonical();
+    let mut field = || -> Result<String, ManagedLifecycleError> {
+        let (length, tail) = rest.split_at_checked(8).ok_or_else(invalid_original)?;
+        let length = usize::try_from(u64::from_be_bytes(
+            length.try_into().map_err(|_| invalid_original())?,
+        ))
+        .map_err(|_| invalid_original())?;
+        if length == 0 || length > 256 {
+            return Err(invalid_original());
+        }
+        let (bytes, tail) = tail.split_at_checked(length).ok_or_else(invalid_original)?;
+        rest = tail;
+        Ok(std::str::from_utf8(bytes)
+            .map_err(|_| invalid_original())?
+            .into())
+    };
+    for expected in [
+        DOMAIN.into(),
+        principal.as_str().into(),
+        request.request_id.as_str().into(),
+        snapshot.transaction_id.as_str().into(),
+        crate::durable_authority::digest_request(request)?
+            .as_str()
+            .into(),
+        snapshot.current_generation.to_string(),
+        snapshot.state_version.to_string(),
+        snapshot.binding_digest.as_str().into(),
+        root.first().lineage().release_dispatch.clone(),
+        root.first().lineage().preparation_digest.clone(),
+        ContentDigest::new(format!("sha256:{}", root.lineage().verification))
+            .map_err(|_| invalid_original())?
+            .as_str()
+            .into(),
+    ] {
+        if field()? != expected {
+            return Err(invalid_original());
+        }
+    }
+    if ContentDigest::new(field()?).map_err(|_| invalid_original())? == ContentDigest::zero() {
+        return Err(invalid_original());
+    }
+    let prepared_raw = field()?;
+    let expiry_raw = field()?;
+    let prepared = prepared_raw
+        .parse::<u64>()
+        .map_err(|_| invalid_original())?;
+    let expiry = expiry_raw.parse::<u64>().map_err(|_| invalid_original())?;
+    if !rest.is_empty()
+        || prepared.to_string() != prepared_raw
+        || expiry.to_string() != expiry_raw
+        || prepared < verified
+        || prepared >= expiry
+        || expiry > proof_expiry
+        || prepared > now_ms()?
+    {
+        return Err(invalid_original());
+    }
+    Ok(())
+}

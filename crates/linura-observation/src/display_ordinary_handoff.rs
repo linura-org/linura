@@ -196,7 +196,27 @@ impl DisplayOrdinaryHandoffFacts {
         {
             return Err(DisplayEvidenceError::Identity);
         }
-        let attrs = &observation.attributes;
+        let result = Self::from_comparison_attributes(
+            &observation.attributes,
+            scope,
+            observation.observed_at_unix_ms,
+        )?;
+        if observation.valid_for_ms != result.window.valid_for_ms()?
+            || now
+                .checked_sub(observation.observed_at_unix_ms)
+                .is_none_or(|age| age >= observation.valid_for_ms)
+        {
+            return Err(DisplayEvidenceError::Freshness);
+        }
+        Ok(result)
+    }
+    /// Historical comparison only. The outer live Root observation must remain
+    /// fresh; these immutable first frames cannot satisfy a current native probe.
+    pub(crate) fn from_comparison_attributes(
+        attrs: &BTreeMap<String, ObservedValue>,
+        scope: &DisplayOrdinaryReleaseScope,
+        observed_at: u64,
+    ) -> Result<Self, DisplayEvidenceError> {
         if attrs.len() > 163
             || attrs.iter().any(|(key, value)| {
                 key.len() > 64 || matches!(value, ObservedValue::Text(text) if text.len() > 256)
@@ -253,7 +273,7 @@ impl DisplayOrdinaryHandoffFacts {
                 security_epoch: number(attrs, "security_epoch")?,
             },
             DisplayNativeHandoffWindow {
-                observed_unix_ms: observation.observed_at_unix_ms,
+                observed_unix_ms: observed_at,
                 observed_boot_ms: number(attrs, "sampled_boot_ms")?,
                 deadline_unix_ms: number(attrs, "deadline_unix_ms")?,
                 deadline_boot_ms: number(attrs, "deadline_boot_ms")?,
@@ -262,13 +282,6 @@ impl DisplayOrdinaryHandoffFacts {
         )?;
         if result.attributes() != *attrs {
             return Err(DisplayEvidenceError::Shape);
-        }
-        if observation.valid_for_ms != result.window.valid_for_ms()?
-            || now
-                .checked_sub(observation.observed_at_unix_ms)
-                .is_none_or(|age| age >= observation.valid_for_ms)
-        {
-            return Err(DisplayEvidenceError::Freshness);
         }
         Ok(result)
     }

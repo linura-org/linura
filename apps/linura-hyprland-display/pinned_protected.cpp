@@ -253,6 +253,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     bool finalRetirementAttempted = false;
     bool currentCommitAttempted = false;
     std::string nativeReleaseParent;
+    std::string ordinaryReleasePreparationDigest;
     bool completionAttempted = false;
     bool currentMode = false;
     bool powerRetirementAttempted = false, nativePowerRetired = false;
@@ -1043,6 +1044,7 @@ class PinnedScene final : public ProtectedScene
             !data->ordinaryGrant->spend())
             return refuse();
         data->nativeReleaseParent = data->ordinaryGrant->record();
+        data->ordinaryReleasePreparationDigest = data->ordinaryGrant->comparisonDigest();
         const auto current = nativeBackend()->snapshot();
         const auto clock = compositorClock();
         const auto history = nativeOrdinaryOutputHighWater(data->bound, held);
@@ -2084,18 +2086,25 @@ readNativeHandoffComparison(const Correlation &terminal)
     return readHandoffComparison(terminal, false);
 }
 
-std::optional<std::string> readOrdinaryHandoffPresentation()
+namespace {
+std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison();
+std::optional<std::string> ordinaryPresentation(bool current)
 {
     const auto data = mutationFence;
-    if (!data || !data->ordinaryRelease || !data->terminalBound || !data->ordinaryGrant)
+    if (!data || !data->ordinaryRelease || !data->terminalBound || data->currentMode != current ||
+        (current ? !data->completionGrant : !data->ordinaryGrant))
         return {};
     const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
     if (!intent)
         return {};
-    const auto receipt = readHandoffComparison(*data->terminalBound, true);
+    const auto review = active.lock();
+    if (current && review && review != data)
+        return {};
+    const auto receipt =
+        current ? readNativeCurrentComparison() : readHandoffComparison(*data->terminalBound, true);
     if (!receipt || receipt->postWriteEpoch != data->postWriteEpoch ||
         receipt->completedCount != data->stableInventory.heads.size() ||
-        !data->ordinaryGrant->live())
+        (current ? !data->completionGrant->live() : !data->ordinaryGrant->live()))
         return {};
     // Every free-form historical field remains in the complete Root record;
     // only bounded canonical native identifiers/digests reach this JSON DTO.
@@ -2125,7 +2134,9 @@ std::optional<std::string> readOrdinaryHandoffPresentation()
     text("release_transaction", data->terminalBound->transaction);
     text("release_effect", data->terminalBound->effectDigest);
     text("release_dispatch", data->terminalBound->dispatchDigest);
-    text("preparation_digest", data->ordinaryGrant->comparisonDigest());
+    const auto parentDigest =
+        current ? data->ordinaryReleasePreparationDigest : data->ordinaryGrant->comparisonDigest();
+    text("preparation_digest", parentDigest);
     text("terminal_record", intent->terminal);
     text("checkpoint", intent->checkpoint);
     text("signed_binding", intent->signedBinding);
@@ -2139,6 +2150,21 @@ std::optional<std::string> readOrdinaryHandoffPresentation()
     number("deadline_boot_ms", receipt->deadlineBootMs);
     number("post_write_epoch", receipt->postWriteEpoch);
     number("security_epoch", receipt->securityEpoch);
+    if (current) {
+        text("completion_digest", data->completionGrant->comparisonDigest());
+        text("current_commit_digest", data->committedCurrent
+                                          ? data->committedCurrent->comparisonDigest()
+                                          : std::string(64, '0'));
+        text("final_retirement_digest", data->retiredCurrent
+                                            ? data->retiredCurrent->comparisonDigest()
+                                            : std::string(64, '0'));
+        proof += ",\"input_retired\":" +
+                 std::string(inputRetirement.phase() == ProtectedInputRetirement::Phase::Open &&
+                                     !heldInput().any
+                                 ? "true"
+                                 : "false");
+        proof += ",\"power_fence_held\":" + std::string(nativePowerFenceHeld() ? "true" : "false");
+    }
     proof += ",\"heads\":[";
     for (std::size_t i = 0; i < receipt->completedCount; ++i) {
         if (i)
@@ -2152,11 +2178,21 @@ std::optional<std::string> readOrdinaryHandoffPresentation()
                  ",\"crtc\":" + std::to_string(kernel.crtc) +
                  ",\"plane\":" + std::to_string(kernel.plane) +
                  ",\"framebuffer\":" + std::to_string(kernel.framebuffer) +
-                 ",\"spend_high_water\":\"" + std::to_string(row.spendHighWater) +
-                 "\",\"completed_commit\":\"" + std::to_string(row.completedCommit) + "\"}";
+                 (current ? ",\"handoff_commit\":\"" : ",\"spend_high_water\":\"") +
+                 std::to_string(row.spendHighWater) + "\",\"completed_commit\":\"" +
+                 std::to_string(row.completedCommit) + "\"}";
     }
     proof += "]}";
     return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;
+}
+} // namespace
+std::optional<std::string> readOrdinaryHandoffPresentation()
+{
+    return ordinaryPresentation(false);
+}
+std::optional<std::string> readOrdinaryCurrentPresentation()
+{
+    return ordinaryPresentation(true);
 }
 
 namespace {

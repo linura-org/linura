@@ -125,6 +125,16 @@
       </description>
       <arg name="facts" type="string"/>
     </event>
+    <event name="ordinary_current_presentation">
+      <description summary="current ordinary scanout under its transferred Root lifetime">
+        One bounded private comparison object before done, mutually exclusive
+        with all other presentation events. Requires the live ordinary completion
+        lifetime and actual KMS and completed buffers after its first handoff.
+        Its fresh read window grants no effect, successor or cleanup authority.
+        Completion, terminal, first handoff and output lineage remain exact.
+      </description>
+      <arg name="facts" type="string"/>
+    </event>
   </interface>
   <interface name="linura_display_head_v1" version="1">
     <description summary="native output lifetime in one snapshot">

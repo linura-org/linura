@@ -1033,6 +1033,11 @@ std::optional<QString> NativeRuntime::observeOrdinaryDisplayHandoff(const QDBusM
     return observeDisplayPresentation(received, DisplayPresentation::Ordinary);
 }
 
+std::optional<QString> NativeRuntime::observeOrdinaryDisplayCurrent(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::OrdinaryCurrent);
+}
+
 std::optional<QString> NativeRuntime::observeNativeDisplayCurrent(const QDBusMessage &received)
 {
     return observeDisplayPresentation(received, DisplayPresentation::Current);
@@ -1051,21 +1056,24 @@ std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMess
     if (!sample)
         return std::nullopt;
     const auto &presentation =
-        kind == DisplayPresentation::Restoration ? sample->originalRestorationPresentation
-        : kind == DisplayPresentation::First     ? sample->nativeHandoffPresentation
-        : kind == DisplayPresentation::Ordinary  ? sample->ordinaryHandoffPresentation
-                                                 : sample->nativeCurrentPresentation;
-    const auto expectedPhase = kind == DisplayPresentation::Current ? 4U : 2U;
+        kind == DisplayPresentation::Restoration       ? sample->originalRestorationPresentation
+        : kind == DisplayPresentation::First           ? sample->nativeHandoffPresentation
+        : kind == DisplayPresentation::Ordinary        ? sample->ordinaryHandoffPresentation
+        : kind == DisplayPresentation::OrdinaryCurrent ? sample->ordinaryCurrentPresentation
+                                                       : sample->nativeCurrentPresentation;
+    const bool current =
+        kind == DisplayPresentation::Current || kind == DisplayPresentation::OrdinaryCurrent;
+    const auto expectedPhase = current ? 4U : 2U;
     const auto presentationCount =
         static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty()) +
-        static_cast<unsigned>(!sample->ordinaryHandoffPresentation.isEmpty());
+        static_cast<unsigned>(!sample->ordinaryHandoffPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->ordinaryCurrentPresentation.isEmpty());
     const bool expectedStartup =
         kind == DisplayPresentation::Ordinary
             ? (sample->startupPhase == 1 || sample->startupPhase == 4)
-            : (sample->startupPhase == expectedPhase ||
-               (kind == DisplayPresentation::Current && sample->startupPhase == 5));
+            : (sample->startupPhase == expectedPhase || (current && sample->startupPhase == 5));
     if (!independent || !sample->fenced || !expectedStartup || presentation.isEmpty() ||
         presentation.size() > 16 * 1024 || presentationCount != 1 ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||

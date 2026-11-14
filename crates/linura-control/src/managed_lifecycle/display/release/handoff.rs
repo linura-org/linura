@@ -11,7 +11,7 @@ use linura_observation::{
 };
 use linura_protocol::ObservationRequest;
 use linura_transaction::TransactionSnapshot;
-mod proof;
+pub(super) mod proof;
 pub use proof::OrdinaryDisplayHandoffVerification;
 
 fn unavailable_at(stage: &str) -> ManagedLifecycleError {

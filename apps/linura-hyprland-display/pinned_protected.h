@@ -50,6 +50,7 @@ readNativeHandoffComparison(const Correlation &terminal);
 [[nodiscard]] std::optional<std::string> readNativeHandoffPresentation();
 [[nodiscard]] std::optional<std::string> readNativeCurrentPresentation();
 [[nodiscard]] std::optional<std::string> readOrdinaryHandoffPresentation();
+[[nodiscard]] std::optional<std::string> readOrdinaryCurrentPresentation();
 [[nodiscard]] std::optional<std::uint32_t>
 nativeHandoffFramebuffer(OutputKey, const SP<Aquamarine::IBuffer> &);
 void initializeProtectedDisplay(wl_display &);

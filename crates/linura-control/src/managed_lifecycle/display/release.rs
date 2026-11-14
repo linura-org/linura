@@ -7,10 +7,12 @@
 
 use super::*;
 mod completion;
+mod current;
 pub use completion::{
     AuthorizedOrdinaryDisplayCompletion, OrdinaryDisplayCompletionPort,
     OrdinaryDisplayCompletionReceipt,
 };
+pub use current::OrdinaryDisplayCurrentInspection;
 mod execution;
 mod original;
 pub use execution::{

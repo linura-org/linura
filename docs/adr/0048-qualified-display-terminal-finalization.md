@@ -884,3 +884,30 @@ current observation/verification, ordered native/Root power retirement, signed
 current completion and final matching records remain required. Stage 5 adoption,
 supersession and reference-aware cleanup are also outstanding. Existing public
 mutation prohibition and Level A/B/C qualification gates are unchanged.
+
+### Ordinary current scanout comparison
+
+The ordinary completion lifetime exposes a separate read-only
+`display.ordinary-completion.observe` Root capability and
+`display.ordinary-current.observe` native capability. Root projects the complete
+original producer and immutable first handoff from its genuinely transferred
+LNOQ/LNOC lifetime. A prepared, disk-only, failed or replaced Root lifetime cannot
+claim transferred state. Historical first-frame deadlines remain unchanged; only
+the outer actual Root read and independently sampled current frames have fresh,
+bounded observation windows. They confer no renewed effect authority.
+
+The private ordinary-current Wayland event is mutually exclusive with all other
+presentation events and requires actual current startup admission. Its ordinary
+lineage never aliases replacement-recovery scope. It projects actual KMS,
+completed buffers after the immutable first handoff boundary, native physical
+input state, held power and exact completion digest. Unknown, duplicate,
+malformed, mixed-purpose, retired or substituted output evidence fails closed.
+
+Control authenticates the existing before-effect preparation and immutable first
+proof against that Root record, independently reads current layout, source,
+logind and S17 coverage, then re-reads Root/native facts and durable history.
+Restart and lost ACKs permit comparison only: signed release remains
+Indeterminate, the original terminal is unchanged, and no review, effect,
+successor or cleanup permission is recreated. Ordered ordinary native/Root power
+retirement and matching ReleasedCurrent/final-retirement records remain required
+before implementation acceptance.

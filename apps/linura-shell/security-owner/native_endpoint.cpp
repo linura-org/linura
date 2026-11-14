@@ -404,6 +404,22 @@ QString NativeEndpoint::ObserveNativeDisplayCurrent()
     return {};
 }
 
+QString NativeEndpoint::ObserveOrdinaryDisplayCurrent()
+{
+    if (calledFromDBus()) {
+        const auto sampled = bootMilliseconds();
+        const auto result = runtime_.observeOrdinaryDisplayCurrent(message());
+        const auto completed = bootMilliseconds();
+        if (sampled && completed && result &&
+            NativeLockObservationWire{runtime_.identity().resource, false, *sampled}.freshAtBootMs(
+                *completed))
+            return *result;
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Ordinary current display evidence unavailable"));
+    }
+    return {};
+}
+
 NativeDisplayAttemptObservationWire
 NativeEndpoint::ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &query)
 {

@@ -195,7 +195,8 @@ class WireEndpoint::Impl final
             !startup.phase || !startup.admit || !originalRestoration.dispatch ||
             !originalRestoration.status || !originalRestoration.presentation ||
             !originalRestoration.handoffPresentation || !originalRestoration.currentPresentation ||
-            !originalRestoration.ordinaryPresentation)
+            !originalRestoration.ordinaryPresentation ||
+            !originalRestoration.ordinaryCurrentPresentation)
             return;
         global = wl_global_create(&display, &linura_display_manager_v1_interface, 1, this, bind);
     }
@@ -323,6 +324,7 @@ class WireEndpoint::Impl final
             const auto handoff = self.originalRestoration.handoffPresentation();
             const auto current = self.originalRestoration.currentPresentation();
             const auto ordinary = self.originalRestoration.ordinaryPresentation();
+            const auto ordinaryCurrent = self.originalRestoration.ordinaryCurrentPresentation();
             const auto completed = self.backend.clock();
             if (!at || !sample || !completed || sample->heads.empty() ||
                 sample->heads.size() > DisplayTransaction::MaxHeads ||
@@ -334,7 +336,10 @@ class WireEndpoint::Impl final
                 (current && (current->empty() || current->size() > 16 * 1024)) ||
                 (ordinary && (ordinary->empty() || ordinary->size() > 16 * 1024)) ||
                 (presentation && handoff) || (current && (presentation || handoff)) ||
-                (ordinary && (presentation || handoff || current))) {
+                (ordinary && (presentation || handoff || current)) ||
+                (ordinaryCurrent &&
+                 (ordinaryCurrent->empty() || ordinaryCurrent->size() > 16 * 1024 || presentation ||
+                  handoff || current || ordinary))) {
                 linura_display_snapshot_v1_send_unavailable(result->native);
                 return;
             }
@@ -394,6 +399,9 @@ class WireEndpoint::Impl final
             if (ordinary)
                 linura_display_snapshot_v1_send_ordinary_handoff_presentation(result->native,
                                                                               ordinary->c_str());
+            if (ordinaryCurrent)
+                linura_display_snapshot_v1_send_ordinary_current_presentation(
+                    result->native, ordinaryCurrent->c_str());
             linura_display_snapshot_v1_send_done(result->native);
         } catch (...) {
             wl_client_post_no_memory(client);

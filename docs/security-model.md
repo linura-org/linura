@@ -1206,3 +1206,13 @@ authenticated grant, exact immutable first KMS/buffer/commit comparison and inpu
 quarantine. ACKs leave Control Indeterminate and all power/final-retirement fences
 held. Independent ordinary current verification and ordered retirement remain
 unfinished, and production display mutation stays disabled.
+
+Ordinary post-transfer current observations have distinct Root and native
+capabilities and preserve their ordinary scope and complete terminal/preparation
+lineage. Immutable first-frame evidence remains historical after its original
+window expires; fresh current scanout requires the genuine retained Root/native
+completion lifetime and new bounded reads. Control independently joins layout,
+source, logind and S17 state and rechecks every immutable preparation/proof before
+returning comparison evidence. Neither this read nor an earlier signed Committed
+original state can retire another fence, admit a successor or delete recovery
+history. Uncertain or substituted ancestry fails closed.

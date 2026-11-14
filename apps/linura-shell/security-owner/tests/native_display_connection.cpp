@@ -118,7 +118,14 @@ class Harness final
         CurrentOrdinary,
         CurrentBoth,
         CurrentEmpty,
-        CurrentOversized
+        CurrentOversized,
+        OrdinaryCurrent,
+        OrdinaryCurrentRetired,
+        OrdinaryCurrentRecovery,
+        OrdinaryCurrentUnadmitted,
+        OrdinaryCurrentBoth,
+        OrdinaryCurrentEmpty,
+        OrdinaryCurrentOversized
     };
     explicit Harness(BuildMismatch mismatch = BuildMismatch::None, bool publishIntegration = true,
                      const char *instance = Instance,
@@ -150,23 +157,29 @@ class Harness final
                     invocation[0] = 1;
                     return invocation;
                 },
-                NativeStartupPort{[presentation] {
-                                      if (presentation == PresentationFixture::CurrentRetired)
-                                          return 5U;
-                                      if (presentation == PresentationFixture::Current ||
-                                          presentation == PresentationFixture::CurrentBoth ||
-                                          presentation == PresentationFixture::CurrentEmpty ||
-                                          presentation == PresentationFixture::CurrentOversized)
-                                          return 4U;
-                                      return presentation == PresentationFixture::None ||
-                                                     presentation ==
-                                                         PresentationFixture::Ordinary ||
-                                                     presentation ==
-                                                         PresentationFixture::CurrentOrdinary
-                                                 ? 1U
-                                                 : 2U;
-                                  },
-                                  [](int, bool, std::uint32_t) { return false; }},
+                NativeStartupPort{
+                    [presentation] {
+                        if (presentation == PresentationFixture::CurrentRetired ||
+                            presentation == PresentationFixture::OrdinaryCurrentRetired)
+                            return 5U;
+                        if (presentation == PresentationFixture::Current ||
+                            presentation == PresentationFixture::CurrentBoth ||
+                            presentation == PresentationFixture::CurrentEmpty ||
+                            presentation == PresentationFixture::CurrentOversized ||
+                            presentation == PresentationFixture::OrdinaryCurrent ||
+                            presentation == PresentationFixture::OrdinaryCurrentBoth ||
+                            presentation == PresentationFixture::OrdinaryCurrentEmpty ||
+                            presentation == PresentationFixture::OrdinaryCurrentOversized)
+                            return 4U;
+                        return presentation == PresentationFixture::None ||
+                                       presentation == PresentationFixture::Ordinary ||
+                                       presentation == PresentationFixture::CurrentOrdinary ||
+                                       presentation ==
+                                           PresentationFixture::OrdinaryCurrentUnadmitted
+                                   ? 1U
+                                   : 2U;
+                    },
+                    [](int, bool, std::uint32_t) { return false; }},
                 NativeOriginalRestorationPort{
                     [](OwnedNativeFd, const Correlation &, const Layout &, const Snapshot &,
                        ClockSample, wl_resource *,
@@ -201,8 +214,27 @@ class Harness final
                                        presentation == PresentationFixture::CurrentRetired ||
                                        presentation == PresentationFixture::CurrentRecovery ||
                                        presentation == PresentationFixture::CurrentOrdinary ||
-                                       presentation == PresentationFixture::CurrentBoth
+                                       presentation == PresentationFixture::CurrentBoth ||
+                                       presentation == PresentationFixture::OrdinaryCurrentBoth
                                    ? std::optional<std::string>("{\"fixture\":\"current\"}")
+                                   : std::nullopt;
+                    },
+                    []() -> std::optional<std::string> { return {}; },
+                    [presentation]() -> std::optional<std::string> {
+                        if (presentation == PresentationFixture::OrdinaryCurrentEmpty)
+                            return std::string{};
+                        if (presentation == PresentationFixture::OrdinaryCurrentOversized)
+                            return std::string(16 * 1024 + 1, 'x');
+                        return presentation == PresentationFixture::OrdinaryCurrent ||
+                                       presentation ==
+                                           PresentationFixture::OrdinaryCurrentRetired ||
+                                       presentation ==
+                                           PresentationFixture::OrdinaryCurrentRecovery ||
+                                       presentation ==
+                                           PresentationFixture::OrdinaryCurrentUnadmitted ||
+                                       presentation == PresentationFixture::OrdinaryCurrentBoth
+                                   ? std::optional<std::string>(
+                                         "{\"fixture\":\"ordinary-current\"}")
                                    : std::nullopt;
                     }});
         assert(!publishIntegration || (endpoint && endpoint->available()));
@@ -807,8 +839,40 @@ void currentScanoutRequiresDistinctCurrentAdmission()
     }
 }
 
+void ordinaryCurrentRequiresSeparateLiveAdmissionAndRejectsMixedProofs()
+{
+    using F = Harness::PresentationFixture;
+    for (const auto kind :
+         {F::OrdinaryCurrent, F::OrdinaryCurrentRetired, F::OrdinaryCurrentRecovery,
+          F::OrdinaryCurrentUnadmitted, F::OrdinaryCurrentBoth, F::OrdinaryCurrentEmpty,
+          F::OrdinaryCurrentOversized}) {
+        Harness harness(Harness::BuildMismatch::None, true, Instance, kind);
+        Client owner(harness.descriptors[0]);
+        const auto sample = owner.connection->sample();
+        if (kind == F::OrdinaryCurrent || kind == F::OrdinaryCurrentRetired) {
+            assert(sample && sample->fenced &&
+                   sample->startupPhase == (kind == F::OrdinaryCurrent ? 4U : 5U));
+            assert(sample->ordinaryCurrentPresentation ==
+                   QByteArray("{\"fixture\":\"ordinary-current\"}"));
+            assert(sample->nativeCurrentPresentation.isEmpty() &&
+                   sample->ordinaryHandoffPresentation.isEmpty());
+            assert(sample->nativeHandoffPresentation.isEmpty() &&
+                   sample->originalRestorationPresentation.isEmpty());
+            auto desired = baseline(*sample);
+            desired.outputs[0].x = 100;
+            assert(!owner.connection->apply(
+                bound(QStringLiteral("transaction:ordinary-current-no-apply")), baseline(*sample),
+                desired, owner.protection()));
+        } else {
+            assert(!sample);
+        }
+        assert(harness.backend.writes == 0);
+    }
+}
+
 int main()
 {
+    ordinaryCurrentRequiresSeparateLiveAdmissionAndRejectsMixedProofs();
     currentScanoutRequiresDistinctCurrentAdmission();
     const NativeDisplayCorrelation window{QStringLiteral("transaction:prepared-window"),
                                           QString(64, QLatin1Char('a')),

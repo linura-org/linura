@@ -5,9 +5,17 @@ use std::fmt::{Display, Formatter};
 
 use linura_core::{CapabilityId, ProviderId, ResourceId};
 
+mod display_ordinary_completion;
+mod display_ordinary_current;
 mod display_ordinary_handoff;
 mod display_ordinary_original;
 mod display_ordinary_release;
+pub use display_ordinary_completion::{
+    DISPLAY_ORDINARY_COMPLETION_CAPABILITY, DisplayOrdinaryCompletionFacts,
+};
+pub use display_ordinary_current::{
+    DISPLAY_ORDINARY_CURRENT_CAPABILITY, DisplayOrdinaryCurrentFacts,
+};
 pub use display_ordinary_handoff::{
     DISPLAY_ORDINARY_HANDOFF_CAPABILITY, DisplayOrdinaryHandoffFacts, DisplayOrdinaryHandoffLineage,
 };

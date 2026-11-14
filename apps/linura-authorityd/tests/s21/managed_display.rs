@@ -45,6 +45,9 @@ struct Machine {
     ordinary_release_approvals: usize,
     ordinary_release_calls: usize,
     ordinary_completion_calls: usize,
+    ordinary_completion_record: Option<Vec<u8>>,
+    ordinary_current_fault: u8,
+    ordinary_current_reads: usize,
     ordinary_completion_store_fault: u8,
     ordinary_release_write_fault: u8,
     ordinary_handoff_enabled: bool,
@@ -263,14 +266,17 @@ impl Observer for LiveFixtureObserver {
             reason: None,
         }];
         if self.template.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
-            capabilities.push(Capability {
-                id: value(CapabilityId::new(
-                    linura_observation::DISPLAY_ORDINARY_HANDOFF_CAPABILITY,
-                )),
-                provider: Some(self.template.provider.clone()),
-                support: SupportLevel::Supported,
-                reason: None,
-            });
+            for capability in [
+                linura_observation::DISPLAY_ORDINARY_HANDOFF_CAPABILITY,
+                linura_observation::DISPLAY_ORDINARY_CURRENT_CAPABILITY,
+            ] {
+                capabilities.push(Capability {
+                    id: value(CapabilityId::new(capability)),
+                    provider: Some(self.template.provider.clone()),
+                    support: SupportLevel::Supported,
+                    reason: None,
+                });
+            }
         }
         if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
             capabilities.push(Capability {
@@ -351,6 +357,15 @@ impl Observer for LiveFixtureObserver {
             0,
             "history snapshot crossed an observation boundary"
         );
+        if self.template.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_ORDINARY_CURRENT_CAPABILITY
+        {
+            return ordinary_release::observe_current(
+                &mut self.machine.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         if self.template.provider.as_str() == linura_observation::DISPLAY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_ORDINARY_HANDOFF_CAPABILITY
         {

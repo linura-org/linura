@@ -26,6 +26,7 @@ struct NativePinnedDisplaySample final
     QByteArray nativeHandoffPresentation;
     QByteArray nativeCurrentPresentation;
     QByteArray ordinaryHandoffPresentation;
+    QByteArray ordinaryCurrentPresentation;
 };
 struct NativeDisplayCorrelation final
 {

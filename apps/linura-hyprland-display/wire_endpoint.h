@@ -52,6 +52,9 @@ struct NativeOriginalRestorationPort final
     std::function<std::optional<std::string>()> ordinaryPresentation = [] {
         return std::optional<std::string>{};
     };
+    std::function<std::optional<std::string>()> ordinaryCurrentPresentation = [] {
+        return std::optional<std::string>{};
+    };
 };
 
 // Adapter-private Wayland mechanism. Its native session scoping and ownership

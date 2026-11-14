@@ -1342,7 +1342,8 @@ void initialize(wl_display &display, wl_event_loop &loop)
         NativeOriginalRestorationPort{restoreOriginalNative, originalNativeStatus,
                                       [] { return backend->originalPresentation(); },
                                       readNativeHandoffPresentation, readNativeCurrentPresentation,
-                                      readOrdinaryHandoffPresentation});
+                                      readOrdinaryHandoffPresentation,
+                                      readOrdinaryCurrentPresentation});
     initializeProtectedDisplay(display);
 }
 void shutdown()

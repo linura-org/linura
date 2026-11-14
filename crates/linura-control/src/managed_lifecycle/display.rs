@@ -122,10 +122,11 @@ pub use finalization::{
 pub use release::{
     AuthorizedOrdinaryDisplayCompletion, AuthorizedOrdinaryDisplayRelease,
     OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt,
-    OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
-    OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseAuthorizer,
-    OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort,
-    OrdinaryDisplayReleaseReceipt, OrdinaryDisplayReleaseRequest,
+    OrdinaryDisplayCurrentInspection, OrdinaryDisplayHandoffInspection,
+    OrdinaryDisplayHandoffVerification, OrdinaryDisplayOriginalInspection,
+    OrdinaryDisplayReleaseAuthorizer, OrdinaryDisplayReleaseChallenge,
+    OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
+    OrdinaryDisplayReleaseRequest,
 };
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,
