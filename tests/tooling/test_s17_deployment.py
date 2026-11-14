@@ -242,6 +242,8 @@ class S17DeploymentTests(unittest.TestCase):
                     "ReserveNativeRelease",
                     "ReserveNativeReleaseGrant",
                     "ReserveCompletionGrant",
+                    "ReserveOrdinaryCompletionGrant",
+                    "ReadOrdinaryCompletion",
                 )
             ],
         )
