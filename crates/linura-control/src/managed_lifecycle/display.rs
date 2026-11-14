@@ -95,18 +95,55 @@ mod decision;
 mod finalization;
 mod release;
 mod restoration;
+mod successor;
 
 /// Exact immutable predecessor comparison. Only the final-retirement workflow
 /// constructs this after checking ReleasedCurrent and its signed ancestry.
 /// It is never a permit and never opens ordinary Begin admission.
 #[derive(Debug, Eq, PartialEq)]
-struct DisplaySuccessorContext {
+struct DisplayRestorationSuccessorContext {
     terminal: linura_transaction::TransactionSnapshot,
     restoration: linura_transaction::TransactionSnapshot,
     scope: linura_core::DisplayRecoveryScope,
     released: linura_transaction::ContentDigest,
     root_released: String,
     root_final: String,
+}
+/// Purpose-separated predecessor comparison accompanying a fresh sealed Apply.
+/// Constructing this enum alone supplies no canonical authorization or effect.
+#[derive(Debug)]
+pub enum DisplaySuccessorPredecessor {
+    Restoration(linura_core::DisplayRecoveryScope),
+    Ordinary(linura_core::DisplayOrdinaryReleaseScope),
+}
+#[derive(Debug, Eq, PartialEq)]
+struct DisplayOrdinarySuccessorContext {
+    terminal: linura_transaction::TransactionSnapshot,
+    original: linura_transaction::TransactionSnapshot,
+    scope: linura_core::DisplayOrdinaryReleaseScope,
+    released: linura_transaction::ContentDigest,
+    adopted: linura_transaction::ContentDigest,
+    root_released: String,
+    root_final: String,
+}
+#[derive(Debug, Eq, PartialEq)]
+enum DisplaySuccessorContext {
+    Restoration(DisplayRestorationSuccessorContext),
+    Ordinary(DisplayOrdinarySuccessorContext),
+}
+impl DisplaySuccessorContext {
+    fn owns(&self, snapshot: &linura_transaction::TransactionSnapshot) -> bool {
+        match self {
+            Self::Restoration(v) => snapshot == &v.terminal || snapshot == &v.restoration,
+            Self::Ordinary(v) => snapshot == &v.terminal || snapshot == &v.original,
+        }
+    }
+    fn into_predecessor(self) -> DisplaySuccessorPredecessor {
+        match self {
+            Self::Restoration(v) => DisplaySuccessorPredecessor::Restoration(v.scope),
+            Self::Ordinary(v) => DisplaySuccessorPredecessor::Ordinary(v.scope),
+        }
+    }
 }
 pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 pub use finalization::{
@@ -134,7 +171,8 @@ pub use release::{
     AuthorizedOrdinaryDisplayCompletion, AuthorizedOrdinaryDisplayCurrentCommit,
     AuthorizedOrdinaryDisplayFinalRetirement, AuthorizedOrdinaryDisplayNativePowerRetirement,
     AuthorizedOrdinaryDisplayRelease, AuthorizedOrdinaryDisplayRootPowerRetirement,
-    OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt, OrdinaryDisplayCurrentCommit,
+    OrdinaryDisplayCommittedAdoption, OrdinaryDisplayCompletionPort,
+    OrdinaryDisplayCompletionReceipt, OrdinaryDisplayCurrentCommit,
     OrdinaryDisplayCurrentCommitPort, OrdinaryDisplayCurrentInspection,
     OrdinaryDisplayFinalRetirementPort, OrdinaryDisplayFinalRetirementVerification,
     OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
@@ -253,7 +291,7 @@ impl<'a> DisplayAttemptQuery<'a> {
 pub struct AuthorizedDisplayApplication {
     authorization: AuthorizedEffect,
     native_baseline_guard: ComponentDigest,
-    predecessor: Option<linura_core::DisplayRecoveryScope>,
+    predecessor: Option<DisplaySuccessorPredecessor>,
 }
 impl AuthorizedDisplayApplication {
     #[must_use]
@@ -262,7 +300,7 @@ impl AuthorizedDisplayApplication {
     ) -> (
         AuthorizedEffect,
         ComponentDigest,
-        Option<linura_core::DisplayRecoveryScope>,
+        Option<DisplaySuccessorPredecessor>,
     ) {
         (
             self.authorization,
@@ -831,10 +869,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                         finalization.restoration().original().topology().seat()
                             == target.topology().seat()
                     };
-                    let transferred = successor.is_some_and(|owner| {
-                        snapshot.principal == owner.terminal.principal
-                            && (snapshot == owner.terminal || snapshot == owner.restoration)
-                    });
+                    let transferred = successor.is_some_and(|owner| owner.owns(&snapshot));
                     if blocked && !transferred {
                         return Err(ManagedLifecycleError::Indeterminate("display completion ownership remains retained for this seat; Committed is not successor, release or cleanup authority".into()));
                     }
@@ -1160,7 +1195,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let application = AuthorizedDisplayApplication {
             authorization,
             native_baseline_guard: checkpoint.native_guard,
-            predecessor: successor.map(|context| context.scope),
+            predecessor: successor.map(DisplaySuccessorContext::into_predecessor),
         };
         match port.dispatch_layout(application, &request, deadline) {
             Ok(outcome) if outcome.dispatch_digest.to_hex() != dispatch_digest => {

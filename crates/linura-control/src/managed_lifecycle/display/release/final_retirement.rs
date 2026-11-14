@@ -101,7 +101,7 @@ impl OrdinaryDisplayReleasedCurrent {
     }
 }
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn observe_ordinary_final(
+    pub(in crate::managed_lifecycle::display) fn observe_ordinary_final(
         &mut self,
         scope: &linura_core::DisplayOrdinaryReleaseScope,
     ) -> Result<(ObservationEnvelope, DisplayOrdinaryFinalRetirementFacts), ManagedLifecycleError>

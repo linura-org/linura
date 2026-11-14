@@ -2072,7 +2072,11 @@ impl DisplayTransactionPort for SuccessorPort {
         deadline: u64,
     ) -> Result<ExecutionOutcome, String> {
         let (authorization, guard, predecessor) = application.into_executor_request();
-        let predecessor = predecessor.ok_or("successor has no sealed predecessor")?;
+        let Some(linura_control::DisplaySuccessorPredecessor::Restoration(predecessor)) =
+            predecessor
+        else {
+            return Err("restoration successor has no purpose-bound predecessor".into());
+        };
         let next = value(linura_core::DisplayLayoutMaterial::decode(
             &request.desired_state["layout"],
         ));

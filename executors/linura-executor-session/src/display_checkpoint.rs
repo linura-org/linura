@@ -13,10 +13,11 @@ use linura_linux_session::{
     NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryCurrentPreparation,
     NativeDisplayOrdinaryFinalPreparation, NativeDisplayOrdinaryPowerPreparation,
     NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryReleasedRecord,
-    NativeDisplayOrdinaryRootPreparation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayRootRetirementPreparation, NativeDisplaySuccessorPreparation,
+    NativeDisplayOrdinaryRootPreparation, NativeDisplayOrdinarySuccessorPreparation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplaySuccessorPreparation,
 };
 use linura_provider_sdk::ComponentDigest;
 use rustix::fs::{self, FileType, FlockOperation, Mode, OFlags};
@@ -56,6 +57,8 @@ const ORDINARY_COMPLETION_SPENT_MAGIC: &[u8] = b"LNOC:1\n";
 const ORDINARY_RELEASE_PREPARED_MAGIC: &[u8] = b"LNOP:1\n";
 // Authenticated native spend only. This is not physical-release evidence.
 const ORDINARY_RELEASE_SPENT_MAGIC: &[u8] = b"LNOS:1\n";
+const ORDINARY_SUCCESSOR_PREPARED_MAGIC: &[u8] = b"LNOM:1\n";
+const ORDINARY_SUCCESSOR_SPENT_MAGIC: &[u8] = b"LNON:1\n";
 const SUCCESSOR_PREPARED_MAGIC: &[u8] = b"LNST:1\n";
 const SUCCESSOR_SPENT_MAGIC: &[u8] = b"LNSX:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
@@ -77,6 +80,8 @@ enum Kind {
     OrdinaryCompletionSpent,
     OrdinaryReleasePrepared,
     OrdinaryReleaseSpent,
+    OrdinarySuccessorPrepared,
+    OrdinarySuccessorSpent,
     SuccessorPrepared,
     SuccessorSpent,
     Restoration,
@@ -113,6 +118,8 @@ impl Kind {
             Self::OrdinaryCompletionSpent => "ordinary-completion-spent-",
             Self::OrdinaryReleasePrepared => "ordinary-release-prepared-",
             Self::OrdinaryReleaseSpent => "ordinary-release-spent-",
+            Self::OrdinarySuccessorPrepared => "ordinary-successor-prepared-",
+            Self::OrdinarySuccessorSpent => "ordinary-successor-spent-",
             Self::SuccessorPrepared => "successor-prepared-",
             Self::SuccessorSpent => "successor-spent-",
             Self::Restoration => "restoration-",
@@ -149,6 +156,8 @@ impl Kind {
             Self::OrdinaryCompletionSpent => ORDINARY_COMPLETION_SPENT_MAGIC,
             Self::OrdinaryReleasePrepared => ORDINARY_RELEASE_PREPARED_MAGIC,
             Self::OrdinaryReleaseSpent => ORDINARY_RELEASE_SPENT_MAGIC,
+            Self::OrdinarySuccessorPrepared => ORDINARY_SUCCESSOR_PREPARED_MAGIC,
+            Self::OrdinarySuccessorSpent => ORDINARY_SUCCESSOR_SPENT_MAGIC,
             Self::SuccessorPrepared => SUCCESSOR_PREPARED_MAGIC,
             Self::SuccessorSpent => SUCCESSOR_SPENT_MAGIC,
             Self::Restoration => RESTORATION_MAGIC,
@@ -172,6 +181,11 @@ impl Kind {
     }
     fn dispatch(self, payload: &[u8]) -> Result<ComponentDigest, String> {
         match self {
+            Self::OrdinarySuccessorPrepared | Self::OrdinarySuccessorSpent => {
+                Ok(NativeDisplayOrdinarySuccessorPreparation::decode(payload)?
+                    .binding()
+                    .dispatch_digest)
+            }
             Self::SuccessorPrepared | Self::SuccessorSpent => {
                 Ok(NativeDisplaySuccessorPreparation::decode(payload)?
                     .binding()
@@ -313,6 +327,8 @@ impl Kind {
 /// structure grants neither current native authority nor permission to retire.
 #[derive(Default)]
 struct TerminalLineage {
+    ordinary_successor_prepared: BTreeMap<String, NativeDisplayOrdinarySuccessorPreparation>,
+    ordinary_successor_spent: BTreeMap<String, NativeDisplayOrdinarySuccessorPreparation>,
     ordinary_final_prepared: BTreeMap<String, NativeDisplayOrdinaryFinalPreparation>,
     ordinary_final_spent: BTreeMap<String, NativeDisplayOrdinaryFinalPreparation>,
     ordinary_released: BTreeMap<String, NativeDisplayOrdinaryReleasedRecord>,
@@ -350,6 +366,25 @@ struct TerminalLineage {
 impl TerminalLineage {
     fn observe(&mut self, kind: Kind, bytes: &[u8]) -> Result<(), String> {
         match kind {
+            Kind::OrdinarySuccessorPrepared | Kind::OrdinarySuccessorSpent => {
+                let record = NativeDisplayOrdinarySuccessorPreparation::decode(bytes)?;
+                let key = record
+                    .parent()
+                    .parent()
+                    .frames()
+                    .scope()
+                    .original_dispatch()
+                    .to_owned();
+                let table = if kind == Kind::OrdinarySuccessorPrepared {
+                    &mut self.ordinary_successor_prepared
+                } else {
+                    &mut self.ordinary_successor_spent
+                };
+                if table.insert(key, record).is_some() {
+                    return Err(unavailable());
+                }
+                Ok(())
+            }
             Kind::SuccessorPrepared | Kind::SuccessorSpent => {
                 let record = NativeDisplaySuccessorPreparation::decode(bytes)?;
                 let key = record
@@ -903,6 +938,28 @@ impl TerminalLineage {
             }
         }
         let mut targets = std::collections::BTreeSet::new();
+        for (scope, record) in &self.ordinary_successor_prepared {
+            let parent = self.ordinary_released.get(scope).ok_or_else(unavailable)?;
+            if record.parent().canonical_bytes() != parent.canonical_bytes()
+                || !targets.insert(record.binding().dispatch_digest.to_hex())
+            {
+                return Err(unavailable());
+            }
+            record.validate_checkpoint(
+                self.originals
+                    .get(&record.binding().dispatch_digest.to_hex())
+                    .ok_or_else(unavailable)?,
+            )?;
+        }
+        for (scope, record) in &self.ordinary_successor_spent {
+            let prepared = self
+                .ordinary_successor_prepared
+                .get(scope)
+                .ok_or_else(unavailable)?;
+            if record.canonical_bytes() != prepared.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
         for (scope, record) in &self.successor_prepared {
             let parent = self.released_current.get(scope).ok_or_else(unavailable)?;
             if record.parent().canonical_bytes() != parent.canonical_bytes()
@@ -941,6 +998,8 @@ fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
         Kind::OrdinaryCompletionSpent,
         Kind::OrdinaryReleasePrepared,
         Kind::OrdinaryReleaseSpent,
+        Kind::OrdinarySuccessorPrepared,
+        Kind::OrdinarySuccessorSpent,
         Kind::SuccessorPrepared,
         Kind::SuccessorSpent,
         Kind::Restoration,
@@ -2850,6 +2909,77 @@ pub(super) fn read_successor(
             lineage.successor_prepared.remove(scope)
         }
     })
+}
+
+/// Exact one-use successor ancestry, never a startup or replay credential.
+pub(super) fn reserve_ordinary_successor(
+    record: &NativeDisplayOrdinarySuccessorPreparation,
+    spent: bool,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        if spent {
+            Kind::OrdinarySuccessorSpent
+        } else {
+            Kind::OrdinarySuccessorPrepared
+        },
+    )
+}
+pub(super) fn read_ordinary_successor(
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+    spent: bool,
+) -> Result<Option<NativeDisplayOrdinarySuccessorPreparation>, String> {
+    read_ordinary_successor_at(&open()?, 0, scope, spent)
+}
+fn read_ordinary_successor_at(
+    fd: &OwnedFd,
+    uid: u32,
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+    spent: bool,
+) -> Result<Option<NativeDisplayOrdinarySuccessorPreparation>, String> {
+    directory(fd, uid, false)?;
+    fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
+    let result = (|| {
+        let mut lineage = TerminalLineage::default();
+        let mut count = 0;
+        for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
+            let entry = entry.map_err(|_| unavailable())?;
+            if matches!(entry.file_name().to_bytes(), b"." | b"..") {
+                continue;
+            }
+            count += 1;
+            if count > MAX_RECORDS {
+                return Err(unavailable());
+            }
+            let (kind, _, bytes) = read_named_record(fd, uid, entry.file_name())?;
+            lineage.observe(kind, &bytes)?;
+        }
+        lineage.verify()?;
+        let record = if spent {
+            lineage
+                .ordinary_successor_spent
+                .remove(scope.original_dispatch())
+        } else {
+            lineage
+                .ordinary_successor_prepared
+                .remove(scope.original_dispatch())
+        };
+        if record
+            .as_ref()
+            .is_some_and(|v| v.parent().parent().frames().scope() != scope)
+        {
+            return Err(unavailable());
+        }
+        Ok(record)
+    })();
+    let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
+    match (result, unlocked) {
+        (Ok(v), Ok(())) => Ok(v),
+        (Err(e), _) | (_, Err(e)) => Err(e),
+    }
 }
 
 #[cfg(test)]

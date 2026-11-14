@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use linura_transaction::{
-    AbortRequest, AuthorityBinding, CommitRequest, ContentDigest, HandoffCommit, HandoffRequest,
+    AbortRequest, AuthorityBinding, CommitRequest, CommittedStateMaterial, ContentDigest, HandoffCommit, HandoffRequest,
     MAX_TRANSACTION_GENERATIONS, PrepareOutcome, RecoveryAnchor, RecoveryOutcome, RecoveryRequest,
     RecoveryResolution, TransactionAuthorityVerifier, TransactionId, TransactionSnapshot,
     TransactionState, TransactionStore, TransactionStoreError, VerifiedCommitMaterial, digest_parts,
@@ -1162,6 +1162,33 @@ impl TransactionStore for SqliteTransactionStore {
                 || TransactionStoreError::Corruption("verified provenance digest missing".into()),
             )?)
             .map_err(|error| TransactionStoreError::Corruption(error.to_string()))?,
+        })
+    }
+
+    fn committed_state_material(
+        &self,
+        transaction_id: &TransactionId,
+    ) -> Result<CommittedStateMaterial, TransactionStoreError> {
+        let (_, generation, snapshot) =
+            load_current(&self.connection, &self.integrity_key, transaction_id)?;
+        if snapshot.state != TransactionState::Committed {
+            return Err(TransactionStoreError::StateConflict);
+        }
+        let read = |raw: Option<String>| {
+            let digest = raw
+                .ok_or_else(|| TransactionStoreError::Corruption("committed lineage missing".into()))
+                .and_then(|raw| ContentDigest::new(raw)
+                    .map_err(|e| TransactionStoreError::Corruption(e.to_string())))?;
+            if digest == ContentDigest::zero() {
+                return Err(TransactionStoreError::Corruption("committed lineage is empty".into()));
+            }
+            Ok(digest)
+        };
+        Ok(CommittedStateMaterial {
+            snapshot,
+            desired_state_digest: read(generation.desired_state_digest)?,
+            graph_digest: read(generation.graph_digest)?,
+            provenance_digest: read(generation.provenance_digest)?,
         })
     }
 

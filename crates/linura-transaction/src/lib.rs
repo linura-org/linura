@@ -499,6 +499,16 @@ pub struct VerifiedCommitMaterial {
     pub provenance_digest: ContentDigest,
 }
 
+/// Authenticated committed desired-state lineage for adoption and explanation.
+/// This read-only material cannot resume verification or authorize an effect.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommittedStateMaterial {
+    pub snapshot: TransactionSnapshot,
+    pub desired_state_digest: ContentDigest,
+    pub graph_digest: ContentDigest,
+    pub provenance_digest: ContentDigest,
+}
+
 const AUTHORITY_MUTATION_KEY_BYTES: usize = 32;
 const AUTHORITY_MUTATION_TAG_BYTES: usize = 32;
 type AuthorityHmac = Hmac<Sha256>;
@@ -1191,6 +1201,10 @@ pub trait TransactionStore: std::fmt::Debug {
         &self,
         transaction_id: &TransactionId,
     ) -> Result<VerifiedCommitMaterial, TransactionStoreError>;
+    fn committed_state_material(
+        &self,
+        transaction_id: &TransactionId,
+    ) -> Result<CommittedStateMaterial, TransactionStoreError>;
     fn list_state(
         &self,
         state: TransactionState,

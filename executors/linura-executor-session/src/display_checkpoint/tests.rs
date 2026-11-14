@@ -2474,6 +2474,60 @@ fn successor_checkpoint(use_byte: u8) -> Vec<u8> {
     encoded
 }
 
+fn ordinary_successor_checkpoint(use_byte: u8) -> Vec<u8> {
+    let (bytes, _) = ordinary_release_fixture(19);
+    let mut rest = bytes.as_slice();
+    let mut fields = Vec::new();
+    while !rest.is_empty() {
+        let (size, tail) = rest.split_at(8);
+        let size =
+            u64::from_be_bytes(size.try_into().unwrap_or_else(|_| unreachable!("length"))) as usize;
+        let (field, tail) = tail.split_at(size);
+        fields.push(
+            std::str::from_utf8(field)
+                .unwrap_or_else(|_| unreachable!("text"))
+                .to_owned(),
+        );
+        rest = tail;
+    }
+    let offsets = fields[8]
+        .match_indices("LNDL:1;")
+        .map(|(i, _)| i)
+        .collect::<Vec<_>>();
+    assert_eq!(offsets.len(), 2);
+    fields[8] = format!(
+        "{}{}{}",
+        &fields[8][..offsets[0]],
+        &fields[8][offsets[1]..],
+        &fields[8][offsets[0]..offsets[1]]
+    );
+    let effect = linura_provider_sdk::display_layout_effect(&fields[8])
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = linura_provider_sdk::ExecutionBinding::new(
+        format!("transaction:ordinary-successor-{use_byte}"),
+        0,
+        1,
+        ComponentDigest::from_bytes([30; 32]),
+        ComponentDigest::from_bytes([use_byte; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    fields[1] = binding.transaction_id;
+    fields[4] = binding.authority_binding_digest.to_hex();
+    fields[5] = binding.authority_use_digest.to_hex();
+    fields[6] = binding.effect_digest.to_hex();
+    fields[7] = binding.dispatch_digest.to_hex();
+    fields[15] = "3000".into();
+    let mut encoded = Vec::new();
+    for field in fields {
+        encoded.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        encoded.extend_from_slice(field.as_bytes());
+    }
+    NativeDisplayRecoveryCheckpoint::validate_stored(&encoded, &binding.dispatch_digest)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    encoded
+}
+
 fn ordinary_completion_fixture(
     parent: &NativeDisplayOrdinaryReleasePreparation,
 ) -> NativeDisplayOrdinaryCompletionPreparation {
@@ -3008,8 +3062,79 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
             .unwrap_or_else(|| unreachable!())
             .1
     );
+    let next_payload = ordinary_successor_checkpoint(26);
+    let next = NativeDisplayOrdinarySuccessorPreparation::from_checkpoint(
+        &released,
+        &next_payload,
+        4000,
+        3000,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let successor_bytes = next.canonical_bytes();
+    assert_eq!(
+        NativeDisplayOrdinarySuccessorPreparation::decode(&successor_bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .canonical_bytes(),
+        successor_bytes
+    );
+    assert!(NativeDisplaySuccessorPreparation::decode(&successor_bytes).is_err());
+    for end in [
+        0,
+        1,
+        7,
+        8,
+        successor_bytes.len() / 2,
+        successor_bytes.len() - 1,
+    ] {
+        assert!(
+            NativeDisplayOrdinarySuccessorPreparation::decode(&successor_bytes[..end]).is_err()
+        );
+    }
+    let mut trailing = successor_bytes.clone();
+    trailing.push(0);
+    assert!(NativeDisplayOrdinarySuccessorPreparation::decode(&trailing).is_err());
+    let next_publish = |kind| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &next.binding().dispatch_digest,
+            &successor_bytes,
+            kind,
+        )
+    };
+    assert!(next_publish(Kind::OrdinarySuccessorPrepared).is_err());
+    reserve_at(
+        &fixture.fd,
+        fixture.uid,
+        &next.binding().dispatch_digest,
+        &next_payload,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    // A new checkpoint does not replace the missing completed-release parent.
+    assert!(next_publish(Kind::OrdinarySuccessorPrepared).is_err());
     publish(Kind::OrdinaryReleased, &released_bytes).unwrap_or_else(|e| unreachable!("{e}"));
     assert!(publish(Kind::OrdinaryReleased, &released_bytes).is_err());
+    assert!(next_publish(Kind::OrdinarySuccessorSpent).is_err());
+    next_publish(Kind::OrdinarySuccessorPrepared).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(next_publish(Kind::OrdinarySuccessorPrepared).is_err());
+    assert_eq!(
+        read_ordinary_successor_at(&fixture.fd, fixture.uid, first.scope(), false)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!())
+            .canonical_bytes(),
+        successor_bytes
+    );
+    next_publish(Kind::OrdinarySuccessorSpent).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(next_publish(Kind::OrdinarySuccessorSpent).is_err());
+    assert_eq!(
+        read_ordinary_successor_at(&fixture.fd, fixture.uid, first.scope(), true)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!())
+            .canonical_bytes(),
+        successor_bytes
+    );
+    assert!(read_ordinary_successor_at(&fixture.fd, fixture.uid + 1, first.scope(), true).is_err());
+
     // The ordinary Root producer carries the immutable full before-final frame
     // checkpoint. A new outer sample never renews its historical window.
     for phase in 1..=3 {

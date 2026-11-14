@@ -222,6 +222,7 @@ class S17DeploymentTests(unittest.TestCase):
                 }
                 for method in (
                     "ReadSuccessor",
+                    "ReadOrdinarySuccessor",
                     "ReadOrdinaryOriginal",
                     "ReserveOrdinaryRelease",
                     "ReserveOrdinaryReleaseGrant",

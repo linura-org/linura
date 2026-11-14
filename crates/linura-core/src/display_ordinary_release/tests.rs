@@ -84,6 +84,30 @@ fn ordinary_release_is_same_scope_and_exposes_only_its_actual_terminal_layout() 
             &original,
         ));
         let release = value(DisplayOrdinaryReleaseMaterial::decode(&encoded));
+        let current = value(release.validate_native(&set, &caps));
+        let different = if outcome == DisplayOrdinaryReleaseOutcome::Keep {
+            intent.baseline().clone()
+        } else {
+            intent.desired().clone()
+        };
+        let next = value(crate::DisplayLayoutIntent::new(
+            material.lock().clone(),
+            current,
+            different,
+        ));
+        let next_text = value(next.canonical_text());
+        let next_material = value(DisplayLayoutMaterial::decode(&next_text));
+        assert!(next_material.continues_after_ordinary(&release));
+        assert!(!next_material.continues_after(&next_material));
+        let current_invocation = material.topology().compositor().as_str();
+        let foreign_invocation = if current_invocation == "00000000-0000-0000-0000-000000000001" {
+            "00000000-0000-0000-0000-000000000002"
+        } else {
+            "00000000-0000-0000-0000-000000000001"
+        };
+        let foreign = next_text.replace(current_invocation, foreign_invocation);
+        assert_ne!(foreign, next_text);
+        assert!(!value(DisplayLayoutMaterial::decode(&foreign)).continues_after_ordinary(&release));
         assert_eq!(release.lineage(), &lineage());
         assert_eq!(release.original_text(), original);
         assert_eq!(release.current_lock(), material.lock());

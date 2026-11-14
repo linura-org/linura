@@ -239,6 +239,7 @@ impl NativeProtection {
                         service.spend_ordinary_current_mechanism(&owner, &key, &record, digest)
                     },
                     |digest| service.spend_ordinary_final_mechanism(&owner, &key, &record, digest),
+                    |digest| service.spend_ordinary_successor_mechanism(&key, &record, digest),
                 );
             })
             .map_err(|_| unavailable())?;

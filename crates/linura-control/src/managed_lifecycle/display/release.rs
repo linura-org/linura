@@ -6,10 +6,12 @@
 //! separate requirements before any protective fence can be released.
 
 use super::*;
+mod adoption;
+pub use adoption::OrdinaryDisplayCommittedAdoption;
 mod completion;
 mod current;
 mod current_commit;
-mod current_records;
+pub(super) mod current_records;
 pub use current_commit::{
     AuthorizedOrdinaryDisplayCurrentCommit, OrdinaryDisplayCurrentCommit,
     OrdinaryDisplayCurrentCommitPort, OrdinaryDisplayQualifiedCurrent,
@@ -30,7 +32,7 @@ pub use root_power::{
     OrdinaryDisplayRootPowerRetirementPort,
 };
 mod execution;
-mod original;
+pub(super) mod original;
 pub use execution::{
     AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayReleaseAuthorizer,
     OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,

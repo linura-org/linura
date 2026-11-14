@@ -37,7 +37,7 @@ fn record_fields(bytes: &[u8]) -> Result<Vec<String>, ManagedLifecycleError> {
     Ok(fields)
 }
 
-impl DisplaySuccessorContext {
+impl DisplayRestorationSuccessorContext {
     fn claim(
         &self,
         principal: &PrincipalId,
@@ -107,11 +107,11 @@ impl DisplaySuccessorContext {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    pub(in crate::managed_lifecycle::display) fn successor_for_request(
+    pub(in crate::managed_lifecycle::display) fn restoration_successor_for_request(
         &self,
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,
-    ) -> Result<Option<DisplaySuccessorContext>, ManagedLifecycleError> {
+    ) -> Result<Option<DisplayRestorationSuccessorContext>, ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
         let key = claim_key("intent", request.request_id.as_str())?;
         let record = match self.display_journal()?.load(&principal_id, &key) {
@@ -132,8 +132,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(invalid());
         }
         let predecessor = RequestId::new(&fields[9]).map_err(|_| invalid())?;
-        let context = self.successor_context(principal, &predecessor)?;
-        self.require_successor_claim(&principal_id, request, &context)?;
+        let context = self.restoration_successor_context(principal, &predecessor)?;
+        self.require_restoration_successor_claim(&principal_id, request, &context)?;
         Ok(Some(context))
     }
 
@@ -141,23 +141,23 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
     /// observed new attempt and verified current layout before recording proof.
     /// Missing ACKs never call either handoff port again.
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::managed_lifecycle::display) fn verify_successor_transfer<
+    pub(in crate::managed_lifecycle::display) fn verify_restoration_successor_transfer<
         P: DisplayTransactionPort,
         V: IndependentDisplayVerifier,
     >(
         &mut self,
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,
-        context: &DisplaySuccessorContext,
+        context: &DisplayRestorationSuccessorContext,
         dispatched: &Record,
         guard: &ComponentDigest,
         port: &mut P,
         verifier: &mut V,
     ) -> Result<(), ManagedLifecycleError> {
         use linura_observation::{DISPLAY_SUCCESSOR_CAPABILITY, DisplaySuccessorFacts};
-        self.require_successor_context(principal, context)?;
+        self.require_restoration_successor_context(principal, context)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
-        self.require_successor_claim(&principal_id, request, context)?;
+        self.require_restoration_successor_claim(&principal_id, request, context)?;
         let query = ObservationRequest {
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
             capability: CapabilityId::new(DISPLAY_SUCCESSOR_CAPABILITY).map_err(|_| invalid())?,
@@ -211,8 +211,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         root.require_current(now_ms()?).map_err(|_| invalid())?;
         native.require_current(now_ms()?).map_err(|_| invalid())?;
-        self.require_successor_context(principal, context)?;
-        self.require_successor_claim(&principal_id, request, context)?;
+        self.require_restoration_successor_context(principal, context)?;
+        self.require_restoration_successor_claim(&principal_id, request, context)?;
         // First evidence is immutable. Later reads validate the same Root
         // spend/checkpoint and retain their own freshness, never rewrite it.
         let key = claim_key("verified", request.request_id.as_str())?;
@@ -296,7 +296,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if actor.kind != ActorKind::Human || !actor.interactive {
             return Err(invalid());
         }
-        let context = self.successor_context(&principal, predecessor)?;
+        let context = self.restoration_successor_context(&principal, predecessor)?;
         let terminal = self.current_finalization_comparison_context(&principal, predecessor)?;
         let previous = DisplayFinalizationMaterial::decode(terminal.intent.material())
             .map_err(|_| invalid())?;
@@ -309,7 +309,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
         let id = TransactionId::for_namespace(&principal_id, &request.request_id);
         match self.authority.snapshot(&id) {
-            Ok(_) => self.require_successor_claim(&principal_id, &request, &context)?,
+            Ok(_) => self.require_restoration_successor_claim(&principal_id, &request, &context)?,
             Err(DurableAuthorityError::Transaction(detail))
                 if detail == "durable transaction not found" =>
             {
@@ -335,15 +335,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             approval_authorizer,
             port,
             verifier,
-            Some(context),
+            Some(DisplaySuccessorContext::Restoration(context)),
         )
     }
 
-    fn successor_context(
+    fn restoration_successor_context(
         &self,
         principal: &AuthenticatedPrincipal,
         predecessor: &RequestId,
-    ) -> Result<DisplaySuccessorContext, ManagedLifecycleError> {
+    ) -> Result<DisplayRestorationSuccessorContext, ManagedLifecycleError> {
         let context = self.current_finalization_comparison_context(principal, predecessor)?;
         let material = DisplayFinalizationMaterial::decode(context.intent.material())
             .map_err(|_| invalid())?;
@@ -381,7 +381,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        Ok(DisplaySuccessorContext {
+        Ok(DisplayRestorationSuccessorContext {
             terminal: actual,
             restoration: history.restoration_snapshot,
             scope: material.recovery_scope().map_err(|_| invalid())?,
@@ -391,22 +391,23 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         })
     }
 
-    pub(in crate::managed_lifecycle::display) fn require_successor_context(
+    pub(in crate::managed_lifecycle::display) fn require_restoration_successor_context(
         &self,
         principal: &AuthenticatedPrincipal,
-        context: &DisplaySuccessorContext,
+        context: &DisplayRestorationSuccessorContext,
     ) -> Result<(), ManagedLifecycleError> {
-        if self.successor_context(principal, &context.terminal.request_id)? != *context {
+        if self.restoration_successor_context(principal, &context.terminal.request_id)? != *context
+        {
             return Err(invalid());
         }
         Ok(())
     }
-    pub(in crate::managed_lifecycle::display) fn require_successor_root(
+    pub(in crate::managed_lifecycle::display) fn require_restoration_successor_root(
         &mut self,
         principal: &AuthenticatedPrincipal,
-        context: &DisplaySuccessorContext,
+        context: &DisplayRestorationSuccessorContext,
     ) -> Result<(), ManagedLifecycleError> {
-        self.require_successor_context(principal, context)?;
+        self.require_restoration_successor_context(principal, context)?;
         // The new opaque review intentionally covers the old ordinary frame.
         // Recheck the actual original Root lifetime and immutable ancestry here;
         // the new canonical candidate independently re-observes its baseline.
@@ -419,13 +420,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid());
         }
-        self.require_successor_context(principal, context)
+        self.require_restoration_successor_context(principal, context)
     }
-    pub(in crate::managed_lifecycle::display) fn retain_successor_claim(
+    pub(in crate::managed_lifecycle::display) fn retain_restoration_successor_claim(
         &mut self,
         principal: &PrincipalId,
         request: &PlanDesiredStateRequest,
-        context: &DisplaySuccessorContext,
+        context: &DisplayRestorationSuccessorContext,
     ) -> Result<(), ManagedLifecycleError> {
         for record in context.claims(principal, request)? {
             self.request_journal
@@ -434,13 +435,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 .retain(&record)
                 .map_err(|_| invalid())?;
         }
-        self.require_successor_claim(principal, request, context)
+        self.require_restoration_successor_claim(principal, request, context)
     }
-    pub(in crate::managed_lifecycle::display) fn require_successor_claim(
+    pub(in crate::managed_lifecycle::display) fn require_restoration_successor_claim(
         &self,
         principal: &PrincipalId,
         request: &PlanDesiredStateRequest,
-        context: &DisplaySuccessorContext,
+        context: &DisplayRestorationSuccessorContext,
     ) -> Result<(), ManagedLifecycleError> {
         self.display_journal()?
             .integrity_check()

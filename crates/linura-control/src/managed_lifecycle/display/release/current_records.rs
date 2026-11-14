@@ -5,7 +5,7 @@ use linura_transaction::{ContentDigest, RetainedRequest, digest_bytes};
 const LIMIT: usize = 8192;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Kind {
+pub(in crate::managed_lifecycle::display) enum Kind {
     Ready,
     Verified,
     Committed,
@@ -14,6 +14,7 @@ pub(super) enum Kind {
     FinalPrepared,
     FinalVerified,
     Released,
+    Adopted,
 }
 impl Kind {
     fn name(self) -> &'static str {
@@ -26,12 +27,16 @@ impl Kind {
             Self::FinalPrepared => "final-prepared",
             Self::FinalVerified => "final-verified",
             Self::Released => "released",
+            Self::Adopted => "adopted",
         }
     }
     fn domain(self) -> String {
         format!("linura.display.ordinary-current-{}.v1", self.name())
     }
-    pub(super) fn key(self, request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
+    pub(in crate::managed_lifecycle::display) fn key(
+        self,
+        request: &RequestId,
+    ) -> Result<RequestId, ManagedLifecycleError> {
         RequestId::new(format!(
             "request:v010:display-ordinary-current-{}:{}",
             self.name(),
@@ -53,6 +58,7 @@ impl Kind {
             Self::FinalPrepared => 11,
             Self::FinalVerified => 14,
             Self::Released => 10,
+            Self::Adopted => 15,
         }
     }
 }
@@ -65,14 +71,18 @@ fn append(out: &mut Vec<u8>, v: &str) -> Result<(), ManagedLifecycleError> {
     out.extend_from_slice(v.as_bytes());
     Ok(())
 }
-pub(super) fn number(raw: &str) -> Result<u64, ManagedLifecycleError> {
+pub(in crate::managed_lifecycle::display) fn number(
+    raw: &str,
+) -> Result<u64, ManagedLifecycleError> {
     let v = raw.parse::<u64>().map_err(|_| invalid_original())?;
     if v.to_string() != raw {
         return Err(invalid_original());
     }
     Ok(v)
 }
-pub(super) fn digest(raw: &str) -> Result<ContentDigest, ManagedLifecycleError> {
+pub(in crate::managed_lifecycle::display) fn digest(
+    raw: &str,
+) -> Result<ContentDigest, ManagedLifecycleError> {
     let d = ContentDigest::new(raw).map_err(|_| invalid_original())?;
     if d == ContentDigest::zero() {
         return Err(invalid_original());
@@ -80,8 +90,8 @@ pub(super) fn digest(raw: &str) -> Result<ContentDigest, ManagedLifecycleError> 
     Ok(d)
 }
 #[derive(Debug)]
-pub(super) struct Entry {
-    pub(super) fields: Vec<String>,
+pub(in crate::managed_lifecycle::display) struct Entry {
+    pub(in crate::managed_lifecycle::display) fields: Vec<String>,
     bytes: Vec<u8>,
     kind: Kind,
 }
@@ -124,7 +134,7 @@ impl Entry {
             kind,
         })
     }
-    pub(super) fn load(
+    pub(in crate::managed_lifecycle::display) fn load(
         journal: &dyn ApprovedRequestJournal,
         kind: Kind,
         pid: &PrincipalId,
@@ -160,7 +170,7 @@ impl Entry {
         }
         Ok(e)
     }
-    pub(super) fn retain(
+    pub(in crate::managed_lifecycle::display) fn retain(
         journal: &mut dyn ApprovedRequestJournal,
         kind: Kind,
         pid: &PrincipalId,
@@ -177,7 +187,7 @@ impl Entry {
         e.readback(journal, pid, request)?;
         Ok(e)
     }
-    pub(super) fn readback(
+    pub(in crate::managed_lifecycle::display) fn readback(
         &self,
         journal: &dyn ApprovedRequestJournal,
         pid: &PrincipalId,
@@ -188,14 +198,14 @@ impl Entry {
         }
         Ok(())
     }
-    pub(super) fn digest(&self) -> ContentDigest {
+    pub(in crate::managed_lifecycle::display) fn digest(&self) -> ContentDigest {
         digest_bytes(&self.kind.domain(), &self.bytes)
     }
 }
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
     /// Read-only old-state comparison tied to the actual authenticated current
     /// state and immutable before-CAS record. This cannot resume a native port.
-    pub(super) fn ordinary_current_comparison_snapshot(
+    pub(in crate::managed_lifecycle::display) fn ordinary_current_comparison_snapshot(
         &self,
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,

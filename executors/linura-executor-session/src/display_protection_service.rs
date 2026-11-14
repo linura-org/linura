@@ -17,11 +17,12 @@ use linura_linux_session::{
     NativeDisplayOrdinaryCompletionPreparation, NativeDisplayOrdinaryCurrentPreparation,
     NativeDisplayOrdinaryFinalPreparation, NativeDisplayOrdinaryPowerPreparation,
     NativeDisplayOrdinaryReleasePreparation, NativeDisplayOrdinaryReleasedRecord,
-    NativeDisplayOrdinaryRootPreparation, NativeDisplayPowerRetirementPreparation,
-    NativeDisplayRecoveryCheckpoint, NativeDisplayReleasedCurrentRecord,
-    NativeDisplayRestorationReservation, NativeDisplayRetirementPreparation,
-    NativeDisplayRootRetirementPreparation, NativeDisplayStartupPeer, NativeDisplayStartupRequest,
-    NativeDisplaySuccessorPreparation, NativeSessionChannel, NativeSessionRole,
+    NativeDisplayOrdinaryRootPreparation, NativeDisplayOrdinarySuccessorPreparation,
+    NativeDisplayPowerRetirementPreparation, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayReleasedCurrentRecord, NativeDisplayRestorationReservation,
+    NativeDisplayRetirementPreparation, NativeDisplayRootRetirementPreparation,
+    NativeDisplayStartupPeer, NativeDisplayStartupRequest, NativeDisplaySuccessorPreparation,
+    NativeSessionChannel, NativeSessionRole,
 };
 use linura_provider_sdk::ComponentDigest;
 use sha2::Digest;
@@ -42,6 +43,7 @@ mod ordinary_current;
 mod ordinary_final;
 mod ordinary_power;
 mod ordinary_root;
+mod ordinary_successor;
 mod power;
 mod root_power;
 mod successor;
@@ -154,6 +156,7 @@ struct Admission {
     current_commits: BTreeMap<String, CurrentCommitReservation>,
     final_retirements: BTreeMap<String, FinalRetirementReservation>,
     successors: BTreeMap<String, SuccessorReservation>,
+    ordinary_successors: BTreeMap<String, SuccessorReservation>,
 }
 
 struct SuccessorReservation {
@@ -381,6 +384,17 @@ type OrdinaryRootPowerRead = (Vec<u8>, Vec<u8>, Vec<u8>, bool);
 type OriginalRootPowerRead = (Vec<u8>, Vec<u8>, Vec<u8>, bool);
 
 trait ProtectionPort: Clone + Send + Sync + 'static {
+    fn reserve_ordinary_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+        checkpoint: &[u8],
+    ) -> zbus::fdo::Result<Vec<u8>>;
+    fn read_ordinary_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)>;
     fn reserve_successor(
         &self,
         sender: &str,
@@ -879,6 +893,21 @@ impl NativeProtection {
 }
 
 impl ProtectionPort for NativeProtection {
+    fn reserve_ordinary_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+        checkpoint: &[u8],
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        self.reserve_ordinary_successor_mechanism(sender, scope, checkpoint)
+    }
+    fn read_ordinary_successor(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+        self.read_ordinary_successor_mechanism(sender, scope)
+    }
     fn reserve_successor(
         &self,
         sender: &str,
@@ -2103,6 +2132,54 @@ impl ProtectionPort for NativeProtection {
 #[zbus::interface(name = "org.linura.DisplayProtection1")]
 impl<P: ProtectionPort> ProtectionService<P> {
     #[zbus(out_args("preparation"))]
+    async fn reserve_ordinary_successor(
+        &self,
+        ordinary_scope: &str,
+        checkpoint: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<Vec<u8>> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 || checkpoint.len() > 384 * 1024 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let payload = checkpoint.to_vec();
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service
+                .port
+                .reserve_ordinary_successor(&sender, scope, &payload)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "spent"))]
+    async fn read_ordinary_successor(
+        &self,
+        ordinary_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_successor(&sender, scope)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation"))]
     async fn reserve_successor(
         &self,
         recovery_scope: &str,
@@ -2914,6 +2991,21 @@ mod tests {
     #[derive(Clone)]
     struct DenyProtection;
     impl ProtectionPort for DenyProtection {
+        fn reserve_ordinary_successor(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+            _: &[u8],
+        ) -> zbus::fdo::Result<Vec<u8>> {
+            Err(unavailable())
+        }
+        fn read_ordinary_successor(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+            Err(unavailable())
+        }
         fn reserve_successor(
             &self,
             _: &str,
@@ -3186,7 +3278,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 38);
+            assert_eq!(text.matches("<method ").count(), 40);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -3213,6 +3305,8 @@ mod tests {
         for method in [
             "ReserveSuccessor",
             "ReadSuccessor",
+            "ReserveOrdinarySuccessor",
+            "ReadOrdinarySuccessor",
             "Begin",
             "Reserve",
             "Verify",

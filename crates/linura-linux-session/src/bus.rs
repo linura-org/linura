@@ -23,8 +23,10 @@ pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
 fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &str) -> usize {
     if path == "/org/linura/DisplayProtection1"
         && interface == "org.linura.DisplayProtection1"
-        && ((role == NativeSessionRole::Executor && method == "ReserveSuccessor")
-            || (role == NativeSessionRole::Control && method == "ReadSuccessor"))
+        && ((role == NativeSessionRole::Executor
+            && matches!(method, "ReserveSuccessor" | "ReserveOrdinarySuccessor"))
+            || (role == NativeSessionRole::Control
+                && matches!(method, "ReadSuccessor" | "ReadOrdinarySuccessor")))
     {
         return crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64;
     }
@@ -687,6 +689,8 @@ mod diagnostic_tests {
                         "ReadOrdinaryOriginal",
                         "ReserveSuccessor",
                         "ReadSuccessor",
+                        "ReserveOrdinarySuccessor",
+                        "ReadOrdinarySuccessor",
                     ] {
                         let admitted = path == "/org/linura/SecurityOwner1"
                             && interface == "org.linura.SecurityOwner1"
@@ -705,8 +709,13 @@ mod diagnostic_tests {
                                 && interface == "org.linura.DisplayProtection1"
                                 && matches!(
                                     (role, method),
-                                    (NativeSessionRole::Control, "ReadSuccessor")
-                                        | (NativeSessionRole::Executor, "ReserveSuccessor")
+                                    (
+                                        NativeSessionRole::Control,
+                                        "ReadSuccessor" | "ReadOrdinarySuccessor"
+                                    ) | (
+                                        NativeSessionRole::Executor,
+                                        "ReserveSuccessor" | "ReserveOrdinarySuccessor"
+                                    )
                                 )
                             {
                                 crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64

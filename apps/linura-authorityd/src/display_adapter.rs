@@ -195,8 +195,20 @@ impl DisplayTransactionPort for SessionExecutorClient {
             );
         }
         binding.validate_for(&effect).map_err(|e| e.to_string())?;
-        if let Some(predecessor) = predecessor {
+        if let Some(linura_control::DisplaySuccessorPredecessor::Restoration(predecessor)) =
+            predecessor
+        {
             self.channel.handoff_prepared_successor_display(
+                material,
+                &binding,
+                deadline_unix_ms,
+                &native_guard,
+                &predecessor,
+            )
+        } else if let Some(linura_control::DisplaySuccessorPredecessor::Ordinary(predecessor)) =
+            predecessor
+        {
+            self.channel.handoff_prepared_ordinary_successor_display(
                 material,
                 &binding,
                 deadline_unix_ms,

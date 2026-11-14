@@ -27,6 +27,10 @@ pub use display_ordinary_completion_preparation::{
     MAX_NATIVE_DISPLAY_ORDINARY_COMPLETION, NativeDisplayOrdinaryCompletionPreparation,
 };
 mod display_ordinary_release_preparation;
+mod display_ordinary_successor_preparation;
+pub use display_ordinary_successor_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_SUCCESSOR_PREPARATION, NativeDisplayOrdinarySuccessorPreparation,
+};
 mod display_successor_preparation;
 pub use display_ordinary_release_preparation::{
     MAX_NATIVE_DISPLAY_ORDINARY_RELEASE, NativeDisplayOrdinaryReleasePreparation,

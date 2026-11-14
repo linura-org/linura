@@ -420,7 +420,7 @@ class OriginalCompletionGrant final
         auto deadline = now->bootMs + 1000;
         if (initial)
             deadline = std::min(deadline, expires_.bootMs);
-        std::string request = !successor.empty()    ? "LNSA:1\n"
+        std::string request = !successor.empty()    ? (ordinary_ ? "LOSA:1\n" : "LNSA:1\n")
                               : !retirement.empty() ? (ordinary_ ? "LOCA:1\n" : "LNCA:1\n")
                               : !committed.empty()  ? (ordinary_ ? "LOCF:1\n" : "LNCF:1\n")
                               : !power.empty()      ? (ordinary_ ? "LOPR:1\n" : "LNPR:1\n")

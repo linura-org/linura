@@ -828,7 +828,7 @@ class PinnedScene final : public ProtectedScene
         if (!domain || !parent || !intent || !guard ||
             !OriginalSuccessorCodec::matches(*bytes, previous->retiredCurrent->comparisonDigest(),
                                              bound, baseline, desired, captured, capturedClock,
-                                             *now, *guard))
+                                             *now, *guard, previous->ordinaryRelease))
             return {};
         for (std::size_t i = 0; i < captured.heads.size(); ++i)
             if (!data->surfaces.contains(captured.heads[i].key) ||
@@ -869,7 +869,7 @@ class PinnedScene final : public ProtectedScene
         if (!current || !finished || !after || *after != captured || heldInput().any ||
             !OriginalSuccessorCodec::matches(*bytes, previous->retiredCurrent->comparisonDigest(),
                                              bound, baseline, desired, captured, capturedClock,
-                                             *finished, *guard))
+                                             *finished, *guard, previous->ordinaryRelease))
             return refuse();
         data->successorCurrent = std::move(current);
         data->successorPreparing = false;

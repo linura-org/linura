@@ -1272,3 +1272,14 @@ completion and the actual witness transition; Control then independently matches
 Root/native and durable signed history. Early signed Committed does not admit a
 successor or authorize recovery-history deletion. The later adoption/supersession
 and reference-aware cleanup gates remain separate.
+
+
+Ordinary committed adoption is Control-local metadata after a fresh independent
+ReleasedCurrent comparison. Authenticated committed desired-state, graph and
+provenance lineage cannot resume Verified authority. The separate ordinary
+successor uses a new canonical Apply policy/review/prepare/dispatch and transfers
+only the actual retained completed lifetime through a purpose-separated one-use
+Root/native spend. Root/compositor replacement cannot recreate that lifetime from
+files. All predecessor references remain held pending qualified shared-reference
+retirement and cleanup; ordinary Begin and public display mutation remain closed.
+See ADR 0048 for the current implementation and qualification boundary.

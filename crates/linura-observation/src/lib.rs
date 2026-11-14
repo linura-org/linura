@@ -39,6 +39,10 @@ pub use display_root_retirement::{
     DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DisplayCurrentGrantLineage,
     DisplayOriginalRootRetirementFacts, DisplayRootRetirementLineage,
 };
+mod display_ordinary_successor;
+pub use display_ordinary_successor::{
+    DISPLAY_ORDINARY_SUCCESSOR_CAPABILITY, DisplayOrdinarySuccessorFacts,
+};
 mod display_successor;
 pub use display_successor::{
     DISPLAY_SUCCESSOR_CAPABILITY, DisplaySuccessorFacts, DisplaySuccessorLineage,

@@ -14,6 +14,10 @@ fn verified(
 ) -> TransactionSnapshot {
     let binding = binding_with_observation("verified-before-compositor-loss");
     let prepared = prepared_snapshot(value(store.prepare(&binding)));
+    assert_eq!(
+        store.committed_state_material(&prepared.transaction_id),
+        Err(TransactionStoreError::StateConflict)
+    );
     value(store.handoff(&value(signer.authorize_handoff(
         &prepared,
         digest("use"),
@@ -21,6 +25,10 @@ fn verified(
         u64::MAX,
     ))));
     let dispatched = value(store.snapshot(&prepared.transaction_id));
+    assert_eq!(
+        store.committed_state_material(&prepared.transaction_id),
+        Err(TransactionStoreError::StateConflict)
+    );
     let request = value(signer.authorize_recovery(
         &dispatched,
         RecoveryResolution::IntendedStateVerified {
@@ -35,7 +43,90 @@ fn verified(
     let RecoveryOutcome::Verified(snapshot) = value(store.recover(&request)) else {
         unreachable!("expected verified")
     };
+    assert_eq!(
+        store.committed_state_material(&snapshot.transaction_id),
+        Err(TransactionStoreError::StateConflict)
+    );
     snapshot
+}
+
+#[test]
+fn committed_adoption_material_survives_restart_without_reopening_verified_authority() {
+    for field in [
+        None,
+        Some("desired_state_digest"),
+        Some("graph_digest"),
+        Some("provenance_digest"),
+    ] {
+        let db = TestDatabase::new();
+        let (signer, mut store) = open_store(&db.path);
+        let verified = verified(&mut store, &signer);
+        let material = value(store.verified_commit_material(&verified.transaction_id));
+        let committed = value(store.commit(&value(signer.authorize_commit(
+            &verified,
+            material.desired_state_digest.clone(),
+            material.graph_digest.clone(),
+            material.provenance_digest.clone(),
+        ))));
+        assert!(
+            store
+                .verified_commit_material(&verified.transaction_id)
+                .is_err()
+        );
+        let adopted = value(store.committed_state_material(&committed.transaction_id));
+        assert_eq!(adopted.snapshot, committed);
+        assert_eq!(adopted.desired_state_digest, material.desired_state_digest);
+        assert_eq!(adopted.graph_digest, material.graph_digest);
+        assert_eq!(adopted.provenance_digest, material.provenance_digest);
+        drop(store);
+        let (_, reopened) = open_store(&db.path);
+        assert_eq!(
+            value(reopened.committed_state_material(&committed.transaction_id)),
+            adopted
+        );
+        assert!(
+            reopened
+                .verified_commit_material(&committed.transaction_id)
+                .is_err()
+        );
+        if let Some(field) = field {
+            let raw = value(Connection::open(&db.path));
+            value(raw.create_scalar_function(
+                "linura_internal_mutation_gate",
+                0,
+                FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS,
+                |_| Ok(1_i64),
+            ));
+            // A caller-selected SQL gate cannot manufacture authenticated lineage.
+            assert!(
+                raw.execute(
+                    &format!("UPDATE generations SET {field}=?1 WHERE transaction_id=?2"),
+                    params![
+                        digest("substituted committed lineage").as_str(),
+                        committed.transaction_id.as_str()
+                    ],
+                )
+                .is_err(),
+                "committed lineage remains immutable despite a spoofed SQL gate"
+            );
+            assert_eq!(
+                value(reopened.committed_state_material(&committed.transaction_id)),
+                adopted
+            );
+            // Direct corruption after a successful read is independently
+            // rejected; a previous authenticated read must never be cached.
+            value(raw.execute(
+                "UPDATE generations SET integrity_tag=zeroblob(32) WHERE transaction_id=?1",
+                params![committed.transaction_id.as_str()],
+            ));
+            assert!(
+                reopened
+                    .committed_state_material(&committed.transaction_id)
+                    .is_err()
+            );
+            assert!(reopened.integrity_check().is_err());
+        }
+    }
 }
 
 #[test]

@@ -143,6 +143,23 @@ impl<'a> DisplayLayoutMaterial<'a> {
             && self.lock.epoch() == previous.lock.epoch()
             && self.baseline == previous.desired
     }
+    /// Historical ordinary-release comparison only. Keep preserves desired
+    /// state; Revert and expiry preserve the independently restored baseline.
+    /// Current evidence and separately authorized successor dispatch are required.
+    #[must_use]
+    pub fn continues_after_ordinary(
+        &self,
+        previous: &crate::DisplayOrdinaryReleaseMaterial<'_>,
+    ) -> bool {
+        self.topology == previous.original().topology
+            && self.lock.epoch() == previous.current_lock().epoch()
+            && self.baseline
+                == match previous.outcome() {
+                    crate::DisplayOrdinaryReleaseOutcome::Keep => previous.original().desired,
+                    crate::DisplayOrdinaryReleaseOutcome::Revert
+                    | crate::DisplayOrdinaryReleaseOutcome::Expired => previous.original().baseline,
+                }
+    }
     pub fn validate_native(
         &self,
         inventory: &DisplayOutputSet,

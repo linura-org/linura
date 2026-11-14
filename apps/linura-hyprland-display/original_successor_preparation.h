@@ -10,7 +10,8 @@ inline constexpr std::size_t MaxPreparation = 64 * 1024;
 // may spend the new purpose, after it independently retains the new checkpoint.
 inline bool matches(std::string_view bytes, std::string_view retiredDigest, const Correlation &next,
                     const Layout &baseline, const Layout &desired, const Snapshot &captured,
-                    ClockSample sampled, ClockSample now, std::string_view nativeSource)
+                    ClockSample sampled, ClockSample now, std::string_view nativeSource,
+                    bool ordinary = false)
 {
     if (bytes.empty() || bytes.size() > MaxPreparation ||
         !OriginalGrantCodec::digest(retiredDigest) || !OriginalGrantCodec::digest(nativeSource) ||
@@ -22,15 +23,20 @@ inline bool matches(std::string_view bytes, std::string_view retiredDigest, cons
     };
     const auto domain = field(64),
                parent = field(OriginalFinalRetirementCodec::MaxPreparation + 512);
-    if (!domain || *domain != "linura.native-display.successor-preparation.v1" || !parent)
+    if (!domain ||
+        *domain != (ordinary ? "linura.native-display.ordinary-successor-preparation.v1"
+                             : "linura.native-display.successor-preparation.v1") ||
+        !parent)
         return false;
     auto previous = *parent;
     const auto parentDomain = OriginalGrantCodec::field(previous, 64);
     const auto final =
         OriginalGrantCodec::field(previous, OriginalFinalRetirementCodec::MaxPreparation);
     const auto proof = OriginalGrantCodec::field(previous, 64);
-    if (!parentDomain || *parentDomain != "linura.native-display.released-current.v1" || !final ||
-        nativeSha256(*final) != std::optional{std::string(retiredDigest)} || !proof ||
+    if (!parentDomain ||
+        *parentDomain != (ordinary ? "linura.native-display.ordinary-released-current.v1"
+                                   : "linura.native-display.released-current.v1") ||
+        !final || nativeSha256(*final) != std::optional{std::string(retiredDigest)} || !proof ||
         !OriginalGrantCodec::digest(*proof))
         return false;
     std::array<std::uint64_t, 4> parentClocks{};

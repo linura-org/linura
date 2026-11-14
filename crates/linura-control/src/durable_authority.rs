@@ -1621,6 +1621,31 @@ where
         Ok(material)
     }
 
+    /// Retained committed lineage is comparison data, never a reconstructed
+    /// review, verified commit capability or executor credential.
+    pub(crate) fn display_committed_material(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<linura_transaction::CommittedStateMaterial, DurableAuthorityError> {
+        let snapshot = self.matching_request_snapshot(principal, request)?;
+        if snapshot.state != TransactionState::Committed {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let material = self
+            .transactions
+            .committed_state_material(&snapshot.transaction_id)?;
+        if material.snapshot != snapshot
+            || material.desired_state_digest != digest_request(request)?
+            || material.graph_digest == ContentDigest::zero()
+            || material.provenance_digest == ContentDigest::zero()
+            || self.matching_request_snapshot(principal, request)? != snapshot
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        Ok(material)
+    }
+
     pub fn commit_verified(
         &mut self,
         principal: &AuthenticatedPrincipal,

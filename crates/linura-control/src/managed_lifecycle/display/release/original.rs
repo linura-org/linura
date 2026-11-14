@@ -37,7 +37,7 @@ impl OrdinaryDisplayOriginalInspection {
         &self.snapshot
     }
 }
-pub(super) fn invalid_original() -> ManagedLifecycleError {
+pub(in crate::managed_lifecycle::display) fn invalid_original() -> ManagedLifecycleError {
     ManagedLifecycleError::Verification(
         "ordinary original-witness/history comparison unavailable; no release authority".into(),
     )

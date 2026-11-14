@@ -71,6 +71,14 @@ trait SessionDispatch: Clone + Send + Sync + 'static {
         deadline_unix_ms: u64,
         native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String>;
+    fn display_ordinary_successor(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
+        predecessor: &linura_core::DisplayOrdinaryReleaseScope,
+    ) -> Result<u32, String>;
     fn display_successor(
         &self,
         material: &str,
@@ -98,6 +106,27 @@ struct NativeSessionDispatch {
     channel: NativeSessionChannel,
 }
 impl SessionDispatch for NativeSessionDispatch {
+    fn display_ordinary_successor(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
+        predecessor: &linura_core::DisplayOrdinaryReleaseScope,
+    ) -> Result<u32, String> {
+        self.channel
+            .begin_display_protection(&binding.dispatch_digest)?;
+        let result = self.channel.dispatch_prepared_ordinary_successor_display(
+            material,
+            binding,
+            deadline_unix_ms,
+            native_baseline_guard,
+            predecessor,
+        );
+        self.channel
+            .verify_display_protection(&binding.dispatch_digest)?;
+        result
+    }
     fn display_successor(
         &self,
         material: &str,
@@ -628,6 +657,109 @@ impl<C: SessionDispatch> SessionExecutor<C> {
     }
     #[allow(clippy::too_many_arguments)]
     #[zbus(out_args("outcome"))]
+    async fn apply_ordinary_successor_display_layout(
+        &self,
+        material: &str,
+        predecessor_scope: &str,
+        deadline_unix_ms: u64,
+        transaction_id: &str,
+        generation: u64,
+        state_version: u64,
+        authority_binding_digest: &str,
+        authority_use_digest: &str,
+        effect_digest: &str,
+        dispatch_digest: &str,
+        native_baseline_guard: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(OutcomeWire,)> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| {
+                zbus::fdo::Error::AccessDenied(
+                    "display executor call has no authenticated sender".into(),
+                )
+            })?
+            .as_str()
+            .to_owned();
+        if predecessor_scope.len() > 256
+            || material.len() > linura_core::MAX_DISPLAY_INTENT_BYTES
+            || transaction_id.len() > 256
+            || [
+                authority_binding_digest,
+                authority_use_digest,
+                effect_digest,
+                dispatch_digest,
+                native_baseline_guard,
+            ]
+            .iter()
+            .any(|value| value.len() != 64)
+        {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "display executor request exceeds its bound".into(),
+            ));
+        }
+        let effect = linura_provider_sdk::display_layout_effect(material)
+            .map_err(zbus::fdo::Error::InvalidArgs)?;
+        let parse = |value| {
+            ComponentDigest::parse_hex(value)
+                .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))
+        };
+        let binding = ExecutionBinding {
+            transaction_id: transaction_id.into(),
+            generation,
+            state_version,
+            authority_binding_digest: parse(authority_binding_digest)?,
+            authority_use_digest: parse(authority_use_digest)?,
+            effect_digest: parse(effect_digest)?,
+            dispatch_digest: parse(dispatch_digest)?,
+        };
+        binding
+            .validate_for(&effect)
+            .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
+        let predecessor = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &ResourceId::new(predecessor_scope)
+                .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?,
+        )
+        .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
+        let layout = linura_core::DisplayLayoutMaterial::decode(material)
+            .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
+        if layout.topology() != predecessor.topology() {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "successor scope differs from the prepared layout".into(),
+            ));
+        }
+        let material = material.to_owned();
+        let native_baseline_guard = parse(native_baseline_guard)?;
+        let channel = self.channel.clone();
+        blocking::unblock(move || {
+            channel
+                .require_control(&sender)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            authorize_service(&sender, ServiceAction::Display)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            channel
+                .require_control(&sender)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            // The bounded native adapter independently validates full metadata,
+            // preserves its original sample time/owner and makes ONE apply.
+            // Any uncertain result remains durable ambiguity, with no retry.
+            let (disposition, detail) = display_disposition(channel.display_ordinary_successor(
+                &material,
+                &binding,
+                deadline_unix_ms,
+                &native_baseline_guard,
+                &predecessor,
+            ));
+            Ok(((
+                disposition.into(),
+                binding.dispatch_digest.to_hex(),
+                detail.into(),
+            ),))
+        })
+        .await
+    }
+    #[allow(clippy::too_many_arguments)]
+    #[zbus(out_args("outcome"))]
     async fn restore_original_display_layout(
         &self,
         material: &str,
@@ -907,6 +1039,16 @@ mod tests {
     #[derive(Clone, Debug)]
     struct DenyNative;
     impl SessionDispatch for DenyNative {
+        fn display_ordinary_successor(
+            &self,
+            _: &str,
+            _: &ExecutionBinding,
+            _: u64,
+            _: &ComponentDigest,
+            _: &linura_core::DisplayOrdinaryReleaseScope,
+        ) -> Result<u32, String> {
+            unreachable!("untrusted calls must never transfer display ownership")
+        }
         fn display_successor(
             &self,
             _: &str,
@@ -1129,8 +1271,8 @@ mod tests {
             assert_eq!(live.matches(&marker).count(), 1);
             assert_eq!(canonical.matches(&marker).count(), 1);
         }
-        assert_eq!(live.matches("<method ").count(), 7);
-        assert_eq!(canonical.matches("<method ").count(), 7);
+        assert_eq!(live.matches("<method ").count(), 8);
+        assert_eq!(canonical.matches("<method ").count(), 8);
         for (name, kind, direction) in [
             ("resource", "s", "in"),
             ("material", "s", "in"),
@@ -1156,12 +1298,11 @@ mod tests {
                 | "decision_digest"
                 | "protected_decision_digest"
                 | "confirm"
-                | "phase"
-                | "predecessor_scope" => 1,
-                "resource" => 2,
-                "material" | "deadline_unix_ms" => 5,
-                "transaction_id" | "dispatch_digest" => 7,
-                _ => 6,
+                | "phase" => 1,
+                "resource" | "predecessor_scope" => 2,
+                "material" | "deadline_unix_ms" => 6,
+                "transaction_id" | "dispatch_digest" => 8,
+                _ => 7,
             };
             assert_eq!(live.matches(&marker).count(), expected, "live {name}");
             assert_eq!(
@@ -1174,38 +1315,44 @@ mod tests {
         assert!(live.contains("<method name=\"ExecuteTransition\">"));
         assert!(live.contains("<method name=\"ApplyDisplayLayout\">"));
         assert!(live.contains("<method name=\"ApplySuccessorDisplayLayout\">"));
+        assert!(live.contains("<method name=\"ApplyOrdinarySuccessorDisplayLayout\">"));
         assert!(live.contains("<method name=\"RestoreOriginalDisplayLayout\">"));
         assert!(live.contains("<method name=\"QuiesceOriginalDisplayFinalization\">"));
         assert!(live.contains("<method name=\"ContinueDisplayLayout\">"));
         // The actual tuple codecs depend on argument ORDER as well as counts.
         for contract in [live.as_str(), canonical] {
-            let successor = contract
-                .split("<method name=\"ApplySuccessorDisplayLayout\">")
-                .nth(1)
-                .and_then(|rest| rest.split("</method>").next())
-                .unwrap_or_else(|| unreachable!("successor method absent"));
-            let mut previous = 0;
-            for name in [
-                "material",
-                "predecessor_scope",
-                "deadline_unix_ms",
-                "transaction_id",
-                "generation",
-                "state_version",
-                "authority_binding_digest",
-                "authority_use_digest",
-                "effect_digest",
-                "dispatch_digest",
-                "native_baseline_guard",
-                "outcome",
+            for method in [
+                "ApplySuccessorDisplayLayout",
+                "ApplyOrdinarySuccessorDisplayLayout",
             ] {
-                let offset = successor
-                    .find(&format!("name=\"{name}\""))
-                    .unwrap_or_else(|| unreachable!("successor argument absent"));
-                assert!(offset > previous, "successor argument order: {name}");
-                previous = offset;
+                let successor = contract
+                    .split(&format!("<method name=\"{method}\">"))
+                    .nth(1)
+                    .and_then(|rest| rest.split("</method>").next())
+                    .unwrap_or_else(|| unreachable!("successor method absent"));
+                let mut previous = 0;
+                for name in [
+                    "material",
+                    "predecessor_scope",
+                    "deadline_unix_ms",
+                    "transaction_id",
+                    "generation",
+                    "state_version",
+                    "authority_binding_digest",
+                    "authority_use_digest",
+                    "effect_digest",
+                    "dispatch_digest",
+                    "native_baseline_guard",
+                    "outcome",
+                ] {
+                    let offset = successor
+                        .find(&format!("name=\"{name}\""))
+                        .unwrap_or_else(|| unreachable!("successor argument absent"));
+                    assert!(offset > previous, "successor argument order: {name}");
+                    previous = offset;
+                }
+                assert_eq!(successor.matches("<arg ").count(), 12);
             }
-            assert_eq!(successor.matches("<arg ").count(), 12);
             let terminal = contract
                 .split("<method name=\"QuiesceOriginalDisplayFinalization\">")
                 .nth(1)
@@ -1321,6 +1468,37 @@ mod tests {
             };
             assert!(matches!(
                 async_io::block_on(service.apply_successor_display_layout(
+                    &material,
+                    predecessor.as_str(),
+                    25_000,
+                    &binding.transaction_id,
+                    binding.generation,
+                    binding.state_version,
+                    &binding.authority_binding_digest.to_hex(),
+                    &binding.authority_use_digest.to_hex(),
+                    &binding.effect_digest.to_hex(),
+                    &binding.dispatch_digest.to_hex(),
+                    &ComponentDigest::from_bytes([3; 32]).to_hex(),
+                    message.header(),
+                )),
+                Err(zbus::fdo::Error::AccessDenied(_))
+            ));
+        }
+        let predecessor =
+            linura_core::DisplayOrdinaryReleaseScope::new(&"a".repeat(64), next.topology().clone())
+                .and_then(|v| v.resource_id())
+                .unwrap_or_else(|e| unreachable!("{e}"));
+        for anonymous in [false, true] {
+            let message = if anonymous {
+                zbus::Message::method_call(OBJECT_PATH, "ApplyOrdinarySuccessorDisplayLayout")
+                    .unwrap_or_else(|e| unreachable!("{e}"))
+                    .build(&())
+                    .unwrap_or_else(|e| unreachable!("{e}"))
+            } else {
+                message.clone()
+            };
+            assert!(matches!(
+                async_io::block_on(service.apply_ordinary_successor_display_layout(
                     &material,
                     predecessor.as_str(),
                     25_000,

@@ -74,17 +74,19 @@ unbounded retention or loss of provenance is permitted.
 Current source boundary: original final retirement/ReleasedCurrent and its
 separately authorized same-invocation successor are implemented. Ordinary release
 now also has its complete purpose-separated continuation through signed/native
-current commit, final retirement and matching completion; the final increment is
-under validation. Stage 5 adoption, supersession/shared ownership and reference-aware
-cleanup remain unimplemented. Real display Level A/B acceptance and independent
+current commit, final retirement and matching completion; its exact-head canonical
+gate passed. Stage 5 ordinary committed adoption across Control restarts and
+same-invocation successor transfer are locally implemented under validation.
+Replacement-invocation adoption, shared-reference retirement and bounded cleanup
+remain implementation work. Real display Level A/B acceptance and independent
 signoff remain outstanding. Maintained physical Level C/Q11 is a future production
 activation gate. No public display mutation is enabled by these source changes.
 
 The initial implementation description and later progress subsections retain
 historical source boundaries. Later continuation sections supersede earlier
 statements that those source paths were missing; none supplies qualification or
-independent acceptance evidence. The current ordinary final protocol is described
-in the final section of this ADR.
+independent acceptance evidence. Current continuation protocols are described
+in the later sections of this ADR.
 
 **Historical initial implementation boundary:**
 
@@ -1051,3 +1053,46 @@ Competing ordinary Begin and provenance deletion remain excluded until the
 separate qualified Stage 5 lifecycle transition. Production display mutations
 remain Unsupported. Component results do not substitute for real source-pinned
 Level A, applicable interactive Level B or maintained physical Level C evidence.
+
+
+### Committed ordinary adoption and separately reviewed successor
+
+Control can reload the approved ordinary release intent and its authenticated
+committed desired-state, graph and provenance digests after a Control restart.
+The new transaction-store `CommittedStateMaterial` read is separate from
+`VerifiedCommitMaterial`: a Committed read cannot reopen verified commit or
+execution authority. Immutable generation tags, signed commit history and
+fresh read validation remain required. Adoption first requires matching durable
+Control/Root ReleasedCurrent records and independently re-observes final current
+frames, native input/power, Root lifetime, layout/source, logind and S17. It
+retains an immutable adoption correlation, then repeats the independent join
+and authenticated history checks after publication. Neither an ACK, an earlier
+signed Committed state nor the adoption correlation is successor permission.
+
+A distinct `begin_ordinary_successor_display_layout` path binds that adoption,
+the signed original and release snapshots, and exact Root completion ancestry.
+Its baseline preserves the kept desired state after Keep, or the independently
+restored baseline after Revert/expiry. It receives a fresh canonical Apply plan,
+policy evaluation, protected review, durable prepare and dispatch. Ordinary Begin
+continues to exclude the retained owner. Two immutable claims bind the one
+predecessor to the one new intent; retries observe that intent without replay.
+Original restoration successors retain their separate scope and purpose.
+
+Root reserves the actual new checkpoint and live kernel/startup protection before
+spending the old continuously held ordinary completion channel. Full-parent
+`LNOM:1`/`LNON:1` records and actual in-memory reservations are compared under
+admission. The distinct `LOSA:1` native spend cannot use `LNSA:1`, precede final
+retirement or be repeated after a missing ACK. The compositor validates the
+sealed full parent, actual retired-current lifetime, fresh protected Apply,
+complete baseline/inventory/source, both clocks and held-input state before
+transferring protection. Root permission is independently joined with the new
+native attempt and actual layout before immutable successor verification.
+
+This adoption preserves the same actual Root/compositor lifetime across Control
+restarts. It does not reconstruct a channel after Root/compositor replacement.
+Preserving committed desired state across those replacements, shared-reference
+retirement and bounded reference-aware checkpoint cleanup remain required
+Stage 5 work. All actual predecessor dependencies and recovery provenance remain
+retained; a signed commit or a new intent cannot close them or authorize deletion.
+Public mutation remains Unsupported. These source changes do not supply real
+Level A/B acceptance, physical Level C/Q11 qualification or independent signoff.

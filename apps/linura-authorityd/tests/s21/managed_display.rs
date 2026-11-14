@@ -120,6 +120,8 @@ struct Machine {
     native_final_retirement: Option<String>,
     final_retirement: Option<linura_observation::DisplayOriginalFinalRetirementFacts>,
     successor: Option<linura_observation::DisplaySuccessorFacts>,
+    ordinary_successor: Option<linura_observation::DisplayOrdinarySuccessorFacts>,
+    ordinary_successor_fault_hits: usize,
     successor_native_available: bool,
     successor_fault: u8,
     root_retirement: Option<linura_observation::DisplayOriginalRootRetirementFacts>,
@@ -1043,6 +1045,7 @@ impl ApprovedRequestJournal for FailingJournal {
                 "final-prepared",
                 "final-verified",
                 "released",
+                "adopted",
             ]
             .iter()
             .position(|phase| {

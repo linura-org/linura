@@ -32,6 +32,9 @@ impl NativeProtection {
         if startup.ordinary {
             return Ok(true);
         }
+        if self.ordinary_startup_admits_successor(admission, payload, dispatch)? {
+            return Ok(true);
+        }
         for (key, memory) in &admission.successors {
             if !memory.spent || memory.dispatch != *dispatch {
                 continue;

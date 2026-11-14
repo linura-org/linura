@@ -419,6 +419,7 @@ impl Observer for OriginalObserver {
             linura_observation::DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY,
             linura_observation::DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY,
+            linura_observation::DISPLAY_ORDINARY_SUCCESSOR_CAPABILITY,
         ]
         .into_iter()
         .map(|id| Capability {
@@ -457,6 +458,13 @@ impl Observer for OriginalObserver {
             0,
             "history snapshot crossed Root observation"
         );
+        if capability.as_str() == linura_observation::DISPLAY_ORDINARY_SUCCESSOR_CAPABILITY {
+            return observe_successor(
+                &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         if capability.as_str() == linura_observation::DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY {
             return observe_final(
                 &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
@@ -3442,6 +3450,17 @@ fn ordinary_final_retirement_requires_matching_physical_and_durable_completion()
                 signed.state,
                 linura_transaction::TransactionState::Committed
             );
+            assert!(
+                control
+                    .adopt_ordinary_display_committed_state(
+                        principal(),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier,
+                    )
+                    .is_err(),
+                "signed Committed must not adopt before native final completion"
+            );
             if fault == 3 {
                 drop(control);
                 control = open_with_previews(
@@ -3613,6 +3632,20 @@ fn ordinary_final_retirement_requires_matching_physical_and_durable_completion()
                         again.verification().first_window(),
                         completed.verification().first_window()
                     );
+                    ordinary_committed_adoption_preserves_lineage_after_restart(
+                        &mut restarted,
+                        database.path(),
+                        &machine,
+                        &receipt.request_id,
+                        completed.record_digest(),
+                        &mut port,
+                        &mut verifier,
+                        if action == DisplayContinuationAction::Confirm {
+                            4
+                        } else {
+                            3
+                        },
+                    );
                 }
             }
             let (_, verify) = authority_material();
@@ -3649,4 +3682,465 @@ fn ordinary_final_retirement_requires_matching_physical_and_durable_completion()
             assert_eq!(m.applies, 1);
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ordinary_committed_adoption_preserves_lineage_after_restart(
+    control: &mut ManagedLifecycleControl<SqliteTransactionStore>,
+    database: &Path,
+    machine: &Arc<Mutex<Machine>>,
+    request: &RequestId,
+    released: &linura_transaction::ContentDigest,
+    port: &mut Port,
+    verifier: &mut Verifier,
+    publication_fault: u8,
+) {
+    assert!(
+        control
+            .adopt_ordinary_display_committed_state(
+                value(AuthenticatedPrincipal::new("dbus:uid:1001")),
+                request,
+                port,
+                verifier,
+            )
+            .is_err()
+    );
+    for fault in [1, 2, publication_fault] {
+        {
+            let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+            m.ordinary_current_commit_store_phase = 9;
+            m.ordinary_current_commit_store_fault = fault;
+        }
+        let before = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!())
+            .ordinary_current_commit_store_fault_hits;
+        assert!(
+            control
+                .adopt_ordinary_display_committed_state(principal(), request, port, verifier,)
+                .is_err(),
+            "adoption publication fault {fault}"
+        );
+        {
+            let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert!(m.ordinary_current_commit_store_fault_hits > before);
+            m.ordinary_current_commit_store_fault = 0;
+            m.ordinary_current_fault = 0;
+        }
+    }
+    let adopted =
+        value(control.adopt_ordinary_display_committed_state(principal(), request, port, verifier));
+    assert_eq!(adopted.released_record(), released);
+    assert_eq!(
+        adopted.material().snapshot.state,
+        linura_transaction::TransactionState::Committed
+    );
+    assert_ne!(
+        adopted.material().graph_digest,
+        linura_transaction::ContentDigest::zero()
+    );
+    assert_ne!(
+        adopted.material().provenance_digest,
+        linura_transaction::ContentDigest::zero()
+    );
+    let mut restarted = open_with_previews(database, machine, 0, previews_inner(machine, true));
+    for fault in [6, 10] {
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!())
+            .ordinary_current_fault = fault;
+        assert!(
+            restarted
+                .adopt_ordinary_display_committed_state(principal(), request, port, verifier,)
+                .is_err(),
+            "retained adoption must not replace fresh physical sources {fault}"
+        );
+    }
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .ordinary_current_fault = 0;
+    let current = value(restarted.adopt_ordinary_display_committed_state(
+        principal(),
+        request,
+        port,
+        verifier,
+    ));
+    assert_eq!(current.record_digest(), adopted.record_digest());
+    assert_eq!(
+        current.first_adopted_at_unix_ms(),
+        adopted.first_adopted_at_unix_ms()
+    );
+    assert_eq!(current.material(), adopted.material());
+    assert_eq!(current.request(), adopted.request());
+    assert_eq!(current.released_record(), adopted.released_record());
+    ordinary_successor_requires_completed_adoption_and_fresh_apply(
+        &mut restarted,
+        database,
+        machine,
+        request,
+        &adopted,
+    );
+}
+
+pub(super) fn observe_successor(
+    m: &mut Machine,
+    resource: &ResourceId,
+    capability: &CapabilityId,
+) -> Result<ObservationEnvelope, ProviderError> {
+    assert_eq!(m.checked_history_reads, 0);
+    if m.successor_fault != 0 {
+        m.ordinary_successor_fault_hits += 1;
+    }
+    let fail = || ProviderError::Unavailable("simulated ordinary successor unavailable".into());
+    let parent = linura_linux_session::NativeDisplayOrdinaryReleasedRecord::decode(
+        m.ordinary_released_record.as_ref().ok_or_else(fail)?,
+    )
+    .map_err(|_| fail())?;
+    if parent
+        .parent()
+        .frames()
+        .scope()
+        .resource_id()
+        .map_err(|_| fail())?
+        != *resource
+    {
+        return Err(fail());
+    }
+    let facts = m.ordinary_successor.as_ref().ok_or_else(fail)?;
+    m.sequence += 1;
+    let mut sample = ObservationEnvelope {
+        provider: value(ProviderId::new(
+            linura_observation::DISPLAY_RECOVERY_PROVIDER,
+        )),
+        capability: capability.clone(),
+        resource: resource.clone(),
+        authority: ObservationAuthority::NativeApi,
+        observed_at_unix_ms: now_unix_ms(),
+        valid_for_ms: 2000,
+        sequence: m.sequence,
+        attributes: facts.attributes(),
+    };
+    let changed = match m.successor_fault {
+        1 => Some(("spent", ObservedValue::Bool(false))),
+        2 => Some((
+            "released_parent_digest",
+            ObservedValue::Text("a".repeat(64)),
+        )),
+        3 => Some(("native_guard_digest", ObservedValue::Text("a".repeat(64)))),
+        4 => Some((
+            "transaction",
+            ObservedValue::Text("transaction:other".into()),
+        )),
+        5 => Some(("effect_digest", ObservedValue::Text("a".repeat(64)))),
+        6 => Some(("dispatch_digest", ObservedValue::Text("a".repeat(64)))),
+        7 => {
+            sample.sequence = 0;
+            None
+        }
+        8 => {
+            sample.authority = ObservationAuthority::SyntheticTest;
+            None
+        }
+        9 => return Err(fail()),
+        _ => None,
+    };
+    if let Some((key, value)) = changed {
+        sample.attributes.insert(key.into(), value);
+    }
+    Ok(sample)
+}
+#[derive(Debug)]
+struct OrdinarySuccessorPort {
+    machine: Arc<Mutex<Machine>>,
+    calls: usize,
+    attempt: Option<(ExecutionBinding, u64)>,
+}
+impl DisplayTransactionPort for OrdinarySuccessorPort {
+    fn dispatch_layout(
+        &mut self,
+        application: AuthorizedDisplayApplication,
+        request: &PlanDesiredStateRequest,
+        deadline: u64,
+    ) -> Result<ExecutionOutcome, String> {
+        let (authorization, guard, predecessor) = application.into_executor_request();
+        let Some(linura_control::DisplaySuccessorPredecessor::Ordinary(scope)) = predecessor else {
+            return Err("no purpose-bound ordinary predecessor".into());
+        };
+        let next = value(linura_core::DisplayLayoutMaterial::decode(
+            &request.desired_state["layout"],
+        ));
+        assert_eq!(scope.topology(), next.topology());
+        let (effect, binding) = authorization.into_executor_request();
+        assert_eq!(
+            effect,
+            value(linura_provider_sdk::display_layout_effect(
+                &request.desired_state["layout"]
+            ))
+        );
+        value(binding.validate_for(&effect));
+        self.calls += 1;
+        let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+        let parent = value(
+            linura_linux_session::NativeDisplayOrdinaryReleasedRecord::decode(
+                m.ordinary_released_record
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!()),
+            ),
+        );
+        m.ordinary_successor = Some(value(
+            linura_observation::DisplayOrdinarySuccessorFacts::new(
+                scope,
+                linura_observation::DisplaySuccessorLineage {
+                    record: "8".repeat(64),
+                    released_parent: parent.record_digest().to_hex(),
+                    checkpoint: "9".repeat(64),
+                    native_guard: guard.to_hex(),
+                    transaction: binding.transaction_id.clone(),
+                    effect: binding.effect_digest.to_hex(),
+                    dispatch: binding.dispatch_digest.to_hex(),
+                },
+                true,
+            ),
+        ));
+        self.attempt = Some((binding, deadline));
+        Err("simulated lost ordinary successor ACK".into())
+    }
+    fn observe_attempt(
+        &mut self,
+        query: &linura_control::DisplayAttemptQuery<'_>,
+    ) -> Result<ObservationEnvelope, String> {
+        if self
+            .attempt
+            .as_ref()
+            .is_none_or(|(binding, _)| query.transaction_id() != binding.transaction_id)
+        {
+            return Port(self.machine.clone()).observe_attempt(query);
+        }
+        let (binding, deadline) = self
+            .attempt
+            .as_ref()
+            .ok_or("no simulated successor attempt")?;
+        let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+        if !m.successor_native_available
+            || query.transaction_id() != binding.transaction_id
+            || query.dispatch_digest() != binding.dispatch_digest.to_hex()
+            || query.deadline_unix_ms() != *deadline
+        {
+            return Err("no independent successor attempt".into());
+        }
+        m.sequence += 1;
+        Ok(ObservationEnvelope {
+            provider: value(ProviderId::new("hyprland")),
+            capability: value(CapabilityId::new("display.layout-attempt.observe")),
+            resource: value(ResourceId::new(format!(
+                "display:attempt:{}",
+                binding.transaction_id
+            ))),
+            authority: ObservationAuthority::NativeApi,
+            observed_at_unix_ms: now_unix_ms(),
+            valid_for_ms: 2000,
+            sequence: m.sequence,
+            attributes: BTreeMap::from([
+                (
+                    "lock_resource".into(),
+                    ObservedValue::Text(
+                        value(s17_managed_lock::lock_id().resource_id())
+                            .as_str()
+                            .into(),
+                    ),
+                ),
+                (
+                    "topology_resource".into(),
+                    ObservedValue::Text(query.request().resource.as_str().into()),
+                ),
+                (
+                    "effect_digest".into(),
+                    ObservedValue::Text(binding.effect_digest.to_hex()),
+                ),
+                (
+                    "dispatch_digest".into(),
+                    ObservedValue::Text(binding.dispatch_digest.to_hex()),
+                ),
+                ("deadline_unix_ms".into(), ObservedValue::U64(*deadline)),
+                ("state".into(), ObservedValue::Text("pending".into())),
+            ]),
+        })
+    }
+    fn continue_layout(&mut self, _: AuthorizedDisplayContinuation) -> Result<(), String> {
+        Err("fixture never continues a successor".into())
+    }
+}
+#[derive(Debug)]
+struct OrdinarySuccessorVerifier(Arc<Mutex<Machine>>);
+impl IndependentDisplayVerifier for OrdinarySuccessorVerifier {
+    fn verify_layout(
+        &mut self,
+        request: &PlanDesiredStateRequest,
+        target: DisplayVerificationTarget,
+        _: u64,
+    ) -> Result<VerificationOutcome, String> {
+        let m = self.0.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(m.checked_history_reads, 0);
+        let (baseline, desired, inventory, caps) = layouts();
+        let current = if m.desired { desired } else { baseline };
+        let material = linura_core::DisplayLayoutMaterial::decode(&request.desired_state["layout"])
+            .map_err(|e| e.to_string())?;
+        let intent = material
+            .validate_native(&inventory, &caps)
+            .map_err(|e| e.to_string())?;
+        let expected = match target {
+            DisplayVerificationTarget::Desired => intent.desired(),
+            DisplayVerificationTarget::Restored { .. } => intent.baseline(),
+        };
+        VerificationOutcome::new(
+            if &current == expected {
+                VerificationDisposition::Satisfied
+            } else {
+                VerificationDisposition::NotSatisfied
+            },
+            "simulated independent successor layout",
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+fn ordinary_successor_requires_completed_adoption_and_fresh_apply(
+    control: &mut ManagedLifecycleControl<SqliteTransactionStore>,
+    database: &Path,
+    machine: &Arc<Mutex<Machine>>,
+    predecessor: &RequestId,
+    adopted: &linura_control::OrdinaryDisplayCommittedAdoption,
+) {
+    let old_desired = machine.lock().unwrap_or_else(|_| unreachable!()).desired;
+    let (a, b, _, _) = layouts();
+    let next_intent = value(
+        DisplayLayoutPlanRequest {
+            request_id: value(RequestId::new("request:v010:display-layout:placeholder")),
+            baseline: if old_desired { b.clone() } else { a.clone() },
+            layout: if old_desired { a } else { b },
+            lock: s17_managed_lock::lock_id(),
+            reason: adopted.request().reason.clone(),
+        }
+        .desired_request(),
+    );
+    let mut next = next_intent;
+    next.request_id = value(managed_request_id("ordinary-successor-next", &next));
+    let mut port = OrdinarySuccessorPort {
+        machine: machine.clone(),
+        calls: 0,
+        attempt: None,
+    };
+    let mut verifier = OrdinarySuccessorVerifier(machine.clone());
+    assert!(
+        control
+            .begin_ordinary_successor_display_layout(
+                principal(),
+                actor(false),
+                predecessor,
+                next.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier
+            )
+            .is_err()
+    );
+    assert!(
+        control
+            .begin_ordinary_successor_display_layout(
+                principal(),
+                actor(true),
+                predecessor,
+                next.clone(),
+                &Deny,
+                &mut port,
+                &mut verifier
+            )
+            .is_err()
+    );
+    assert_eq!(port.calls, 0);
+    let receipt = value(control.begin_ordinary_successor_display_layout(
+        principal(),
+        actor(true),
+        predecessor,
+        next.clone(),
+        &approval(),
+        &mut port,
+        &mut verifier,
+    ));
+    assert_eq!(receipt.state, DisplayLayoutState::Indeterminate);
+    assert_eq!(port.calls, 1);
+    let mut restarted = open_with_previews(database, machine, 0, previews_inner(machine, true));
+    let receipt = value(restarted.begin_ordinary_successor_display_layout(
+        principal(),
+        actor(true),
+        predecessor,
+        next.clone(),
+        &approval(),
+        &mut port,
+        &mut verifier,
+    ));
+    assert_eq!(receipt.state, DisplayLayoutState::Indeterminate);
+    assert_eq!(port.calls, 1);
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .successor_native_available = true;
+    assert_eq!(
+        value(restarted.display_layout_status(
+            principal(),
+            actor(true),
+            &next.request_id,
+            &mut port,
+            &mut verifier
+        ))
+        .state,
+        DisplayLayoutState::Indeterminate
+    );
+    machine.lock().unwrap_or_else(|_| unreachable!()).desired = !old_desired;
+    for fault in 1..=9 {
+        let before = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!())
+            .ordinary_successor_fault_hits;
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!())
+            .successor_fault = fault;
+        assert_eq!(
+            value(restarted.display_layout_status(
+                principal(),
+                actor(true),
+                &next.request_id,
+                &mut port,
+                &mut verifier
+            ))
+            .state,
+            DisplayLayoutState::Indeterminate,
+            "ordinary successor evidence fault {fault}"
+        );
+        assert!(
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_successor_fault_hits
+                > before,
+            "ordinary successor fault {fault} did not reach its source"
+        );
+    }
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .successor_fault = 0;
+    assert_eq!(
+        value(restarted.display_layout_status(
+            principal(),
+            actor(true),
+            &next.request_id,
+            &mut port,
+            &mut verifier
+        ))
+        .state,
+        DisplayLayoutState::AwaitingConfirmation
+    );
+    assert_eq!(port.calls, 1);
 }
