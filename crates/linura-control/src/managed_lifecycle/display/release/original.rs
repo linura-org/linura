@@ -53,7 +53,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         port: &mut P,
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayOriginalInspection, ManagedLifecycleError> {
-        let request = self.retained_display_request(&principal, request_id)?;
+        let checked = self.checked_display_history()?;
+        let request = checked.original_request(&principal, request_id)?;
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let snapshot = self
             .authority
@@ -91,6 +92,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 .map_err(|_| invalid_original())?,
             resource: scope.resource_id().map_err(|_| invalid_original())?,
         };
+        drop(checked);
         let before = self
             .previews
             .observe(&query)
@@ -118,14 +120,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             || eligibility.dispatch_digest() != dispatch
             || eligibility.terminal_record_digest() != terminal.as_str()
             || eligibility.durable_binding_digest() != snapshot.binding_digest.as_str()
-            || self
-                .authority
-                .matching_request_snapshot(&principal, &request)?
-                != snapshot
         {
             return Err(invalid_original());
         }
-        let retained = self.retained_display_request(&principal, request_id)?;
+        let checked = self.checked_display_history()?;
+        if self
+            .authority
+            .matching_request_snapshot(&principal, &request)?
+            != snapshot
+        {
+            return Err(invalid_original());
+        }
+        let retained = checked.original_request(&principal, request_id)?;
         let latest = DisplayHistory::load(
             self.display_journal()?,
             &principal_id,

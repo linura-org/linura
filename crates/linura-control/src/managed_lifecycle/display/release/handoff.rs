@@ -61,7 +61,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayHandoffInspection, ManagedLifecycleError> {
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
-        self.authority.integrity_check()?;
+        let checked = self.checked_display_history()?;
         let retained = self
             .display_journal()?
             .load(&principal_id, release_request)
@@ -88,6 +88,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let material = DisplayOrdinaryReleaseMaterial::decode(intent.material())
             .map_err(|_| invalid_original())?;
         let scope = material.release_scope().map_err(|_| invalid_original())?;
+        drop(checked);
         let original = self.inspect_ordinary_display_original(
             principal.clone(),
             &material.lineage().original_request,
@@ -224,7 +225,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(unavailable_at("post-read frame and Root reconciliation"));
         }
         self.require_ordinary_release_history(&principal, &original)?;
-        self.authority.integrity_check()?;
+        let checked = self.checked_display_history()?;
         if self
             .authority
             .matching_request_snapshot(&principal, &request)?
@@ -241,6 +242,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return Err(unavailable_at("post-read durable history"));
         }
         intent.require_claim(self.display_journal()?, &principal_id, &request)?;
+        drop(checked);
         let now = now_ms()?;
         for (label, source) in [
             ("original", original.observation()),

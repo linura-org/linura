@@ -22,6 +22,7 @@ use linura_transaction::{ApprovedRequestJournal, RetainedRequest, TransactionSto
 
 #[derive(Debug, Default)]
 struct Machine {
+    checked_history_reads: usize,
     journal_keys: std::collections::BTreeSet<(PrincipalId, RequestId)>,
     desired: bool,
     state: Option<&'static str>,
@@ -340,6 +341,14 @@ impl Observer for LiveFixtureObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        assert_eq!(
+            self.machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .checked_history_reads,
+            0,
+            "history snapshot crossed an observation boundary"
+        );
         if self.template.provider.as_str() == linura_observation::DISPLAY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_ORDINARY_HANDOFF_CAPABILITY
         {
@@ -715,12 +724,33 @@ struct FailingJournal {
     fail_at: usize,
     writes: usize,
 }
+#[derive(Debug)]
+struct CheckedHistoryRead<'a> {
+    inner: Option<Box<dyn linura_transaction::ApprovedRequestReadScope + 'a>>,
+    machine: Arc<Mutex<Machine>>,
+}
+impl linura_transaction::ApprovedRequestReadScope for CheckedHistoryRead<'_> {}
+impl Drop for CheckedHistoryRead<'_> {
+    fn drop(&mut self) {
+        drop(self.inner.take());
+        let mut machine = self.machine.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(machine.checked_history_reads, 1);
+        machine.checked_history_reads = 0;
+    }
+}
 impl ApprovedRequestJournal for FailingJournal {
     fn checked_read_scope(
         &self,
     ) -> Result<Box<dyn linura_transaction::ApprovedRequestReadScope + '_>, TransactionStoreError>
     {
-        self.inner.checked_read_scope()
+        let inner = self.inner.checked_read_scope()?;
+        let mut machine = self.machine.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(machine.checked_history_reads, 0);
+        machine.checked_history_reads = 1;
+        Ok(Box::new(CheckedHistoryRead {
+            inner: Some(inner),
+            machine: self.machine.clone(),
+        }))
     }
 
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
@@ -1113,6 +1143,10 @@ impl DisplayTransactionPort for Port {
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
         let binding = m.binding.clone().ok_or("simulated native attempt absent")?;
+        assert_eq!(
+            m.checked_history_reads, 0,
+            "history snapshot crossed native attempt observation"
+        );
         if transaction != binding.transaction_id
             || query.dispatch_digest() != binding.dispatch_digest.to_hex()
             || query.deadline_unix_ms() != m.deadline
@@ -1213,6 +1247,10 @@ impl IndependentDisplayVerifier for Verifier {
             .0
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(
+            m.checked_history_reads, 0,
+            "history snapshot crossed independent verification"
+        );
         let restoration = matches!(target, DisplayVerificationTarget::Restored { .. });
         if let DisplayVerificationTarget::Restored {
             native_baseline_guard,

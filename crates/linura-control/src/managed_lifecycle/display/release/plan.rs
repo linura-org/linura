@@ -244,7 +244,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let snapshot = inspection.original_snapshot();
         let eligibility = inspection.eligibility();
         let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
-        if self.retained_display_request(principal, &request.request_id)? != *request
+        let checked = self.checked_display_history()?;
+        if checked.original_request(principal, &request.request_id)? != *request
             || self
                 .authority
                 .matching_request_snapshot(principal, request)?

@@ -310,14 +310,14 @@ No historical terminal or first-frame comparison may promote itself to
    checkpoint boundary as native startup, re-authenticate the supervised Control
    principal and actual Root-held original/replacement lineage. Persist an
    immutable, bounded, separately versioned one-use retirement reservation
-   with exclusive sync and readback before *any* protection retirement.
+   with exclusive sync and readback before _any_ protection retirement.
    Retaining Control terminal history is necessary but not a Root capability.
 2. **Physical native barrier.** The actual current, source-pinned supervised
    compositor consumes a distinct one-use release grant, validates continuously
    held lock/input/power/KMS protection and independently demonstrates correct
    output, rules/overlays, surviving root and hardware-completed frames.
    Temporarily lifting opaque coverage to observe first ordinary frames must
-   *not* simultaneously release Root admission, S17 input or the inhibitor.
+   _not_ simultaneously release Root admission, S17 input or the inhibitor.
    Final input/power/admission handoff requires separately verified physical
    state and independently committed durable terminal records.
 
@@ -328,15 +328,15 @@ not authority for any of them.
 
 ### Required monotonic state ordering
 
-| Design state | Retained evidence | Permitted effect |
-| --- | --- | --- |
-| Held | Original checkpoint, live witnesses and fenced native history | None |
-| ReleasePrepared | Actual committed Control terminal history and exact immutable purpose-bound request | No protection retirement |
-| RootRetirementPrepared | Root reservation serialized against startup, both owners and original history checked | No ordinary admission or unlock |
-| RootRetiredHeld | Root retirement synced and independently read back; fences still held | Only one exact native physical release attempt |
-| NativeReleaseSpent | Original authenticated native release grant spent before attempting effect | No retry, even after lost ACK |
-| PhysicalReleaseVerified | Fresh native + independent KMS/frame/input/S17 evidence joined to unchanged durable anchors | Exact durable finalization only |
-| ReleasedCurrent | Root and Control re-read matching final records while admission remains serialized | Qualified admission and reference-aware cleanup may proceed |
+| Design state            | Retained evidence                                                                           | Permitted effect                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Held                    | Original checkpoint, live witnesses and fenced native history                               | None                                                        |
+| ReleasePrepared         | Actual committed Control terminal history and exact immutable purpose-bound request         | No protection retirement                                    |
+| RootRetirementPrepared  | Root reservation serialized against startup, both owners and original history checked       | No ordinary admission or unlock                             |
+| RootRetiredHeld         | Root retirement synced and independently read back; fences still held                       | Only one exact native physical release attempt              |
+| NativeReleaseSpent      | Original authenticated native release grant spent before attempting effect                  | No retry, even after lost ACK                               |
+| PhysicalReleaseVerified | Fresh native + independent KMS/frame/input/S17 evidence joined to unchanged durable anchors | Exact durable finalization only                             |
+| ReleasedCurrent         | Root and Control re-read matching final records while admission remains serialized          | Qualified admission and reference-aware cleanup may proceed |
 
 These states have distinct meanings, rather than interchangeable wire codes.
 `PhysicalReleaseVerified` is now an immutable Control journal record after the
@@ -560,17 +560,17 @@ generation, lock and protected-owner identity must be checked before and
 after publication. A concurrent startup, changed process identity or
 partial checkpoint refuses.
 
-| Failure point | Mandatory behavior |
-| --- | --- |
-| Before durable release preparation | Preserve the original fence; no new authority |
-| Torn/full/unreadable retirement storage | Fail closed for existing and replacement admission |
-| After durable prepare, before native consumption | Keep a single immutable spent/ambiguous operation; no automatic effect |
-| During native release or after a lost acknowledgement | At most one native attempt; read-only reconciliation only |
-| Frame, input, owner, Root or source proof lost | Hold surviving protection and admission; no optimistic completion |
-| Reply lost after independently durable completion | Re-read exact committed lineage and fresh physical state; do not replay native effects |
-| Protection-service or compositor restart | Do not reconstruct an old witness, approval, channel or owner from disk |
-| Original Committed survives compositor death | Adopt only the independently proved desired state and original ownership, never blindly compensate to baseline |
-| Supersession or shared retained checkpoint | Require independently approved successor and owner/reference-aware retirement; never delete-to-retry |
+| Failure point                                         | Mandatory behavior                                                                                             |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Before durable release preparation                    | Preserve the original fence; no new authority                                                                  |
+| Torn/full/unreadable retirement storage               | Fail closed for existing and replacement admission                                                             |
+| After durable prepare, before native consumption      | Keep a single immutable spent/ambiguous operation; no automatic effect                                         |
+| During native release or after a lost acknowledgement | At most one native attempt; read-only reconciliation only                                                      |
+| Frame, input, owner, Root or source proof lost        | Hold surviving protection and admission; no optimistic completion                                              |
+| Reply lost after independently durable completion     | Re-read exact committed lineage and fresh physical state; do not replay native effects                         |
+| Protection-service or compositor restart              | Do not reconstruct an old witness, approval, channel or owner from disk                                        |
+| Original Committed survives compositor death          | Adopt only the independently proved desired state and original ownership, never blindly compensate to baseline |
+| Supersession or shared retained checkpoint            | Require independently approved successor and owner/reference-aware retirement; never delete-to-retry           |
 
 At every boundary, inject native/compositor/Root/executor termination,
 concurrent owner and startup requests, interrupted writes, missing ACK,
@@ -670,7 +670,6 @@ Root storage ancestry and native component builds are separate from real
 compositor execution. Level A/B, exact-head final gates, independent review and
 maintained Level C release evidence remain required where applicable.
 
-
 ### Ordinary release planning and same-invocation original evidence
 
 Ordinary terminal release now has its own `LNOR:1` comparison, same-invocation
@@ -765,7 +764,6 @@ poisons the journal lifetime. Forgetting a scope cannot create a new current
 inspection or restore writer access. This changes no on-disk schema, authority
 record, freshness interval, immutable first proof, Root grant or policy gate.
 
-
 ### Same-invocation successor after completed original retirement
 
 A completed original path may transfer protection to a separately prepared
@@ -836,3 +834,15 @@ ReleasedCurrent still require implementation, as do Stage 5 adoption,
 supersession and reference-aware cleanup. Real Level A/B execution and maintained
 Level C release qualification remain separate evidence gates. No public
 production mutation is enabled.
+
+Ordinary comparison reads group immutable request, checkpoint, phase and owner
+records into the existing authenticated synchronous journal read scope. Scope
+entry still validates every row; selected records remain individually
+MAC-checked. Every scope ends before native/provider observation, verification
+or persistence, and a new fully checked scope reads current history after each
+boundary. This avoids redundant full-journal scans consuming the original
+two-second handoff window without extending either producer clock. It does not
+cache approval, provider state or execution authority. Test guards reject scopes
+that cross independent observation/verification boundaries. Each adversarial
+source case uses its own original producer window and must finish before that
+unchanged deadline, so expiry cannot substitute for rejection of its fault.

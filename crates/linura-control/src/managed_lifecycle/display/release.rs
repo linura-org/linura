@@ -141,7 +141,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         port: &mut P,
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayReleaseInspection, ManagedLifecycleError> {
-        let request = self.retained_display_request(&principal, request_id)?;
+        // Authenticate all immutable journal rows once for this synchronous
+        // read. End the snapshot before either independent provider is called.
+        let checked = self.checked_display_history()?;
+        let request = checked.original_request(&principal, request_id)?;
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
         self.authority
@@ -178,6 +181,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             now_ms()?,
         )?;
         let query = DisplayAttemptQuery::new(&request, dispatched)?;
+        drop(checked);
         let first = port
             .observe_attempt(&query)
             .map_err(ManagedLifecycleError::Verification)?;
@@ -215,9 +219,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "ordinary display release changed during independent verification".into(),
             ));
         }
-        self.display_journal()?
-            .integrity_check()
-            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        // A new full check sees changes made across the provider boundary.
+        let checked = self.checked_display_history()?;
+        if checked.original_request(&principal, request_id)? != request {
+            return Err(invalid_original());
+        }
         let current = self.authority.snapshot(&transaction)?;
         if current != snapshot {
             return Err(ManagedLifecycleError::Authority(

@@ -8,6 +8,10 @@ pub(super) fn observe_handoff(
     resource: &ResourceId,
     capability: &CapabilityId,
 ) -> Result<ObservationEnvelope, ProviderError> {
+    assert_eq!(
+        m.checked_history_reads, 0,
+        "history snapshot crossed handoff observation"
+    );
     use linura_observation::{
         DISPLAY_ORDINARY_HANDOFF_CAPABILITY, DISPLAY_ORDINARY_RELEASE_CAPABILITY, DISPLAY_PROVIDER,
         DISPLAY_RECOVERY_PROVIDER, DisplayNativeHandoffOutput, DisplayNativeHandoffWindow,
@@ -38,7 +42,7 @@ pub(super) fn observe_handoff(
         return Err(fail());
     }
     let attributes = if root {
-        value(DisplayOrdinaryReleaseFacts::new(
+        DisplayOrdinaryReleaseFacts::new(
             scope.clone(),
             DisplayOrdinaryReleaseComparison {
                 material: record.material().into(),
@@ -50,7 +54,8 @@ pub(super) fn observe_handoff(
                 producer: record.window(),
                 sampled_boot_ms,
             },
-        ))
+        )
+        .map_err(|_| fail())?
         .attributes()
     } else {
         if m.ordinary_handoff_fault == 1 {
@@ -63,7 +68,7 @@ pub(super) fn observe_handoff(
         } else {
             layouts().0
         };
-        value(DisplayOrdinaryHandoffFacts::new(
+        DisplayOrdinaryHandoffFacts::new(
             scope,
             DisplayOrdinaryHandoffLineage {
                 original_transaction: original.transaction_id.clone(),
@@ -99,7 +104,8 @@ pub(super) fn observe_handoff(
                     )
                 })
                 .collect(),
-        ))
+        )
+        .map_err(|_| fail())?
         .attributes()
     };
     let mut sample = ObservationEnvelope {
@@ -158,13 +164,23 @@ pub(super) fn observe_handoff(
 
 #[test]
 fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committing_on_inspection() {
-    for (action, storage_fault) in [
-        (DisplayContinuationAction::Confirm, None),
-        (DisplayContinuationAction::Revert, None),
-        (DisplayContinuationAction::Confirm, Some(0)),
-        (DisplayContinuationAction::Confirm, Some(1)),
-        (DisplayContinuationAction::Confirm, Some(2)),
+    let mut cases = vec![
+        (DisplayContinuationAction::Confirm, None, 0),
+        (DisplayContinuationAction::Revert, None, 0),
+        (DisplayContinuationAction::Confirm, Some(0), 0),
+        (DisplayContinuationAction::Confirm, Some(1), 0),
+        (DisplayContinuationAction::Confirm, Some(2), 0),
+    ];
+    // Every source substitution gets its own original producer window. A
+    // failure after another fault consumed that window proves only expiry,
+    // not rejection of the intended substitution.
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
     ] {
+        cases.extend((1..=14).map(|fault| (action, None, fault)));
+    }
+    for (action, storage_fault, source_fault) in cases {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));
         let mut port = Port(machine.clone());
@@ -215,114 +231,10 @@ fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committin
             &mut verifier,
             &mut release_port,
         ));
-        if let Some(fault) = storage_fault {
-            drop(control);
-            machine
-                .lock()
-                .unwrap_or_else(|_| unreachable!())
-                .ordinary_release_write_fault = fault;
-            control =
-                open_with_previews(database.path(), &machine, 1, previews_inner(&machine, true));
-            // Failure before write, a false persistence ACK, and a durable
-            // write followed by a lost ACK cannot manufacture verification.
-            assert!(
-                control
-                    .verify_ordinary_display_handoff(
-                        principal(),
-                        &receipt.request_id,
-                        &mut port,
-                        &mut verifier
-                    )
-                    .is_err()
-            );
-            drop(control);
-            machine
-                .lock()
-                .unwrap_or_else(|_| unreachable!())
-                .ordinary_release_write_fault = 0;
-            control =
-                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
-        }
-        let inspection = value(control.inspect_ordinary_display_handoff(
-            principal(),
-            &receipt.request_id,
-            &mut port,
-            &mut verifier,
-        ));
-        assert_eq!(
-            inspection.release().state,
-            linura_transaction::TransactionState::Indeterminate
-        );
-        assert!(inspection.root().matches_native(inspection.frames()));
-        assert!(
-            inspection
-                .observation()
-                .attributes
-                .contains_key("control.ordinary-handoff.coverage_digest")
-        );
-        let proof = value(control.verify_ordinary_display_handoff(
-            principal(),
-            &receipt.request_id,
-            &mut port,
-            &mut verifier,
-        ));
-        assert!(proof.first_verified_unix_ms() < proof.first_valid_until_unix_ms());
-        drop(control);
-        let mut control =
-            open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
-        let inspected = value(control.inspect_ordinary_display_handoff(
-            principal(),
-            &receipt.request_id,
-            &mut port,
-            &mut verifier,
-        ));
-        assert_eq!(inspected.release(), inspection.release());
-        assert!(inspected.frames().reconciles(inspection.frames()));
-        let recovered = value(control.verify_ordinary_display_handoff(
-            principal(),
-            &receipt.request_id,
-            &mut port,
-            &mut verifier,
-        ));
-        assert_eq!(recovered.record_digest(), proof.record_digest());
-        assert_eq!(
-            recovered.first_verified_unix_ms(),
-            proof.first_verified_unix_ms()
-        );
-        assert_eq!(
-            recovered.first_valid_until_unix_ms(),
-            proof.first_valid_until_unix_ms()
-        );
-        machine
-            .lock()
-            .unwrap_or_else(|_| unreachable!())
-            .ordinary_handoff_fault = 14;
-        // Two mutually consistent fresh reads still cannot replace the first
-        // durably verified frame with a later completed commit after restart.
-        assert!(
-            control
-                .inspect_ordinary_display_handoff(
-                    principal(),
-                    &receipt.request_id,
-                    &mut port,
-                    &mut verifier
-                )
-                .is_ok()
-        );
-        assert!(
-            control
-                .verify_ordinary_display_handoff(
-                    principal(),
-                    &receipt.request_id,
-                    &mut port,
-                    &mut verifier
-                )
-                .is_err()
-        );
-        for fault in 1..=13 {
+        if (1..=13).contains(&source_fault) {
             {
                 let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
-                m.ordinary_handoff_fault = fault;
+                m.ordinary_handoff_fault = source_fault;
                 m.ordinary_handoff_reads = 0;
             }
             assert!(
@@ -331,14 +243,137 @@ fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committin
                         principal(),
                         &receipt.request_id,
                         &mut port,
-                        &mut verifier
+                        &mut verifier,
                     )
                     .is_err(),
-                "fault {fault}"
+                "source fault {source_fault}"
             );
+        } else {
+            if let Some(fault) = storage_fault {
+                drop(control);
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_release_write_fault = fault;
+                control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    1,
+                    previews_inner(&machine, true),
+                );
+                // Before-write failure, false ACK, and durable write with lost
+                // ACK cannot manufacture a successful verification response.
+                assert!(
+                    control
+                        .verify_ordinary_display_handoff(
+                            principal(),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier,
+                        )
+                        .is_err()
+                );
+                drop(control);
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_release_write_fault = 0;
+                control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+            }
+            let proof = value(control.verify_ordinary_display_handoff(
+                principal(),
+                &receipt.request_id,
+                &mut port,
+                &mut verifier,
+            ));
+            let inspection = proof.inspection();
+            assert_eq!(
+                inspection.release().state,
+                linura_transaction::TransactionState::Indeterminate
+            );
+            assert!(inspection.root().matches_native(inspection.frames()));
+            assert!(
+                inspection
+                    .observation()
+                    .attributes
+                    .contains_key("control.ordinary-handoff.coverage_digest")
+            );
+            assert!(proof.first_verified_unix_ms() < proof.first_valid_until_unix_ms());
+            drop(control);
+            control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+            if source_fault == 14 {
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_handoff_fault = 14;
+                // Two mutually consistent fresh reads cannot replace the first
+                // durably verified frame with a later commit after restart.
+                assert!(
+                    control
+                        .inspect_ordinary_display_handoff(
+                            principal(),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier,
+                        )
+                        .is_ok()
+                );
+                assert!(
+                    control
+                        .verify_ordinary_display_handoff(
+                            principal(),
+                            &receipt.request_id,
+                            &mut port,
+                            &mut verifier,
+                        )
+                        .is_err()
+                );
+            } else {
+                let recovered = value(control.verify_ordinary_display_handoff(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                assert_eq!(recovered.inspection().release(), inspection.release());
+                assert!(
+                    recovered
+                        .inspection()
+                        .frames()
+                        .reconciles(inspection.frames())
+                );
+                assert_eq!(recovered.record_digest(), proof.record_digest());
+                assert_eq!(
+                    recovered.first_verified_unix_ms(),
+                    proof.first_verified_unix_ms()
+                );
+                assert_eq!(
+                    recovered.first_valid_until_unix_ms(),
+                    proof.first_valid_until_unix_ms()
+                );
+            }
         }
         {
             let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+            let preparation = value(
+                linura_linux_session::NativeDisplayOrdinaryReleasePreparation::decode(
+                    m.ordinary_release_record
+                        .as_ref()
+                        .unwrap_or_else(|| unreachable!()),
+                ),
+            );
+            // Negative cases must reject their intended fault while the
+            // ORIGINAL producer is still live. Do not extend or resample it.
+            assert!(
+                now_unix_ms() < preparation.window().deadline_unix_ms,
+                "case {action:?}/{storage_fault:?}/{source_fault} consumed the original producer window"
+            );
             m.ordinary_handoff_fault = 0;
         }
         assert_eq!(
@@ -405,6 +440,14 @@ impl Observer for OriginalObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        assert_eq!(
+            self.0
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .checked_history_reads,
+            0,
+            "history snapshot crossed Root observation"
+        );
         if capability.as_str() == linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY {
             return observe_handoff(
                 &mut self.0.lock().unwrap_or_else(|_| unreachable!()),

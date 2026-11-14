@@ -149,17 +149,22 @@ NativeDisplayOrdinaryReleaseIntent::parse(const QString &text)
     const auto generation = number(fields[5].toUtf8()), version = number(fields[6].toUtf8());
     const auto lock = NativeLockIdentity::parse(fields[9]);
     const auto original = NativeDisplayIntent::parse(fields[10]);
-    const auto outcome = fields[8] == QLatin1String("keep")      ? std::optional{Outcome::Keep}
-                         : fields[8] == QLatin1String("revert")  ? std::optional{Outcome::Revert}
-                         : fields[8] == QLatin1String("expired") ? std::optional{Outcome::Expired}
-                                                                 : std::nullopt;
+    Outcome outcome;
+    if (fields[8] == QLatin1String("keep"))
+        outcome = Outcome::Keep;
+    else if (fields[8] == QLatin1String("revert"))
+        outcome = Outcome::Revert;
+    else if (fields[8] == QLatin1String("expired"))
+        outcome = Outcome::Expired;
+    else
+        return {};
     if (!rest.empty() || fields[0].isEmpty() || !generation || !version || !*version || !lock ||
-        !original || !outcome || !sameLogin(*lock, original->lock) || !digest(fields[7]) ||
+        !original || !sameLogin(*lock, original->lock) || !digest(fields[7]) ||
         !std::all_of(fields.begin() + 1, fields.begin() + 5, digest))
         return {};
     NativeDisplayOrdinaryReleaseIntent result{fields[0], fields[1], fields[2],   fields[3],
                                               fields[4], fields[7], *generation, *version,
-                                              *outcome,  *lock,     *original};
+                                              outcome,   *lock,     *original};
     return result.encode() == text ? std::optional{std::move(result)} : std::nullopt;
 }
 

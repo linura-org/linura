@@ -166,10 +166,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if canonical.len() > MAX_BYTES {
             return Err(invalid_original());
         }
-        let journal = self.request_journal.as_mut().ok_or_else(invalid_original)?;
-        journal.integrity_check().map_err(|_| invalid_original())?;
-        match journal.load(&principal_id, &key) {
-            Err(TransactionStoreError::NotFound) => journal
+        let existing = {
+            let journal = self.display_journal()?;
+            let _scope = journal
+                .checked_read_scope()
+                .map_err(|_| invalid_original())?;
+            journal.load(&principal_id, &key)
+        };
+        match existing {
+            Err(TransactionStoreError::NotFound) => self
+                .request_journal
+                .as_mut()
+                .ok_or_else(invalid_original)?
                 .retain(
                     &RetainedRequest::new(principal_id.clone(), key.clone(), canonical)
                         .map_err(|_| invalid_original())?,
@@ -178,10 +186,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             Ok(_) => (),
             Err(_) => return Err(invalid_original()),
         }
-        journal.integrity_check().map_err(|_| invalid_original())?;
-        let retained = journal
-            .load(&principal_id, &key)
-            .map_err(|_| invalid_original())?;
+        let retained = {
+            let journal = self.display_journal()?;
+            let _scope = journal
+                .checked_read_scope()
+                .map_err(|_| invalid_original())?;
+            journal
+                .load(&principal_id, &key)
+                .map_err(|_| invalid_original())?
+        };
         if retained.principal() != &principal_id
             || retained.request_id() != &key
             || retained.canonical().len() > MAX_BYTES
