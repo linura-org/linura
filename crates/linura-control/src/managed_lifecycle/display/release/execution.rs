@@ -66,7 +66,7 @@ pub struct OrdinaryDisplayReleaseReceipt {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    fn ordinary_release_receipt(
+    pub(super) fn ordinary_release_receipt(
         &self,
         principal: &AuthenticatedPrincipal,
         request: &PlanDesiredStateRequest,

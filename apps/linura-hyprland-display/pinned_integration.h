@@ -21,6 +21,7 @@ class CMonitorRule;
 namespace Linura::HyprlandDisplay {
 class OriginalFinalizationGrant;
 class OriginalCompletionGrant;
+class OrdinaryReleaseGrant;
 class OwnedNativeFd;
 [[nodiscard]] bool nativePowerFenceHeld() noexcept;
 [[nodiscard]] bool retireNativePowerFence() noexcept;
@@ -59,6 +60,14 @@ using NativeOutputCommits = std::optional<std::vector<NativeFirstFrameGate::Outp
 [[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
 nativeCurrentFrameKernel(const Correlation &, const Snapshot &);
 [[nodiscard]] NativeFirstFrameArm nativeFirstFrameArm(const Correlation &, const Snapshot &);
+[[nodiscard]] std::unique_ptr<OrdinaryReleaseGrant>
+receiveOrdinaryReleaseGrant(OwnedNativeFd, const Correlation &, std::string_view material);
+[[nodiscard]] NativeFirstFrameArm nativeOrdinaryFirstFrameArm(const Correlation &,
+                                                              const Snapshot &);
+[[nodiscard]] NativeOutputCommits nativeOrdinaryOutputHighWater(const Correlation &,
+                                                                const Snapshot &);
+[[nodiscard]] std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
+nativeOrdinaryFrameKernel(const Correlation &, const Snapshot &);
 
 inline constexpr char UpstreamCommit[] = "efb50993780079460b0cbed1363e2166a2de1d9f";
 inline constexpr char UpstreamVersion[] = "0.56.2";

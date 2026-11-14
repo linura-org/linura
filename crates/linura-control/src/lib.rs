@@ -101,6 +101,7 @@ pub use managed_lifecycle::{
     MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
     ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
     ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
     OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseAuthorizer,
     OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort,
     OrdinaryDisplayReleaseReceipt, OrdinaryDisplayReleaseRequest, OriginalDisplayCompletionPort,

@@ -76,8 +76,19 @@ class StartupFence final
     // or root-looking file cannot replace the continuously retained lease.
     [[nodiscard]] bool authenticatesGrantPeer(int descriptor) const noexcept
     {
-        if (ordinary_ || !guardAlive() || descriptor < 0 ||
-            fcntl(descriptor, F_GETFD) != FD_CLOEXEC)
+        return !ordinary_ && authenticatesPeer(descriptor);
+    }
+    // Separate peer comparison for the same-invocation ordinary-release
+    // purpose. This does not admit original restoration or grant an effect.
+    [[nodiscard]] bool authenticatesOrdinaryGrantPeer(int descriptor) const noexcept
+    {
+        return (ordinary_ || currentAttempted_) && authenticatesPeer(descriptor);
+    }
+
+  private:
+    [[nodiscard]] bool authenticatesPeer(int descriptor) const noexcept
+    {
+        if (!guardAlive() || descriptor < 0 || fcntl(descriptor, F_GETFD) != FD_CLOEXEC)
             return false;
         int type = 0, domain = 0;
         socklen_t size = sizeof(type);
@@ -99,6 +110,8 @@ class StartupFence final
                original.pid > 0 && grant.uid == original.uid && grant.gid == original.gid &&
                grant.pid == original.pid && guardAlive();
     }
+
+  public:
     // Private read-only protocol state: unadmitted, ordinary, recovery fenced,
     // or lost/invalid. Lost admission is terminal for this invocation.
     [[nodiscard]] unsigned phase() const noexcept

@@ -331,6 +331,9 @@ class Client final
             },
             [](void *, linura_display_snapshot_v1 *, const char *) {
                 assert(false && "portable fixture cannot attest current scanout");
+            },
+            [](void *, linura_display_snapshot_v1 *, const char *) {
+                assert(false && "portable fixture cannot attest ordinary terminal handoff");
             }};
         linura_display_snapshot_v1_add_listener(sample->wire, &listener, sample.get());
         snapshots.push_back(std::move(sample));

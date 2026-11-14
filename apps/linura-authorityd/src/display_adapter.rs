@@ -49,7 +49,7 @@ impl linura_control::OrdinaryDisplayReleasePort for SessionExecutorClient {
         }
         binding.validate_for(&effect).map_err(|e| e.to_string())?;
         self.channel
-            .prepare_ordinary_display_release(&material, &binding, deadline)
+            .dispatch_ordinary_display_release(&material, &binding, deadline)
     }
 }
 

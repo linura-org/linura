@@ -802,3 +802,37 @@ This implements same-invocation ownership transfer, not replacement-invocation
 adoption or cleanup. Actual compositor Level A/B acceptance and maintained Level C
 release qualification remain separate required evidence. No unsupported
 production operation or qualification gate is enabled or weakened.
+
+### Ordinary terminal grant, first presentation and immutable verification
+
+Ordinary terminal release uses a fresh purpose-13 protected review, full LNOR
+material, its own fixed `auth_admin` action, and the canonical managed plan,
+durable prepare/revalidation and one-use dispatch. Earlier Apply/Keep/Revert or
+original restoration/finalization proofs cannot substitute for that approval.
+
+The original ordinary Root/native peer supplies a distinct LNOG/LNOW endpoint.
+Root reserves the live attempt before fallible transfer, validates the complete
+LNOP parent and original kernel/power/startup witnesses, and durably publishes
+LNOS before ACK. A lost ACK cannot recreate the endpoint or repeat its spend.
+The compositor intersects both original Root producer clocks with its own first
+frame window; the review's longer deadline cannot renew the physical handoff.
+
+A separate ordinary presentation event and canonical observation capabilities
+bind the actual completed immutable post-spend buffers, output-wide commit
+history, KMS identities, original terminal and complete preparation digest.
+Control joins fresh Root/native facts with the signed original terminal, full
+current layout/source, logind and S17 coverage, and independently re-reads the
+same first frame and Root lifetime. It retains an immutable first joined proof;
+later reads preserve its first verification and expiry across restart.
+
+Normal wire phases Confirmed=4 and Restored=5 are distinct from the replacement
+original-restoration adapter's phase 3. Spent ordinary protection can remain held
+in Pending/Restoring without extending any earlier approval, writer or decision
+window. That retention grants no release, successor or cleanup authority.
+
+This increment retains input, S17, native/Root power, startup and provenance
+fences. Ordinary completion transfer, ordered retirement and matching durable
+ReleasedCurrent still require implementation, as do Stage 5 adoption,
+supersession and reference-aware cleanup. Real Level A/B execution and maintained
+Level C release qualification remain separate evidence gates. No public
+production mutation is enabled.

@@ -15,6 +15,7 @@
 namespace Linura::SecurityOwner {
 struct NativeDisplayRestorationIntent;
 struct NativeDisplayFinalizationIntent;
+struct NativeDisplayOrdinaryReleaseIntent;
 
 enum class NativePeerPurpose;
 struct NativeDisplayChoiceChallenge;
@@ -77,6 +78,8 @@ class NativeRuntime final : public QObject
     [[nodiscard]] std::optional<QString>
     observeOriginalDisplayPresentation(const QDBusMessage &received);
     [[nodiscard]] std::optional<QString> observeNativeDisplayHandoff(const QDBusMessage &received);
+    [[nodiscard]] std::optional<QString>
+    observeOrdinaryDisplayHandoff(const QDBusMessage &received);
     [[nodiscard]] std::optional<QString> observeNativeDisplayCurrent(const QDBusMessage &received);
     [[nodiscard]] std::optional<quint32>
     dispatchPreparedDisplay(const QDBusMessage &, const NativeDisplayIntent &,
@@ -97,6 +100,11 @@ class NativeRuntime final : public QObject
         int terminalGrant);
     // One actual Control-owned original Root spend attempt. This only reports
     // LNRX (phase 6); never physical completion or lock/input/power release.
+    [[nodiscard]] bool spendOrdinaryDisplayRelease(const QDBusMessage &,
+                                                   const NativeDisplayOrdinaryReleaseIntent &,
+                                                   const NativeDisplayCorrelation &,
+                                                   const QString &sampleDigest,
+                                                   quint64 sampledBootMs, int grant);
     [[nodiscard]] std::optional<quint32>
     spendOriginalDisplayNativeRelease(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
                                       const NativeDisplayCorrelation &, const QString &sampleDigest,
@@ -153,7 +161,7 @@ class NativeRuntime final : public QObject
     void approvalInteractionCompleted();
 
   private:
-    enum class DisplayPresentation { Restoration, First, Current };
+    enum class DisplayPresentation { Restoration, First, Current, Ordinary };
     [[nodiscard]] std::optional<QString> observeDisplayPresentation(const QDBusMessage &received,
                                                                     DisplayPresentation);
     NativeRuntime();

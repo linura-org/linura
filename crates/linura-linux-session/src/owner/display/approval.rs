@@ -16,6 +16,7 @@ pub enum NativeDisplayApprovalPurpose {
     Revert,
     RestoreOriginal,
     FinalizeOriginal,
+    ReleaseOrdinary,
 }
 impl NativeDisplayApprovalPurpose {
     fn wire(self) -> u32 {
@@ -25,6 +26,7 @@ impl NativeDisplayApprovalPurpose {
             Self::Revert => 10,
             Self::RestoreOriginal => 11,
             Self::FinalizeOriginal => 12,
+            Self::ReleaseOrdinary => 13,
         }
     }
 
@@ -36,6 +38,9 @@ impl NativeDisplayApprovalPurpose {
             }
             NativeDisplayApprovalPurpose::FinalizeOriginal => {
                 "org.linura.authority.finalize-original-display-restoration"
+            }
+            NativeDisplayApprovalPurpose::ReleaseOrdinary => {
+                "org.linura.authority.release-ordinary-display"
             }
             NativeDisplayApprovalPurpose::Keep | NativeDisplayApprovalPurpose::Revert => {
                 return Err("display decisions require the retained native attempt".into());
@@ -160,6 +165,36 @@ impl NativeDisplayApprovalRequest {
         )
     }
 
+    /// Fresh ordinary post-commit review; old Apply/Keep/Revert/restoration
+    /// receipts never authorize releasing the retained protective fences.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_ordinary_release(
+        principal: PrincipalId,
+        request: RequestId,
+        plan: PlanId,
+        request_digest: ComponentDigest,
+        observation_digest: ComponentDigest,
+        review_digest: ComponentDigest,
+        material: &str,
+        reason: &str,
+        budget: Duration,
+    ) -> Result<Self, String> {
+        Self::at(
+            principal,
+            request,
+            plan,
+            request_digest,
+            observation_digest,
+            review_digest,
+            material,
+            reason,
+            budget,
+            unix_ms()?,
+            boot_ms()?,
+            NativeDisplayApprovalPurpose::ReleaseOrdinary,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn at(
         principal: PrincipalId,
@@ -176,6 +211,9 @@ impl NativeDisplayApprovalRequest {
         purpose: NativeDisplayApprovalPurpose,
     ) -> Result<Self, String> {
         let maximum = match purpose {
+            NativeDisplayApprovalPurpose::ReleaseOrdinary => {
+                linura_core::MAX_DISPLAY_ORDINARY_RELEASE_BYTES
+            }
             NativeDisplayApprovalPurpose::FinalizeOriginal => {
                 linura_core::MAX_DISPLAY_FINALIZATION_BYTES
             }
@@ -198,6 +236,13 @@ impl NativeDisplayApprovalRequest {
             return Err("native display interaction material/window is unsupported".into());
         }
         let (lock, prefix) = match purpose {
+            NativeDisplayApprovalPurpose::ReleaseOrdinary => (
+                linura_core::DisplayOrdinaryReleaseMaterial::decode(material)
+                    .map_err(|e| e.to_string())?
+                    .current_lock()
+                    .clone(),
+                "request:v010:display-ordinary-release:",
+            ),
             NativeDisplayApprovalPurpose::Apply => (
                 linura_core::DisplayLayoutMaterial::decode(material)
                     .map_err(|e| e.to_string())?
@@ -464,6 +509,158 @@ mod tests {
             NativeDisplayApprovalPurpose::Apply,
         ))
     }
+    #[test]
+    fn ordinary_release_requires_its_own_full_material_principal_purpose_and_window() {
+        use linura_core::{
+            DisplayLayoutMaterial, DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial,
+            DisplayOrdinaryReleaseOutcome,
+        };
+        let source = fixture();
+        let original = value(DisplayLayoutMaterial::decode(&source.material));
+        let lineage = DisplayOrdinaryReleaseLineage {
+            original_request: source.request.clone(),
+            original_dispatch: &"a".repeat(64),
+            terminal_record: &"b".repeat(64),
+            original_checkpoint: &"c".repeat(64),
+            signed_binding: &"d".repeat(64),
+            generation: 0,
+            state_version: 9,
+            current_source_guard: &"e".repeat(64),
+        };
+        let make = |purpose, text: &str, request: &str, principal: &str, budget| {
+            NativeDisplayApprovalRequest::at(
+                value(PrincipalId::new(principal)),
+                value(RequestId::new(request)),
+                value(PlanId::new(request)),
+                source.request_digest,
+                source.observation_digest,
+                source.review_digest,
+                text,
+                "Finish the terminal display change",
+                budget,
+                100,
+                200,
+                purpose,
+            )
+        };
+        let purpose = NativeDisplayApprovalPurpose::ReleaseOrdinary;
+        let request = "request:v010:display-ordinary-release:review";
+        assert_eq!(purpose.wire(), 13);
+        assert_eq!(
+            purpose.authentication_action(),
+            Ok("org.linura.authority.release-ordinary-display")
+        );
+        let mut digests = BTreeSet::new();
+        for outcome in [
+            DisplayOrdinaryReleaseOutcome::Keep,
+            DisplayOrdinaryReleaseOutcome::Revert,
+            DisplayOrdinaryReleaseOutcome::Expired,
+        ] {
+            let text = value(DisplayOrdinaryReleaseMaterial::encode(
+                &lineage,
+                outcome,
+                original.lock(),
+                &source.material,
+            ));
+            let approval = value(make(
+                purpose,
+                &text,
+                request,
+                "unix:uid:1000",
+                Duration::from_secs(60),
+            ));
+            assert_eq!(approval.material, text);
+            assert_eq!(
+                (approval.deadline_unix_ms, approval.deadline_boot_ms),
+                (60_100, 60_200)
+            );
+            assert!(digests.insert(value(approval.protected_scope_digest()).to_hex()));
+            // Neither earlier terminal review nor a restoration/finalization
+            // namespace can be relabelled into fresh ordinary authority.
+            for other in [
+                NativeDisplayApprovalPurpose::Apply,
+                NativeDisplayApprovalPurpose::Keep,
+                NativeDisplayApprovalPurpose::Revert,
+                NativeDisplayApprovalPurpose::RestoreOriginal,
+                NativeDisplayApprovalPurpose::FinalizeOriginal,
+            ] {
+                assert!(
+                    make(
+                        other,
+                        &text,
+                        request,
+                        "unix:uid:1000",
+                        Duration::from_secs(1)
+                    )
+                    .is_err()
+                );
+            }
+            for prefix in [
+                "display-layout",
+                "display-restoration",
+                "display-finalization",
+                "session-lock",
+            ] {
+                assert!(
+                    make(
+                        purpose,
+                        &text,
+                        &format!("request:v010:{prefix}:review"),
+                        "unix:uid:1000",
+                        Duration::from_secs(1)
+                    )
+                    .is_err()
+                );
+            }
+            assert!(
+                make(
+                    purpose,
+                    &text,
+                    request,
+                    "unix:uid:1001",
+                    Duration::from_secs(1)
+                )
+                .is_err()
+            );
+            assert!(
+                make(
+                    purpose,
+                    &text,
+                    request,
+                    "unix:uid:1000",
+                    Duration::from_secs(61)
+                )
+                .is_err()
+            );
+            assert!(
+                make(
+                    purpose,
+                    &source.material,
+                    request,
+                    "unix:uid:1000",
+                    Duration::from_secs(1)
+                )
+                .is_err()
+            );
+            assert!(
+                make(
+                    purpose,
+                    &format!("{text}0:;"),
+                    request,
+                    "unix:uid:1000",
+                    Duration::from_secs(1)
+                )
+                .is_err()
+            );
+            assert_eq!(
+                approval.remaining_at(101, 201),
+                Ok(Duration::from_millis(59_999))
+            );
+            assert!(approval.remaining_at(102, 60_200).is_err());
+            assert!(approval.remaining_at(103, 203).is_err()); // terminal; never renew on retry
+        }
+    }
+
     #[test]
     fn finalization_has_fresh_material_principal_purpose_and_clock_bounds() {
         let source = fixture();

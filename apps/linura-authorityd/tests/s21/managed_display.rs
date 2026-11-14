@@ -44,6 +44,10 @@ struct Machine {
     ordinary_release_approvals: usize,
     ordinary_release_calls: usize,
     ordinary_release_write_fault: u8,
+    ordinary_handoff_enabled: bool,
+    ordinary_release_record: Option<Vec<u8>>,
+    ordinary_handoff_fault: u8,
+    ordinary_handoff_reads: usize,
     original_protection_lost: bool,
     restoration_calls: usize,
     restoration_outcome: u8,
@@ -255,6 +259,16 @@ impl Observer for LiveFixtureObserver {
             provider: Some(self.template.provider.clone()),
             reason: None,
         }];
+        if self.template.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
+            capabilities.push(Capability {
+                id: value(CapabilityId::new(
+                    linura_observation::DISPLAY_ORDINARY_HANDOFF_CAPABILITY,
+                )),
+                provider: Some(self.template.provider.clone()),
+                support: SupportLevel::Supported,
+                reason: None,
+            });
+        }
         if self.template.provider.as_str() == linura_observation::DISPLAY_RECOVERY_PROVIDER {
             capabilities.push(Capability {
                 id: value(CapabilityId::new(
@@ -326,6 +340,15 @@ impl Observer for LiveFixtureObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        if self.template.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_ORDINARY_HANDOFF_CAPABILITY
+        {
+            return ordinary_release::observe_handoff(
+                &mut self.machine.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         let successor = self.template.provider.as_str()
             == linura_observation::DISPLAY_RECOVERY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_SUCCESSOR_CAPABILITY;

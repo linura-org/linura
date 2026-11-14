@@ -13,7 +13,8 @@ struct NativeDisplayPromptScope final
         Keep = 1,
         Revert = 2,
         Recovery = 3,
-        Finalization = 4
+        Finalization = 4,
+        OrdinaryRelease = 5
     };
     QString digest;
     Purpose purpose = Purpose::Apply;

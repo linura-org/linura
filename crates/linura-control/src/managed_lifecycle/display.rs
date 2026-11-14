@@ -116,7 +116,8 @@ pub use finalization::{
     OriginalDisplayRootPowerRetirementPort,
 };
 pub use release::{
-    AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayOriginalInspection,
+    AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayHandoffInspection,
+    OrdinaryDisplayHandoffVerification, OrdinaryDisplayOriginalInspection,
     OrdinaryDisplayReleaseAuthorizer, OrdinaryDisplayReleaseChallenge,
     OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
     OrdinaryDisplayReleaseRequest,

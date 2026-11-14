@@ -1749,12 +1749,27 @@ impl NativeSessionChannel {
         binding: &ExecutionBinding,
         deadline_unix_ms: u64,
     ) -> Result<ExecutionOutcome, String> {
+        self.reserve_ordinary_release_record(material, binding, deadline_unix_ms, Instant::now())?;
+        ExecutionOutcome::new(
+            ExecutionDisposition::Dispatched,
+            binding.dispatch_digest,
+            "original Root ordinary release preparation retained; physical handoff unverified",
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn reserve_ordinary_release_record(
+        &self,
+        material: &str,
+        binding: &ExecutionBinding,
+        deadline_unix_ms: u64,
+        started: Instant,
+    ) -> Result<(crate::NativeDisplayOrdinaryReleasePreparation, Identity), String> {
         self.require_role(NativeSessionRole::Control)?;
         let effect = linura_provider_sdk::display_ordinary_release_effect(material)?;
         binding.validate_for(&effect).map_err(|e| e.to_string())?;
         let decoded = linura_core::DisplayOrdinaryReleaseMaterial::decode(material)
             .map_err(|e| e.to_string())?;
-        let started = Instant::now();
         let wall = crate::owner::unix_ms()?;
         let boot = crate::owner::boot_ms()?;
         if deadline_unix_ms <= wall
@@ -1816,12 +1831,7 @@ impl NativeSessionChannel {
                 "ordinary release original preparation expired or Root changed; no replay".into(),
             );
         }
-        ExecutionOutcome::new(
-            ExecutionDisposition::Dispatched,
-            binding.dispatch_digest,
-            "original Root ordinary release preparation retained; physical handoff unverified",
-        )
-        .map_err(|e| e.to_string())
+        Ok((record, identity))
     }
 
     /// Separately prepared terminal-purpose handoff; acknowledgement is not completion.

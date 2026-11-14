@@ -12,7 +12,9 @@ pub use execution::{
     AuthorizedOrdinaryDisplayRelease, OrdinaryDisplayReleaseAuthorizer,
     OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleasePort, OrdinaryDisplayReleaseReceipt,
 };
+mod handoff;
 mod plan;
+pub use handoff::{OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification};
 pub use original::OrdinaryDisplayOriginalInspection;
 use original::invalid_original;
 pub use plan::OrdinaryDisplayReleaseRequest;

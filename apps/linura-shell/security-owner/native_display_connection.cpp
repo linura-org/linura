@@ -373,6 +373,7 @@ class NativeDisplayConnection::Impl final
             const auto size = facts ? strnlen(facts, 16 * 1024 + 1) : 0;
             if (!capture.identityReceived || capture.done ||
                 !capture.sample.originalRestorationPresentation.isEmpty() ||
+                !capture.sample.ordinaryHandoffPresentation.isEmpty() ||
                 !capture.sample.nativeHandoffPresentation.isEmpty() || size == 0 ||
                 !capture.sample.nativeCurrentPresentation.isEmpty() || size > 16 * 1024 ||
                 capture.sample.startupPhase != 2 || !capture.sample.fenced) {
@@ -391,6 +392,7 @@ class NativeDisplayConnection::Impl final
             const auto size = facts ? strnlen(facts, 16 * 1024 + 1) : 0;
             if (!capture.identityReceived || capture.done ||
                 !capture.sample.nativeHandoffPresentation.isEmpty() ||
+                !capture.sample.ordinaryHandoffPresentation.isEmpty() ||
                 !capture.sample.originalRestorationPresentation.isEmpty() || size == 0 ||
                 !capture.sample.nativeCurrentPresentation.isEmpty() || size > 16 * 1024 ||
                 capture.sample.startupPhase != 2 || !capture.sample.fenced) {
@@ -409,6 +411,7 @@ class NativeDisplayConnection::Impl final
             const auto size = facts ? strnlen(facts, 16 * 1024 + 1) : 0;
             if (!capture.identityReceived || capture.done ||
                 !capture.sample.nativeCurrentPresentation.isEmpty() ||
+                !capture.sample.ordinaryHandoffPresentation.isEmpty() ||
                 !capture.sample.originalRestorationPresentation.isEmpty() ||
                 !capture.sample.nativeHandoffPresentation.isEmpty() || size == 0 ||
                 size > 16 * 1024 ||
@@ -418,6 +421,26 @@ class NativeDisplayConnection::Impl final
                 return;
             }
             capture.sample.nativeCurrentPresentation =
+                QByteArray(facts, static_cast<qsizetype>(size));
+        });
+    }
+    static void ordinaryHandoffPresentation(void *data, linura_display_snapshot_v1 *,
+                                            const char *facts)
+    {
+        auto &capture = *static_cast<Capture *>(data);
+        callback(capture, [&] {
+            const auto size = facts ? strnlen(facts, 16 * 1024 + 1) : 0;
+            if (!capture.identityReceived || capture.done || size == 0 || size > 16 * 1024 ||
+                !capture.sample.originalRestorationPresentation.isEmpty() ||
+                !capture.sample.nativeHandoffPresentation.isEmpty() ||
+                !capture.sample.nativeCurrentPresentation.isEmpty() ||
+                !capture.sample.ordinaryHandoffPresentation.isEmpty() ||
+                (capture.sample.startupPhase != 1 && capture.sample.startupPhase != 4) ||
+                !capture.sample.fenced) {
+                capture.invalid = true;
+                return;
+            }
+            capture.sample.ordinaryHandoffPresentation =
                 QByteArray(facts, static_cast<qsizetype>(size));
         });
     }
@@ -564,7 +587,8 @@ std::optional<NativePinnedDisplaySample> NativeDisplayConnection::sample()
                                                               Impl::unavailable,
                                                               Impl::originalRestorationPresentation,
                                                               Impl::nativeHandoffPresentation,
-                                                              Impl::nativeCurrentPresentation};
+                                                              Impl::nativeCurrentPresentation,
+                                                              Impl::ordinaryHandoffPresentation};
     if (!capture.native ||
         linura_display_snapshot_v1_add_listener(capture.native, &listener, &capture) != 0 ||
         !impl_->sync() || capture.invalid || !capture.done) {

@@ -1,5 +1,6 @@
 #include "native_display_finalization.h"
 #include "native_approval.h"
+#include "native_display_ordinary_release.h"
 #include "native_display_review.h"
 
 #include <QFile>
@@ -30,6 +31,135 @@ void terminalMaterialBoundaries()
     assert(text.toUtf8() == bytes);
     const auto parsed = NativeDisplayFinalizationIntent::parse(text);
     assert(parsed && parsed->encode() == text && parsed->postWriteEpoch == 29);
+    // Synthetic comparison vectors only: all normal terminal dispositions
+    // need a fresh purpose, complete original intent and current source.
+    const auto &original = parsed->restoration.original;
+    for (const auto outcome : {NativeDisplayOrdinaryReleaseIntent::Outcome::Keep,
+                               NativeDisplayOrdinaryReleaseIntent::Outcome::Revert,
+                               NativeDisplayOrdinaryReleaseIntent::Outcome::Expired}) {
+        NativeDisplayOrdinaryReleaseIntent ordinary{parsed->restoration.originalRequest,
+                                                    parsed->restoration.originalDispatch,
+                                                    QString(64, QLatin1Char('b')),
+                                                    parsed->restoration.originalCheckpoint,
+                                                    QString(64, QLatin1Char('d')),
+                                                    QString(64, QLatin1Char('e')),
+                                                    0,
+                                                    9,
+                                                    outcome,
+                                                    original.lock,
+                                                    original};
+        const auto encoded = ordinary.encode();
+        assert(!encoded.isEmpty());
+        const auto decoded = NativeDisplayOrdinaryReleaseIntent::parse(encoded);
+        assert(decoded && decoded->encode() == encoded);
+        assert(decoded->expectedAttemptPhase() ==
+               (outcome == NativeDisplayOrdinaryReleaseIntent::Outcome::Keep ? 4U : 5U));
+        const auto projected = decoded->presentation();
+        const auto &target = outcome == NativeDisplayOrdinaryReleaseIntent::Outcome::Keep
+                                 ? original.desired
+                                 : original.baseline;
+        assert(projected.baseline.encode() == target.encode() &&
+               projected.desired.encode() == target.encode());
+        NativeDisplaySnapshot native;
+        const auto generation =
+            target.topology.mid(target.topology.lastIndexOf(':') + 1).toULongLong();
+        native.generation = generation;
+        for (const auto &row : target.outputs) {
+            NativeDisplayHead head;
+            head.handle = row.handle;
+            head.generation = row.generation;
+            head.name = QStringLiteral("DP-%1").arg(row.handle);
+            head.modes = {{1280, 720, 60000}, {1920, 1080, 60000}};
+            head.enabled = row.enabled;
+            if (row.enabled) {
+                head.current = row.mode;
+                head.x = row.x;
+                head.y = row.y;
+                head.transform = static_cast<qint32>(row.transform);
+                head.scaleFixed = 256;
+                head.scaleMilli = 1000;
+                head.scaleFloatBits = 0x3f800000U;
+            }
+            head.baseRuleDigest = QString(64, QLatin1Char('d'));
+            head.outputIdentityDigest = QString(64, QLatin1Char('e'));
+            native.heads.push_back(head);
+        }
+        const auto source = native.baselineGuard(target.encode());
+        assert(source);
+        ordinary.sourceGuard = *source;
+        assert(ordinary.matchesCurrent(native, target.topology, original.lock));
+        auto drift = native;
+        drift.heads[0].outputIdentityDigest = QString(64, QLatin1Char('f'));
+        assert(!ordinary.matchesCurrent(drift, target.topology, original.lock));
+        ++drift.generation;
+        assert(!ordinary.matchesCurrent(drift, target.topology, original.lock));
+        assert(!ordinary.matchesCurrent(native, target.topology + QLatin1Char('x'), original.lock));
+        for (unsigned fault = 0; fault < 7; ++fault) {
+            auto excessive = ordinary;
+            if (fault == 0)
+                excessive.original.baseline.outputs.resize(17);
+            else if (fault == 1)
+                excessive.original.desired.topology = QString(257, QLatin1Char('x'));
+            else if (fault == 2)
+                excessive.currentLock.uid += 1;
+            else if (fault == 3)
+                excessive.stateVersion = 0;
+            else if (fault == 4)
+                excessive.outcome = static_cast<NativeDisplayOrdinaryReleaseIntent::Outcome>(3);
+            else if (fault == 5)
+                excessive.sourceGuard = QString(64, QLatin1Char('0'));
+            else
+                excessive.originalRequest = QString(129, QChar(0x00e9));
+            assert(excessive.encode().isEmpty());
+            assert(!excessive.matchesCurrent(native, target.topology, original.lock));
+        }
+        for (qsizetype length = 0; length < encoded.size(); ++length)
+            assert(!NativeDisplayOrdinaryReleaseIntent::parse(encoded.left(length)));
+        assert(!NativeDisplayOrdinaryReleaseIntent::parse(encoded + QStringLiteral("0:;")));
+        assert(!NativeDisplayFinalizationIntent::parse(encoded));
+        assert(!NativeDisplayOrdinaryReleaseIntent::parse(text));
+        NativeApprovalScope review{
+            original.lock,
+            QStringLiteral("unix:uid:1000"),
+            QStringLiteral("request:v010:display-ordinary-release:review"),
+            QStringLiteral("request:v010:display-ordinary-release:review"),
+            QStringLiteral("sha256:") + QString(64, QLatin1Char('1')),
+            QStringLiteral("sha256:") + QString(64, QLatin1Char('2')),
+            QStringLiteral("sha256:") + QString(64, QLatin1Char('3')),
+            ApprovalPurpose::ReleaseOrdinaryDisplay,
+            std::nullopt,
+            NativeDisplayApprovalBinding{
+                ordinary.encode(), {}, 1000, QStringLiteral("Finish the display change"), 900}};
+        assert(review.valid());
+        assert(QString::fromLatin1(review.authenticationAction()) ==
+               QStringLiteral("org.linura.authority.release-ordinary-display"));
+        const auto pages = nativeDisplayReviewPages(review, native);
+        assert(pages && pages->front().heading == QStringLiteral("Finish this display change?"));
+        for (auto purpose :
+             {ApprovalPurpose::ApplyDisplay, ApprovalPurpose::KeepDisplay,
+              ApprovalPurpose::RevertDisplay, ApprovalPurpose::RestoreOriginalDisplay,
+              ApprovalPurpose::FinalizeOriginalDisplay}) {
+            auto changed = review;
+            changed.purpose = purpose;
+            assert(!changed.valid());
+        }
+        auto changed = review;
+        changed.display->decisionDigest = QStringLiteral("sha256:") + QString(64, QLatin1Char('4'));
+        assert(!changed.valid());
+        quint64 clock = 100;
+        NativeApproval fresh(review.lock, [&] { return clock; });
+        NativeDisplayPromptStatus ready{generation, 7, NativeDisplayPromptStatus::Phase::Ready};
+        assert(!fresh.begin(review, true));
+        assert(fresh.beginDisplay(review, ready, 60'000));
+        assert(fresh.nativePrompt(review) && fresh.nativeCompleted(review, true));
+        assert(fresh.consume(review) && !fresh.consume(review));
+    }
+    for (quint32 phase = 0; phase < 8; ++phase) {
+        assert(NativeDisplayOrdinaryReleaseIntent::terminalAttemptPhase(phase) ==
+               (phase == 4U || phase == 5U));
+        assert(NativeDisplayOrdinaryReleaseIntent::retainedAttemptPhase(phase) ==
+               (phase >= 2U && phase <= 5U));
+    }
     assert(parsed->restorationRequest == QStringLiteral("restore-before-finalization"));
     assert(parsed->currentLock == parsed->restoration.replacement.lock);
     auto fields = std::vector<QString>{parsed->restorationRequest,
@@ -257,6 +387,6 @@ void terminalMaterialBoundaries()
                                           1000, 900};
     assert(prompt.valid());
     auto invalid = prompt;
-    invalid.purpose = static_cast<NativeDisplayPromptScope::Purpose>(5);
+    invalid.purpose = static_cast<NativeDisplayPromptScope::Purpose>(6);
     assert(!invalid.valid());
 }

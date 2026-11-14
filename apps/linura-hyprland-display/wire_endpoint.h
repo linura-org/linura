@@ -47,6 +47,11 @@ struct NativeOriginalRestorationPort final
     // Post-handoff current KMS/frames and actual input retirement. It is never
     // interchangeable with first-frame comparison or a release credential.
     std::function<std::optional<std::string>()> currentPresentation;
+    // Same-invocation Keep/Revert/expiry handoff has separate lineage and
+    // startup admission from replacement original-restoration handoff.
+    std::function<std::optional<std::string>()> ordinaryPresentation = [] {
+        return std::optional<std::string>{};
+    };
 };
 
 // Adapter-private Wayland mechanism. Its native session scoping and ownership

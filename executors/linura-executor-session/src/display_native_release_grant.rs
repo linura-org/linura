@@ -11,6 +11,7 @@ const RESERVED: u8 = 1;
 const SPENT: u8 = 2;
 const FRAME_BYTES: usize = 48;
 const PURPOSE: &[u8; 8] = b"LNRW:1\n\0";
+const ORDINARY_PURPOSE: &[u8; 8] = b"LNOW:1\n\0";
 const BUDGET: Duration = Duration::from_secs(1);
 
 fn unavailable() -> zbus::fdo::Error {
@@ -58,6 +59,47 @@ pub(super) fn serve(
     stream: &mut UnixStream,
     digest: &[u8; 32],
     lifetime: Lifetime,
+    authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
+    verify: impl FnMut() -> zbus::fdo::Result<()>,
+    persist_spent: impl FnMut() -> zbus::fdo::Result<()>,
+) -> zbus::fdo::Result<()> {
+    serve_purpose(
+        stream,
+        digest,
+        lifetime,
+        PURPOSE,
+        authenticate,
+        verify,
+        persist_spent,
+    )
+}
+
+/// Same bounded credential transport, with a distinct ordinary-release purpose.
+/// An original-restoration frame can never spend an ordinary preparation.
+pub(super) fn serve_ordinary(
+    stream: &mut UnixStream,
+    digest: &[u8; 32],
+    lifetime: Lifetime,
+    authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
+    verify: impl FnMut() -> zbus::fdo::Result<()>,
+    persist_spent: impl FnMut() -> zbus::fdo::Result<()>,
+) -> zbus::fdo::Result<()> {
+    serve_purpose(
+        stream,
+        digest,
+        lifetime,
+        ORDINARY_PURPOSE,
+        authenticate,
+        verify,
+        persist_spent,
+    )
+}
+
+fn serve_purpose(
+    stream: &mut UnixStream,
+    digest: &[u8; 32],
+    lifetime: Lifetime,
+    purpose: &[u8; 8],
     mut authenticate: impl FnMut(&rustix::net::UCred) -> zbus::fdo::Result<()>,
     mut verify: impl FnMut() -> zbus::fdo::Result<()>,
     mut persist_spent: impl FnMut() -> zbus::fdo::Result<()>,
@@ -84,7 +126,7 @@ pub(super) fn serve(
         }
         read += size;
     }
-    if bytes[..8] != PURPOSE[..]
+    if bytes[..8] != purpose[..]
         || bytes[8..16] != 1_u64.to_be_bytes()
         || bytes[16..] != digest[..]
         || Instant::now() >= deadline
@@ -146,6 +188,131 @@ mod tests {
             Err(unavailable())
         }
     }
+    #[test]
+    fn ordinary_purpose_authenticates_every_fragment_and_persists_before_ack() {
+        let (mut root, mut native) = pair();
+        let state = ChannelState::reserved();
+        let lifetime = Lifetime::new(state.clone());
+        let (durable_tx, durable_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut fragments = 0;
+            let result = serve_ordinary(
+                &mut root,
+                &[9; 32],
+                lifetime,
+                |sender| {
+                    fragments += 1;
+                    same_sender(sender)
+                },
+                || Ok(()),
+                || {
+                    value(durable_tx.send(()));
+                    Ok(())
+                },
+            );
+            assert!(result.is_ok());
+            assert!(fragments >= 3);
+        });
+        let mut sent = frame([9; 32]);
+        sent[..8].copy_from_slice(ORDINARY_PURPOSE);
+        value(native.write_all(&sent));
+        let mut received = [0; FRAME_BYTES];
+        value(native.read_exact(&mut received));
+        value(durable_rx.recv_timeout(Duration::from_secs(1)));
+        assert_eq!(received, sent);
+        value(worker.join());
+        assert!(!state.pending());
+        assert!(native.write_all(&sent).is_err() || native.read_exact(&mut received).is_err());
+    }
+
+    #[test]
+    fn ordinary_rejects_original_purpose_identity_drift_storage_failure_and_unknown_commit() {
+        for fault in 0..7 {
+            let (mut root, mut native) = pair();
+            let state = ChannelState::reserved();
+            let lifetime = Lifetime::new(state.clone());
+            let worker = std::thread::spawn(move || {
+                let writes = std::cell::Cell::new(0);
+                let mut fragments = 0;
+                let result = serve_ordinary(
+                    &mut root,
+                    &[9; 32],
+                    lifetime,
+                    |sender| {
+                        same_sender(sender)?;
+                        fragments += 1;
+                        if fault == 3 || (fault == 4 && fragments > 1) {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    || {
+                        if fault == 6 && writes.get() > 0 {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    || {
+                        writes.set(writes.get() + 1);
+                        if fault == 5 {
+                            Err(unavailable())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                );
+                assert!(result.is_err());
+                assert_eq!(writes.get(), usize::from(fault >= 5));
+            });
+            let mut sent = frame([9; 32]);
+            sent[..8].copy_from_slice(ORDINARY_PURPOSE);
+            match fault {
+                0 => sent[..8].copy_from_slice(PURPOSE),
+                1 => sent[15] = 2,
+                2 => sent[16] ^= 1,
+                _ => {}
+            }
+            value(native.write_all(&sent));
+            assert!(native.read_exact(&mut [0; FRAME_BYTES]).is_err());
+            value(worker.join());
+            assert!(!state.pending());
+        }
+    }
+
+    #[test]
+    fn ordinary_lost_ack_does_not_repeat_persistence_or_reopen_channel() {
+        let (mut root, mut native) = pair();
+        let state = ChannelState::reserved();
+        let lifetime = Lifetime::new(state.clone());
+        let (durable_tx, durable_rx) = std::sync::mpsc::channel();
+        let (lost_tx, lost_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = serve_ordinary(
+                &mut root,
+                &[9; 32],
+                lifetime,
+                same_sender,
+                || Ok(()),
+                || {
+                    value(durable_tx.send(()));
+                    value(lost_rx.recv_timeout(Duration::from_secs(1)));
+                    Ok(())
+                },
+            );
+            assert!(result.is_err());
+        });
+        let mut sent = frame([9; 32]);
+        sent[..8].copy_from_slice(ORDINARY_PURPOSE);
+        value(native.write_all(&sent));
+        value(durable_rx.recv_timeout(Duration::from_secs(1)));
+        drop(native);
+        value(lost_tx.send(()));
+        value(worker.join());
+        assert!(!state.pending());
+    }
+
     #[test]
     fn exact_original_native_spend_is_once_and_requires_durable_before_ack() {
         let (mut root, mut native) = pair();

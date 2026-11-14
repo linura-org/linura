@@ -35,6 +35,19 @@ impl linura_control::OriginalDisplayFinalizationAuthorizer for NativeSessionAppr
     }
 }
 
+impl linura_control::OrdinaryDisplayReleaseAuthorizer for NativeSessionApprovalAuthorizer {
+    fn authorize_ordinary_release(
+        &self,
+        challenge: &linura_control::OrdinaryDisplayReleaseChallenge,
+    ) -> Result<TrustedHumanApproval, String> {
+        crate::display_approval::authorize_ordinary_release(
+            &self.channel,
+            &self.principal,
+            challenge,
+        )
+    }
+}
+
 impl ManagedApprovalAuthorizer for NativeSessionApprovalAuthorizer {
     fn authorize(
         &self,

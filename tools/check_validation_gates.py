@@ -1288,7 +1288,7 @@ REVIEWED_SHELL_EXECUTION = {
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
     "qualification/v010/workstation-acceptance/run-live-session.sh": "e8013a8b52a6eeac5b53e1bfa3861a2a4879e4b33978f3d22b08ce634e06360f",
     "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
-    "tests/acceptance/v06/qualify-guest.sh": "07501468bc45d08345c43c879603bfb078a28f4f67a0f3b205ccbe080507ecf7",
+    "tests/acceptance/v06/qualify-guest.sh": "aa6c470357d28b0214a32432810188bb732e75c67ccd896f67ed90e0c2537c71",
     "tests/acceptance/v06/qualify-host.sh": "16bdd54f2b5ed67461c09773df4b5ec398cfde23d4196256893332ebf94bd28c",
     "tests/acceptance/v06/qualify-native-session.sh": "7b8d49ae79048f65c7c148e0f98df12cf93857e4bd9136fd4766e4222a43fc8f",
     # Development-only tools run at the caller's existing permissions.

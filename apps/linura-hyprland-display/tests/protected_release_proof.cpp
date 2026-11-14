@@ -92,6 +92,30 @@ int main()
     const auto before = baseline(held);
     const auto scanout = kernel(held);
 
+    // The ordinary producer carries TWO original absolute deadlines. A short
+    // BOOTTIME budget cannot borrow unused wall time, or be renewed by a later cap.
+    {
+        auto gate = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(gate && gate->narrowProducerWindow({9'900, 4'900}, {11'900, 5'150}));
+        assert(gate->narrowProducerWindow({9'950, 4'950}, {11'950, 6'950}));
+        assert(!gate->spend(held, {10'100, 5'150}, before, scanout));
+        assert(gate->phase() == Phase::Faulted);
+    }
+    for (const auto &[observed, end] :
+         std::vector<std::pair<ClockSample, ClockSample>>{{{0, 4'900}, {11'000, 5'100}},
+                                                          {{9'900, 0}, {11'000, 5'100}},
+                                                          {{10'001, 4'900}, {11'000, 5'100}},
+                                                          {{9'900, 5'001}, {11'000, 5'100}},
+                                                          {{9'900, 4'900}, {10'000, 5'100}},
+                                                          {{9'900, 4'900}, {11'000, 5'000}},
+                                                          {{9'000, 4'900}, {11'001, 5'100}},
+                                                          {{9'900, 4'000}, {11'000, 6'001}}}) {
+        auto gate = NativeFirstFrameGate::arm({held, 13, start, before, scanout});
+        assert(gate && !gate->narrowProducerWindow(observed, end));
+        assert(gate->phase() == Phase::Faulted);
+        assert(!gate->spend(held, later, before, scanout));
+    }
+
     // Original Control wall/BOOTTIME bounds can only shorten the first-frame
     // gate. In particular receipt reconciliation cannot restore the old cap.
     for (const auto deadline : {ClockSample{10'000, 5'000}, ClockSample{10'500, 0},

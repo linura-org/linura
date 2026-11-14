@@ -80,4 +80,10 @@
     <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
   </action>
+  <action id="org.linura.authority.release-ordinary-display">
+    <description>Authorize finishing this independently verified display change</description>
+    <message>Fresh administrator authentication authorizes finishing this verified display change while preserving the session lock</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
 </policyconfig>

@@ -1,6 +1,7 @@
 #include "native_endpoint.h"
 #include "native_display_restoration.h"
 #include "native_display_finalization.h"
+#include "native_display_ordinary_release.h"
 #include "native_runtime.h"
 #include "native_display_flow.h"
 
@@ -75,9 +76,13 @@ std::optional<NativeApprovalScope> NativeApprovalWire::displayScope(const QStrin
                                                                     quint64 deadlineUnixMs,
                                                                     quint64 deadlineBootMs) const
 {
-    const auto maximum = purpose == 12 ? 14 * 1024 : purpose == 11 ? 12 * 1024 : 4096;
-    if ((purpose != 8 && purpose != 11 && purpose != 12) || material.size() > maximum ||
-        reason.size() > 2048 || principal.size() > 64 || request.size() > 128 || plan.size() > 128)
+    const auto maximum = purpose == 12   ? 14 * 1024
+                         : purpose == 11 ? 12 * 1024
+                         : purpose == 13 ? 6 * 1024
+                                         : 4096;
+    if ((purpose != 8 && purpose != 11 && purpose != 12 && purpose != 13) ||
+        material.size() > maximum || reason.size() > 2048 || principal.size() > 64 ||
+        request.size() > 128 || plan.size() > 128)
         return std::nullopt;
     const auto lock = NativeLockIdentity::parse(resource);
     if (!lock)
@@ -367,6 +372,22 @@ QString NativeEndpoint::ObserveNativeDisplayHandoff()
     return {};
 }
 
+QString NativeEndpoint::ObserveOrdinaryDisplayHandoff()
+{
+    if (calledFromDBus()) {
+        const auto sampled = bootMilliseconds();
+        const auto result = runtime_.observeOrdinaryDisplayHandoff(message());
+        const auto completed = bootMilliseconds();
+        if (sampled && completed && result &&
+            NativeLockObservationWire{runtime_.identity().resource, false, *sampled}.freshAtBootMs(
+                *completed))
+            return *result;
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Ordinary terminal handoff evidence unavailable"));
+    }
+    return {};
+}
+
 QString NativeEndpoint::ObserveNativeDisplayCurrent()
 {
     if (calledFromDBus()) {
@@ -501,6 +522,21 @@ quint32 NativeEndpoint::QuiesceOriginalDisplayFinalization(
         sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
                        QStringLiteral("Native original display terminal quiescence unavailable"));
     return 7; // Neither rejection nor lost acknowledgement permits another attempt.
+}
+
+bool NativeEndpoint::SpendOrdinaryDisplayRelease(const NativeDisplayAttemptQueryWire &query,
+                                                 const QString &sampleDigest, quint64 sampledBootMs,
+                                                 const QDBusUnixFileDescriptor &grant)
+{
+    if (!calledFromDBus() || query.intent.size() > 6 * 1024 || query.transaction.size() > 256 ||
+        query.effectDigest.size() != 64 || query.dispatchDigest.size() != 64 ||
+        sampleDigest.size() != 64 || !grant.isValid())
+        return false;
+    const auto intent = NativeDisplayOrdinaryReleaseIntent::parse(query.intent);
+    const NativeDisplayCorrelation bound{query.transaction, query.effectDigest,
+                                         query.dispatchDigest, query.deadlineUnixMs};
+    return intent && runtime_.spendOrdinaryDisplayRelease(message(), *intent, bound, sampleDigest,
+                                                          sampledBootMs, grant.fileDescriptor());
 }
 
 quint32 NativeEndpoint::SpendOriginalDisplayNativeRelease(

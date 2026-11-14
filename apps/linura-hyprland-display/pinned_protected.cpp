@@ -4,6 +4,7 @@
 #include "original_finalization_intent.h"
 #include "original_finalization_grant.h"
 #include "original_native_release_grant.h"
+#include "ordinary_release_grant.h"
 #include "original_completion_grant.h"
 #include "original_power_retirement.h"
 #include "original_current_commit.h"
@@ -233,6 +234,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::function<bool()> originalAlive;
     std::string originalMaterial;
     bool terminalActive = false, terminalConsumed = false;
+    bool ordinaryRelease = false;
+    std::unique_ptr<OrdinaryReleaseGrant> ordinaryGrant;
     bool terminalQuiescenceAttempted = false;
     std::string terminalMaterial;
     std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
@@ -358,6 +361,12 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         const auto clock = compositorClock();
         const bool devices = devicesCurrent();
         if (mutation) {
+            if (ordinaryRelease && nativeReleaseSpent &&
+                (!ordinaryGrant || !ordinaryGrant->live())) {
+                mutationFault = true;
+                interaction.cancel();
+                return false;
+            }
             if (originalRestoration &&
                 (!originalAlive || !originalAlive() ||
                  (completionGrant ? !completionGrant->live()
@@ -940,6 +949,116 @@ class PinnedScene final : public ProtectedScene
         data->invalidateFrames();
         data->decisionActive = true;
         return reconfigureReview();
+    }
+    bool beginOrdinaryRelease(const ProtectedInteraction::Scope &scope,
+                              const std::string &material) override
+    {
+        if (!data->mutation || data->originalRestoration || data->currentMode || data->writing ||
+            data->terminalActive || data->ownerLost || data->mutationFault ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            scope.purpose != ProtectedInteraction::Purpose::OrdinaryRelease ||
+            scope.digest == data->interaction.scope().digest || !data->postWriteEpoch ||
+            heldInput().any || !data->refresh())
+            return false;
+        const auto intent = OrdinaryReleaseCodec::decode(material);
+        const auto phase =
+            nativeTransactions() ? nativeTransactions()->status(data->bound) : std::nullopt;
+        const auto expected = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                                  ? CompositorDisplayService::Phase::Confirmed
+                                  : CompositorDisplayService::Phase::Restored;
+        if (!intent || phase != std::optional{expected} ||
+            !OrdinaryReleaseCodec::matchesHeld(*intent, data->bound, data->baseline, data->desired,
+                                               data->stableInventory))
+            return false;
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto review = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!review || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->interaction = std::move(*review);
+        data->decisionActive = false;
+        data->ordinaryRelease = data->terminalActive = true;
+        data->terminalMaterial = material;
+        data->invalidateFrames();
+        return reconfigureReview();
+    }
+    bool spendOrdinaryRelease(OwnedNativeFd descriptor, const Correlation &release) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->nativeReleaseAttempted)
+            return refuse();
+        data->nativeReleaseAttempted = true;
+        if (!data->ordinaryRelease || data->originalRestoration || !data->mutation ||
+            !data->terminalActive || !data->terminalConsumed || !data->terminalEpoch ||
+            data->writing || data->ordinaryGrant || data->ownerLost || data->mutationFault ||
+            heldInput().any || release.transaction == data->bound.transaction ||
+            release.dispatchDigest == data->bound.dispatchDigest || !data->refresh() ||
+            release.deadlineUnixMs > data->interaction.scope().deadlineUnixMs)
+            return refuse();
+        const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
+        const auto phase =
+            nativeTransactions() ? nativeTransactions()->status(data->bound) : std::nullopt;
+        const auto expected = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                                  ? CompositorDisplayService::Phase::Confirmed
+                                  : CompositorDisplayService::Phase::Restored;
+        if (!intent || phase != std::optional{expected} ||
+            !OrdinaryReleaseCodec::matchesHeld(*intent, data->bound, data->baseline, data->desired,
+                                               data->stableInventory))
+            return refuse();
+        auto grant =
+            receiveOrdinaryReleaseGrant(std::move(descriptor), release, data->terminalMaterial);
+        if (!grant || grant->window().deadline.unixMs > data->interaction.scope().deadlineUnixMs ||
+            grant->window().deadline.bootMs > data->interaction.scope().deadlineBootMs)
+            return refuse();
+        data->ordinaryGrant = std::move(grant);
+        const auto held = data->stableInventory;
+        auto gate = nativeOrdinaryFirstFrameArm(data->bound, held);
+        const auto window = data->ordinaryGrant->window();
+        if (!gate || !gate->narrowProducerWindow(window.observed, window.deadline) ||
+            !data->refresh() || data->ownerLost || data->mutationFault || heldInput().any ||
+            !data->ordinaryGrant->spend())
+            return refuse();
+        data->nativeReleaseParent = data->ordinaryGrant->record();
+        const auto current = nativeBackend()->snapshot();
+        const auto clock = compositorClock();
+        const auto history = nativeOrdinaryOutputHighWater(data->bound, held);
+        const auto kernel = nativeOrdinaryFrameKernel(data->bound, held);
+        if (!current || !clock || !history || !kernel || !data->ordinaryGrant->spent() ||
+            !gate->spend(*current, *clock, *history, *kernel) || !data->refresh() ||
+            data->ownerLost || data->mutationFault || heldInput().any)
+            return refuse();
+        data->terminalBound = release;
+        data->nativeReleaseGate.emplace(std::move(*gate));
+        data->nativeReleaseSpent = data->nativeHandoffActive = true;
+        data->invalidateFrames();
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !monitor->m_output || !data->refresh() || data->mutationFault ||
+                data->ownerLost || heldInput().any)
+                return refuse();
+            surface.disableCommit = 0;
+            surface.disableSubmitted = false;
+            if (monitor->m_enabled)
+                continue;
+            const auto &pending = monitor->m_output->state->state();
+            if (pending.enabled ||
+                (pending.committed & ~static_cast<std::uint32_t>(
+                                         Aquamarine::COutputState::AQ_OUTPUT_STATE_ENABLED)) != 0)
+                return refuse();
+            monitor->m_output->state->setEnabled(false);
+            if (commitProtectedDisplay(monitor.get()) != std::optional{true})
+                return refuse();
+        }
+        data->damage();
+        return true; // First presentation only; every other protective fence stays held.
     }
     bool beginFinalization(const ProtectedInteraction::Scope &scope,
                            const std::string &material) override
@@ -1825,7 +1944,7 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
         data->cancelInput();
         return false;
     }
-    if (data->originalRestoration)
+    if (data->originalRestoration || data->ordinaryRelease)
         surface->submittedBuffer = std::make_shared<ImmutablePresentationBuffer>(buffer);
     return true;
 }
@@ -1847,18 +1966,24 @@ std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonit
     return OriginalRestorationFrame{surface->submittedBuffer->buffer,
                                     surface->frame.completedCommit(), data->postWriteEpoch};
 }
-std::optional<NativeFirstFrameGate::Receipt>
-readNativeHandoffComparison(const Correlation &terminal)
+namespace {
+std::optional<NativeFirstFrameGate::Receipt> readHandoffComparison(const Correlation &terminal,
+                                                                   bool ordinary)
 {
     const auto data = mutationFence;
     auto *backend = nativeBackend();
+    const auto grantLive = [&] {
+        if (!data || data->ordinaryRelease != ordinary)
+            return false;
+        return ordinary                ? data->ordinaryGrant && data->ordinaryGrant->live()
+               : data->completionGrant ? data->completionGrant->verify()
+                                       : data->terminalGrant && data->terminalGrant->verify();
+    };
     if (!data || data->currentMode || !backend || !data->nativeHandoffActive ||
         !data->nativeReleaseSpent || !data->nativeReleaseGate || !data->terminalBound ||
         *data->terminalBound != terminal || data->writing || data->ownerLost ||
         data->mutationFault || heldInput().any || !data->refresh() || data->ownerLost ||
-        data->mutationFault ||
-        (data->completionGrant ? !data->completionGrant->verify()
-                               : !data->terminalGrant || !data->terminalGrant->verify()))
+        data->mutationFault || !grantLive())
         return std::nullopt;
     const auto refuse = [&]() -> std::optional<NativeFirstFrameGate::Receipt> {
         data->mutationFault = true;
@@ -1870,8 +1995,10 @@ readNativeHandoffComparison(const Correlation &terminal)
     const auto before = backend->snapshot();
     if (!before || *before != held)
         return refuse();
-    const auto kernel = nativeFirstFrameKernel(data->bound, held);
-    const auto commits = nativeOutputHighWater(data->bound, held);
+    const auto kernel = ordinary ? nativeOrdinaryFrameKernel(data->bound, held)
+                                 : nativeFirstFrameKernel(data->bound, held);
+    const auto commits = ordinary ? nativeOrdinaryOutputHighWater(data->bound, held)
+                                  : nativeOutputHighWater(data->bound, held);
     if (!kernel || !commits || held.heads.size() != data->surfaces.size())
         return refuse();
     std::vector<NativeFirstFrameGate::NativeFrame> frames;
@@ -1900,9 +2027,7 @@ readNativeHandoffComparison(const Correlation &terminal)
     }
     const auto after = backend->snapshot();
     if (!after || *after != held || !data->refresh() || data->ownerLost || data->mutationFault ||
-        heldInput().any ||
-        (data->completionGrant ? !data->completionGrant->verify()
-                               : !data->terminalGrant || !data->terminalGrant->verify()))
+        heldInput().any || !grantLive())
         return refuse();
     const auto clock = compositorClock();
     if (!clock)
@@ -1916,6 +2041,88 @@ readNativeHandoffComparison(const Correlation &terminal)
     if (!finished || !gate.retain(held, *finished))
         return refuse();
     return result;
+}
+} // namespace
+
+std::optional<NativeFirstFrameGate::Receipt>
+readNativeHandoffComparison(const Correlation &terminal)
+{
+    return readHandoffComparison(terminal, false);
+}
+
+std::optional<std::string> readOrdinaryHandoffPresentation()
+{
+    const auto data = mutationFence;
+    if (!data || !data->ordinaryRelease || !data->terminalBound || !data->ordinaryGrant)
+        return {};
+    const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
+    if (!intent)
+        return {};
+    const auto receipt = readHandoffComparison(*data->terminalBound, true);
+    if (!receipt || receipt->postWriteEpoch != data->postWriteEpoch ||
+        receipt->completedCount != data->stableInventory.heads.size() ||
+        !data->ordinaryGrant->live())
+        return {};
+    // Every free-form historical field remains in the complete Root record;
+    // only bounded canonical native identifiers/digests reach this JSON DTO.
+    const auto atom = [](std::string_view value) {
+        return !value.empty() && value.size() <= 256 &&
+               std::all_of(value.begin(), value.end(), [](char c) {
+                   return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ':' || c == '-';
+               });
+    };
+    if (!atom(intent->layout.topology) || !atom(data->bound.transaction) ||
+        !atom(data->terminalBound->transaction) ||
+        !OriginalGrantCodec::digest(data->bound.effectDigest) ||
+        !OriginalGrantCodec::digest(data->terminalBound->effectDigest) ||
+        !OriginalGrantCodec::digest(data->terminalBound->dispatchDigest))
+        return {};
+    std::string proof = "{\"schema\":1";
+    const auto text = [&](std::string_view key, std::string_view value) {
+        proof += ",\"" + std::string(key) + "\":\"" + std::string(value) + "\"";
+    };
+    const auto number = [&](std::string_view key, std::uint64_t value) {
+        text(key, std::to_string(value));
+    };
+    text("topology", intent->layout.topology);
+    text("original_transaction", data->bound.transaction);
+    text("original_effect", data->bound.effectDigest);
+    text("original_dispatch", data->bound.dispatchDigest);
+    text("release_transaction", data->terminalBound->transaction);
+    text("release_effect", data->terminalBound->effectDigest);
+    text("release_dispatch", data->terminalBound->dispatchDigest);
+    text("preparation_digest", data->ordinaryGrant->comparisonDigest());
+    text("terminal_record", intent->terminal);
+    text("checkpoint", intent->checkpoint);
+    text("signed_binding", intent->signedBinding);
+    text("source_guard", intent->source);
+    text("outcome", intent->outcome == OrdinaryReleaseCodec::Outcome::Keep     ? "keep"
+                    : intent->outcome == OrdinaryReleaseCodec::Outcome::Revert ? "revert"
+                                                                               : "expired");
+    number("sampled_unix_ms", receipt->observedUnixMs);
+    number("sampled_boot_ms", receipt->observedBootMs);
+    number("deadline_unix_ms", receipt->deadlineUnixMs);
+    number("deadline_boot_ms", receipt->deadlineBootMs);
+    number("post_write_epoch", receipt->postWriteEpoch);
+    number("security_epoch", receipt->securityEpoch);
+    proof += ",\"heads\":[";
+    for (std::size_t i = 0; i < receipt->completedCount; ++i) {
+        if (i)
+            proof += ',';
+        const auto &row = receipt->completed[i];
+        const auto &kernel = row.kernel;
+        proof += "{\"handle\":\"" + std::to_string(kernel.key.handle) + "\",\"generation\":\"" +
+                 std::to_string(kernel.key.generation) +
+                 "\",\"enabled\":" + (kernel.active ? "true" : "false") +
+                 ",\"connector\":" + std::to_string(kernel.connector) +
+                 ",\"crtc\":" + std::to_string(kernel.crtc) +
+                 ",\"plane\":" + std::to_string(kernel.plane) +
+                 ",\"framebuffer\":" + std::to_string(kernel.framebuffer) +
+                 ",\"spend_high_water\":\"" + std::to_string(row.spendHighWater) +
+                 "\",\"completed_commit\":\"" + std::to_string(row.completedCommit) + "\"}";
+    }
+    proof += "]}";
+    return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;
 }
 
 namespace {
@@ -2163,6 +2370,58 @@ NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Sn
         return std::nullopt;
     return result;
 }
+NativeProtectedBaseline readOrdinaryProtectedBaseline(const Correlation &bound,
+                                                      const Snapshot &expected)
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    if (!data || !backend || !data->mutation || !data->ordinaryRelease ||
+        data->originalRestoration || data->currentMode || data->closed || data->writing ||
+        data->ownerLost || data->mutationFault || data->bound != bound || !data->terminalActive ||
+        !data->terminalConsumed || !data->ordinaryGrant || !data->postWriteEpoch ||
+        heldInput().any || expected.heads.empty() ||
+        expected.heads.size() > DisplayTransaction::MaxHeads ||
+        expected.heads.size() != data->surfaces.size() || expected != data->stableInventory ||
+        !data->refresh())
+        return {};
+    const auto first = backend->snapshot();
+    const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
+    const auto phase = nativeTransactions() ? nativeTransactions()->status(bound) : std::nullopt;
+    const auto wanted = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                            ? CompositorDisplayService::Phase::Confirmed
+                            : CompositorDisplayService::Phase::Restored;
+    if (!first || *first != expected || !intent || phase != std::optional{wanted} ||
+        !OrdinaryReleaseCodec::matchesHeld(*intent, bound, data->baseline, data->desired, expected))
+        return {};
+    NativeProtectedFrameBaseline result;
+    result.postWriteEpoch = data->postWriteEpoch;
+    result.before.reserve(expected.heads.size());
+    for (const auto &head : expected.heads) {
+        const auto surface = data->surfaces.find(head.key);
+        if (surface == data->surfaces.end() || surface->second.output != head.key ||
+            surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return {};
+        const auto &held = surface->second;
+        const auto high = held.frame.highWater();
+        if (!high || *high == std::numeric_limits<std::uint64_t>::max() ||
+            held.disableCommit == std::numeric_limits<std::uint64_t>::max())
+            return {};
+        if (head.current.enabled) {
+            if (!held.submittedBuffer || held.frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+                held.frame.completedBuffer() != held.submittedBuffer->buffer.get() ||
+                held.frame.completedCommit() != *high || !*high)
+                return {};
+        } else if (!held.disableSubmitted)
+            return {};
+        result.before.push_back({head.key, std::max(*high, held.disableCommit)});
+    }
+    const auto after = backend->snapshot();
+    if (!after || *after != expected || !data->refresh() || data->ownerLost ||
+        data->mutationFault || heldInput().any || result.postWriteEpoch != data->postWriteEpoch)
+        return {};
+    return result;
+}
+
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
 {
     if (startupBlocksProtectedScene())

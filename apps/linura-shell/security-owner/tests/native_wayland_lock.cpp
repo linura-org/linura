@@ -1021,6 +1021,14 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             return {}; // A simulated scene cannot restore native original state.
         }
+        bool beginOrdinaryRelease(const ProtectedInteraction::Scope &, const std::string &) override
+        {
+            return false;
+        }
+        bool spendOrdinaryRelease(OwnedNativeFd, const Correlation &) override
+        {
+            return false;
+        }
         bool beginFinalization(const ProtectedInteraction::Scope &, const std::string &) override
         {
             return false; // No original Root witness in this transport fixture.

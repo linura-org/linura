@@ -98,6 +98,14 @@ class Scene final : public ProtectedScene
     {
         return {};
     } // No original Root lifetime or successor grant in this fixture.
+    bool beginOrdinaryRelease(const ProtectedInteraction::Scope &, const std::string &) override
+    {
+        return false;
+    }
+    bool spendOrdinaryRelease(OwnedNativeFd, const Correlation &) override
+    {
+        return false;
+    }
     bool beginFinalization(const ProtectedInteraction::Scope &next,
                            const std::string &material) override
     {

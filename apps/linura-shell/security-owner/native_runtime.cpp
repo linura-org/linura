@@ -14,6 +14,7 @@
 #include "native_display_watchdog.h"
 #include "native_display_flow.h"
 #include "native_display_finalization.h"
+#include "native_display_ordinary_release.h"
 #include "peer_guard.h"
 #include "session_bootstrap.h"
 
@@ -691,10 +692,12 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
     if (!peer ||
         (scope.purpose != ApprovalPurpose::ApplyDisplay &&
          scope.purpose != ApprovalPurpose::RestoreOriginalDisplay &&
-         scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay) ||
+         scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
+         scope.purpose != ApprovalPurpose::ReleaseOrdinaryDisplay) ||
         !scope.valid() || scope.lock != identity() || impl_->approvalScope ||
         impl_->displayRetiring ||
-        (scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay && impl_->display &&
+        (scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
+         scope.purpose != ApprovalPurpose::ReleaseOrdinaryDisplay && impl_->display &&
          impl_->display->fenced()) ||
         impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
         impl_->transitionRequest)
@@ -712,6 +715,9 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
     if (scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay)
         return impl_->display && impl_->display->fenced() &&
                impl_->display->beginFinalization(scope, *peer);
+    if (scope.purpose == ApprovalPurpose::ReleaseOrdinaryDisplay)
+        return impl_->display && impl_->display->fenced() &&
+               impl_->display->beginOrdinaryRelease(scope, *peer);
     // An earlier display conversation can be canceled or lose its native owner
     // while the compositor still holds a pending/recovery-failed mutation. Do
     // not present another protected approval over that unresolved native fence.
@@ -1022,6 +1028,10 @@ std::optional<QString> NativeRuntime::observeNativeDisplayHandoff(const QDBusMes
 {
     return observeDisplayPresentation(received, DisplayPresentation::First);
 }
+std::optional<QString> NativeRuntime::observeOrdinaryDisplayHandoff(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::Ordinary);
+}
 
 std::optional<QString> NativeRuntime::observeNativeDisplayCurrent(const QDBusMessage &received)
 {
@@ -1043,15 +1053,19 @@ std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMess
     const auto &presentation =
         kind == DisplayPresentation::Restoration ? sample->originalRestorationPresentation
         : kind == DisplayPresentation::First     ? sample->nativeHandoffPresentation
+        : kind == DisplayPresentation::Ordinary  ? sample->ordinaryHandoffPresentation
                                                  : sample->nativeCurrentPresentation;
     const auto expectedPhase = kind == DisplayPresentation::Current ? 4U : 2U;
     const auto presentationCount =
         static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
         static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
-        static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty());
+        static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->ordinaryHandoffPresentation.isEmpty());
     const bool expectedStartup =
-        sample->startupPhase == expectedPhase ||
-        (kind == DisplayPresentation::Current && sample->startupPhase == 5);
+        kind == DisplayPresentation::Ordinary
+            ? (sample->startupPhase == 1 || sample->startupPhase == 4)
+            : (sample->startupPhase == expectedPhase ||
+               (kind == DisplayPresentation::Current && sample->startupPhase == 5));
     if (!independent || !sample->fenced || !expectedStartup || presentation.isEmpty() ||
         presentation.size() > 16 * 1024 || presentationCount != 1 ||
         sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
@@ -1253,6 +1267,32 @@ std::optional<quint32> NativeRuntime::quiesceOriginalDisplayFinalization(
     // No ordinary Apply/Recovery/Keep/unlock receipt can enter this path.
     return impl_->backend->quiesceOriginalDisplayFinalization(intent, correlation, sampledBootMs,
                                                               terminalGrant);
+}
+
+bool NativeRuntime::spendOrdinaryDisplayRelease(const QDBusMessage &received,
+                                                const NativeDisplayOrdinaryReleaseIntent &intent,
+                                                const NativeDisplayCorrelation &bound,
+                                                const QString &sampleDigest, quint64 sampledBootMs,
+                                                int grant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || grant < 0 || intent.currentLock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest || !NativeDisplayOrdinaryReleaseIntent::parse(intent.encode()) ||
+        !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs))
+        return false;
+    const auto sample = displaySample(received, NativePeerPurpose::ControlApproval);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return false;
+    const auto after = NativeDisplayClock::sample();
+    if (!after || !bound.dispatchWindow(sampledBootMs, after->bootMs, after->unixMs) ||
+        !impl_->display || !impl_->backend || !impl_->display->redeemOrdinaryRelease(intent, bound))
+        return false;
+    return impl_->backend->spendOrdinaryDisplayRelease(intent, bound, sampledBootMs, grant);
 }
 
 std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(

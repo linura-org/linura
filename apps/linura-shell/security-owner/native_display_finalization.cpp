@@ -1,4 +1,5 @@
 #include "native_display_finalization.h"
+#include "native_display_ordinary_release.h"
 
 #include <algorithm>
 #include <array>
@@ -123,6 +124,108 @@ bool NativeDisplayFinalizationIntent::matchesRestored(const NativeDisplaySnapsho
            desired.topology == exactTopology && postWriteEpoch == currentPostWriteEpoch &&
            desired.matchesGeometry(snapshot) &&
            snapshot.baselineGuard(desired.encode()) == std::optional(restoredSourceGuard);
+}
+
+std::optional<NativeDisplayOrdinaryReleaseIntent>
+NativeDisplayOrdinaryReleaseIntent::parse(const QString &text)
+{
+    if (text.isEmpty() || text.size() > MaxBytes ||
+        std::any_of(text.begin(), text.end(),
+                    [](QChar c) { return c.category() == QChar::Other_Control; }))
+        return {};
+    const auto bytes = text.toUtf8();
+    if (bytes.size() > MaxBytes || !bytes.startsWith("LNOR:1;"))
+        return {};
+    QByteArrayView rest(bytes);
+    rest = rest.sliced(7);
+    constexpr std::array<qsizetype, 11> bounds{256, 64, 64, 64, 64, 20, 20, 64, 7, 256, 4096};
+    std::array<QString, 11> fields{};
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const auto part = field(rest, bounds[i]);
+        if (!part)
+            return {};
+        fields[i] = *part;
+    }
+    const auto generation = number(fields[5].toUtf8()), version = number(fields[6].toUtf8());
+    const auto lock = NativeLockIdentity::parse(fields[9]);
+    const auto original = NativeDisplayIntent::parse(fields[10]);
+    const auto outcome = fields[8] == QLatin1String("keep")      ? std::optional{Outcome::Keep}
+                         : fields[8] == QLatin1String("revert")  ? std::optional{Outcome::Revert}
+                         : fields[8] == QLatin1String("expired") ? std::optional{Outcome::Expired}
+                                                                 : std::nullopt;
+    if (!rest.empty() || fields[0].isEmpty() || !generation || !version || !*version || !lock ||
+        !original || !outcome || !sameLogin(*lock, original->lock) || !digest(fields[7]) ||
+        !std::all_of(fields.begin() + 1, fields.begin() + 5, digest))
+        return {};
+    NativeDisplayOrdinaryReleaseIntent result{fields[0], fields[1], fields[2],   fields[3],
+                                              fields[4], fields[7], *generation, *version,
+                                              *outcome,  *lock,     *original};
+    return result.encode() == text ? std::optional{std::move(result)} : std::nullopt;
+}
+
+QString NativeDisplayOrdinaryReleaseIntent::encode() const
+{
+    if (originalRequest.isEmpty() || originalRequest.size() > 256 ||
+        currentLock.resource.size() > 256 || !bounded(original) || !stateVersion ||
+        !digest(originalDispatch) || !digest(terminalRecord) || !digest(originalCheckpoint) ||
+        !digest(signedBinding) || !digest(sourceGuard))
+        return {};
+    const auto requestBytes = originalRequest.toUtf8();
+    if (requestBytes.size() > 256 || QString::fromUtf8(requestBytes) != originalRequest ||
+        std::any_of(originalRequest.begin(), originalRequest.end(),
+                    [](QChar c) { return c.category() == QChar::Other_Control; }))
+        return {};
+    const auto lock = NativeLockIdentity::parse(currentLock.resource);
+    if (!lock || *lock != currentLock || !sameLogin(*lock, original.lock))
+        return {};
+    QString disposition;
+    switch (outcome) {
+    case Outcome::Keep:
+        disposition = QStringLiteral("keep");
+        break;
+    case Outcome::Revert:
+        disposition = QStringLiteral("revert");
+        break;
+    case Outcome::Expired:
+        disposition = QStringLiteral("expired");
+        break;
+    default:
+        return {};
+    }
+    const auto nested = original.encode();
+    if (nested.isEmpty() || nested.toUtf8().size() > 4096)
+        return {};
+    QString text = QStringLiteral("LNOR:1;");
+    for (const auto &value :
+         {originalRequest, originalDispatch, terminalRecord, originalCheckpoint, signedBinding,
+          QString::number(generation), QString::number(stateVersion), sourceGuard, disposition,
+          currentLock.resource, nested})
+        text +=
+            QString::number(value.toUtf8().size()) + QLatin1Char(':') + value + QLatin1Char(';');
+    return text.toUtf8().size() <= MaxBytes ? text : QString{};
+}
+
+NativeDisplayIntent NativeDisplayOrdinaryReleaseIntent::presentation() const
+{
+    if (!bounded(original) || currentLock.resource.size() > 256)
+        return {};
+    const auto lock = NativeLockIdentity::parse(currentLock.resource);
+    if (!lock || *lock != currentLock)
+        return {};
+    const auto &target = outcome == Outcome::Keep ? original.desired : original.baseline;
+    return {currentLock, target, target};
+}
+
+bool NativeDisplayOrdinaryReleaseIntent::matchesCurrent(const NativeDisplaySnapshot &snapshot,
+                                                        const QString &exactTopology,
+                                                        const NativeLockIdentity &exactLock) const
+{
+    if (!parse(encode()))
+        return false;
+    const auto intent = presentation();
+    return currentLock == exactLock && intent.nativeOptions(snapshot, exactTopology, exactLock) &&
+           intent.desired.matchesGeometry(snapshot) &&
+           snapshot.baselineGuard(intent.desired.encode()) == std::optional{sourceGuard};
 }
 
 } // namespace Linura::SecurityOwner

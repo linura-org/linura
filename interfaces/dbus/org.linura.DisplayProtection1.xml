@@ -31,6 +31,18 @@
       <arg name="preparation" type="ay" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
+    <method name="ReserveOrdinaryReleaseGrant">
+      <!-- The original admitted Control alone may transfer one Root channel.
+           Its credentialed native spend records LNOS before ACK, not release. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryRelease">
+      <!-- Read-only actual Root invocation/witness facts, never authority. -->
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="spent" type="b" direction="out"/>
+    </method>
     <method name="ReadOriginal">
       <!-- Supervised Control only; exact historical bytes plus live retained
            witness checks. No credential, restoration grant or output write. -->

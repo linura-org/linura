@@ -188,6 +188,7 @@ class NamespaceContractTests(unittest.TestCase):
                 "FinalizeOriginal",
                 "org.linura.authority.finalize-original-display-restoration",
             ),
+            ("ReleaseOrdinary", "org.linura.authority.release-ordinary-display"),
         ):
             with (
                 self.subTest(purpose=purpose),

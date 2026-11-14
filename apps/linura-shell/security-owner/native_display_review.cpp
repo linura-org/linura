@@ -1,5 +1,6 @@
 #include "native_display_review.h"
 #include "native_display_restoration.h"
+#include "native_display_ordinary_release.h"
 
 #include <QTextBoundaryFinder>
 #include <algorithm>
@@ -57,14 +58,21 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
                        n == '-' || n == '_' || n == '.';
             }))
             return std::nullopt;
-    const bool terminal = scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay;
+    const bool ordinary = scope.purpose == ApprovalPurpose::ReleaseOrdinaryDisplay;
+    const bool terminal = scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay || ordinary;
     const bool recovery = scope.purpose == ApprovalPurpose::RestoreOriginalDisplay;
+    if (ordinary) {
+        const auto release = NativeDisplayOrdinaryReleaseIntent::parse(scope.display->material);
+        if (!release || !release->matchesCurrent(snapshot, intent->baseline.topology, scope.lock))
+            return {};
+    }
     if (recovery) {
         const auto material = NativeDisplayRestorationIntent::parse(scope.display->material);
         if (!material || !material->nativeOptions(snapshot, intent->baseline.topology, scope.lock))
             return std::nullopt;
     }
-    const auto purpose = terminal   ? QStringLiteral("Finish recovery")
+    const auto purpose = ordinary   ? QStringLiteral("Finish display change")
+                         : terminal ? QStringLiteral("Finish recovery")
                          : recovery ? QStringLiteral("Restore original")
                          : scope.purpose == ApprovalPurpose::ApplyDisplay ? QStringLiteral("Apply")
                          : scope.purpose == ApprovalPurpose::KeepDisplay  ? QStringLiteral("Keep")
@@ -91,12 +99,21 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
             .arg(purpose)
             .arg(scope.lock.uid);
     std::vector<NativeDisplayReviewPage> pages;
-    pages.push_back({terminal ? QStringLiteral("Finish display recovery?")
-                              : purpose + QStringLiteral(" display layout?"),
+    pages.push_back({ordinary   ? QStringLiteral("Finish this display change?")
+                     : terminal ? QStringLiteral("Finish display recovery?")
+                                : purpose + QStringLiteral(" display layout?"),
                      introduction});
     if (terminal && !intent->desired.matchesGeometry(snapshot))
         return std::nullopt;
-    if (terminal)
+    if (ordinary)
+        pages.push_back({QStringLiteral("Return to normal display use"),
+                         QStringLiteral("Finish the verified display change using the settings "
+                                        "shown here. This cannot change monitor settings, unlock "
+                                        "the session or authorize a power action. Protection "
+                                        "stays active until the final independent checks finish. "
+                                        "When the desktop returns, press Escape and release all "
+                                        "keys and pointer buttons to resume input.")});
+    if (terminal && !ordinary)
         pages.push_back({QStringLiteral("Finish the verified display recovery"),
                          QStringLiteral("The original display settings have been restored and "
                                         "independently checked. Fresh administrator authentication "
@@ -143,15 +160,21 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
                  .arg(head->name)
                  .arg(i + 1)
                  .arg(intent->baseline.outputs.size()),
-             terminal ? QStringLiteral("Restored settings: %1").arg(desired)
-                      : QStringLiteral("Previous: %1\nRequested: %2").arg(previous, desired)});
+             ordinary   ? QStringLiteral("Current settings: %1").arg(desired)
+             : terminal ? QStringLiteral("Restored settings: %1").arg(desired)
+                        : QStringLiteral("Previous: %1\nRequested: %2").arg(previous, desired)});
     }
     pages.push_back(
-        {terminal ? QStringLiteral("Finish this verified recovery?")
-                  : purpose + QStringLiteral(" this exact layout?"),
-         terminal   ? QStringLiteral("Finish only this verified recovery. Existing session-lock "
-                                       "protection stays active. Ordinary content returns only "
-                                       "after the final independent checks complete.")
+        {ordinary   ? QStringLiteral("Finish this verified display change?")
+         : terminal ? QStringLiteral("Finish this verified recovery?")
+                    : purpose + QStringLiteral(" this exact layout?"),
+         ordinary
+             ? QStringLiteral("Finish only this verified display change. Existing session-lock "
+                              "protection stays active. Normal display use resumes after "
+                              "the final independent checks complete.")
+         : terminal ? QStringLiteral("Finish only this verified recovery. Existing session-lock "
+                                     "protection stays active. Ordinary content returns only "
+                                     "after the final independent checks complete.")
          : recovery ? QStringLiteral("Restore only the original display settings. This "
                                      "approval cannot apply a different layout, unlock the "
                                      "session or authorize a power transition.")

@@ -137,6 +137,9 @@
     <!-- Read-only; supervised Control only. Complete canonical intent and
          immutable native correlation scope this get_status probe. Phases are
          native facts, never verified layout, approval or replay permission. -->
+    <method name="ObserveOrdinaryDisplayHandoff">
+      <arg name="facts" type="s" direction="out"/>
+    </method>
     <method name="ObserveDisplayAttempt">
       <arg name="query" type="(sssst)" direction="in"/>
       <arg name="observation" type="(sssttub)" direction="out"/>
@@ -182,6 +185,15 @@
     <!-- One-use original Root native release-spend attempt from authenticated
          Control, with immutable terminal/Root ancestry. Wire phase 6 proves
          only the before-effect spend, never physical release or unlock. -->
+    <method name="SpendOrdinaryDisplayRelease">
+      <!-- Exact consumed purpose-13 review plus one actual original Root grant.
+           Accepted does not prove physical frames or retire input/power. -->
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="sample_digest" type="s" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="SpendOriginalDisplayNativeRelease">
       <arg name="query" type="(sssst)" direction="in"/>
       <arg name="sample_digest" type="s" direction="in"/>

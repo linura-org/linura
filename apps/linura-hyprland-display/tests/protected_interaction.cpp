@@ -108,7 +108,8 @@ void originalBootBoundCannotBeRenewedFromWallTime()
 {
     for (const auto purpose :
          {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Recovery,
-          ProtectedInteraction::Purpose::Finalization}) {
+          ProtectedInteraction::Purpose::Finalization,
+          ProtectedInteraction::Purpose::OrdinaryRelease}) {
         auto original = scope(purpose);
         original.deadlineBootMs = 1200; // Wall time has much more remaining budget.
         auto value = ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6);
@@ -135,7 +136,8 @@ void purposeAndProofCannotBeSubstitutedOrReused()
     for (const auto purpose :
          {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Keep,
           ProtectedInteraction::Purpose::Revert, ProtectedInteraction::Purpose::Recovery,
-          ProtectedInteraction::Purpose::Finalization}) {
+          ProtectedInteraction::Purpose::Finalization,
+          ProtectedInteraction::Purpose::OrdinaryRelease}) {
         auto expected = scope(purpose);
         auto value = ProtectedInteraction::start(expected, inventory(), {10'000, 1000}, 6);
         assert(value);
@@ -150,11 +152,13 @@ void purposeAndProofCannotBeSubstitutedOrReused()
     for (const auto original :
          {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Keep,
           ProtectedInteraction::Purpose::Revert, ProtectedInteraction::Purpose::Recovery,
-          ProtectedInteraction::Purpose::Finalization}) {
+          ProtectedInteraction::Purpose::Finalization,
+          ProtectedInteraction::Purpose::OrdinaryRelease}) {
         for (const auto other :
              {ProtectedInteraction::Purpose::Apply, ProtectedInteraction::Purpose::Keep,
               ProtectedInteraction::Purpose::Revert, ProtectedInteraction::Purpose::Recovery,
-              ProtectedInteraction::Purpose::Finalization}) {
+              ProtectedInteraction::Purpose::Finalization,
+              ProtectedInteraction::Purpose::OrdinaryRelease}) {
             if (original == other)
                 continue;
             auto expected = scope(original);

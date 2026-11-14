@@ -2316,6 +2316,115 @@ fn orphan_or_corrupt_ordinary_release_quarantines_other_reservations_without_cle
     }
 }
 
+#[test]
+fn ordinary_native_spend_requires_exact_preparation_and_survives_missing_ack_without_replay() {
+    let fixture = Fixture::new();
+    let (payload, record) = ordinary_release_fixture(7);
+    let original = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let scope = record
+        .decoded_material()
+        .and_then(|m| m.release_scope().map_err(|e| e.to_string()))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let publish = |record: &NativeDisplayOrdinaryReleasePreparation, kind| {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &record.binding().dispatch_digest,
+            &record.canonical_bytes(),
+            kind,
+        )
+    };
+    assert!(publish(&record, Kind::OrdinaryReleaseSpent).is_err());
+    reserve_at(&fixture.fd, fixture.uid, &original, &payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(&record, Kind::OrdinaryReleaseSpent).is_err());
+    publish(&record, Kind::OrdinaryReleasePrepared).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(
+        !read_ordinary_release_state_at(&fixture.fd, fixture.uid, &scope)
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .unwrap_or_else(|| unreachable!())
+            .1
+    );
+    let (_, foreign) = ordinary_release_fixture(8);
+    assert!(publish(&foreign, Kind::OrdinaryReleaseSpent).is_err());
+    publish(&record, Kind::OrdinaryReleaseSpent).unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish(&record, Kind::OrdinaryReleaseSpent).is_err());
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let (retained, spent) = read_ordinary_release_state_at(&reopened, fixture.uid, &scope)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .unwrap_or_else(|| unreachable!());
+    assert!(spent);
+    assert_eq!(retained.canonical_bytes(), record.canonical_bytes());
+    assert!(publish(&foreign, Kind::OrdinaryReleasePrepared).is_err());
+    assert_eq!(startup_clear_at(&reopened, fixture.uid), Ok(false));
+}
+
+#[test]
+fn ordinary_spent_orphan_substitution_and_damage_quarantine_the_entire_history() {
+    for fault in 0..4 {
+        let fixture = Fixture::new();
+        let (payload, record) = ordinary_release_fixture(7);
+        let original = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let scope = record
+            .decoded_material()
+            .and_then(|m| m.release_scope().map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        reserve_at(&fixture.fd, fixture.uid, &original, &payload)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        for kind in [Kind::OrdinaryReleasePrepared, Kind::OrdinaryReleaseSpent] {
+            reserve_kind_at(
+                &fixture.fd,
+                fixture.uid,
+                &record.binding().dispatch_digest,
+                &record.canonical_bytes(),
+                kind,
+            )
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        }
+        let prepared = fixture
+            .path
+            .join(Kind::OrdinaryReleasePrepared.name(&record.binding().dispatch_digest));
+        let spent = fixture
+            .path
+            .join(Kind::OrdinaryReleaseSpent.name(&record.binding().dispatch_digest));
+        match fault {
+            0 => std::fs::remove_file(&prepared).unwrap_or_else(|e| unreachable!("{e}")),
+            1 => std::fs::write(&spent, ORDINARY_RELEASE_SPENT_MAGIC)
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            2 => std::fs::set_permissions(&spent, std::fs::Permissions::from_mode(0o640))
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            _ => {
+                let mut changed = record.window();
+                changed.deadline_unix_ms -= 1;
+                changed.deadline_boot_ms -= 1;
+                let foreign = NativeDisplayOrdinaryReleasePreparation::new(
+                    record.material(),
+                    record.binding(),
+                    changed,
+                )
+                .unwrap_or_else(|e| unreachable!("{e}"));
+                let payload = foreign.canonical_bytes();
+                let mut bytes = ORDINARY_RELEASE_SPENT_MAGIC.to_vec();
+                bytes.extend_from_slice(&Sha256::digest(&payload));
+                bytes.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+                bytes.extend_from_slice(&payload);
+                std::fs::write(&spent, bytes).unwrap_or_else(|e| unreachable!("{e}"));
+            }
+        }
+        assert!(read_ordinary_release_state_at(&fixture.fd, fixture.uid, &scope).is_err());
+        assert!(fixture.reserve(9, b"unrelated comparison").is_err());
+        assert!(spent.exists());
+        assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+    }
+}
+
 // A complete synthetic new checkpoint for the same replacement invocation.
 // These fixtures exercise parsing/storage only and cannot open a native fence.
 fn successor_checkpoint(use_byte: u8) -> Vec<u8> {

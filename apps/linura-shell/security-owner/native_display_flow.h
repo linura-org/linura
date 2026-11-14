@@ -10,6 +10,7 @@
 
 namespace Linura::SecurityOwner {
 struct NativeDisplayFinalizationIntent;
+struct NativeDisplayOrdinaryReleaseIntent;
 class NativeWaylandLock;
 class NativePresentation;
 class AuthenticationAgent;
@@ -44,6 +45,10 @@ class NativeDisplayFlow final : public QObject
     [[nodiscard]] bool redeemOriginal(const NativeDisplayRestorationIntent &,
                                       const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginFinalization(const NativeApprovalScope &, const NativePeerIdentity &);
+    [[nodiscard]] bool beginOrdinaryRelease(const NativeApprovalScope &,
+                                            const NativePeerIdentity &);
+    [[nodiscard]] bool redeemOrdinaryRelease(const NativeDisplayOrdinaryReleaseIntent &,
+                                             const NativeDisplayCorrelation &);
     [[nodiscard]] bool redeemFinalization(const NativeDisplayFinalizationIntent &,
                                           const NativeDisplayCorrelation &);
     [[nodiscard]] bool continuesFinalization(const NativeDisplayFinalizationIntent &,

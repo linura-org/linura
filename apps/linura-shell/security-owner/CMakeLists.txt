@@ -27,6 +27,7 @@ add_library(linura-security-owner-foundation STATIC
     native_display_guard.cpp
     native_display_restoration.cpp native_display_restoration.h
     native_display_finalization.cpp native_display_finalization.h
+    native_display_ordinary_release.h
     native_display_prompt.cpp native_display_prompt.h
     native_display_review.cpp native_display_review.h
     native_display_attempt.cpp native_display_attempt.h

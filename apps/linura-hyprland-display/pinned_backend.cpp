@@ -15,6 +15,7 @@
 #include "original_finalization_grant.h"
 #include "original_native_release_grant.h"
 #include "original_completion_grant.h"
+#include "ordinary_release_grant.h"
 #include "native_baseline_guard.h"
 #include "native_kernel_scanout.h"
 #include "protected_wire.h"
@@ -1047,19 +1048,33 @@ std::optional<std::uint32_t> nativeHandoffFramebuffer(OutputKey key,
 }
 
 namespace {
-enum class FrameScope { First, Current };
+enum class FrameScope { First, Current, OrdinaryFirst };
 bool frameScopeLive(FrameScope scope)
 {
+    if (scope == FrameScope::OrdinaryFirst)
+        return startupFence.ordinaryAllowed() && nativePowerFenceHeld();
     return scope == FrameScope::First ? startupFence.recoveryAvailable()
                                       : startupFence.currentAvailable();
+}
+bool frameSourceLive(const Correlation &original, FrameScope scope)
+{
+    if (!backend || backend->writing || backend->commitFailed || !frameScopeLive(scope))
+        return false;
+    if (scope == FrameScope::OrdinaryFirst) {
+        const auto phase = service ? service->status(original) : std::nullopt;
+        return phase && (*phase == CompositorDisplayService::Phase::Confirmed ||
+                         *phase == CompositorDisplayService::Phase::Restored);
+    }
+    return backend->originalRecovery && backend->originalRecovery->grant &&
+           backend->originalRecovery->protection && !backend->originalRecovery->failed &&
+           backend->originalRecovery->bound == original &&
+           backend->originalRecovery->grant->verify() &&
+           backend->originalRecovery->protection->healthy();
 }
 std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
 frameKernel(const Correlation &original, const Snapshot &expected, FrameScope scope)
 {
-    if (!backend || !backend->originalRecovery || backend->writing || backend->commitFailed ||
-        !frameScopeLive(scope) || !backend->originalRecovery->grant ||
-        !backend->originalRecovery->protection || backend->originalRecovery->failed ||
-        backend->originalRecovery->bound != original)
+    if (!frameSourceLive(original, scope))
         return std::nullopt;
     if (expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
         return std::nullopt;
@@ -1081,9 +1096,7 @@ frameKernel(const Correlation &original, const Snapshot &expected, FrameScope sc
         return std::nullopt;
     if (*begin != expected)
         return std::nullopt;
-    if (!backend->originalRecovery->grant->verify())
-        return std::nullopt;
-    if (!backend->originalRecovery->protection->healthy())
+    if (!frameSourceLive(original, scope))
         return std::nullopt;
     if (!budget())
         return std::nullopt;
@@ -1122,9 +1135,7 @@ frameKernel(const Correlation &original, const Snapshot &expected, FrameScope sc
         return std::nullopt;
     if (*after != expected)
         return std::nullopt;
-    if (!backend->originalRecovery->grant->verify())
-        return std::nullopt;
-    if (!backend->originalRecovery->protection->healthy())
+    if (!frameSourceLive(original, scope))
         return std::nullopt;
     if (!budget() || !frameScopeLive(scope))
         return std::nullopt;
@@ -1134,13 +1145,7 @@ frameKernel(const Correlation &original, const Snapshot &expected, FrameScope sc
 NativeOutputCommits frameHighWater(const Correlation &original, const Snapshot &expected,
                                    FrameScope scope)
 {
-    if (!backend || !backend->originalRecovery)
-        return std::nullopt;
-    if (backend->originalRecovery->failed || backend->writing || backend->commitFailed)
-        return std::nullopt;
-    if (backend->originalRecovery->bound != original)
-        return std::nullopt;
-    if (!backend->originalRecovery->grant || !backend->originalRecovery->protection)
+    if (!frameSourceLive(original, scope))
         return std::nullopt;
     if ((scope == FrameScope::First && !backend->powerInhibitor.held()) || !frameScopeLive(scope))
         return std::nullopt;
@@ -1148,9 +1153,7 @@ NativeOutputCommits frameHighWater(const Correlation &original, const Snapshot &
     const auto initial = backend->snapshot();
     if (!began || !initial || *initial != expected)
         return std::nullopt;
-    if (!backend->originalRecovery->grant->verify())
-        return std::nullopt;
-    if (!backend->originalRecovery->protection->healthy())
+    if (!frameSourceLive(original, scope))
         return std::nullopt;
     const auto sample = backend->outputCommitHighWater(expected);
     const auto last = backend->snapshot();
@@ -1172,9 +1175,7 @@ NativeOutputCommits frameHighWater(const Correlation &original, const Snapshot &
         if ((*sample)[i].previousCommit != (*current)[i].previousCommit)
             return std::nullopt;
     }
-    if (!backend->originalRecovery->grant->verify())
-        return std::nullopt;
-    if (!backend->originalRecovery->protection->healthy())
+    if (!frameSourceLive(original, scope))
         return std::nullopt;
     if (!frameScopeLive(scope))
         return std::nullopt;
@@ -1200,6 +1201,47 @@ NativeOutputCommits nativeCurrentOutputHighWater(const Correlation &original,
                                                  const Snapshot &expected)
 {
     return frameHighWater(original, expected, FrameScope::Current);
+}
+
+std::unique_ptr<OrdinaryReleaseGrant> receiveOrdinaryReleaseGrant(OwnedNativeFd descriptor,
+                                                                  const Correlation &release,
+                                                                  std::string_view material)
+{
+    return OrdinaryReleaseGrant::receive(startupFence, std::move(descriptor), release, material);
+}
+NativeOutputCommits nativeOrdinaryOutputHighWater(const Correlation &original,
+                                                  const Snapshot &expected)
+{
+    return frameHighWater(original, expected, FrameScope::OrdinaryFirst);
+}
+std::optional<std::vector<NativeFirstFrameGate::NativeScanout>>
+nativeOrdinaryFrameKernel(const Correlation &original, const Snapshot &expected)
+{
+    return frameKernel(original, expected, FrameScope::OrdinaryFirst);
+}
+NativeFirstFrameArm nativeOrdinaryFirstFrameArm(const Correlation &original,
+                                                const Snapshot &expected)
+{
+    if (!frameSourceLive(original, FrameScope::OrdinaryFirst))
+        return {};
+    const auto armed = backend->clock();
+    const auto protectedSample = readOrdinaryProtectedBaseline(original, expected);
+    const auto kernel = nativeOrdinaryFrameKernel(original, expected);
+    const auto commits = nativeOrdinaryOutputHighWater(original, expected);
+    const auto after = backend->snapshot();
+    const auto ended = backend->clock();
+    if (!armed || !protectedSample || !kernel || !commits || !after || *after != expected ||
+        !ended || ended->unixMs < armed->unixMs || ended->bootMs < armed->bootMs ||
+        ended->unixMs - armed->unixMs >= NativeFirstFrameGate::MaxProofWindowMs ||
+        ended->bootMs - armed->bootMs >= NativeFirstFrameGate::MaxProofWindowMs ||
+        commits->size() != protectedSample->before.size())
+        return {};
+    for (std::size_t i = 0; i < commits->size(); ++i)
+        if ((*commits)[i].key != protectedSample->before[i].key ||
+            (*commits)[i].previousCommit < protectedSample->before[i].previousCommit)
+            return {};
+    return NativeFirstFrameGate::arm(
+        {expected, protectedSample->postWriteEpoch, *armed, *commits, *kernel});
 }
 
 NativeFirstFrameArm nativeFirstFrameArm(const Correlation &original, const Snapshot &expected)
@@ -1283,8 +1325,8 @@ void initialize(wl_display &display, wl_event_loop &loop)
             }},
         NativeOriginalRestorationPort{restoreOriginalNative, originalNativeStatus,
                                       [] { return backend->originalPresentation(); },
-                                      readNativeHandoffPresentation,
-                                      readNativeCurrentPresentation});
+                                      readNativeHandoffPresentation, readNativeCurrentPresentation,
+                                      readOrdinaryHandoffPresentation});
     initializeProtectedDisplay(display);
 }
 void shutdown()

@@ -114,6 +114,7 @@ struct Admission {
     // missing files. Neither disk loss nor restart reconstructs this lifetime.
     finalizations: BTreeMap<String, FinalizationReservation>,
     ordinary_releases: BTreeMap<String, (ComponentDigest, String)>,
+    ordinary_grants: BTreeMap<String, Arc<super::display_native_release_grant::ChannelState>>,
     // Reserve in memory before any synced preparation write; even disk errors
     // cannot make this original live Control attempt look unused.
     retirements: BTreeMap<String, ComponentDigest>,
@@ -468,6 +469,16 @@ trait ProtectionPort: Clone + Send + Sync + 'static {
         sender: &str,
         record: NativeDisplayOrdinaryReleasePreparation,
     ) -> zbus::fdo::Result<bool>;
+    fn reserve_ordinary_release_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryReleasePreparation,
+    ) -> zbus::fdo::Result<OwnedFd>;
+    fn read_ordinary_release(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)>;
     fn read_original(
         &self,
         sender: &str,
@@ -809,6 +820,20 @@ impl ProtectionPort for NativeProtection {
         record: NativeDisplayOrdinaryReleasePreparation,
     ) -> zbus::fdo::Result<bool> {
         self.reserve_ordinary_release_mechanism(sender, record)
+    }
+    fn reserve_ordinary_release_grant(
+        &self,
+        sender: &str,
+        record: NativeDisplayOrdinaryReleasePreparation,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        self.reserve_ordinary_release_grant_mechanism(sender, record)
+    }
+    fn read_ordinary_release(
+        &self,
+        sender: &str,
+        scope: linura_core::DisplayOrdinaryReleaseScope,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+        self.read_ordinary_release_mechanism(sender, scope)
     }
     fn reserve_final_retirement(
         &self,
@@ -2239,6 +2264,45 @@ impl<P: ProtectionPort> ProtectionService<P> {
         })
         .await
     }
+    #[zbus(out_args("grant"))]
+    async fn reserve_ordinary_release_grant(
+        &self,
+        preparation: &[u8],
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<OwnedFd> {
+        let sender = sender(&header)?;
+        let record = NativeDisplayOrdinaryReleasePreparation::decode(preparation)
+            .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.restoration_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.reserve_ordinary_release_grant(&sender, record)
+        })
+        .await
+    }
+    #[zbus(out_args("preparation", "spent"))]
+    async fn read_ordinary_release(
+        &self,
+        ordinary_scope: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+        let sender = sender(&header)?;
+        if ordinary_scope.len() > 256 {
+            return Err(unavailable());
+        }
+        let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(
+            &linura_core::ResourceId::new(ordinary_scope).map_err(|_| unavailable())?,
+        )
+        .map_err(|_| unavailable())?;
+        let slot = StartupSlot::enter(&self.original_pending)?;
+        let service = self.clone();
+        blocking::unblock(move || {
+            let _slot = slot;
+            service.port.read_ordinary_release(&sender, scope)
+        })
+        .await
+    }
     #[zbus(out_args("accepted"))]
     async fn prepare_retirement(
         &self,
@@ -2647,6 +2711,20 @@ mod tests {
         ) -> zbus::fdo::Result<bool> {
             Err(unavailable())
         }
+        fn reserve_ordinary_release_grant(
+            &self,
+            _: &str,
+            _: NativeDisplayOrdinaryReleasePreparation,
+        ) -> zbus::fdo::Result<OwnedFd> {
+            Err(unavailable())
+        }
+        fn read_ordinary_release(
+            &self,
+            _: &str,
+            _: linura_core::DisplayOrdinaryReleaseScope,
+        ) -> zbus::fdo::Result<(Vec<u8>, bool)> {
+            Err(unavailable())
+        }
         fn read_original(
             &self,
             _: &str,
@@ -2688,7 +2766,7 @@ mod tests {
         assert!(xml.contains("org.linura.DisplayProtection1"));
         let canonical = include_str!("../../../interfaces/dbus/org.linura.DisplayProtection1.xml");
         for text in [&xml, canonical] {
-            assert_eq!(text.matches("<method ").count(), 26);
+            assert_eq!(text.matches("<method ").count(), 28);
             for marker in [
                 "name=\"request\" type=\"(sussss)\" direction=\"in\"",
                 "name=\"lease\" type=\"h\" direction=\"out\"",
@@ -2720,6 +2798,8 @@ mod tests {
             "Verify",
             "ReadOrdinaryOriginal",
             "ReserveOrdinaryRelease",
+            "ReserveOrdinaryReleaseGrant",
+            "ReadOrdinaryRelease",
             "ReadOriginal",
             "ReadFinalization",
             "ReadCompletion",
@@ -2961,6 +3041,10 @@ mod tests {
             async_io::block_on(service.reserve_ordinary_release(&bytes, anonymous.header())),
             Err(zbus::fdo::Error::AccessDenied(_))
         ));
+        assert!(matches!(
+            async_io::block_on(service.reserve_ordinary_release_grant(&bytes, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
         let message = zbus::Message::method_call(PATH, "ReserveOrdinaryRelease")
             .unwrap_or_else(|e| unreachable!("{e}"))
             .sender(":1.7")
@@ -2977,14 +3061,28 @@ mod tests {
                 async_io::block_on(service.reserve_ordinary_release(&malformed, message.header()))
                     .is_err()
             );
+            assert!(
+                async_io::block_on(
+                    service.reserve_ordinary_release_grant(&malformed, message.header())
+                )
+                .is_err()
+            );
         }
         assert!(
             async_io::block_on(service.reserve_ordinary_release(&bytes, message.header())).is_err()
+        );
+        assert!(
+            async_io::block_on(service.reserve_ordinary_release_grant(&bytes, message.header()))
+                .is_err()
         );
         let slot = StartupSlot::enter(&service.restoration_pending)
             .unwrap_or_else(|e| unreachable!("{e}"));
         assert!(
             async_io::block_on(service.reserve_ordinary_release(&bytes, message.header())).is_err()
+        );
+        assert!(
+            async_io::block_on(service.reserve_ordinary_release_grant(&bytes, message.header()))
+                .is_err()
         );
         drop(slot);
     }
@@ -3004,6 +3102,10 @@ mod tests {
             async_io::block_on(service.read_ordinary_original(&scope, anonymous.header())),
             Err(zbus::fdo::Error::AccessDenied(_))
         ));
+        assert!(matches!(
+            async_io::block_on(service.read_ordinary_release(&scope, anonymous.header())),
+            Err(zbus::fdo::Error::AccessDenied(_))
+        ));
         let message = zbus::Message::method_call(PATH, "ReadOrdinaryOriginal")
             .unwrap_or_else(|e| unreachable!("{e}"))
             .sender(":1.7")
@@ -3019,14 +3121,23 @@ mod tests {
             assert!(
                 async_io::block_on(service.read_ordinary_original(&bad, message.header())).is_err()
             );
+            assert!(
+                async_io::block_on(service.read_ordinary_release(&bad, message.header())).is_err()
+            );
         }
         assert!(
             async_io::block_on(service.read_ordinary_original(&scope, message.header())).is_err()
+        );
+        assert!(
+            async_io::block_on(service.read_ordinary_release(&scope, message.header())).is_err()
         );
         let slot =
             StartupSlot::enter(&service.original_pending).unwrap_or_else(|e| unreachable!("{e}"));
         assert!(
             async_io::block_on(service.read_ordinary_original(&scope, message.header())).is_err()
+        );
+        assert!(
+            async_io::block_on(service.read_ordinary_release(&scope, message.header())).is_err()
         );
         drop(slot);
     }

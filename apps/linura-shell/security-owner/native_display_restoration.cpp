@@ -1,5 +1,6 @@
 #include "native_display_restoration.h"
 #include "native_display_finalization.h"
+#include "native_display_ordinary_release.h"
 
 #include <QStringList>
 #include <algorithm>
@@ -167,6 +168,12 @@ std::optional<NativeDisplayIntent> nativeDisplayApprovalIntent(const NativeAppro
 {
     if (!scope.display || !scope.isDisplay())
         return std::nullopt;
+    if (scope.purpose == ApprovalPurpose::ReleaseOrdinaryDisplay) {
+        const auto release = NativeDisplayOrdinaryReleaseIntent::parse(scope.display->material);
+        return release && release->currentLock == scope.lock
+                   ? std::optional{release->presentation()}
+                   : std::nullopt;
+    }
     if (scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay) {
         const auto terminal = NativeDisplayFinalizationIntent::parse(scope.display->material);
         if (!terminal || terminal->currentLock != scope.lock)

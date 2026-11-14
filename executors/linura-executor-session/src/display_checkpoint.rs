@@ -41,6 +41,8 @@ const ROOT_POWER_PREPARED_MAGIC: &[u8] = b"LNFP:1\n";
 const POWER_PREPARED_MAGIC: &[u8] = b"LNPP:1\n";
 const POWER_SPENT_MAGIC: &[u8] = b"LNPS:1\n";
 const ORDINARY_RELEASE_PREPARED_MAGIC: &[u8] = b"LNOP:1\n";
+// Authenticated native spend only. This is not physical-release evidence.
+const ORDINARY_RELEASE_SPENT_MAGIC: &[u8] = b"LNOS:1\n";
 const SUCCESSOR_PREPARED_MAGIC: &[u8] = b"LNST:1\n";
 const SUCCESSOR_SPENT_MAGIC: &[u8] = b"LNSX:1\n";
 const MAX_PAYLOAD: usize = 384 * 1024;
@@ -51,6 +53,7 @@ const HEADER: usize = MAGIC.len() + 32 + 8;
 enum Kind {
     Original,
     OrdinaryReleasePrepared,
+    OrdinaryReleaseSpent,
     SuccessorPrepared,
     SuccessorSpent,
     Restoration,
@@ -76,6 +79,7 @@ impl Kind {
         match self {
             Self::Original => "attempt-",
             Self::OrdinaryReleasePrepared => "ordinary-release-prepared-",
+            Self::OrdinaryReleaseSpent => "ordinary-release-spent-",
             Self::SuccessorPrepared => "successor-prepared-",
             Self::SuccessorSpent => "successor-spent-",
             Self::Restoration => "restoration-",
@@ -101,6 +105,7 @@ impl Kind {
         match self {
             Self::Original => MAGIC,
             Self::OrdinaryReleasePrepared => ORDINARY_RELEASE_PREPARED_MAGIC,
+            Self::OrdinaryReleaseSpent => ORDINARY_RELEASE_SPENT_MAGIC,
             Self::SuccessorPrepared => SUCCESSOR_PREPARED_MAGIC,
             Self::SuccessorSpent => SUCCESSOR_SPENT_MAGIC,
             Self::Restoration => RESTORATION_MAGIC,
@@ -129,7 +134,7 @@ impl Kind {
                     .binding()
                     .dispatch_digest)
             }
-            Self::OrdinaryReleasePrepared => {
+            Self::OrdinaryReleasePrepared | Self::OrdinaryReleaseSpent => {
                 Ok(NativeDisplayOrdinaryReleasePreparation::decode(payload)?
                     .binding()
                     .dispatch_digest)
@@ -218,6 +223,7 @@ impl Kind {
 struct TerminalLineage {
     originals: BTreeMap<String, Vec<u8>>,
     ordinary_releases: BTreeMap<String, NativeDisplayOrdinaryReleasePreparation>,
+    ordinary_spent: BTreeMap<String, NativeDisplayOrdinaryReleasePreparation>,
     successor_prepared: BTreeMap<String, NativeDisplaySuccessorPreparation>,
     successor_spent: BTreeMap<String, NativeDisplaySuccessorPreparation>,
     restorations: BTreeMap<String, NativeDisplayRestorationReservation>,
@@ -263,14 +269,19 @@ impl TerminalLineage {
                 }
                 Ok(())
             }
-            Kind::OrdinaryReleasePrepared => {
+            Kind::OrdinaryReleasePrepared | Kind::OrdinaryReleaseSpent => {
                 let record = NativeDisplayOrdinaryReleasePreparation::decode(bytes)?;
                 let dispatch = record
                     .decoded_material()?
                     .lineage()
                     .original_dispatch
                     .to_owned();
-                if self.ordinary_releases.insert(dispatch, record).is_some() {
+                let records = if kind == Kind::OrdinaryReleasePrepared {
+                    &mut self.ordinary_releases
+                } else {
+                    &mut self.ordinary_spent
+                };
+                if records.insert(dispatch, record).is_some() {
                     return Err(unavailable());
                 }
                 Ok(())
@@ -456,6 +467,15 @@ impl TerminalLineage {
     }
 
     fn verify(&self) -> Result<(), String> {
+        for (dispatch, spent) in &self.ordinary_spent {
+            let prepared = self
+                .ordinary_releases
+                .get(dispatch)
+                .ok_or_else(unavailable)?;
+            if spent.canonical_bytes() != prepared.canonical_bytes() {
+                return Err(unavailable());
+            }
+        }
         for (dispatch, record) in &self.ordinary_releases {
             record.validate_original(self.originals.get(dispatch).ok_or_else(unavailable)?)?;
             let material = record.decoded_material()?;
@@ -639,6 +659,7 @@ fn named_kind(name: &[u8]) -> Result<(Kind, ComponentDigest), String> {
     for kind in [
         Kind::Original,
         Kind::OrdinaryReleasePrepared,
+        Kind::OrdinaryReleaseSpent,
         Kind::SuccessorPrepared,
         Kind::SuccessorSpent,
         Kind::Restoration,
@@ -1109,16 +1130,49 @@ pub(super) fn read_ordinary_release(
     read_ordinary_release_at(&open()?, 0, record)
 }
 
+pub(super) fn spend_ordinary_release(
+    record: &NativeDisplayOrdinaryReleasePreparation,
+) -> Result<(), String> {
+    reserve_kind_at(
+        &open()?,
+        0,
+        &record.binding().dispatch_digest,
+        &record.canonical_bytes(),
+        Kind::OrdinaryReleaseSpent,
+    )
+}
+
+pub(super) fn read_ordinary_release_state(
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<(NativeDisplayOrdinaryReleasePreparation, bool)>, String> {
+    read_ordinary_release_state_at(&open()?, 0, scope)
+}
+
 fn read_ordinary_release_at(
     fd: &OwnedFd,
     uid: u32,
     record: &NativeDisplayOrdinaryReleasePreparation,
 ) -> Result<Vec<u8>, String> {
+    let scope = record
+        .decoded_material()?
+        .release_scope()
+        .map_err(|_| unavailable())?;
+    let (actual, _) = read_ordinary_release_state_at(fd, uid, &scope)?.ok_or_else(unavailable)?;
+    if actual.canonical_bytes() != record.canonical_bytes() {
+        return Err(unavailable());
+    }
+    Ok(actual.canonical_bytes())
+}
+
+fn read_ordinary_release_state_at(
+    fd: &OwnedFd,
+    uid: u32,
+    scope: &linura_core::DisplayOrdinaryReleaseScope,
+) -> Result<Option<(NativeDisplayOrdinaryReleasePreparation, bool)>, String> {
     directory(fd, uid, false)?;
     fs::flock(fd, FlockOperation::NonBlockingLockShared).map_err(|_| unavailable())?;
     let result = (|| {
         let mut lineage = TerminalLineage::default();
-        let mut found = None;
         let mut count = 0;
         for entry in fs::Dir::read_from(fd).map_err(|_| unavailable())? {
             let entry = entry.map_err(|_| unavailable())?;
@@ -1130,21 +1184,25 @@ fn read_ordinary_release_at(
             if count > MAX_RECORDS {
                 return Err(unavailable());
             }
-            let (kind, dispatch, bytes) = read_named_record(fd, uid, name)?;
+            let (kind, _, bytes) = read_named_record(fd, uid, name)?;
             lineage.observe(kind, &bytes)?;
-            if kind == Kind::OrdinaryReleasePrepared
-                && dispatch == record.binding().dispatch_digest
-                && found.replace(bytes).is_some()
-            {
-                return Err(unavailable());
-            }
         }
         lineage.verify()?;
-        let bytes = found.ok_or_else(unavailable)?;
-        if bytes != record.canonical_bytes() {
+        let Some(record) = lineage.ordinary_releases.remove(scope.original_dispatch()) else {
+            return Ok(None);
+        };
+        if record
+            .decoded_material()?
+            .release_scope()
+            .map_err(|_| unavailable())?
+            != *scope
+        {
             return Err(unavailable());
         }
-        Ok(bytes)
+        let spent = lineage
+            .ordinary_spent
+            .contains_key(scope.original_dispatch());
+        Ok(Some((record, spent)))
     })();
     let unlocked = fs::flock(fd, FlockOperation::Unlock).map_err(|_| unavailable());
     match (result, unlocked) {

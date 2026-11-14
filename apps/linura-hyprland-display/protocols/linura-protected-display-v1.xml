@@ -191,6 +191,33 @@
       <arg name="grant" type="fd"/>
       <arg name="preparation_digest" type="string"/>
     </request>
+    <request name="begin_ordinary_release">
+      <description summary="fresh release review on the exact ordinary terminal scene">
+        Complete sealed LNOR comparison must match the actual Confirmed/Restored
+        native attempt, original source and continuously held protection. This
+        creates a distinct protected purpose; old decisions grant no release.
+      </description>
+      <arg name="scope_digest" type="string"/>
+      <arg name="material" type="fd"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+      <arg name="deadline_boot_hi" type="uint"/>
+      <arg name="deadline_boot_lo" type="uint"/>
+    </request>
+    <request name="spend_ordinary_release">
+      <description summary="consume one actual original Root ordinary-release grant">
+        The same consumed ordinary release scene authenticates LNOG/LNOW and
+        the original producer clocks. LNOS is recorded before ACK. This permits
+        only first ordinary presentation; input, S17, power, startup protection
+        and recovery ancestry remain held for independent completion.
+      </description>
+      <arg name="grant" type="fd"/>
+      <arg name="transaction_id" type="string"/>
+      <arg name="effect_digest" type="string"/>
+      <arg name="dispatch_digest" type="string"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+    </request>
     <event name="status">
       <arg name="compositor_instance" type="string"/>
       <arg name="topology_hi" type="uint"/>

@@ -7,6 +7,7 @@
 #include "original_current_commit.h"
 #include "original_final_retirement.h"
 #include "original_successor_preparation.h"
+#include "ordinary_release_grant.h"
 #include "sealed_native_material.h"
 #include "native_digest.h"
 #include "native_baseline_guard.h"
@@ -29,6 +30,145 @@ std::string framed(const std::vector<std::string> &fields)
         bytes += field;
     }
     return bytes;
+}
+void ordinaryReleaseComparison()
+{
+    // Synthetic mechanism comparison only. These bytes are not a Root grant,
+    // protected approval, physical scanout or release qualification evidence.
+    const std::string topology = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:"
+                                 "seat0:33333333-3333-4333-8333-333333333333:3";
+    const std::string lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:"
+                             "22222222-2222-4222-8222-222222222222:1";
+    const std::string request = "request:v010:display-layout:ordinary-original";
+    const auto baseline = "LNDL:1;" + topology + ";1:2:enabled:1920:1080:60000:1000:0:0:0:-;";
+    const auto desired = "LNDL:1;" + topology + ";1:2:enabled:1920:1080:60000:1000:0:100:0:-;";
+    const auto original = "LNDI:1;" + lock + ';' + baseline + desired;
+    const auto intent = OriginalGrantCodec::intent(original);
+    assert(intent);
+    const auto transaction = OriginalFinalizationCodec::transaction(request, lock);
+    assert(transaction);
+    const Correlation held{*transaction, std::string(64, 'a'), std::string(64, 'b'), 25'000};
+    const Correlation release{"transaction:ordinary-release", std::string(64, 'c'),
+                              std::string(64, 'd'), 20'000};
+    for (const auto &outcome :
+         {std::string("keep"), std::string("revert"), std::string("expired")}) {
+        Snapshot current;
+        current.generation = 3;
+        current.securityEpoch = 1;
+        current.coverage = Coverage::Unlocked;
+        Head head;
+        head.key = {1, 2};
+        head.current = outcome == "keep" ? intent->desired.front() : intent->baseline.front();
+        head.modes.push_back(head.current.mode);
+        head.powered = true;
+        head.baseRuleWitness = "bounded synthetic base rule";
+        head.outputIdentityWitness = "bounded synthetic connector";
+        current.heads.push_back(head);
+        const auto source = nativeBaselineGuard(current, outcome == "keep" ? desired : baseline);
+        assert(source);
+        const std::vector<std::string> fields{request,
+                                              held.dispatchDigest,
+                                              std::string(64, 'e'),
+                                              std::string(64, 'f'),
+                                              std::string(64, '1'),
+                                              "0",
+                                              "9",
+                                              *source,
+                                              outcome,
+                                              lock,
+                                              original};
+        const auto encode = [](const std::vector<std::string> &values) {
+            std::string result = "LNOR:1;";
+            for (const auto &value : values)
+                result += std::to_string(value.size()) + ':' + value + ';';
+            return result;
+        };
+        const auto material = encode(fields);
+        const auto decoded = OrdinaryReleaseCodec::decode(material);
+        assert(decoded && OrdinaryReleaseCodec::matchesHeld(*decoded, held, intent->baseline,
+                                                            intent->desired, current));
+        assert(!OrdinaryReleaseCodec::decode(material + 'x'));
+        assert(
+            !OrdinaryReleaseCodec::decode(std::string(OrdinaryReleaseCodec::MaxMaterial + 1, 'x')));
+        for (const auto &[index, bad] :
+             std::vector<std::pair<std::size_t, std::string>>{{0, ""},
+                                                              {1, std::string(64, '0')},
+                                                              {2, "invalid"},
+                                                              {3, ""},
+                                                              {4, std::string(64, 'G')},
+                                                              {5, "00"},
+                                                              {6, "0"},
+                                                              {6, "09"},
+                                                              {7, "invalid"},
+                                                              {8, "unknown"},
+                                                              {9, "session:lock:foreign"},
+                                                              {10, "LNDI:2;"}}) {
+            auto changed = fields;
+            changed[index] = bad;
+            assert(!OrdinaryReleaseCodec::decode(encode(changed)));
+        }
+        auto altered = current;
+        altered.heads[0].current.x += 1;
+        assert(!OrdinaryReleaseCodec::matchesHeld(*decoded, held, intent->baseline, intent->desired,
+                                                  altered));
+        altered = current;
+        altered.heads[0].baseRuleWitness += 'x';
+        assert(!OrdinaryReleaseCodec::matchesHeld(*decoded, held, intent->baseline, intent->desired,
+                                                  altered));
+        auto wrong = held;
+        wrong.dispatchDigest[0] = 'c';
+        assert(!OrdinaryReleaseCodec::matchesHeld(*decoded, wrong, intent->baseline,
+                                                  intent->desired, current));
+        const std::vector<std::string> preparation{"linura.native-display.ordinary-release.v1",
+                                                   material,
+                                                   release.transaction,
+                                                   "0",
+                                                   "1",
+                                                   std::string(64, '2'),
+                                                   std::string(64, '3'),
+                                                   release.effectDigest,
+                                                   release.dispatchDigest,
+                                                   "1000",
+                                                   "100",
+                                                   "3000",
+                                                   "2100"};
+        const auto bytes = framed(preparation);
+        assert(OrdinaryReleaseCodec::preparation(bytes, material, release, {1001, 101}));
+        for (const auto now : {ClockSample{999, 101}, ClockSample{1001, 99}, ClockSample{3000, 101},
+                               ClockSample{1001, 2100}})
+            assert(!OrdinaryReleaseCodec::preparation(bytes, material, release, now));
+        assert(!OrdinaryReleaseCodec::preparation(bytes + 'x', material, release, {1001, 101}));
+        for (const auto &[index, bad] : std::vector<std::pair<std::size_t, std::string>>{
+                 {0, "linura.native-display.retirement-preparation.v1"},
+                 {1, material + 'x'},
+                 {2, "transaction:foreign"},
+                 {3, "00"},
+                 {4, "0"},
+                 {5, std::string(64, '0')},
+                 {6, "invalid"},
+                 {7, held.effectDigest},
+                 {8, held.dispatchDigest},
+                 {9, "0"},
+                 {10, "0100"},
+                 {11, "3001"},
+                 {12, "2101"}}) {
+            auto changed = preparation;
+            changed[index] = bad;
+            assert(!OrdinaryReleaseCodec::preparation(framed(changed), material, release,
+                                                      {1001, 101}));
+        }
+    }
+    StartupFence ordinary;
+    int lease[2]{}, channel[2]{};
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, lease) == 0);
+    assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, channel) == 0);
+    assert(ordinary.retain(lease[0], true));
+    assert(!ordinary.authenticatesGrantPeer(channel[0]));
+    close(channel[1]);
+    assert(!OrdinaryReleaseGrant::receive(ordinary, OwnedNativeFd{channel[0]}, release, "LNOR:1;"));
+    assert(fcntl(channel[0], F_GETFD) == -1 && errno == EBADF);
+    close(lease[1]);
+    assert(!ordinary.authenticatesOrdinaryGrantPeer(-1));
 }
 void comparisonOnly(const std::string &material)
 {
@@ -781,6 +921,7 @@ int main(int argc, char **argv)
            std::optional<std::string>{
                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"});
     comparisonOnly(material);
+    ordinaryReleaseComparison();
     std::ifstream terminalInput(argv[2]);
     assert(terminalInput.good());
     std::string terminal{std::istreambuf_iterator<char>(terminalInput),

@@ -1,5 +1,368 @@
 //! Real Control/SQLite with simulated native sources; no physical qualification.
 use super::*;
+
+// Explicitly simulated Root/native first-frame sources. They exercise the
+// real Control join and SQLite restart, never physical compositor qualification.
+pub(super) fn observe_handoff(
+    m: &mut Machine,
+    resource: &ResourceId,
+    capability: &CapabilityId,
+) -> Result<ObservationEnvelope, ProviderError> {
+    use linura_observation::{
+        DISPLAY_ORDINARY_HANDOFF_CAPABILITY, DISPLAY_ORDINARY_RELEASE_CAPABILITY, DISPLAY_PROVIDER,
+        DISPLAY_RECOVERY_PROVIDER, DisplayNativeHandoffOutput, DisplayNativeHandoffWindow,
+        DisplayOrdinaryHandoffFacts, DisplayOrdinaryHandoffLineage,
+        DisplayOrdinaryReleaseComparison, DisplayOrdinaryReleaseFacts,
+    };
+    let fail = || ProviderError::Unavailable("simulated ordinary handoff unavailable".into());
+    let record = linura_linux_session::NativeDisplayOrdinaryReleasePreparation::decode(
+        m.ordinary_release_record.as_ref().ok_or_else(fail)?,
+    )
+    .map_err(|_| fail())?;
+    let material = record.decoded_material().map_err(|_| fail())?;
+    let scope = material.release_scope().map_err(|_| fail())?;
+    if scope.resource_id().map_err(|_| fail())? != *resource {
+        return Err(fail());
+    }
+    let wall = now_unix_ms();
+    let sampled_boot_ms =
+        record.window().observed_boot_ms + wall.saturating_sub(record.window().observed_unix_ms);
+    let window = DisplayNativeHandoffWindow {
+        observed_unix_ms: wall,
+        observed_boot_ms: sampled_boot_ms,
+        ..record.window()
+    };
+    m.sequence += 1;
+    let root = capability.as_str() == DISPLAY_ORDINARY_RELEASE_CAPABILITY;
+    if !root && capability.as_str() != DISPLAY_ORDINARY_HANDOFF_CAPABILITY {
+        return Err(fail());
+    }
+    let attributes = if root {
+        value(DisplayOrdinaryReleaseFacts::new(
+            scope.clone(),
+            DisplayOrdinaryReleaseComparison {
+                material: record.material().into(),
+                transaction: record.binding().transaction_id.clone(),
+                effect: record.binding().effect_digest.to_hex(),
+                dispatch: record.binding().dispatch_digest.to_hex(),
+                preparation_digest: record.record_digest().to_hex(),
+                spent: true,
+                producer: record.window(),
+                sampled_boot_ms,
+            },
+        ))
+        .attributes()
+    } else {
+        if m.ordinary_handoff_fault == 1 {
+            return Err(fail());
+        } // Root spend alone is not a frame
+        m.ordinary_handoff_reads += 1;
+        let original = m.binding.as_ref().ok_or_else(fail)?;
+        let layout = if material.outcome() == linura_core::DisplayOrdinaryReleaseOutcome::Keep {
+            layouts().1
+        } else {
+            layouts().0
+        };
+        value(DisplayOrdinaryHandoffFacts::new(
+            scope,
+            DisplayOrdinaryHandoffLineage {
+                original_transaction: original.transaction_id.clone(),
+                original_effect: original.effect_digest.to_hex(),
+                release_transaction: record.binding().transaction_id.clone(),
+                release_effect: record.binding().effect_digest.to_hex(),
+                release_dispatch: record.binding().dispatch_digest.to_hex(),
+                preparation_digest: record.record_digest().to_hex(),
+                terminal_record: material.lineage().terminal_record.into(),
+                checkpoint: material.lineage().original_checkpoint.into(),
+                signed_binding: material.lineage().signed_binding.into(),
+                source_guard: material.lineage().current_source_guard.into(),
+                outcome: material.outcome().as_str().into(),
+                post_write_epoch: 1,
+                security_epoch: 4,
+            },
+            window,
+            layout
+                .outputs()
+                .iter()
+                .map(|row| {
+                    (
+                        row.output().clone(),
+                        DisplayNativeHandoffOutput {
+                            enabled: matches!(row, DisplayOutputLayout::Enabled { .. }),
+                            connector: 5,
+                            crtc: 6,
+                            plane: 7,
+                            framebuffer: 8,
+                            spend_high_water: 90,
+                            completed_commit: 91,
+                        },
+                    )
+                })
+                .collect(),
+        ))
+        .attributes()
+    };
+    let mut sample = ObservationEnvelope {
+        provider: value(ProviderId::new(if root {
+            DISPLAY_RECOVERY_PROVIDER
+        } else {
+            DISPLAY_PROVIDER
+        })),
+        capability: capability.clone(),
+        resource: resource.clone(),
+        authority: ObservationAuthority::NativeApi,
+        observed_at_unix_ms: wall,
+        valid_for_ms: window.valid_for_ms().map_err(|_| fail())?,
+        sequence: m.sequence,
+        attributes,
+    };
+    let fault = m.ordinary_handoff_fault;
+    let substituted = if root {
+        match fault {
+            2 => Some(("spent", ObservedValue::Bool(false))),
+            3 => Some(("preparation_digest", ObservedValue::Text("9".repeat(64)))),
+            4 => Some((
+                "transaction",
+                ObservedValue::Text("transaction:foreign".into()),
+            )),
+            _ => None,
+        }
+    } else {
+        match fault {
+            5 => Some((
+                "original_transaction",
+                ObservedValue::Text("transaction:foreign".into()),
+            )),
+            6 => Some(("signed_binding", ObservedValue::Text("9".repeat(64)))),
+            7 => Some(("source_guard", ObservedValue::Text("9".repeat(64)))),
+            8 => Some(("output.0.completed_commit", ObservedValue::U64(90))),
+            9 => Some(("output.0.framebuffer", ObservedValue::U64(0))),
+            10 => Some(("deadline_boot_ms", ObservedValue::U64(102_000))),
+            11 => {
+                sample.authority = ObservationAuthority::SyntheticTest;
+                None
+            }
+            12 if m.ordinary_handoff_reads == 2 => {
+                Some(("output.0.completed_commit", ObservedValue::U64(92)))
+            }
+            13 => Some(("outcome", ObservedValue::Text("expired".into()))),
+            14 => Some(("output.0.completed_commit", ObservedValue::U64(92))),
+            _ => None,
+        }
+    };
+    if let Some((key, value)) = substituted {
+        sample.attributes.insert(key.into(), value);
+    }
+    Ok(sample)
+}
+
+#[test]
+fn ordinary_handoff_joins_actual_sources_without_replaying_lost_ack_or_committing_on_inspection() {
+    for (action, storage_fault) in [
+        (DisplayContinuationAction::Confirm, None),
+        (DisplayContinuationAction::Revert, None),
+        (DisplayContinuationAction::Confirm, Some(0)),
+        (DisplayContinuationAction::Confirm, Some(1)),
+        (DisplayContinuationAction::Confirm, Some(2)),
+    ] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let mut port = Port(machine.clone());
+        let mut verifier = Verifier(machine.clone());
+        let original = display_request("ordinary-handoff-original");
+        let mut control =
+            open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+        value(control.begin_display_layout(
+            principal(),
+            actor(true),
+            original.clone(),
+            &approval(),
+            &mut port,
+            &mut verifier,
+        ));
+        value(control.decide_display_layout(
+            principal(),
+            actor(true),
+            &original.request_id,
+            action,
+            &Decision::approve(&machine),
+            &mut port,
+            &mut verifier,
+        ));
+        let before = value(control.inspect_ordinary_display_original(
+            principal(),
+            &original.request_id,
+            &mut port,
+            &mut verifier,
+        ))
+        .original_snapshot()
+        .clone();
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!())
+            .ordinary_handoff_enabled = true;
+        let mut release_port = ReleasePort(machine.clone(), 1); // durable native spend, missing reply
+        let receipt = value(control.begin_ordinary_display_release(
+            principal(),
+            actor(true),
+            linura_control::OrdinaryDisplayReleaseRequest {
+                operation_id: "ordinary-handoff-release".into(),
+                original_request: original.request_id.clone(),
+                reason: original.reason.clone(),
+            },
+            &ReleaseApproval(machine.clone(), 0),
+            &mut port,
+            &mut verifier,
+            &mut release_port,
+        ));
+        if let Some(fault) = storage_fault {
+            drop(control);
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_release_write_fault = fault;
+            control =
+                open_with_previews(database.path(), &machine, 1, previews_inner(&machine, true));
+            // Failure before write, a false persistence ACK, and a durable
+            // write followed by a lost ACK cannot manufacture verification.
+            assert!(
+                control
+                    .verify_ordinary_display_handoff(
+                        principal(),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier
+                    )
+                    .is_err()
+            );
+            drop(control);
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .ordinary_release_write_fault = 0;
+            control =
+                open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+        }
+        let inspection = value(control.inspect_ordinary_display_handoff(
+            principal(),
+            &receipt.request_id,
+            &mut port,
+            &mut verifier,
+        ));
+        assert_eq!(
+            inspection.release().state,
+            linura_transaction::TransactionState::Indeterminate
+        );
+        assert!(inspection.root().matches_native(inspection.frames()));
+        assert!(
+            inspection
+                .observation()
+                .attributes
+                .contains_key("control.ordinary-handoff.coverage_digest")
+        );
+        let proof = value(control.verify_ordinary_display_handoff(
+            principal(),
+            &receipt.request_id,
+            &mut port,
+            &mut verifier,
+        ));
+        assert!(proof.first_verified_unix_ms() < proof.first_valid_until_unix_ms());
+        drop(control);
+        let mut control =
+            open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
+        let inspected = value(control.inspect_ordinary_display_handoff(
+            principal(),
+            &receipt.request_id,
+            &mut port,
+            &mut verifier,
+        ));
+        assert_eq!(inspected.release(), inspection.release());
+        assert!(inspected.frames().reconciles(inspection.frames()));
+        let recovered = value(control.verify_ordinary_display_handoff(
+            principal(),
+            &receipt.request_id,
+            &mut port,
+            &mut verifier,
+        ));
+        assert_eq!(recovered.record_digest(), proof.record_digest());
+        assert_eq!(
+            recovered.first_verified_unix_ms(),
+            proof.first_verified_unix_ms()
+        );
+        assert_eq!(
+            recovered.first_valid_until_unix_ms(),
+            proof.first_valid_until_unix_ms()
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!())
+            .ordinary_handoff_fault = 14;
+        // Two mutually consistent fresh reads still cannot replace the first
+        // durably verified frame with a later completed commit after restart.
+        assert!(
+            control
+                .inspect_ordinary_display_handoff(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier
+                )
+                .is_ok()
+        );
+        assert!(
+            control
+                .verify_ordinary_display_handoff(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier
+                )
+                .is_err()
+        );
+        for fault in 1..=13 {
+            {
+                let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_handoff_fault = fault;
+                m.ordinary_handoff_reads = 0;
+            }
+            assert!(
+                control
+                    .inspect_ordinary_display_handoff(
+                        principal(),
+                        &receipt.request_id,
+                        &mut port,
+                        &mut verifier
+                    )
+                    .is_err(),
+                "fault {fault}"
+            );
+        }
+        {
+            let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+            m.ordinary_handoff_fault = 0;
+        }
+        assert_eq!(
+            value(control.inspect_ordinary_display_original(
+                principal(),
+                &original.request_id,
+                &mut port,
+                &mut verifier
+            ))
+            .original_snapshot(),
+            &before
+        );
+        let m = machine.lock().unwrap_or_else(|_| unreachable!());
+        assert_eq!(
+            (
+                m.applies,
+                m.decisions,
+                m.ordinary_release_calls,
+                m.ordinary_release_approvals
+            ),
+            (1, 1, 1, 1)
+        );
+    }
+}
 #[derive(Debug)]
 pub(super) struct OriginalObserver(pub(super) Arc<Mutex<Machine>>);
 impl Observer for OriginalObserver {
@@ -9,14 +372,18 @@ impl Observer for OriginalObserver {
         ))
     }
     fn observation_capabilities(&self) -> Vec<Capability> {
-        vec![Capability {
-            id: value(CapabilityId::new(
-                linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
-            )),
+        [
+            linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
+            linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY,
+        ]
+        .into_iter()
+        .map(|id| Capability {
+            id: value(CapabilityId::new(id)),
             provider: Some(self.observer_id()),
             support: SupportLevel::Supported,
             reason: None,
-        }]
+        })
+        .collect()
     }
     fn requires_live_health_preflight(&self) -> bool {
         false
@@ -38,6 +405,13 @@ impl Observer for OriginalObserver {
         resource: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<ObservationEnvelope, ProviderError> {
+        if capability.as_str() == linura_observation::DISPLAY_ORDINARY_RELEASE_CAPABILITY {
+            return observe_handoff(
+                &mut self.0.lock().unwrap_or_else(|_| unreachable!()),
+                resource,
+                capability,
+            );
+        }
         if capability.as_str() != linura_observation::DISPLAY_ORDINARY_ORIGINAL_CAPABILITY {
             return Err(ProviderError::Unsupported("ordinary source only".into()));
         }
@@ -582,6 +956,24 @@ impl linura_control::OrdinaryDisplayReleasePort for ReleasePort {
         assert_ne!(binding.transaction_id, original.transaction_id);
         assert_ne!(binding.dispatch_digest, original.dispatch_digest);
         assert_ne!(binding.effect_digest, original.effect_digest);
+        if m.ordinary_handoff_enabled {
+            let wall = now_unix_ms();
+            m.ordinary_release_record = Some(
+                value(
+                    linura_linux_session::NativeDisplayOrdinaryReleasePreparation::new(
+                        &material,
+                        &binding,
+                        linura_observation::DisplayNativeHandoffWindow {
+                            observed_unix_ms: wall,
+                            observed_boot_ms: 100_000,
+                            deadline_unix_ms: wall + 1900,
+                            deadline_boot_ms: 101_900,
+                        },
+                    ),
+                )
+                .canonical_bytes(),
+            );
+        }
         if self.1 == 1 {
             return Err("simulated Root reservation lost reply".into());
         }

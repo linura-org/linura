@@ -1,5 +1,6 @@
 #include "protected_wire.h"
 #include "sealed_native_material.h"
+#include "ordinary_release_intent.h"
 #include "linura-protected-display-v1-server-protocol.h"
 
 #include <algorithm>
@@ -439,6 +440,61 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void beginOrdinaryRelease(wl_client *, wl_resource *resource, const char *scope,
+                                     std::int32_t descriptor, std::uint32_t high, std::uint32_t low,
+                                     std::uint32_t bootHigh, std::uint32_t bootLow)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            const bool current =
+                state && state->scene && !state->closed && interaction.owner.current(interaction);
+            const auto material =
+                current ? SealedNativeMaterial::read<OrdinaryReleaseCodec::MaxMaterial>(
+                              std::move(owned))
+                        : std::nullopt;
+            if (!digest(scope) || !material || !current ||
+                !state->scene->beginOrdinaryRelease({scope,
+                                                     ProtectedInteraction::Purpose::OrdinaryRelease,
+                                                     joined(high, low), joined(bootHigh, bootLow)},
+                                                    *material)) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+            }
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
+    static void spendOrdinaryRelease(wl_client *, wl_resource *resource, std::int32_t descriptor,
+                                     const char *transaction, const char *effect,
+                                     const char *dispatch, std::uint32_t high, std::uint32_t low)
+    {
+        OwnedNativeFd owned{descriptor};
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!transaction || strnlen(transaction, 257) > 256 ||
+                !std::string_view(transaction).starts_with("transaction:") || !digest(effect) ||
+                !digest(dispatch) || !state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) ||
+                !state->scene->spendOrdinaryRelease(
+                    std::move(owned), {transaction, effect, dispatch, joined(high, low)})) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+                return;
+            }
+            status(nullptr, resource);
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static void quiesceFinalization(wl_client *, wl_resource *resource, std::int32_t descriptor,
                                     const char *transaction, const char *effect,
                                     const char *dispatch, std::uint32_t high, std::uint32_t low,
@@ -603,7 +659,7 @@ const struct linura_protected_display_interaction_v1_interface
 {
     destroy, getSurface, status, refreshPresentation, consume, beginDecision, beginFinalization,
         quiesceFinalization, spendNativeRelease, retireCurrent, commitCurrent, retirePower,
-        transferCompletion
+        transferCompletion, beginOrdinaryRelease, spendOrdinaryRelease
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {

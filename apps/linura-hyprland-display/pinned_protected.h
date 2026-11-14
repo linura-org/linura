@@ -38,6 +38,8 @@ struct NativeProtectedFrameBaseline final
 };
 using NativeProtectedBaseline = std::optional<NativeProtectedFrameBaseline>;
 [[nodiscard]] NativeProtectedBaseline readProtectedBaseline(const Correlation &, const Snapshot &);
+[[nodiscard]] NativeProtectedBaseline readOrdinaryProtectedBaseline(const Correlation &,
+                                                                    const Snapshot &);
 // Read-only current comparison of the actual one-use physical handoff. The
 // fixed original deadlines, native buffer leases and Root continuity remain
 // required; the returned receipt grants no input/power/admission retirement.
@@ -47,6 +49,7 @@ readNativeHandoffComparison(const Correlation &terminal);
 // terminal material, replay, renewed deadline or fence-retirement credential.
 [[nodiscard]] std::optional<std::string> readNativeHandoffPresentation();
 [[nodiscard]] std::optional<std::string> readNativeCurrentPresentation();
+[[nodiscard]] std::optional<std::string> readOrdinaryHandoffPresentation();
 [[nodiscard]] std::optional<std::uint32_t>
 nativeHandoffFramebuffer(OutputKey, const SP<Aquamarine::IBuffer> &);
 void initializeProtectedDisplay(wl_display &);

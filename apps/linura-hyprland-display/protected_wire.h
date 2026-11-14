@@ -36,6 +36,9 @@ class ProtectedScene
     // fresh review is not another restoration write or permission to release.
     [[nodiscard]] virtual bool beginFinalization(const ProtectedInteraction::Scope &,
                                                  const std::string &material) = 0;
+    [[nodiscard]] virtual bool beginOrdinaryRelease(const ProtectedInteraction::Scope &,
+                                                    const std::string &material) = 0;
+    [[nodiscard]] virtual bool spendOrdinaryRelease(OwnedNativeFd, const Correlation &) = 0;
     // One prepared actual-Root channel over this exact consumed terminal scene.
     // Success retains all fences and is never retirement or ordinary admission.
     [[nodiscard]] virtual bool quiesceFinalization(OwnedNativeFd, const Correlation &,

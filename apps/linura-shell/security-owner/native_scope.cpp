@@ -160,7 +160,8 @@ bool NativeApprovalScope::valid() const
             QString::fromUtf8(display->reason.toUtf8()) != display->reason ||
             ((purpose == ApprovalPurpose::ApplyDisplay ||
               purpose == ApprovalPurpose::RestoreOriginalDisplay ||
-              purpose == ApprovalPurpose::FinalizeOriginalDisplay)
+              purpose == ApprovalPurpose::FinalizeOriginalDisplay ||
+              purpose == ApprovalPurpose::ReleaseOrdinaryDisplay)
                  ? !display->decisionDigest.isEmpty()
                  : (!digest(display->decisionDigest) ||
                     display->decisionDigest ==
@@ -170,6 +171,7 @@ bool NativeApprovalScope::valid() const
         if (!intent || intent->lock != lock ||
             (purpose != ApprovalPurpose::RestoreOriginalDisplay &&
              purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
+             purpose != ApprovalPurpose::ReleaseOrdinaryDisplay &&
              intent->encode() != display->material))
             return false;
     } else if (display)
@@ -208,7 +210,9 @@ bool NativeApprovalScope::valid() const
         }
     } else if (transition)
         return false;
-    const QString prefix = purpose == ApprovalPurpose::FinalizeOriginalDisplay
+    const QString prefix = purpose == ApprovalPurpose::ReleaseOrdinaryDisplay
+                               ? QStringLiteral("request:v010:display-ordinary-release:")
+                           : purpose == ApprovalPurpose::FinalizeOriginalDisplay
                                ? QStringLiteral("request:v010:display-finalization:")
                            : purpose == ApprovalPurpose::RestoreOriginalDisplay
                                ? QStringLiteral("request:v010:display-restoration:")
@@ -241,6 +245,7 @@ bool NativeApprovalScope::valid() const
     case ApprovalPurpose::RevertDisplay:
     case ApprovalPurpose::RestoreOriginalDisplay:
     case ApprovalPurpose::FinalizeOriginalDisplay:
+    case ApprovalPurpose::ReleaseOrdinaryDisplay:
         return true;
     }
     return false;
@@ -269,6 +274,8 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
         return "org.linura.authority.restore-original-display-layout";
     case ApprovalPurpose::FinalizeOriginalDisplay:
         return "org.linura.authority.finalize-original-display-restoration";
+    case ApprovalPurpose::ReleaseOrdinaryDisplay:
+        return "org.linura.authority.release-ordinary-display";
     case ApprovalPurpose::ApplyDisplay:
         return "org.linura.authority.apply-display-layout";
     case ApprovalPurpose::KeepDisplay:
@@ -284,7 +291,8 @@ bool NativeApprovalScope::isDisplay() const noexcept
     return purpose == ApprovalPurpose::ApplyDisplay || purpose == ApprovalPurpose::KeepDisplay ||
            purpose == ApprovalPurpose::RevertDisplay ||
            purpose == ApprovalPurpose::RestoreOriginalDisplay ||
-           purpose == ApprovalPurpose::FinalizeOriginalDisplay;
+           purpose == ApprovalPurpose::FinalizeOriginalDisplay ||
+           purpose == ApprovalPurpose::ReleaseOrdinaryDisplay;
 }
 
 QString NativeApprovalScope::protectedDisplayDigest() const

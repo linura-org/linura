@@ -1139,9 +1139,23 @@ material, and rechecks the live original ordinary startup/kernel/power witnesses
 and both absolute clocks around immutable `LNOP:1` publication/readback. The
 complete actual original checkpoint must match, and missing/corrupt ancestry
 fences all subsequent writes. Root preparation never releases native coverage,
-input, S17, power, startup admission or evidence. Native grant/spend, physical
-handoff and independent completion remain required and unavailable in this
-increment; public production display mutation remains prohibited.
+input, S17, power, startup admission or evidence. A separate fresh purpose-13
+native review and `auth_admin` action now bind the complete ordinary material.
+The same original Root/native peer sends a distinct one-use LNOG/LNOW grant;
+Root publishes and reads back the exact parent-bound `LNOS:1` spend before ACK.
+Neither old Keep/Revert approval nor replacement-restoration credentials can
+substitute. Both original producer clocks bound the first physical handoff.
+
+Ordinary first-frame evidence has separate Root and native capabilities and a
+distinct private presentation event. Native retains the actual safety boundary,
+post-spend ordinary buffers, per-output completion counters and KMS identities.
+Control independently joins these with the signed terminal, complete current
+source/layout, logind session and S17 coverage, then re-reads the same immutable
+frame and Root spend. Immutable Control proof retention preserves its first
+verification and expiry across restart; it cannot renew a grant or replay an
+effect. Unknown clocks, peers, acknowledgments or current sources retain opaque
+protection. Ordinary completion/lifetime transfer and ordered fence retirement
+remain unimplemented. Public production display mutation remains prohibited.
 
 A checked request-history read scope is a synchronous storage lifetime, never a
 current-provider observation or execution capability. SQLite fully validates

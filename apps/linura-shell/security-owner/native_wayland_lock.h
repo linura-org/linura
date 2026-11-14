@@ -14,6 +14,7 @@ struct wl_display;
 namespace Linura::SecurityOwner {
 struct NativeDisplayRestorationIntent;
 struct NativeDisplayFinalizationIntent;
+struct NativeDisplayOrdinaryReleaseIntent;
 
 class SecretEntry;
 struct NativeDisplayCorrelation;
@@ -131,6 +132,13 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,
                                                          const QString &material,
                                                          const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginProtectedOrdinaryDisplayRelease(const NativeDisplayPromptScope &,
+                                                            const QString &material,
+                                                            const NativeDisplayCorrelation &);
+    [[nodiscard]] bool spendOrdinaryDisplayRelease(const NativeDisplayOrdinaryReleaseIntent &,
+                                                   const NativeDisplayCorrelation &,
+                                                   quint64 sampledBootMs, int grant);
+    [[nodiscard]] bool heldOrdinaryDisplayRelease(const NativeDisplayCorrelation &);
     [[nodiscard]] bool beginProtectedDisplayDecision(const NativeDisplayPromptScope &,
                                                      const NativeDisplayIntent &,
                                                      const NativeDisplayCorrelation &);

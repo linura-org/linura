@@ -164,6 +164,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"out\"/></method>"
         "<method name=\"ObserveNativeDisplayCurrent\"><arg name=\"facts\" type=\"s\" "
         "direction=\"out\"/></method>"
+        "<method name=\"ObserveOrdinaryDisplayHandoff\"><arg name=\"facts\" type=\"s\" "
+        "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplayAttempt\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"observation\" type=\"(sssttub)\" "
         "direction=\"out\"/></method>"
@@ -188,6 +190,12 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
         "<arg name=\"terminal_grant\" type=\"h\" direction=\"in\"/>"
         "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
+        "<method name=\"SpendOrdinaryDisplayRelease\"><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"sample_digest\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"grant\" type=\"h\" direction=\"in\"/>"
+        "<arg name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"SpendOriginalDisplayNativeRelease\"><arg name=\"query\" "
         "type=\"(sssst)\" direction=\"in\"/><arg name=\"sample_digest\" type=\"s\" "
         "direction=\"in\"/><arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
@@ -288,6 +296,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     NativePreparedDisplayObservationWire ObservePreparedDisplay();
     QString ObserveOriginalDisplayPresentation();
     QString ObserveNativeDisplayHandoff();
+    QString ObserveOrdinaryDisplayHandoff();
     QString ObserveNativeDisplayCurrent();
     NativeDisplayAttemptObservationWire
     ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &);
@@ -305,6 +314,9 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                                const QString &sample_digest,
                                                quint64 sampled_boot_ms,
                                                const QDBusUnixFileDescriptor &terminal_grant);
+    bool SpendOrdinaryDisplayRelease(const NativeDisplayAttemptQueryWire &,
+                                     const QString &sample_digest, quint64 sampled_boot_ms,
+                                     const QDBusUnixFileDescriptor &grant);
     quint32 SpendOriginalDisplayNativeRelease(const NativeDisplayAttemptQueryWire &,
                                               const QString &sample_digest, quint64 sampled_boot_ms,
                                               quint64 control_version,

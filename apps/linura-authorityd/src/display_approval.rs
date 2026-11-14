@@ -73,6 +73,47 @@ pub(crate) fn authorize_finalization(
     ))
 }
 
+pub(crate) fn authorize_ordinary_release(
+    channel: &NativeSessionChannel,
+    principal: &PrincipalId,
+    challenge: &linura_control::OrdinaryDisplayReleaseChallenge,
+) -> Result<TrustedHumanApproval, String> {
+    let managed = challenge.managed();
+    if managed.principal() != principal
+        || managed.change_key() != "release_ordinary"
+        || managed.approval_class() != ManagedApprovalClass::Administrator
+    {
+        return Err("ordinary release native approval has another principal/class/purpose".into());
+    }
+    let effect = linura_provider_sdk::display_ordinary_release_effect(challenge.material())?;
+    if effect.resource != *managed.resource()
+        || effect.canonical_payload.as_slice() != managed.desired_value().as_bytes()
+    {
+        return Err("ordinary release material differs from its canonical challenge".into());
+    }
+    let request = NativeDisplayApprovalRequest::new_ordinary_release(
+        principal.clone(),
+        managed.request_id().clone(),
+        managed.plan_id().clone(),
+        super::session_approval::digest(managed.request_digest())?,
+        super::session_approval::digest(managed.observation_digest())?,
+        super::session_approval::digest(managed.review_digest())?,
+        challenge.material(),
+        managed.reason(),
+        INTERACTION_BUDGET,
+    )?;
+    complete(
+        &ProductionPort { channel },
+        &request,
+        &|| request.remaining(),
+        &thread::sleep,
+    )?;
+    Ok(TrustedHumanApproval::from_authorized_challenge(
+        principal.clone(),
+        managed,
+    ))
+}
+
 fn request(
     principal: &PrincipalId,
     challenge: &ManagedApprovalChallenge,

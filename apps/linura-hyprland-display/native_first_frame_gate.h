@@ -174,6 +174,24 @@ class NativeFirstFrameGate final
         return true;
     }
 
+    // Exact producer clocks from a separately authenticated ordinary Root
+    // preparation. Do not reconstruct one clock from the other's remainder.
+    [[nodiscard]] bool narrowProducerWindow(ClockSample observed, ClockSample end) noexcept
+    {
+        if (phase_ != Phase::Held || !observed.unixMs || !observed.bootMs ||
+            observed.unixMs > lastSample_.unixMs || observed.bootMs > lastSample_.bootMs ||
+            end.unixMs <= lastSample_.unixMs || end.bootMs <= lastSample_.bootMs ||
+            end.unixMs <= observed.unixMs || end.bootMs <= observed.bootMs ||
+            end.unixMs - observed.unixMs > MaxProofWindowMs ||
+            end.bootMs - observed.bootMs > MaxProofWindowMs) {
+            phase_ = Phase::Faulted;
+            return false;
+        }
+        deadline_.unixMs = std::min(deadline_.unixMs, end.unixMs);
+        deadline_.bootMs = std::min(deadline_.bootMs, end.bootMs);
+        return true;
+    }
+
     // Called only AFTER the separately authenticated, durable Root/native
     // release grant was spent. A second fresh, output-owned native commit
     // high-water read closes the arm-to-spend race: a completed frame that

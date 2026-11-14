@@ -224,6 +224,8 @@ class S17DeploymentTests(unittest.TestCase):
                     "ReadSuccessor",
                     "ReadOrdinaryOriginal",
                     "ReserveOrdinaryRelease",
+                    "ReserveOrdinaryReleaseGrant",
+                    "ReadOrdinaryRelease",
                     "ReserveFinalRetirement",
                     "CompleteReleasedCurrent",
                     "ReadFinalRetirement",

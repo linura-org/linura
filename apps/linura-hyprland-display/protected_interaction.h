@@ -14,7 +14,7 @@ namespace Linura::HyprlandDisplay {
 class ProtectedInteraction final
 {
   public:
-    enum class Purpose { Apply, Keep, Revert, Recovery, Finalization };
+    enum class Purpose { Apply, Keep, Revert, Recovery, Finalization, OrdinaryRelease };
     enum class Phase { Arming, Ready, Consumed, Cancelled };
     static constexpr std::uint64_t MaximumWindowMs = 60'000;
     static constexpr std::uint64_t DecisionWindowMs = 15'000;

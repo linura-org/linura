@@ -114,6 +114,17 @@
       </description>
       <arg name="facts" type="string"/>
     </event>
+    <event name="ordinary_handoff_presentation">
+      <description summary="same-invocation ordinary terminal handoff comparison">
+        At most one bounded private object before done, mutually exclusive with
+        other presentation events. Requires the exact consumed fresh ordinary
+        review, live original Root producer window and one-use spend, actual
+        post-spend completed ordinary buffers and current KMS on every output.
+        The complete preparation digest and terminal lineage remain bound to
+        this ordinary invocation. No completion or fence retirement authority.
+      </description>
+      <arg name="facts" type="string"/>
+    </event>
   </interface>
   <interface name="linura_display_head_v1" version="1">
     <description summary="native output lifetime in one snapshot">
