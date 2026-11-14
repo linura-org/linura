@@ -23,6 +23,7 @@ ALLOWED_KINDS = {
     "tool",
     "planned-app",
     "shell",
+    "native-adapter",
 }
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RELEASE_BINARIES_COMMAND = (
@@ -221,6 +222,19 @@ def check(root: Path) -> list[str]:
                 f"{component_id}: planned-app kind must remain roadmap-scaffold"
             )
 
+        if kind == "native-adapter":
+            if workspace_member is not False or release_artifact is not False:
+                failures.append(
+                    f"{component_id}: native adapters are non-workspace source integrations, not release binaries"
+                )
+            if (
+                not (root / path / "README.md").is_file()
+                or not (root / path / "CMakeLists.txt").is_file()
+            ):
+                failures.append(
+                    f"{component_id}: native adapter requires README.md and CMakeLists.txt"
+                )
+
         if kind == "shell":
             if workspace_member is not False:
                 failures.append(
@@ -357,7 +371,7 @@ def check(root: Path) -> list[str]:
         path
         for path, item in by_path.items()
         if item.get("workspace_member") is False
-        and item.get("kind") in {"planned-app", "shell"}
+        and item.get("kind") in {"planned-app", "shell", "native-adapter"}
     }
     if non_workspace_app_dirs != declared_non_workspace_apps:
         failures.append(

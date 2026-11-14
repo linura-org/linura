@@ -130,6 +130,46 @@ EXPECTED_LOCAL_OPERATIONS = {
     }
 }
 EXPECTED_REGISTERED_OPERATIONS = {
+    "managed-display-ordinary-release": {
+        "operation_id": "operation:display.layout.release-ordinary",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-ordinary-release.risk-floor",
+        "provider": "hyprland-recovery",
+        "observation_capability": "display.ordinary-original.observe",
+        "resource_prefix": "display:ordinary-release:",
+        "change_keys": ["release_ordinary"],
+    },
+    "managed-display-finalization": {
+        "operation_id": "operation:display.layout.finalize-original",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-finalization.risk-floor",
+        "provider": "hyprland-recovery",
+        "observation_capability": "display.original-finalization.observe",
+        "resource_prefix": "display:recovery:",
+        "change_keys": ["finalize_original"],
+    },
+    "managed-display-restoration": {
+        "operation_id": "operation:display.layout.restore-original",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-restoration.risk-floor",
+        "provider": "hyprland-recovery",
+        "observation_capability": "display.original-protection.observe",
+        "resource_prefix": "display:recovery:",
+        "change_keys": ["restore_original"],
+    },
+    "managed-display-layout": {
+        "operation_id": "operation:display.layout.apply",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-layout.risk-floor",
+        "provider": "hyprland",
+        "observation_capability": "display.outputs.observe",
+        "resource_prefix": "display:topology:",
+        "change_keys": ["layout"],
+    },
     "managed-session-lock": {
         "operation_id": "operation:session.lock.set-secure",
         "class": "managed-external-effect",
@@ -536,12 +576,65 @@ def validate(root: Path) -> list[str]:
             "review_plan_with_classification",
             "candidate.risk_floor",
             "review.subject().prospective_risk() != risk.risk",
+            "pub(crate) fn revalidate_display_review(",
+            "pub(crate) enum DisplayReviewPurpose",
+            "Self::Keep => (",
+            "Self::OriginalFinalization => (",
+            "|| !self.purpose.matches(&self.plan)",
+            "|| !purpose.matches(&prepared.candidate.plan)",
+            "original.revalidate(principal, floor, &self.approvals)",
         ):
             if fragment not in durable_text:
                 failures.append(
                     f"durable authority handoff boundary missing required fragment: {fragment}"
                 )
-        expected_review_paths = 3
+        # Each purpose/state boundary must retain its OWN live review call.
+        # A call in the committed continuation cannot mask its removal from
+        # ordinary Keep/original-finalization dispatch, or vice versa.
+        common_review_guards = (
+            "current.current_generation != original.generation",
+            "current.binding_digest != *original.binding.digest()",
+            "principal.as_str() != original.binding.principal().as_str()",
+            "current.principal != *original.binding.principal()",
+            "current.request_id != request.request_id",
+            "digest_request(request)? != *original.binding.request_digest()",
+            "original.risk_floor != floor",
+            "original.revalidate(principal, floor, &self.approvals)",
+        )
+        for method, guards in (
+            (
+                "revalidate_display_review",
+                (
+                    "current != *expected",
+                    "current.state != TransactionState::Indeterminate",
+                ),
+            ),
+            (
+                "revalidate_committed_display_review",
+                (
+                    "current != *committed",
+                    "current.state != TransactionState::Committed",
+                    "before.state != TransactionState::Indeterminate",
+                    "before.state_version.checked_add(2) != Some(current.state_version)",
+                    "current.current_generation != before.current_generation",
+                    "current.binding_digest != before.binding_digest",
+                    "original.purpose != DisplayReviewPurpose::OriginalFinalization",
+                ),
+            ),
+        ):
+            marker = f"    pub(crate) fn {method}("
+            body = ""
+            if durable_text.count(marker) == 1:
+                body = durable_text.split(marker, 1)[1].split("\n    }", 1)[0]
+            for fragment in (*common_review_guards, *guards):
+                if body.count(fragment) != 1:
+                    failures.append(
+                        "durable authority handoff boundary missing required fragment: "
+                        f"{method}: {fragment}"
+                    )
+        # Candidate, recovery, prepared handoff and purpose-bound original
+        # display review (shared by Keep and original finalization).
+        expected_review_paths = 4
         actual_review_paths = durable_text.count("review_plan_with_classification(")
         if actual_review_paths != expected_review_paths:
             failures.append(

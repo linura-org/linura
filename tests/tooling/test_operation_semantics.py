@@ -451,6 +451,110 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+    def test_display_registration_cannot_downgrade_or_accept_arbitrary_native_material(
+        self,
+    ) -> None:
+        for field, replacement in (
+            (
+                'class = "managed-external-effect"',
+                'class = "transient-external-effect"',
+            ),
+            ('risk_floor = "security-sensitive"', 'risk_floor = "user-state"'),
+            ('provider = "hyprland"', 'provider = "shell"'),
+            ('resource_prefix = "display:topology:"', 'resource_prefix = "display:"'),
+            ('change_keys = ["layout"]', 'change_keys = ["command"]'),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                contract = root / "contracts/operation-semantics.toml"
+                source = contract.read_text(encoding="utf-8")
+                start = source.index("[registered_operations.managed-display-layout]")
+                end = source.find("\n[", start + 1)
+                if end < 0:
+                    end = len(source)
+                table = source[start:end]
+                self.assertIn(field, table)
+                contract.write_text(
+                    source[:start]
+                    + table.replace(field, replacement, 1)
+                    + source[end:],
+                    encoding="utf-8",
+                )
+                self.assertTrue(
+                    any(
+                        "registered_operations drifted" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+
+    def test_original_restoration_registration_is_not_apply_or_transient_authority(
+        self,
+    ) -> None:
+        for operation, capability, change, prefix in (
+            (
+                "restoration",
+                "display.original-protection.observe",
+                "restore_original",
+                "display:recovery:",
+            ),
+            (
+                "finalization",
+                "display.original-finalization.observe",
+                "finalize_original",
+                "display:recovery:",
+            ),
+            (
+                "ordinary-release",
+                "display.ordinary-original.observe",
+                "release_ordinary",
+                "display:ordinary-release:",
+            ),
+        ):
+            for field, replacement in (
+                (
+                    'class = "managed-external-effect"',
+                    'class = "transient-external-effect"',
+                ),
+                ('risk_floor = "security-sensitive"', 'risk_floor = "user-state"'),
+                ('provider = "hyprland-recovery"', 'provider = "hyprland"'),
+                (
+                    f'observation_capability = "{capability}"',
+                    'observation_capability = "display.outputs.observe"',
+                ),
+                (
+                    f'resource_prefix = "{prefix}"',
+                    'resource_prefix = "display:"',
+                ),
+                (f'change_keys = ["{change}"]', 'change_keys = ["layout"]'),
+            ):
+                with (
+                    self.subTest(operation=operation, field=field),
+                    tempfile.TemporaryDirectory() as temp_dir,
+                ):
+                    root = Path(temp_dir)
+                    self._copy_fixture(root)
+                    contract = root / "contracts/operation-semantics.toml"
+                    source = contract.read_text(encoding="utf-8")
+                    start = source.index(
+                        f"[registered_operations.managed-display-{operation}]"
+                    )
+                    end = source.index("\n[", start + 1)
+                    table = source[start:end]
+                    self.assertIn(field, table)
+                    contract.write_text(
+                        source[:start]
+                        + table.replace(field, replacement, 1)
+                        + source[end:],
+                        encoding="utf-8",
+                    )
+                    self.assertTrue(
+                        any(
+                            "registered_operations drifted" in failure
+                            for failure in check_operation_semantics.validate(root)
+                        )
+                    )
+
     def test_registered_managed_systemd_contract_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -518,6 +622,85 @@ class OperationSemanticsContractTests(unittest.TestCase):
                     for failure in check_operation_semantics.validate(root)
                 )
             )
+
+    def test_display_keep_cannot_drop_original_policy_approval_revalidation(
+        self,
+    ) -> None:
+        original = "original.revalidate(principal, floor, &self.approvals)"
+        for method in (
+            "revalidate_display_review",
+            "revalidate_committed_display_review",
+        ):
+            with (
+                self.subTest(method=method),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / "crates/linura-control/src/durable_authority.rs"
+                text = path.read_text(encoding="utf-8")
+                marker = f"    pub(crate) fn {method}("
+                self.assertEqual(text.count(marker), 1)
+                prefix, tail = text.split(marker, 1)
+                body, suffix = tail.split("\n    }", 1)
+                self.assertEqual(body.count(original), 1)
+                # Keep the other path intact: a global substring check must
+                # not conceal removal from this particular authority boundary.
+                changed = body.replace(original, "Ok(())", 1)
+                path.write_text(
+                    prefix + marker + changed + "\n    }" + suffix, encoding="utf-8"
+                )
+                self.assertTrue(
+                    any(
+                        f"{method}: {original}" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+        for fragment in (
+            "current.state != TransactionState::Committed",
+            "before.state != TransactionState::Indeterminate",
+            "before.state_version.checked_add(2) != Some(current.state_version)",
+            "current.current_generation != before.current_generation",
+            "current.binding_digest != before.binding_digest",
+            "original.purpose != DisplayReviewPurpose::OriginalFinalization",
+        ):
+            with (
+                self.subTest(guard=fragment),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / "crates/linura-control/src/durable_authority.rs"
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(text.count(fragment), 1)
+                path.write_text(text.replace(fragment, "false", 1), encoding="utf-8")
+                self.assertTrue(
+                    any(
+                        f"revalidate_committed_display_review: {fragment}" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+
+    def test_display_continuations_cannot_drop_purpose_binding(self) -> None:
+        for fragment in (
+            "|| !self.purpose.matches(&self.plan)",
+            "|| !purpose.matches(&prepared.candidate.plan)",
+        ):
+            with self.subTest(fragment=fragment):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / "crates/linura-control/src/durable_authority.rs"
+                    text = path.read_text(encoding="utf-8")
+                    self.assertEqual(text.count(fragment), 1)
+                    path.write_text(text.replace(fragment, "", 1), encoding="utf-8")
+                    self.assertTrue(
+                        any(
+                            "durable authority handoff boundary missing required fragment"
+                            in failure
+                            for failure in check_operation_semantics.validate(root)
+                        )
+                    )
 
     def test_durable_authority_cannot_drop_floored_policy_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

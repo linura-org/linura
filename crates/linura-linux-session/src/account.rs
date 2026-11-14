@@ -23,7 +23,73 @@ pub(crate) fn local_authority_ids() -> Result<(u32, u32), String> {
 }
 
 fn local_accounts() -> Result<Vec<u8>, String> {
-    let path = Path::new("/etc/passwd");
+    local_database(Path::new("/etc/passwd"))
+}
+
+pub(crate) fn local_display_entry_gid() -> Result<u32, String> {
+    let gid = parse_display_entry_gid(&local_database(Path::new("/etc/group"))?)?;
+    validate_display_entry_accounts(gid, &local_accounts()?)?;
+    Ok(gid)
+}
+
+fn validate_display_entry_accounts(gid: u32, bytes: &[u8]) -> Result<(), String> {
+    let denied = || "native display entry group has unsupported primary membership".to_owned();
+    if bytes.len() as u64 > ACCOUNT_LIMIT {
+        return Err(denied());
+    }
+    for line in std::str::from_utf8(bytes)
+        .map_err(|_| denied())?
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let fields: Vec<_> = line.split(':').collect();
+        if fields.len() != 7 {
+            return Err(denied());
+        }
+        let primary: u32 = fields[3].parse().map_err(|_| denied())?;
+        if primary.to_string() != fields[3] || primary == gid {
+            return Err(denied());
+        }
+    }
+    Ok(())
+}
+
+fn parse_display_entry_gid(bytes: &[u8]) -> Result<u32, String> {
+    let denied = || "native display entry group is absent, shared or unsupported".to_owned();
+    if bytes.len() as u64 > ACCOUNT_LIMIT {
+        return Err(denied());
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| denied())?;
+    let mut selected = None;
+    let mut all = Vec::new();
+    for line in text
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let fields: Vec<_> = line.split(':').collect();
+        if fields.len() != 4 {
+            return Err(denied());
+        }
+        let gid: u32 = fields[2].parse().map_err(|_| denied())?;
+        if gid.to_string() != fields[2] {
+            return Err(denied());
+        }
+        all.push(gid);
+        if fields[0] == "linura-display-entry" {
+            if selected.is_some() || gid == 0 || gid == u32::MAX || !fields[3].is_empty() {
+                return Err(denied());
+            }
+            selected = Some(gid);
+        }
+    }
+    let gid = selected.ok_or_else(denied)?;
+    if all.iter().filter(|&&other| other == gid).count() != 1 {
+        return Err(denied());
+    }
+    Ok(gid)
+}
+
+fn local_database(path: &Path) -> Result<Vec<u8>, String> {
     if !immutable_file(path, false) {
         return Err("local service account database is not immutable".into());
     }
@@ -103,6 +169,42 @@ fn parse_service_uid(account: LocalServiceAccount, bytes: &[u8]) -> Result<u32, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn display_entry_group_is_local_unique_non_root_and_has_no_members() {
+        let good = "root:x:0:\nlinura-display-entry:x:991:\nother:x:992:user\n";
+        assert_eq!(parse_display_entry_gid(good.as_bytes()), Ok(991));
+        for bad in [
+            "",
+            "linura-display-entry:x:0:\n",
+            "linura-display-entry:x:0991:\n",
+            "linura-display-entry:x:4294967295:\n",
+            "linura-display-entry:x:991:user\n",
+            "linura-display-entry:x:991:\nother:x:991:\n",
+            "linura-display-entry:x:991:\nlinura-display-entry:x:992:\n",
+            "linura-display-entry:x:991\n",
+            "another:x:991:\n",
+        ] {
+            assert!(parse_display_entry_gid(bad.as_bytes()).is_err());
+        }
+        assert!(parse_display_entry_gid(&vec![b'x'; ACCOUNT_LIMIT as usize + 1]).is_err());
+        assert!(
+            validate_display_entry_accounts(
+                991,
+                b"root:x:0:0::/:/bin/bash\nuser:x:1000:1000::/:/bin/bash\n"
+            )
+            .is_ok()
+        );
+        for bad in [
+            b"user:x:1000:991::/:/bin/bash\n".as_slice(),
+            b"user:x:1000:0991::/:/bin/bash\n",
+            b"user:x:1000:garbled::/:/bin/bash\n",
+            b"user:x:1000:4294967296::/:/bin/bash\n",
+            b"user:x:1000:1000\n",
+            b"\xff",
+        ] {
+            assert!(validate_display_entry_accounts(991, bad).is_err());
+        }
+    }
     #[test]
     fn helper_identity_requires_the_same_exact_non_root_account_and_primary_group() {
         assert_eq!(

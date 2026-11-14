@@ -12,11 +12,51 @@ use zbus::zvariant::OwnedValue;
 const BUS_PATH: &str = "/run/dbus/system_bus_socket";
 const CONTROL_SERVICE: &str = "org.linura.Authority1";
 const EXECUTOR_SERVICE: &str = "org.linura.Executor.Session1";
+const DISPLAY_PROTECTION_SERVICE: &str = "org.linura.DisplayProtection1";
 const CONNECT_BUDGET: Duration = Duration::from_secs(2);
 pub(crate) const CALL_BUDGET: Duration = Duration::from_millis(500);
 pub(crate) const PROBE_BUDGET: Duration = Duration::from_secs(2);
 pub(crate) const MAX_REPLY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_DISPLAY_REPLY_BYTES: usize = 384 * 1024;
 pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
+
+fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &str) -> usize {
+    if path == "/org/linura/DisplayProtection1"
+        && interface == "org.linura.DisplayProtection1"
+        && ((role == NativeSessionRole::Executor && method == "ReserveSuccessor")
+            || (role == NativeSessionRole::Control && method == "ReadSuccessor"))
+    {
+        return crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64;
+    }
+    let protection = path == "/org/linura/DisplayProtection1"
+        && interface == "org.linura.DisplayProtection1"
+        && role == NativeSessionRole::Control;
+    if protection && method == "ReadOrdinaryOriginal" {
+        return MAX_DISPLAY_REPLY_BYTES + 32;
+    }
+    if protection && method == "ReadRootPower" {
+        return crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
+            + crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT
+            + MAX_DISPLAY_REPLY_BYTES
+            + 160;
+    }
+    if protection && method == "ReadFinalRetirement" {
+        return 2 * crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 1024;
+    }
+    let original = path == "/org/linura/DisplayProtection1"
+        && interface == "org.linura.DisplayProtection1"
+        && method == "ReadOriginal"
+        && role == NativeSessionRole::Control;
+    let display = path == "/org/linura/SecurityOwner1"
+        && interface == "org.linura.SecurityOwner1"
+        && ((method == "ObserveDisplay" && role == NativeSessionRole::Control)
+            || (method == "ObservePreparedDisplay" && role == NativeSessionRole::Executor));
+    if original || display {
+        MAX_DISPLAY_REPLY_BYTES
+    } else {
+        MAX_REPLY_BYTES
+    }
+}
 
 pub(crate) enum NativeCallError {
     TransitionPending,
@@ -213,6 +253,7 @@ fn native_failure_label(category: &str, method: &str) -> String {
         "VerifyReleased" => "release-verification",
         "RetainedVerifiedRelease" => "retained-release",
         "CommitVerifiedRelease" => "release-commit",
+        "ReserveNativeRelease" => "display-release-reserve",
         "DispatchPreparedLock" => "lock-dispatch",
         _ => "mechanism",
     };
@@ -223,6 +264,7 @@ fn native_failure_label(category: &str, method: &str) -> String {
 pub enum NativeSessionRole {
     Control,
     Executor,
+    DisplayProtection,
 }
 
 impl NativeSessionRole {
@@ -230,6 +272,7 @@ impl NativeSessionRole {
         match self {
             Self::Control => CONTROL_SERVICE,
             Self::Executor => EXECUTOR_SERVICE,
+            Self::DisplayProtection => DISPLAY_PROTECTION_SERVICE,
         }
     }
 }
@@ -255,6 +298,20 @@ impl NativeSessionChannel {
             connection: connect_native_bus(Some(role))?,
             role,
         })
+    }
+
+    /// Fixed guard publication only, after registering its complete object on
+    /// the same connection. This grants no client/executor authority.
+    pub fn publish_display_protection(&self) -> Result<(), String> {
+        // The name does not exist yet. Do not use require_role here: its
+        // independent bus-owner check is meaningful only after publication.
+        if self.role != NativeSessionRole::DisplayProtection {
+            return Err("native channel has the wrong service role".into());
+        }
+        self.connection
+            .request_name(DISPLAY_PROTECTION_SERVICE)
+            .map_err(|_| "display protection name publication failed".to_owned())?;
+        self.require_role(NativeSessionRole::DisplayProtection)
     }
 
     /// Concrete adapter composition only: register the service on the SAME
@@ -308,6 +365,9 @@ pub(crate) fn connect_native_bus(role: Option<NativeSessionRole>) -> Result<Conn
                 Some(NativeSessionRole::Executor) => builder
                     .name(EXECUTOR_SERVICE)
                     .map_err(|_| "canonical native executor name is invalid".to_owned())?,
+                // Type=dbus must not announce readiness before the guard's
+                // complete object is registered on this same connection.
+                Some(NativeSessionRole::DisplayProtection) => builder,
                 None => builder,
             };
             let connection = builder.build().await.map_err(|_| {
@@ -410,7 +470,8 @@ impl NativeSessionChannel {
                 )))
             },
         ))?;
-        if reply.body().len() > MAX_REPLY_BYTES {
+        let maximum = reply_limit(self.role, path, interface, method);
+        if reply.body().len() > maximum {
             return Err(NativeCallError::other(
                 "native session reply exceeded its size bound",
             ));
@@ -585,6 +646,138 @@ where
 
 #[cfg(test)]
 mod diagnostic_tests {
+    #[test]
+    fn expanded_display_reply_bound_requires_exact_role_endpoint_and_method() {
+        use super::*;
+        for role in [
+            NativeSessionRole::Control,
+            NativeSessionRole::Executor,
+            NativeSessionRole::DisplayProtection,
+        ] {
+            for path in [
+                "/org/linura/SecurityOwner1",
+                "/org/linura/DisplayProtection1",
+                "/org/linura/Other",
+            ] {
+                for interface in [
+                    "org.linura.SecurityOwner1",
+                    "org.linura.DisplayProtection1",
+                    "org.linura.Other",
+                ] {
+                    for method in [
+                        "ObserveDisplay",
+                        "ObservePreparedDisplay",
+                        "ObserveLock",
+                        "GetAll",
+                        "ReadOriginal",
+                        "ReadFinalization",
+                        "ReadRootPower",
+                        "ReadFinalRetirement",
+                        "ReadOrdinaryOriginal",
+                        "ReserveSuccessor",
+                        "ReadSuccessor",
+                    ] {
+                        let admitted = path == "/org/linura/SecurityOwner1"
+                            && interface == "org.linura.SecurityOwner1"
+                            && matches!(
+                                (role, method),
+                                (NativeSessionRole::Control, "ObserveDisplay")
+                                    | (NativeSessionRole::Executor, "ObservePreparedDisplay")
+                            )
+                            || path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && role == NativeSessionRole::Control
+                                && method == "ReadOriginal";
+                        assert_eq!(
+                            reply_limit(role, path, interface, method),
+                            if path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && matches!(
+                                    (role, method),
+                                    (NativeSessionRole::Control, "ReadSuccessor")
+                                        | (NativeSessionRole::Executor, "ReserveSuccessor")
+                                )
+                            {
+                                crate::MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION + 64
+                            } else if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadOrdinaryOriginal"
+                            {
+                                MAX_DISPLAY_REPLY_BYTES + 32
+                            } else if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadRootPower"
+                            {
+                                crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT
+                                    + crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT
+                                    + MAX_DISPLAY_REPLY_BYTES
+                                    + 160
+                            } else if role == NativeSessionRole::Control
+                                && path == "/org/linura/DisplayProtection1"
+                                && interface == "org.linura.DisplayProtection1"
+                                && method == "ReadFinalRetirement"
+                            {
+                                2 * crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 1024
+                            } else if admitted {
+                                MAX_DISPLAY_REPLY_BYTES
+                            } else {
+                                MAX_REPLY_BYTES
+                            }
+                        );
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn full_retirement_reply_shapes_fit_only_their_exact_transport_exceptions()
+    -> Result<(), zbus::Error> {
+        use super::*;
+        let scope = "/org/linura/DisplayProtection1";
+        let interface = "org.linura.DisplayProtection1";
+        let root = zbus::Message::method_call(scope, "ReadRootPower")?.build(&(
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_ROOT_RETIREMENT],
+            vec![0_u8; MAX_DISPLAY_REPLY_BYTES],
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_CURRENT_COMMIT],
+            true,
+        ))?;
+        let final_record = zbus::Message::method_call(scope, "ReadFinalRetirement")?.build(&(
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT],
+            3_u32,
+            vec![0_u8; crate::MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 512],
+        ))?;
+        let ordinary = zbus::Message::method_call(scope, "ReadOrdinaryOriginal")?
+            .build(&(vec![0_u8; MAX_DISPLAY_REPLY_BYTES],))?;
+        for (message, method) in [
+            (root, "ReadRootPower"),
+            (final_record, "ReadFinalRetirement"),
+            (ordinary, "ReadOrdinaryOriginal"),
+        ] {
+            assert!(message.body().len() > MAX_REPLY_BYTES);
+            assert!(
+                message.body().len()
+                    <= reply_limit(NativeSessionRole::Control, scope, interface, method)
+            );
+            for role in [
+                NativeSessionRole::Executor,
+                NativeSessionRole::DisplayProtection,
+            ] {
+                assert!(message.body().len() > reply_limit(role, scope, interface, method));
+            }
+            assert!(
+                message.body().len()
+                    > reply_limit(
+                        NativeSessionRole::Control,
+                        scope,
+                        interface,
+                        "ReadFinalization"
+                    )
+            );
+        }
+        Ok(())
+    }
     use super::*;
 
     fn property_reply(value: OwnedValue) -> Result<zbus::Message, zbus::Error> {

@@ -17,7 +17,22 @@ mod agent_interpretation;
 mod approval;
 mod approval_review;
 mod authority_clock;
+mod display_checkpoint;
+mod display_finalization_intent;
+mod display_finalization_plan;
+mod display_native_release_reservation;
+mod display_native_release_spend;
+mod display_ordinary_release_intent;
+mod display_ordinary_release_plan;
+mod display_plan;
+mod display_recovery_journal;
+mod display_restoration_link;
+mod display_restoration_plan;
+mod display_safety;
+mod display_terminal_retirement;
 mod durable_authority;
+pub use display_plan::DisplayLayoutPlanRequest;
+pub use display_safety::{DisplayLayoutSafetyReview, DisplaySafetyError};
 mod managed_lifecycle;
 mod operation_registry;
 mod operation_semantics;
@@ -71,11 +86,42 @@ pub use durable_authority::{
     DurableRecoveryOutcome, FreshRecoveryApproval, PreparedDurableAuthority,
 };
 pub use managed_lifecycle::{
-    AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier,
-    MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
-    MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
+    AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
+    AuthorizedEffectExecutor, AuthorizedOrdinaryDisplayCompletion,
+    AuthorizedOrdinaryDisplayRelease, AuthorizedOriginalDisplayCompletion,
+    AuthorizedOriginalDisplayCurrentCommit, AuthorizedOriginalDisplayFinalRetirement,
+    AuthorizedOriginalDisplayFinalization, AuthorizedOriginalDisplayNativePowerRetirement,
+    AuthorizedOriginalDisplayNativeReleaseReservation, AuthorizedOriginalDisplayNativeReleaseSpend,
+    AuthorizedOriginalDisplayRestoration, AuthorizedOriginalDisplayRetirementPreparation,
+    AuthorizedOriginalDisplayRootPowerRetirement, DISPLAY_CONFIRMATION_WINDOW_MS,
+    DisplayAttemptQuery, DisplayContinuationAction, DisplayDecisionAuthorizer,
+    DisplayDecisionChallenge, DisplayTransactionPort, DisplayVerificationTarget,
+    IndependentDisplayVerifier, IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY,
+    MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER,
+    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
     ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
-    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt, TrustedHumanApproval,
+    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    OrdinaryDisplayCompletionPort, OrdinaryDisplayCompletionReceipt,
+    OrdinaryDisplayHandoffInspection, OrdinaryDisplayHandoffVerification,
+    OrdinaryDisplayOriginalInspection, OrdinaryDisplayReleaseAuthorizer,
+    OrdinaryDisplayReleaseChallenge, OrdinaryDisplayReleaseInspection, OrdinaryDisplayReleasePort,
+    OrdinaryDisplayReleaseReceipt, OrdinaryDisplayReleaseRequest, OriginalDisplayCompletionPort,
+    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
+    OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
+    OriginalDisplayCurrentVerification, OriginalDisplayFinalRetirementPort,
+    OriginalDisplayFinalRetirementVerification, OriginalDisplayFinalizationAuthorizer,
+    OriginalDisplayFinalizationChallenge, OriginalDisplayFinalizationInspection,
+    OriginalDisplayFinalizationPort, OriginalDisplayFinalizationReceipt,
+    OriginalDisplayFinalizationRequest, OriginalDisplayNativeHandoffInspection,
+    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativePowerInspection,
+    OriginalDisplayNativePowerRetirementPort, OriginalDisplayNativeReleaseReservationPort,
+    OriginalDisplayNativeReleaseSpendPort, OriginalDisplayQualifiedCurrent,
+    OriginalDisplayQuiescenceInspection, OriginalDisplayReleasedCurrent,
+    OriginalDisplayReleasedCurrentCompletion, OriginalDisplayReleasedCurrentPort,
+    OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
+    OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
+    OriginalDisplayRetirementPreparationPort, OriginalDisplayRootPowerInspection,
+    OriginalDisplayRootPowerRetirementPort, TrustedDisplayDecision, TrustedHumanApproval,
     managed_request_id,
 };
 pub use operation_registry::{

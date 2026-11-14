@@ -5,6 +5,7 @@
 #include "native_startup.h"
 #include "compositor_probe.h"
 #include "lock_mechanism.h"
+#include "native_display_connection.h"
 
 #include <QDBusMessage>
 #include <QObject>
@@ -12,8 +13,28 @@
 #include <optional>
 
 namespace Linura::SecurityOwner {
+struct NativeDisplayRestorationIntent;
+struct NativeDisplayFinalizationIntent;
+struct NativeDisplayOrdinaryReleaseIntent;
+
+enum class NativePeerPurpose;
+struct NativeDisplayChoiceChallenge;
 
 enum class NativeObservedLockState { Unlocked, Secure, Acquiring, Releasing };
+struct NativeDisplaySample final
+{
+    QString resource, compositor, seat, topology, monitors;
+    bool secure = false;
+    QString recoveryPreimage{};
+    [[nodiscard]] QString correlationDigest() const;
+};
+struct NativeDisplayAttemptSample final
+{
+    QString lock, topology, transaction;
+    quint64 deadlineUnixMs = 0;
+    quint32 phase = 7;
+    bool secure = false;
+};
 [[nodiscard]] std::optional<NativeObservedLockState>
 nativeObservedLockState(NativeCompositorLockState compositor, LockMechanism::State mechanism,
                         bool requested, bool coverage);
@@ -32,9 +53,89 @@ class NativeRuntime final : public QObject
     [[nodiscard]] bool armApproval(const QDBusMessage &received, const NativeApprovalScope &scope);
     [[nodiscard]] bool consumeApproval(const QDBusMessage &received,
                                        const NativeApprovalScope &scope);
+    [[nodiscard]] bool armDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
+    [[nodiscard]] std::optional<bool> displayApprovalReady(const QDBusMessage &,
+                                                           const NativeApprovalScope &);
+    [[nodiscard]] bool consumeDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
+    [[nodiscard]] bool cancelDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
+    [[nodiscard]] bool armDisplayDecision(const QDBusMessage &,
+                                          const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] std::optional<bool> displayDecisionReady(const QDBusMessage &,
+                                                           const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool consumeDisplayDecision(const QDBusMessage &,
+                                              const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool cancelDisplayDecision(const QDBusMessage &,
+                                             const NativeDisplayChoiceChallenge &);
+    // Cancels only display continuation and awaits the original compensation.
+    // True is safety readiness, never lock, power or display authority.
+    [[nodiscard]] bool retireDisplayForSecurity(const QDBusMessage &, const NativeLockIdentity &);
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);
+    [[nodiscard]] std::optional<NativeDisplaySample> observeDisplay(const QDBusMessage &received);
+    [[nodiscard]] std::optional<NativeDisplaySample>
+    observePreparedDisplay(const QDBusMessage &received);
+    [[nodiscard]] std::optional<QString>
+    observeOriginalDisplayPresentation(const QDBusMessage &received);
+    [[nodiscard]] std::optional<QString> observeNativeDisplayHandoff(const QDBusMessage &received);
+    [[nodiscard]] std::optional<QString>
+    observeOrdinaryDisplayHandoff(const QDBusMessage &received);
+    [[nodiscard]] std::optional<QString> observeNativeDisplayCurrent(const QDBusMessage &received);
+    [[nodiscard]] std::optional<quint32>
+    dispatchPreparedDisplay(const QDBusMessage &, const NativeDisplayIntent &,
+                            const NativeDisplayCorrelation &, const QString &sampleDigest,
+                            quint64 sampledBootMs, const QString &nativeBaselineGuard);
+    [[nodiscard]] std::optional<quint32>
+    dispatchPreparedSuccessorDisplay(const QDBusMessage &, const NativeDisplayIntent &,
+                                     const NativeDisplayCorrelation &, const QString &sampleDigest,
+                                     quint64 sampledBootMs, const QString &nativeBaselineGuard,
+                                     const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    restoreOriginalDisplay(const QDBusMessage &, const NativeDisplayRestorationIntent &,
+                           const NativeDisplayCorrelation &, const QString &sampleDigest,
+                           quint64 sampledBootMs, int originalGrant);
+    [[nodiscard]] std::optional<quint32> quiesceOriginalDisplayFinalization(
+        const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+        const NativeDisplayCorrelation &, const QString &sampleDigest, quint64 sampledBootMs,
+        int terminalGrant);
+    // One actual Control-owned original Root spend attempt. This only reports
+    // LNRX (phase 6); never physical completion or lock/input/power release.
+    [[nodiscard]] bool spendOrdinaryDisplayRelease(const QDBusMessage &,
+                                                   const NativeDisplayOrdinaryReleaseIntent &,
+                                                   const NativeDisplayCorrelation &,
+                                                   const QString &sampleDigest,
+                                                   quint64 sampledBootMs, int grant);
+    [[nodiscard]] std::optional<quint32>
+    spendOriginalDisplayNativeRelease(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                                      const NativeDisplayCorrelation &, const QString &sampleDigest,
+                                      quint64 sampledBootMs, quint64 controlVersion,
+                                      const QString &controlBinding,
+                                      const QString &controlObservation, int nativeGrant);
+    [[nodiscard]] std::optional<quint32> transferOrdinaryDisplayCompletion(
+        const QDBusMessage &, const NativeDisplayOrdinaryReleaseIntent &,
+        const NativeDisplayCorrelation &, const QString &digest, int grant);
+    [[nodiscard]] std::optional<quint32>
+    transferOriginalDisplayCompletion(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                                      const NativeDisplayCorrelation &, const QString &digest,
+                                      int completionGrant);
+    [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayCurrent(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    commitOriginalDisplayCurrent(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayPower(const QDBusMessage &, const NativeDisplayFinalizationIntent &,
+                               const NativeDisplayCorrelation &, const QString &digest,
+                               const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const QDBusMessage &,
+                                                                 const NativeDisplayIntent &,
+                                                                 const NativeDisplayDecision &);
+    [[nodiscard]] std::optional<NativeDisplayAttemptSample>
+    observeDisplayAttempt(const QDBusMessage &, const NativeDisplayIntent &,
+                          const NativeDisplayCorrelation &);
     [[nodiscard]] bool fencePreparedTransition(const QDBusMessage &received,
                                                const NativeTransitionIdentity &target);
     [[nodiscard]] bool cancelUndispatchedTransition(const QDBusMessage &received,
@@ -63,12 +164,17 @@ class NativeRuntime final : public QObject
     void approvalInteractionCompleted();
 
   private:
+    enum class DisplayPresentation { Restoration, First, Current, Ordinary };
+    [[nodiscard]] std::optional<QString> observeDisplayPresentation(const QDBusMessage &received,
+                                                                    DisplayPresentation);
     NativeRuntime();
     [[nodiscard]] bool initialize(NativeStartup startup);
     void requestNativeUnlock();
     void recoverNativeUnlock();
     void recoverNativeTransition();
     void recoverNativeSleepEntry();
+    [[nodiscard]] std::optional<NativeDisplaySample> displaySample(const QDBusMessage &received,
+                                                                   NativePeerPurpose purpose);
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

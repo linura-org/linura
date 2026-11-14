@@ -203,8 +203,8 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             ),
             (
                 ".github/workflows/v010-shell-runtime-qualification.yml",
-                "[[ -c /dev/kvm ]]",
-                "true # unverified accelerator",
+                '[[ "$VM_ACCELERATION" == kvm ]]\n          [[ -c /dev/kvm ]]',
+                '[[ "$VM_ACCELERATION" == kvm ]]\n          true # unverified accelerator',
                 "[[ -c /dev/kvm ]]",
             ),
             (
@@ -2016,9 +2016,14 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             path = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = path.read_text(encoding="utf-8")
-            marker = "-attempt-${{ github.run_attempt }}"
+            marker = "artifact-name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}"
             self.assertIn(marker, text)
-            path.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            path.write_text(
+                text.replace(
+                    marker, marker.replace("-attempt-${{ github.run_attempt }}", ""), 1
+                ),
+                encoding="utf-8",
+            )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("native tray evidence gate", result.stderr)

@@ -36,7 +36,9 @@ RUST_SERVE_AT_PATTERN = re.compile(
     r"(?:\.serve_at|\.object_server\s*\(\s*\)\s*\.at)\s*"
     r'\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,'
 )
-RUST_BUS_NAME_PATTERN = re.compile(r'\.name\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*\)')
+RUST_BUS_NAME_PATTERN = re.compile(
+    r'\.(?:name|request_name)\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*\)'
+)
 RUST_ZBUS_INTERFACE_PATTERN = re.compile(
     r"#\s*\[\s*(?:zbus::)?interface\s*\((.*?)\)\s*\]",
     re.DOTALL,
@@ -50,7 +52,7 @@ RUST_ACTION_ARG_PATTERN = re.compile(
     r'"--action-id"(?:\s*\.to_owned\(\))?\s*,\s*([A-Z][A-Z0-9_]*|"[^"]+")'
 )
 RUST_NATIVE_APPROVAL_ACTION_PATTERN = re.compile(
-    r'\bNativeApprovalPurpose::[A-Z][A-Za-z0-9_]*\s*=>\s*(?:\{\s*)?("org\.linura\.authority\.[^"]+")'
+    r'\bNative(?:Display)?ApprovalPurpose::[A-Z][A-Za-z0-9_]*\s*=>\s*(?:\{\s*)?("org\.linura\.authority\.[^"]+")'
 )
 CMAKE_QML_MODULE_PATTERN = re.compile(r"\bqt_add_qml_module\s*\((.*?)\)", re.DOTALL)
 CMAKE_URI_PATTERN = re.compile(r"(?:^|\s)URI\s+([A-Za-z0-9_.]+)(?=\s|$)")
@@ -342,7 +344,7 @@ def _rust_dbus_surfaces(
             continue
         local = local_constants[path]
 
-        if ".name" in text:
+        if ".name" in text or ".request_name" in text:
             for match in RUST_BUS_NAME_PATTERN.finditer(text):
                 token = match.group(1)
                 interface_name: str | None = None
@@ -900,9 +902,7 @@ def check(root: Path) -> list[str]:
             bound_active_services.add(service)
 
         if key not in runtime_dbus_name_calls:
-            failures.append(
-                f"missing D-Bus runtime name acquisition {source}: .name({token})"
-            )
+            failures.append(f"missing D-Bus runtime name acquisition {source}: {token}")
         resolved_service = _resolve_runtime_binding_constant(
             source,
             token,
@@ -1014,9 +1014,7 @@ def check(root: Path) -> list[str]:
 
     for source, token in sorted(runtime_dbus_name_calls):
         if (source, token) not in declared_dbus_name_bindings:
-            failures.append(
-                f"undeclared D-Bus runtime name binding {source}: .name({token})"
-            )
+            failures.append(f"undeclared D-Bus runtime name binding {source}: {token}")
 
     for (kind, identifier), status in sorted(declared.items()):
         if (

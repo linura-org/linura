@@ -429,6 +429,12 @@ class NativeAssistiveBridge::Impl final
                           value.focused && value.accepting ? 1 : 0, g_variant_new_string(""));
                 previous = value;
             }
+            // A genuine output hotplug can produce more AT-SPI work than one
+            // bounded dispatch batch. Never idle while an authenticated
+            // caller's read-only application-tree RPC is already queued:
+            // the caller's original 500 ms timeout is not renewed or waived.
+            if (g_main_context_pending(context))
+                continue;
             std::unique_lock lock(mutex);
             condition.wait_for(lock, std::chrono::milliseconds(20),
                                [this] { return stopping.load(); });

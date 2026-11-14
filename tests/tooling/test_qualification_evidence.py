@@ -924,18 +924,37 @@ jobs:
         )
         self.assertIn('"fault_matrix": {\n                  "cases": 11,', workflow)
         self.assertIn(
-            '"expanded_fault_matrix": {\n                  "cases": 49,', workflow
+            '"expanded_fault_matrix": {\n                  "cases": 77,', workflow
         )
 
-        for count, filtered in ((49, 0), (11, 38)):
+        self.assertIn(
+            '"fault_matrix_inventory": root / "tests/acceptance/v06/fault-matrix.txt"',
+            workflow,
+        )
+        inventory = semantic_verifier._v06_matrix_inventory(ROOT)
+        for count, filtered in ((77, 0), (11, 66)):
+            expected = (
+                inventory
+                if count == 77
+                else tuple(
+                    name
+                    for name in inventory
+                    if not name.startswith(("s17_managed_", "s21_managed_"))
+                )
+            )
             with self.subTest(count=count, filtered=filtered):
                 good = (
                     f"running {count} tests\n"
-                    f"test result: ok. {count} passed; 0 failed; 0 ignored; "
+                    + "".join(f"test {name} ... ok\n" for name in expected)
+                    + f"test result: ok. {count} passed; 0 failed; 0 ignored; "
                     f"0 measured; {filtered} filtered out; finished in 0.01s\n"
                 )
                 semantic_verifier._require_v06_matrix_result(
-                    good, count, "v0.6 matrix", filtered_out=filtered
+                    good,
+                    count,
+                    "v0.6 matrix",
+                    filtered_out=filtered,
+                    expected_tests=expected,
                 )
                 rejected = [
                     good.replace(f"running {count} tests", "running 1 test"),
@@ -949,13 +968,83 @@ jobs:
                     "0 measured; 0 filtered out; finished in 0.01s\n",
                     good.replace("test result: ok.", "test result: FAILED."),
                     good + "\nFAILED\n",
+                    good.replace(f"test {expected[0]} ... ok\n", ""),
+                    good.replace(expected[0], "substituted_case"),
+                    good + f"test {expected[0]} ... ok\n",
+                    good.replace(expected[0], expected[1]),
+                    good.replace(
+                        f"test {expected[0]} ... ok",
+                        f"test {expected[0]} ... diagnostic before result\nok",
+                    ),
+                    good.replace(
+                        f"test {expected[0]} ... ok", f"test {expected[0]} ... ignored"
+                    ),
                 ]
                 for invalid in rejected:
                     with self.subTest(invalid=invalid):
                         with self.assertRaises(semantic_verifier.VerificationError):
                             semantic_verifier._require_v06_matrix_result(
-                                invalid, count, "v0.6 matrix", filtered_out=filtered
+                                invalid,
+                                count,
+                                "v0.6 matrix",
+                                filtered_out=filtered,
+                                expected_tests=expected,
                             )
+
+    def test_v06_matrix_inventory_rejects_ambiguous_or_changed_sets(self):
+        inventory = ROOT / "tests/acceptance/v06/fault-matrix.txt"
+        good = inventory.read_bytes()
+        lines = good.splitlines(keepends=True)
+        invalid = (
+            b"".join(line for line in lines if b"::native_handoff::" not in line),
+            b"".join(lines[:-1]),
+            good + lines[-1],
+            b"".join([lines[0], lines[0], *lines[2:]]),
+            b"".join(reversed(lines)),
+            good.replace(b"\n", b"\r\n"),
+            good.rstrip(b"\n"),
+            b"x" * (16 * 1024 + 1),
+            good.replace(b"s17_managed_", b"unreviewed_"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "tests/acceptance/v06/fault-matrix.txt"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(good)
+            self.assertEqual(len(semantic_verifier._v06_matrix_inventory(root)), 77)
+            for data in invalid:
+                with self.subTest(data=data[:100]):
+                    target.write_bytes(data)
+                    with self.assertRaises(semantic_verifier.VerificationError):
+                        semantic_verifier._v06_matrix_inventory(root)
+
+    def test_v06_original_read_requires_both_transport_and_runtime_proofs(self):
+        parsed = "native-display-original-same-account-malformed-scope"
+        denied = "native-display-original-same-account-not-control-denied"
+        failure = "Error org.freedesktop.DBus.Error.Failed: original display protection unavailable; no retry"
+        refusal = "Error org.freedesktop.DBus.Error.AccessDenied: Access denied"
+
+        def quoted(text):
+            return text.replace(" ", "\\ ").replace(";", "\\;")
+
+        good = (
+            f"{parsed}-rc=1\n{parsed}-output={quoted(failure)}\n"
+            f"{denied}-rc=1\n{denied}-output={quoted(refusal)}\n"
+        )
+        semantic_verifier._require_v06_original_read_admission(good)
+        for bad in (
+            good.replace(quoted(failure), quoted(refusal)),
+            good.replace(quoted(refusal), quoted(failure)),
+            good.replace(f"{parsed}-rc=1", f"{parsed}-rc=0"),
+            good.replace(f"{denied}-rc=1", f"{denied}-rc=0"),
+            good.replace(f"{parsed}-output={quoted(failure)}\n", ""),
+            good + f"{denied}-rc=1\n",
+            good + f"{parsed}-output={quoted(failure)}\n",
+            good.replace("no\\ retry", "unknown"),
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(semantic_verifier.VerificationError):
+                    semantic_verifier._require_v06_original_read_admission(bad)
 
     def test_non_evidence_lanes_cannot_self_promote(self):
         contract = evidence.load_contract(ROOT)

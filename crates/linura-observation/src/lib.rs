@@ -5,6 +5,74 @@ use std::fmt::{Display, Formatter};
 
 use linura_core::{CapabilityId, ProviderId, ResourceId};
 
+mod display_ordinary_handoff;
+mod display_ordinary_original;
+mod display_ordinary_release;
+pub use display_ordinary_handoff::{
+    DISPLAY_ORDINARY_HANDOFF_CAPABILITY, DisplayOrdinaryHandoffFacts, DisplayOrdinaryHandoffLineage,
+};
+pub use display_ordinary_original::{
+    DISPLAY_ORDINARY_ORIGINAL_CAPABILITY, DisplayOrdinaryOriginalComparison,
+    DisplayOrdinaryOriginalFacts,
+};
+pub use display_ordinary_release::{
+    DISPLAY_ORDINARY_RELEASE_CAPABILITY, DisplayOrdinaryReleaseComparison,
+    DisplayOrdinaryReleaseFacts,
+};
+mod display;
+mod display_completion;
+mod display_current;
+mod display_root_retirement;
+pub use display_root_retirement::{
+    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DisplayCurrentGrantLineage,
+    DisplayOriginalRootRetirementFacts, DisplayRootRetirementLineage,
+};
+mod display_successor;
+pub use display_successor::{
+    DISPLAY_SUCCESSOR_CAPABILITY, DisplaySuccessorFacts, DisplaySuccessorLineage,
+};
+mod display_final_retirement;
+pub use display_final_retirement::{
+    DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY, DisplayFinalRetirementLineage,
+    DisplayOriginalFinalRetirementFacts, DisplayReleasedCurrentLineage,
+};
+mod display_power_retirement;
+pub use display_power_retirement::{
+    DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DisplayOriginalPowerRetirementFacts,
+};
+mod display_finalization;
+mod display_handoff;
+mod display_presentation;
+mod display_recovery;
+pub use display::{
+    DISPLAY_COVERAGE_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
+    DisplayEvidenceError, DisplayObservationFacts, DisplayRecoveryMetadata,
+    display_observation_attributes, display_recovery_observation_attributes,
+};
+pub use display_completion::{
+    DISPLAY_ORIGINAL_COMPLETION_CAPABILITY, DisplayCompletionLineage,
+    DisplayOriginalCompletionFacts,
+};
+pub use display_current::{
+    DISPLAY_NATIVE_CURRENT_CAPABILITY, DisplayNativeCurrentFacts, DisplayNativeCurrentOutput,
+};
+pub use display_finalization::{
+    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DisplayFinalizationPhase,
+    DisplayFinalizationReservationFacts, DisplayOriginalFinalizationFacts,
+};
+pub use display_handoff::{
+    DISPLAY_NATIVE_HANDOFF_CAPABILITY, DisplayNativeHandoffFacts, DisplayNativeHandoffLineage,
+    DisplayNativeHandoffOutput, DisplayNativeHandoffWindow,
+};
+pub use display_presentation::{
+    DISPLAY_ORIGINAL_PRESENTATION_CAPABILITY, DisplayOriginalPresentationFacts,
+    DisplayPostWriteFrame,
+};
+pub use display_recovery::{
+    DISPLAY_ORIGINAL_PROTECTION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
+    DisplayOriginalProtectionFacts,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObservationAuthority {
     NativeApi,

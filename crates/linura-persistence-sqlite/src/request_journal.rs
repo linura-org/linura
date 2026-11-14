@@ -1,14 +1,16 @@
 //! Independent write-once request retention; does not change the released
 //! transaction schema or reconstruct any approval/dispatch credential.
 
+use std::cell::Cell;
 use std::fmt::{Debug, Formatter};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use linura_core::{PrincipalId, RequestId};
 use linura_transaction::{
-    ApprovedRequestJournal, RETAINED_REQUEST_FORMAT, RetainedRequest, TransactionStoreError,
-    digest_bytes,
+    ApprovedRequestJournal, ApprovedRequestReadScope, RETAINED_REQUEST_FORMAT, RetainedRequest,
+    TransactionStoreError, digest_bytes,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
@@ -25,6 +27,7 @@ const IDENTITY_DOMAIN: &str = "linura.sqlite.request-journal-identity.v1";
 pub struct SqliteApprovedRequestJournal {
     connection: Connection,
     integrity_key: SqliteIntegrityKey,
+    read_scope: Cell<ReadScopeState>,
 }
 
 impl Debug for SqliteApprovedRequestJournal {
@@ -56,6 +59,8 @@ impl SqliteApprovedRequestJournal {
         )
         .map_err(sqlite)?;
         connection
+            .set_prepared_statement_cache_capacity(crate::VALIDATION_STATEMENT_CACHE_CAPACITY);
+        connection
             .busy_timeout(Duration::from_millis(500))
             .map_err(sqlite)?;
         // Refuse foreign schemas before applying persistent journal settings.
@@ -66,11 +71,9 @@ impl SqliteApprovedRequestJournal {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .map_err(sqlite)?;
         let objects: i64 = connection
-            .query_row(
-                "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
-                [],
-                |r| r.get(0),
-            )
+            .prepare_cached("SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+            .map_err(sqlite)?
+            .query_row([], |r| r.get(0))
             .map_err(sqlite)?;
         if !((application == 0 && version == 0 && objects == 0)
             || (application == APPLICATION_ID && version == 1))
@@ -123,6 +126,7 @@ impl SqliteApprovedRequestJournal {
         let journal = Self {
             connection,
             integrity_key,
+            read_scope: Cell::new(ReadScopeState::Idle),
         };
         journal.integrity_check()?;
         Ok(journal)
@@ -143,9 +147,24 @@ fn identity_material(key: &SqliteIntegrityKey) -> (String, String, Vec<u8>) {
 
 type SchemaObject = (String, String, String, String);
 
+fn expected_schema_objects() -> Result<&'static [SchemaObject], TransactionStoreError> {
+    // Only the compiled schema is retained. Each caller still reads and checks
+    // its live database, identity, durability settings and authenticated rows.
+    static EXPECTED: OnceLock<Result<Vec<SchemaObject>, TransactionStoreError>> = OnceLock::new();
+    EXPECTED
+        .get_or_init(|| {
+            let reference = Connection::open_in_memory().map_err(sqlite)?;
+            reference.execute_batch(SCHEMA).map_err(sqlite)?;
+            schema_objects(&reference)
+        })
+        .as_ref()
+        .map(Vec::as_slice)
+        .map_err(Clone::clone)
+}
+
 fn schema_objects(connection: &Connection) -> Result<Vec<SchemaObject>, TransactionStoreError> {
     let mut statement = connection
-        .prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY name LIMIT 4")
+        .prepare_cached("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY name LIMIT 4")
         .map_err(sqlite)?;
     let rows = statement
         .query_map([], |row| {
@@ -164,9 +183,7 @@ fn validate_identity(
     connection: &Connection,
     key: &SqliteIntegrityKey,
 ) -> Result<(), TransactionStoreError> {
-    let reference = Connection::open_in_memory().map_err(sqlite)?;
-    reference.execute_batch(SCHEMA).map_err(sqlite)?;
-    if schema_objects(connection)? != schema_objects(&reference)? {
+    if schema_objects(connection)?.as_slice() != expected_schema_objects()? {
         return Err(corrupt());
     }
     let application: i64 = connection
@@ -205,22 +222,28 @@ fn validate_identity(
         return Err(corrupt());
     }
     let identities: i64 = connection
-        .query_row("SELECT count(*) FROM request_journal_identity", [], |r| {
-            r.get(0)
-        })
+        .prepare_cached("SELECT count(*) FROM request_journal_identity")
+        .map_err(sqlite)?
+        .query_row([], |r| r.get(0))
         .map_err(sqlite)?;
     if identities != 1 {
         return Err(corrupt());
     }
     let (expected_fingerprint, expected_schema, canonical) = identity_material(key);
-    let valid = connection.query_row("SELECT format,integrity_fingerprint,schema_digest,integrity_tag FROM request_journal_identity WHERE singleton=1", [], |r| {
+    let valid = connection.prepare_cached("SELECT format,integrity_fingerprint,schema_digest,integrity_tag FROM request_journal_identity WHERE singleton=1",
+            )
+            .map_err(sqlite)?
+            .query_row(
+                [], |r| {
         Ok(r.get::<_, i64>(0)? == 1
             && r.get_ref(1)?.as_str()? == expected_fingerprint
             && r.get_ref(2)?.as_str()? == expected_schema
             && key.verify(IDENTITY_DOMAIN, &canonical, r.get_ref(3)?.as_blob()?))
     }).map_err(sqlite)?;
     let count: i64 = connection
-        .query_row("SELECT count(*) FROM retained_requests", [], |r| r.get(0))
+        .prepare_cached("SELECT count(*) FROM retained_requests")
+        .map_err(sqlite)?
+        .query_row([], |r| r.get(0))
         .map_err(sqlite)?;
     if !valid || count > MAX_REQUESTS {
         return Err(corrupt());
@@ -244,7 +267,7 @@ fn load_record(
     principal: &PrincipalId,
     request_id: &RequestId,
 ) -> Result<Option<RetainedRequest>, TransactionStoreError> {
-    connection.query_row("SELECT format,CASE WHEN length(canonical) BETWEEN 1 AND 262144 THEN canonical ELSE NULL END,CASE WHEN length(CAST(request_digest AS BLOB))=71 THEN request_digest ELSE NULL END,CASE WHEN length(integrity_tag)=32 THEN integrity_tag ELSE NULL END FROM retained_requests WHERE principal=?1 AND request_id=?2",
+    connection.prepare_cached("SELECT format,CASE WHEN length(canonical) BETWEEN 1 AND 262144 THEN canonical ELSE NULL END,CASE WHEN length(CAST(request_digest AS BLOB))=71 THEN request_digest ELSE NULL END,CASE WHEN length(integrity_tag)=32 THEN integrity_tag ELSE NULL END FROM retained_requests WHERE principal=?1 AND request_id=?2").map_err(|_| corrupt())?.query_row(
         params![principal.as_str(), request_id.as_str()], |row| {
             let bytes = row.get_ref(1)?.as_blob()?;
             let digest = row.get_ref(2)?.as_str()?;
@@ -262,8 +285,104 @@ fn load_record(
         }).optional().map_err(|_| corrupt())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReadScopeState {
+    Idle,
+    Checking,
+    Active { changes: u64 },
+    Poisoned,
+}
+
+impl SqliteApprovedRequestJournal {
+    fn require_checked_snapshot(&self) -> Result<(), TransactionStoreError> {
+        if matches!(self.read_scope.get(), ReadScopeState::Active { changes }
+            if !self.connection.is_autocommit() && changes == self.connection.total_changes())
+        {
+            Ok(())
+        } else {
+            self.read_scope.set(ReadScopeState::Poisoned);
+            Err(corrupt())
+        }
+    }
+}
+
+struct CheckedRead<'a> {
+    journal: &'a SqliteApprovedRequestJournal,
+}
+impl Debug for CheckedRead<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CheckedRequestHistoryRead")
+    }
+}
+impl ApprovedRequestReadScope for CheckedRead<'_> {}
+impl Drop for CheckedRead<'_> {
+    fn drop(&mut self) {
+        let unchanged = self.journal.read_scope.get() == ReadScopeState::Checking
+            || self.journal.require_checked_snapshot().is_ok();
+        let rolled_back = self.journal.connection.execute_batch("ROLLBACK").is_ok();
+        if rolled_back && unchanged {
+            self.journal.read_scope.set(ReadScopeState::Idle);
+        } else {
+            self.journal.read_scope.set(ReadScopeState::Poisoned);
+        }
+    }
+}
+
+fn check_history(
+    connection: &Connection,
+    key: &SqliteIntegrityKey,
+) -> Result<(), TransactionStoreError> {
+    let check: String = connection
+        .query_row("PRAGMA integrity_check(1)", [], |r| r.get(0))
+        .map_err(sqlite)?;
+    if check != "ok" {
+        return Err(corrupt());
+    }
+    let mut statement = connection
+        .prepare_cached("SELECT principal,request_id FROM retained_requests LIMIT 4097")
+        .map_err(sqlite)?;
+    let rows = statement
+        .query_map([], |row| {
+            let principal = row.get_ref(0)?.as_str()?;
+            let request = row.get_ref(1)?.as_str()?;
+            if principal.len() > 256 || request.len() > 256 {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+            Ok((principal.to_owned(), request.to_owned()))
+        })
+        .map_err(sqlite)?;
+    for row in rows {
+        let (principal, request) = row.map_err(sqlite)?;
+        let principal = PrincipalId::new(principal).map_err(|_| corrupt())?;
+        let request = RequestId::new(request).map_err(|_| corrupt())?;
+        load_record(connection, key, &principal, &request)?.ok_or_else(corrupt)?;
+    }
+    Ok(())
+}
+
 impl ApprovedRequestJournal for SqliteApprovedRequestJournal {
+    fn checked_read_scope(
+        &self,
+    ) -> Result<Box<dyn ApprovedRequestReadScope + '_>, TransactionStoreError> {
+        if self.read_scope.get() != ReadScopeState::Idle || !self.connection.is_autocommit() {
+            return Err(corrupt());
+        }
+        self.connection
+            .execute_batch("BEGIN DEFERRED")
+            .map_err(sqlite)?;
+        self.read_scope.set(ReadScopeState::Checking);
+        let scope = CheckedRead { journal: self };
+        validate_identity(&self.connection, &self.integrity_key)?;
+        check_history(&self.connection, &self.integrity_key)?;
+        self.read_scope.set(ReadScopeState::Active {
+            changes: self.connection.total_changes(),
+        });
+        Ok(Box::new(scope))
+    }
     fn retain(&mut self, request: &RetainedRequest) -> Result<(), TransactionStoreError> {
+        if self.read_scope.get() != ReadScopeState::Idle {
+            return Err(corrupt());
+        }
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -280,7 +399,9 @@ impl ApprovedRequestJournal for SqliteApprovedRequestJournal {
             }
         } else {
             let count: i64 = transaction
-                .query_row("SELECT count(*) FROM retained_requests", [], |r| r.get(0))
+                .prepare_cached("SELECT count(*) FROM retained_requests")
+                .map_err(sqlite)?
+                .query_row([], |r| r.get(0))
                 .map_err(sqlite)?;
             if count >= MAX_REQUESTS {
                 return Err(TransactionStoreError::CapacityExceeded);
@@ -309,6 +430,23 @@ impl ApprovedRequestJournal for SqliteApprovedRequestJournal {
         principal: &PrincipalId,
         request_id: &RequestId,
     ) -> Result<RetainedRequest, TransactionStoreError> {
+        match self.read_scope.get() {
+            ReadScopeState::Poisoned | ReadScopeState::Checking => return Err(corrupt()),
+            ReadScopeState::Active { .. } => {
+                self.require_checked_snapshot()?;
+                let result =
+                    load_record(&self.connection, &self.integrity_key, principal, request_id)
+                        .and_then(|record| record.ok_or(TransactionStoreError::NotFound));
+                if result
+                    .as_ref()
+                    .is_err_and(|e| *e != TransactionStoreError::NotFound)
+                {
+                    self.read_scope.set(ReadScopeState::Poisoned);
+                }
+                return result;
+            }
+            ReadScopeState::Idle => (),
+        }
         let transaction = self.connection.unchecked_transaction().map_err(sqlite)?;
         validate_identity(&transaction, &self.integrity_key)?;
         load_record(&transaction, &self.integrity_key, principal, request_id)?
@@ -316,35 +454,25 @@ impl ApprovedRequestJournal for SqliteApprovedRequestJournal {
     }
 
     fn integrity_check(&self) -> Result<(), TransactionStoreError> {
+        match self.read_scope.get() {
+            ReadScopeState::Poisoned | ReadScopeState::Checking => return Err(corrupt()),
+            ReadScopeState::Active { .. } => {
+                self.require_checked_snapshot()?;
+                // Entry already authenticated EVERY row of this held SQLite
+                // snapshot. No writer or provider is exposed by the scope.
+                // Recheck connection-local identity/durability settings, but
+                // do not rescan the same immutable history for each parent.
+                let result = validate_identity(&self.connection, &self.integrity_key);
+                if result.is_err() {
+                    self.read_scope.set(ReadScopeState::Poisoned);
+                }
+                return result;
+            }
+            ReadScopeState::Idle => (),
+        }
         let transaction = self.connection.unchecked_transaction().map_err(sqlite)?;
         validate_identity(&transaction, &self.integrity_key)?;
-        let check: String = transaction
-            .query_row("PRAGMA integrity_check(1)", [], |r| r.get(0))
-            .map_err(sqlite)?;
-        if check != "ok" {
-            return Err(corrupt());
-        }
-        let mut statement = transaction
-            .prepare("SELECT principal,request_id FROM retained_requests LIMIT 4097")
-            .map_err(sqlite)?;
-        let rows = statement
-            .query_map([], |row| {
-                let principal = row.get_ref(0)?.as_str()?;
-                let request = row.get_ref(1)?.as_str()?;
-                if principal.len() > 256 || request.len() > 256 {
-                    return Err(rusqlite::Error::InvalidQuery);
-                }
-                Ok((principal.to_owned(), request.to_owned()))
-            })
-            .map_err(sqlite)?;
-        for row in rows {
-            let (principal, request) = row.map_err(sqlite)?;
-            let principal = PrincipalId::new(principal).map_err(|_| corrupt())?;
-            let request = RequestId::new(request).map_err(|_| corrupt())?;
-            load_record(&transaction, &self.integrity_key, &principal, &request)?
-                .ok_or_else(corrupt)?;
-        }
-        Ok(())
+        check_history(&transaction, &self.integrity_key)
     }
 }
 
@@ -357,13 +485,13 @@ mod tests {
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
-    struct Database {
+    pub(super) struct Database {
         root: PathBuf,
         path: PathBuf,
     }
 
     impl Database {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let root = std::env::temp_dir().join(format!(
                 "linura-approved-request-{}-{}",
                 std::process::id(),
@@ -373,7 +501,7 @@ mod tests {
             let path = root.join("requests.sqlite3");
             Self { root, path }
         }
-        fn open(&self) -> SqliteApprovedRequestJournal {
+        pub(super) fn open(&self) -> SqliteApprovedRequestJournal {
             SqliteApprovedRequestJournal::open(&self.path, key(0x61))
                 .unwrap_or_else(|e| unreachable!("{e}"))
         }
@@ -389,7 +517,7 @@ mod tests {
         SqliteIntegrityKey::new(vec![byte; 32]).unwrap_or_else(|e| unreachable!("{e}"))
     }
 
-    fn record(principal: &str, request: &str, bytes: &[u8]) -> RetainedRequest {
+    pub(super) fn record(principal: &str, request: &str, bytes: &[u8]) -> RetainedRequest {
         RetainedRequest::new(
             PrincipalId::new(principal).unwrap_or_else(|e| unreachable!("{e}")),
             RequestId::new(request).unwrap_or_else(|e| unreachable!("{e}")),
@@ -503,6 +631,35 @@ mod tests {
     }
 
     #[test]
+    fn independent_journals_revalidate_live_state_after_reference_is_warm() {
+        let good_database = Database::new();
+        let mut good = good_database.open();
+        let request = record("unix:uid:1000", "request:s17:a", b"lock");
+        assert!(good.retain(&request).is_ok());
+        for sql in [
+            "CREATE TABLE foreign_schema(value BLOB)",
+            "UPDATE request_journal_identity SET integrity_tag=zeroblob(32)",
+            "UPDATE retained_requests SET integrity_tag=zeroblob(32)",
+            "PRAGMA synchronous=OFF",
+        ] {
+            let bad_database = Database::new();
+            let mut bad = bad_database.open();
+            assert!(bad.retain(&request).is_ok());
+            assert!(bad.integrity_check().is_ok());
+            bad.connection
+                .execute_batch(sql)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert!(bad.integrity_check().is_err());
+            assert!(bad.load(request.principal(), request.request_id()).is_err());
+            assert!(good.integrity_check().is_ok());
+            assert_eq!(
+                good.load(request.principal(), request.request_id()),
+                Ok(request.clone())
+            );
+        }
+    }
+
+    #[test]
     fn extra_triggers_views_or_tables_fail_closed_before_writing() {
         for sql in [
             "CREATE TRIGGER malicious AFTER INSERT ON retained_requests BEGIN DELETE FROM retained_requests; END;",
@@ -604,5 +761,188 @@ mod tests {
             .unwrap_or_else(|e| unreachable!("{e}"));
         std::os::unix::fs::symlink(&target, &database.path).unwrap_or_else(|e| unreachable!("{e}"));
         assert!(SqliteApprovedRequestJournal::open(&database.path, key(0x61)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod read_scope_tests {
+    use super::tests::{Database, record};
+    use super::*;
+
+    #[test]
+    fn checked_scope_is_coherent_and_a_new_scope_reloads_concurrent_commits() {
+        let database = Database::new();
+        let mut journal = database.open();
+        let first = record(
+            "unix:uid:1000",
+            "request:scope:first",
+            b"first immutable record",
+        );
+        let later = record(
+            "unix:uid:1000",
+            "request:scope:later",
+            b"later immutable record",
+        );
+        assert!(journal.retain(&first).is_ok());
+        let scope = journal
+            .checked_read_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            journal.load(first.principal(), first.request_id()),
+            Ok(first.clone())
+        );
+        assert!(journal.checked_read_scope().is_err());
+        assert!(journal.integrity_check().is_ok());
+        let mut concurrent = database.open();
+        assert!(concurrent.retain(&later).is_ok());
+        assert_eq!(
+            journal.load(later.principal(), later.request_id()),
+            Err(TransactionStoreError::NotFound)
+        );
+        assert_eq!(
+            journal.load(first.principal(), first.request_id()),
+            Ok(first)
+        );
+        drop(scope);
+        assert!(journal.connection.is_autocommit());
+        let next = journal
+            .checked_read_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert_eq!(
+            journal.load(later.principal(), later.request_id()),
+            Ok(later)
+        );
+        drop(next);
+        assert!(journal.integrity_check().is_ok());
+    }
+
+    #[test]
+    fn scope_validates_all_rows_and_rechecks_live_identity_after_drop() {
+        for fault in 0..3 {
+            let database = Database::new();
+            let mut journal = database.open();
+            let first = record("unix:uid:1000", "request:scope:first", b"first");
+            let other = record("unix:uid:1000", "request:scope:unselected", b"other");
+            assert!(journal.retain(&first).is_ok());
+            assert!(journal.retain(&other).is_ok());
+            {
+                let _scope = journal
+                    .checked_read_scope()
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+                assert_eq!(
+                    journal.load(first.principal(), first.request_id()),
+                    Ok(first)
+                );
+            }
+            let sql = match fault {
+                0 => {
+                    "UPDATE retained_requests SET integrity_tag=zeroblob(32) WHERE request_id='request:scope:unselected'"
+                }
+                1 => "PRAGMA trusted_schema=ON",
+                _ => "CREATE TABLE unexpected(value BLOB)",
+            };
+            journal
+                .connection
+                .execute_batch(sql)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert!(journal.checked_read_scope().is_err(), "fault {fault}");
+            assert!(journal.connection.is_autocommit());
+            assert!(journal.integrity_check().is_err());
+        }
+    }
+
+    #[test]
+    fn nested_checks_cannot_promote_concurrent_corruption_or_changed_settings() {
+        let database = Database::new();
+        let mut journal = database.open();
+        let request = record("unix:uid:1000", "request:scope:validated", b"validated");
+        let other = record("unix:uid:1000", "request:scope:other", b"unselected");
+        assert!(journal.retain(&request).is_ok());
+        assert!(journal.retain(&other).is_ok());
+        let scope = journal
+            .checked_read_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let concurrent = database.open();
+        concurrent
+            .connection
+            .execute_batch("UPDATE retained_requests SET integrity_tag=zeroblob(32) WHERE request_id='request:scope:other'")
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        // The already authenticated snapshot is coherent, including its
+        // unselected rows. A subsequent current scope must see the corruption.
+        assert!(journal.integrity_check().is_ok());
+        assert_eq!(
+            journal.load(other.principal(), other.request_id()),
+            Ok(other)
+        );
+        drop(scope);
+        assert!(journal.checked_read_scope().is_err());
+
+        let clean = Database::new();
+        let mut journal = clean.open();
+        assert!(journal.retain(&request).is_ok());
+        let scope = journal
+            .checked_read_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        journal
+            .connection
+            .execute_batch("PRAGMA trusted_schema=ON")
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(journal.integrity_check().is_err());
+        assert!(
+            journal
+                .load(request.principal(), request.request_id())
+                .is_err()
+        );
+        drop(scope);
+        assert!(journal.retain(&request).is_err());
+    }
+
+    #[test]
+    fn a_scoped_record_still_requires_its_mac_and_rollback_failure_poisons_the_lifetime() {
+        for fault in 0..2 {
+            let database = Database::new();
+            let mut journal = database.open();
+            let first = record("unix:uid:1000", "request:scope:first", b"first");
+            assert!(journal.retain(&first).is_ok());
+            let scope = journal
+                .checked_read_scope()
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            if fault == 0 {
+                // Private test-only access to the underlying connection. No
+                // public read scope exposes SQL or a writer handle.
+                journal
+                    .connection
+                    .execute_batch("UPDATE retained_requests SET integrity_tag=zeroblob(32)")
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+                assert!(journal.load(first.principal(), first.request_id()).is_err());
+            } else {
+                journal
+                    .connection
+                    .execute_batch("ROLLBACK")
+                    .unwrap_or_else(|e| unreachable!("{e}"));
+                assert!(journal.integrity_check().is_err());
+            }
+            drop(scope);
+            assert!(journal.load(first.principal(), first.request_id()).is_err());
+            assert!(journal.checked_read_scope().is_err());
+            assert!(journal.retain(&first).is_err());
+        }
+    }
+
+    #[test]
+    fn forgetting_a_scope_cannot_reopen_writes_or_another_current_inspection() {
+        let database = Database::new();
+        let mut journal = database.open();
+        let scope = journal
+            .checked_read_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        std::mem::forget(scope);
+        assert!(
+            journal
+                .retain(&record("unix:uid:1000", "request:scope:orphan", b"data"))
+                .is_err()
+        );
+        assert!(journal.checked_read_scope().is_err());
+        assert!(journal.integrity_check().is_ok());
     }
 }

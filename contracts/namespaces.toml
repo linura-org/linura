@@ -67,6 +67,21 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.executor.session.apply-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.executor.session.restore-original-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.executor.session.quiesce-original-display-finalization"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "linura-executor-session.service"
 kind = "systemd-unit"
 status = "active"
@@ -145,6 +160,26 @@ status = "active"
 
 [[identifier]]
 id = "org.linura.authority.unlock-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.apply-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.restore-original-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.finalize-original-display-restoration"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.release-ordinary-display"
 kind = "polkit-action"
 status = "active"
 
@@ -260,6 +295,27 @@ token = "TRANSITION_ACTION"
 action = "org.linura.executor.session.execute-transition"
 policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
 
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "DISPLAY_ACTION"
+action = "org.linura.executor.session.apply-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
+
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "ORIGINAL_DISPLAY_ACTION"
+action = "org.linura.executor.session.restore-original-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
+
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "FINALIZATION_DISPLAY_ACTION"
+action = "org.linura.executor.session.quiesce-original-display-finalization"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
+
 [[dbus_name_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"
 token = "SERVICE_NAME"
@@ -327,6 +383,34 @@ action = "org.linura.authority.unlock-session"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.apply-display-layout"'
+action = "org.linura.authority.apply-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.restore-original-display-layout"'
+action = "org.linura.authority.restore-original-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.finalize-original-display-restoration"'
+action = "org.linura.authority.finalize-original-display-restoration"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.release-ordinary-display"'
+action = "org.linura.authority.release-ordinary-display"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
 source = "crates/linura-linux-session/src/owner.rs"
 usage = "native-approval-action"
 token = '"org.linura.authority.enable-protective-lock"'
@@ -374,3 +458,34 @@ usage = "authorize-caller"
 token = "MANAGED_ACTION_ID"
 action = "org.linura.executor.systemd.set-active-state"
 policy = "packaging/polkit-1/actions/org.linura.executor.systemd.policy"
+
+[[identifier]]
+id = "org.linura.DisplayProtection1"
+kind = "dbus-service"
+status = "active"
+primary_interface = "org.linura.DisplayProtection1"
+
+[[identifier]]
+id = "org.linura.DisplayProtection1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/DisplayProtection1"
+
+[[identifier]]
+id = "linura-display-protection.service"
+kind = "systemd-unit"
+status = "active"
+
+[[dbus_name_binding]]
+source = "crates/linura-linux-session/src/bus.rs"
+token = "DISPLAY_PROTECTION_SERVICE"
+service = "org.linura.DisplayProtection1"
+bus = "system"
+policy = "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf"
+systemd_unit = "packaging/systemd/system/linura-display-protection.service"
+
+[[dbus_registration]]
+source = "executors/linura-executor-session/src/display_protection_service.rs"
+path_token = "PATH"
+object_token = "service"
+interface = "org.linura.DisplayProtection1"

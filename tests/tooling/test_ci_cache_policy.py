@@ -47,6 +47,39 @@ class CiCachePolicyTests(unittest.TestCase):
             failures,
         )
 
+    def test_native_display_build_and_ctest_cannot_be_bypassed(self) -> None:
+        for old, new in (
+            ("cmake -S apps/linura-hyprland-display", "echo skipped"),
+            (
+                "-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON",
+                "-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF",
+            ),
+            ('ctest --test-dir "$build_dir" --output-on-failure', "true"),
+        ):
+            with self.subTest(old=old):
+                root = self.copy_root()
+                path = root / ".github/workflows/ci.yml"
+                text = path.read_text(encoding="utf-8")
+                marker = "      - name: Build and test native display mechanism\n"
+                before, remaining = text.split(marker, 1)
+                native, after = remaining.split(
+                    "      - name: Build and test native security-owner foundation", 1
+                )
+                self.assertIn(old, native)
+                path.write_text(
+                    before
+                    + marker
+                    + native.replace(old, new, 1)
+                    + "      - name: Build and test native security-owner foundation"
+                    + after,
+                    encoding="utf-8",
+                )
+                failures = policy.check(root)
+                self.assertTrue(
+                    any("native display build recipe drifted" in f for f in failures),
+                    failures,
+                )
+
     def test_native_ctest_cannot_be_bypassed(self) -> None:
         root = self.copy_root()
         path = root / ".github/workflows/ci.yml"

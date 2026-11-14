@@ -58,6 +58,7 @@ struct NativeSessionBinding final
 {
     NativeLockIdentity lock;
     quint32 compositorPid = 0;
+    QString seat = {};
     bool operator==(const NativeSessionBinding &) const = default;
 };
 

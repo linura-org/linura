@@ -1,0 +1,2678 @@
+#include "pinned_protected.h"
+#include "pinned_integration.h"
+#include "protected_wire.h"
+#include "original_finalization_intent.h"
+#include "original_finalization_grant.h"
+#include "original_native_release_grant.h"
+#include "ordinary_release_grant.h"
+#include "original_completion_grant.h"
+#include "original_power_retirement.h"
+#include "original_current_commit.h"
+#include "original_final_retirement.h"
+#include "original_successor_preparation.h"
+#include "sealed_native_material.h"
+#include "native_current_frame_gate.h"
+#include "protected_input_retirement.h"
+#include "protected_key_delivery.h"
+#include "protected_frame.h"
+#include "protected_scope_history.h"
+#include "protected_opaque_buffer.h"
+#include "native_owner_admission.h"
+
+#include "src/Compositor.hpp"
+#include "src/config/ConfigValue.hpp"
+#include "src/plugins/PluginSystem.hpp"
+#include "src/managers/input/InputManager.hpp"
+#include "src/managers/SeatManager.hpp"
+#include "src/managers/eventLoop/EventLoopManager.hpp"
+#include "src/output/Monitor.hpp"
+#include "src/pointer/PointerManager.hpp"
+#include "src/protocols/core/Compositor.hpp"
+#include "src/render/Renderer.hpp"
+#include "src/render/OpenGL.hpp"
+#include "src/render/Renderbuffer.hpp"
+#include "src/render/pass/RectPassElement.hpp"
+#include "src/render/pass/SurfacePassElement.hpp"
+#include "src/state/MonitorState.hpp"
+
+#include <aquamarine/input/Input.hpp>
+#include <libinput.h>
+#include <libudev.h>
+#include <cstring>
+#include <string_view>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <linux/input-event-codes.h>
+#include <map>
+#include <memory>
+#include <wayland-server-core.h>
+
+namespace Linura::HyprlandDisplay {
+namespace {
+std::optional<NativeFirstFrameGate::Receipt> readHandoffComparison(const Correlation &, bool);
+}
+
+namespace {
+class PrivateRole final : public ISurfaceRole
+{
+  public:
+    eSurfaceRole role() override
+    {
+        return SURFACE_ROLE_LINURA_PROTECTED;
+    }
+};
+struct NativeData;
+std::weak_ptr<NativeData> active;
+// A failed/abandoned transaction must not drop its fence when wire objects die.
+// Only verified terminal retirement releases this compositor-owned reference.
+std::shared_ptr<NativeData> mutationFence;
+NativeData *activeNative = nullptr;
+ProtectedInputRetirement inputRetirement;
+std::unique_ptr<ProtectedWireEndpoint> endpoint;
+std::uint64_t nextEpoch = 1;
+ProtectedScopeHistory scopes;
+wl_event_source *drainTimer = nullptr;
+std::map<std::pair<IPointer *, std::uint32_t>, WP<IPointer>> heldButtons;
+
+bool nativeInputOrigin(libinput_device *device)
+{
+    if (!device)
+        return false;
+    auto *native = libinput_device_get_udev_device(device);
+    if (!native)
+        return false;
+    const char *path = udev_device_get_syspath(native);
+    const auto length = path ? strnlen(path, 4097) : 0;
+    const std::string_view value =
+        path && length <= 4096 ? std::string_view(path, length) : std::string_view{};
+    // This is the live libinput device's udev object, not a client-supplied
+    // name or a lookup which can adopt a recycled event node. Guest virtio/USB
+    // devices remain native guest input; this makes no physical Q11 claim.
+    const bool accepted =
+        value.starts_with("/sys/devices/") && value.find("/virtual/") == std::string_view::npos;
+    udev_device_unref(native);
+    return accepted;
+}
+bool nativeKeyboardDevice(const SP<IKeyboard> &keyboard)
+{
+    const auto native = keyboard && !keyboard->isVirtual() ? keyboard->aq() : nullptr;
+    return native && nativeInputOrigin(native->getLibinputHandle());
+}
+bool nativePointerDevice(const SP<IPointer> &pointer)
+{
+    const auto native = pointer && !pointer->isVirtual() ? pointer->aq() : nullptr;
+    return native && nativeInputOrigin(native->getLibinputHandle());
+}
+ProtectedInputRetirement::Held heldInput()
+{
+    ProtectedInputRetirement::Held held{!heldButtons.empty(), false, !heldButtons.empty()};
+    if (!g_pInputManager)
+        return {true, false, true};
+    for (const auto &keyboard : g_pInputManager->m_keyboards) {
+        if (!nativeKeyboardDevice(keyboard))
+            continue;
+        for (std::uint32_t key = 0; key <= KEY_MAX; ++key) {
+            if (!keyboard->getPressed(key))
+                continue;
+            held.any = true;
+            if (key == KEY_ESC)
+                held.escape = true;
+            else
+                held.other = true;
+        }
+    }
+    return held;
+}
+bool keysHeld()
+{
+    return heldInput().any;
+}
+bool supportedPresentation()
+{
+    static auto shader = CConfigValue<std::string>("decoration:screen_shader");
+    return g_pPluginSystem && g_pPluginSystem->pluginCount() == 0 &&
+           ((*shader).empty() || *shader == STRVAL_EMPTY);
+}
+// A modeset placeholder is allocated, not initialized. Render directly into
+// that exact future-size scanout buffer before it can reach the backend. The
+// pinned FULL_FAKE path binds the supplied FB without importing the ordinary
+// scene or committing an output; no nested render pass is permitted here.
+bool renderOpaqueBuffer(Monitor::CMonitor *monitor, const SP<Aquamarine::IBuffer> &buffer)
+{
+    if (!monitor || !monitor->m_output || !buffer || !buffer->good() || !g_pHyprRenderer ||
+        !Render::GL::g_pHyprOpenGL || g_pHyprRenderer->renderData().pMonitor)
+        return false;
+    if (!monitor->m_output->swapchain || !monitor->m_output->swapchain->contains(buffer) ||
+        buffer->lockedByBackend || buffer->backendPinCount() != 0)
+        return false; // Never modify a client buffer or an existing scanout in place.
+    const auto &state = monitor->m_output->state->state();
+    const auto mode = state.mode ? state.mode : state.customMode;
+    if (!state.enabled || !mode || buffer->size != mode->pixelSize || buffer->size.x < 1 ||
+        buffer->size.y < 1 || buffer->size.x > 32768 || buffer->size.y > 32768 ||
+        buffer->size.x * buffer->size.y > 8 * 1024 * 1024 ||
+        buffer->size.x != std::floor(buffer->size.x) ||
+        buffer->size.y != std::floor(buffer->size.y))
+        return false;
+    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    if (glGetError() != GL_NO_ERROR || glGetGraphicsResetStatus() != GL_NO_ERROR)
+        return false;
+    const auto renderbuffer = g_pHyprRenderer->getOrCreateRenderbuffer(buffer, state.drmFormat);
+    const auto framebuffer = renderbuffer ? renderbuffer->getFB() : nullptr;
+    if (!framebuffer || framebuffer->m_size != buffer->size)
+        return false;
+    CRegion damage{0, 0, static_cast<int>(buffer->size.x), static_cast<int>(buffer->size.y)};
+    if (!g_pHyprRenderer->beginFullFakeRender(monitor->m_self.lock(), damage, framebuffer))
+        return false;
+    // Clear is independent of the old monitor transform, viewport, damage,
+    // color management and scene contents. Restrictive inherited write masks
+    // cannot leave uninitialized pixels outside the old output geometry.
+    const bool cleared = clearProtectedFramebuffer();
+    g_pHyprRenderer->endRender();
+    // This path has no renderer-produced acquire fence. Complete the actual
+    // write before handing the buffer to queued native submission. Completion
+    // here is NOT a hardware presentation acknowledgement.
+    return cleared && glGetError() == GL_NO_ERROR && glGetGraphicsResetStatus() == GL_NO_ERROR;
+}
+bool draining()
+{
+    return inputRetirement.blocked() || !heldButtons.empty();
+}
+void scheduleRefocus()
+{
+    if (g_pEventLoopManager)
+        g_pEventLoopManager->doLater([] {
+            if (!active.expired() || draining() || !g_pInputManager)
+                return;
+            g_pInputManager->refocus();
+        });
+}
+struct ImmutablePresentationBuffer final
+{
+    explicit ImmutablePresentationBuffer(SP<Aquamarine::IBuffer> value) : buffer(std::move(value))
+    {
+        buffer->lock();
+    }
+    ~ImmutablePresentationBuffer()
+    {
+        buffer->unlock();
+    }
+    ImmutablePresentationBuffer(const ImmutablePresentationBuffer &) = delete;
+    ImmutablePresentationBuffer &operator=(const ImmutablePresentationBuffer &) = delete;
+    SP<Aquamarine::IBuffer> buffer;
+};
+struct NativeData final : std::enable_shared_from_this<NativeData>
+{
+    struct Surface final
+    {
+        OutputKey output;
+        PHLMONITORREF monitor;
+        WP<CWLSurfaceResource> resource;
+        SP<ISurfaceRole> role;
+        ProtectedScene::Configure configure;
+        std::uint32_t serial = 0;
+        bool acknowledged = false, contentCommitted = false, selectedFrame = false;
+        bool selectedOrdinaryFrame = false;
+        ProtectedFrame frame;
+        std::uint64_t disableCommit = 0;
+        bool disableSubmitted = false;
+        SP<Aquamarine::IBuffer> renderedBuffer;
+        std::shared_ptr<const ImmutablePresentationBuffer> submittedBuffer;
+        CHyprSignalListener commit, destroy, present, result;
+    };
+    ProtectedInteraction interaction;
+    std::map<OutputKey, Surface> surfaces;
+    struct Keyboard final
+    {
+        WP<IKeyboard> device;
+        std::shared_ptr<xkb_keymap> keymap;
+        bool enabled = false, allowed = false;
+        CHyprSignalListener changed;
+    };
+    std::vector<Keyboard> keyboards;
+    ProtectedKeyDelivery keys;
+    std::vector<WP<IPointer>> pointers;
+    bool closed = false;
+    bool originalRestoration = false;
+    std::map<OutputKey, std::string> restoredSources;
+    std::function<bool()> originalAlive;
+    std::string originalMaterial;
+    bool terminalActive = false, terminalConsumed = false;
+    bool ordinaryRelease = false;
+    std::unique_ptr<OrdinaryReleaseGrant> ordinaryGrant;
+    bool terminalQuiescenceAttempted = false;
+    std::string terminalMaterial;
+    std::unique_ptr<OriginalFinalizationGrant> terminalGrant;
+    std::unique_ptr<OriginalCompletionGrant> completionGrant;
+    std::unique_ptr<OriginalCompletionGrant::CommittedCurrent> committedCurrent;
+    std::unique_ptr<OriginalCompletionGrant::RetiredCurrent> retiredCurrent;
+    std::unique_ptr<OriginalCompletionGrant> successorRoot;
+    std::unique_ptr<OriginalCompletionGrant::SuccessorCurrent> successorCurrent;
+    std::shared_ptr<NativeData> predecessor;
+    bool successorAttempted = false, successorPreparing = false;
+    bool finalRetirementAttempted = false;
+    bool currentCommitAttempted = false;
+    std::string nativeReleaseParent;
+    bool completionAttempted = false;
+    bool currentMode = false;
+    bool powerRetirementAttempted = false, nativePowerRetired = false;
+    std::optional<NativeCurrentFrameGate> currentFrames;
+    std::optional<Correlation> terminalBound;
+    bool nativeReleaseAttempted = false, nativeReleaseSpent = false;
+    bool nativeHandoffActive = false;
+    std::optional<NativeFirstFrameGate> nativeReleaseGate;
+    bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
+    std::uint64_t postWriteEpoch = 0, terminalEpoch = 0;
+    bool decisionActive = false, decisionStarted = false, decisionUsed = false;
+    MutationProtection::Write lastWrite = MutationProtection::Write::Apply;
+    Snapshot mutationInventory, stableInventory;
+    Layout baseline, desired;
+    Correlation bound;
+    std::uint64_t mutationEpoch = 0, mutationDeadlineBootMs = 0;
+    ClockSample mutationClock;
+    bool escapeDown = false;
+    std::uint64_t exitBootMs = 0, exitEpoch = 0;
+    wl_event_source *timer = nullptr;
+    NativeData(ProtectedInteraction value) : interaction(std::move(value))
+    {
+        for (const auto &keyboard : g_pInputManager->m_keyboards) {
+            std::shared_ptr<xkb_keymap> retained;
+            if (keyboard->m_xkbKeymap)
+                retained = {xkb_keymap_ref(keyboard->m_xkbKeymap), xkb_keymap_unref};
+            keyboards.push_back(
+                {keyboard, std::move(retained), keyboard->m_enabled, keyboard->m_allowed, {}});
+        }
+        for (const auto &pointer : g_pInputManager->m_pointers)
+            pointers.emplace_back(pointer);
+    }
+    bool devicesCurrent() const
+    {
+        if (!g_pInputManager || keyboards.size() != g_pInputManager->m_keyboards.size() ||
+            pointers.size() != g_pInputManager->m_pointers.size())
+            return false;
+        for (std::size_t i = 0; i < keyboards.size(); ++i) {
+            const auto keyboard = keyboards[i].device.lock();
+            if (!keyboard || keyboard != g_pInputManager->m_keyboards[i] ||
+                keyboard->m_xkbKeymap != keyboards[i].keymap.get() ||
+                keyboard->m_enabled != keyboards[i].enabled ||
+                keyboard->m_allowed != keyboards[i].allowed)
+                return false;
+        }
+        for (std::size_t i = 0; i < pointers.size(); ++i)
+            if (!pointers[i].lock() || pointers[i].lock() != g_pInputManager->m_pointers[i])
+                return false;
+        return true;
+    }
+    // Exact managed display-source comparison after the separate final grant
+    // retires obsolete display/input/S17-review bindings. Ongoing S17 authority
+    // remains in its native session-lock implementation; this never unlocks it.
+    bool sameReleasedSource(const Snapshot &fresh) const
+    {
+        if (fresh.generation != stableInventory.generation ||
+            fresh.heads.size() != stableInventory.heads.size())
+            return false;
+        for (std::size_t i = 0; i < fresh.heads.size(); ++i) {
+            const auto &a = fresh.heads[i];
+            const auto &b = stableInventory.heads[i];
+            if (a.key != b.key || a.modes != b.modes || a.current != b.current ||
+                a.powered != b.powered || a.linuraOwned != b.linuraOwned ||
+                a.baseRuleWitness != b.baseRuleWitness ||
+                a.outputIdentityWitness != b.outputIdentityWitness ||
+                a.ownedTargetWitness != b.ownedTargetWitness)
+                return false;
+        }
+        return true;
+    }
+    bool ordinarySourceCurrent() const
+    {
+        const auto intent = OrdinaryReleaseCodec::decode(terminalMaterial);
+        const auto phase =
+            nativeTransactions() ? nativeTransactions()->status(bound) : std::nullopt;
+        const auto expected = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                                  ? CompositorDisplayService::Phase::Confirmed
+                                  : CompositorDisplayService::Phase::Restored;
+        return intent && phase == std::optional{expected} &&
+               OrdinaryReleaseCodec::matchesHeld(*intent, bound, baseline, desired,
+                                                 stableInventory);
+    }
+    bool refreshCurrent()
+    {
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        const bool valid =
+            currentMode && !closed && !ownerLost && !mutationFault && completionGrant &&
+            completionGrant->live() &&
+            (nativePowerRetired ? !nativePowerFenceHeld() : nativePowerFenceHeld()) &&
+            currentFrames && currentFrames->phase() == NativeCurrentFrameGate::Phase::Active &&
+            (ordinaryRelease ? ordinarySourceCurrent() : originalAlive && originalAlive()) &&
+            facts && clock &&
+            (retiredCurrent ? (retiredCurrent->live() && sameReleasedSource(*facts))
+                            : (devicesCurrent() && *facts == stableInventory)) &&
+            clock->unixMs >= mutationClock.unixMs && clock->bootMs >= mutationClock.bootMs &&
+            (committedCurrent ? committedCurrent->live()
+                              : (clock->unixMs < interaction.scope().deadlineUnixMs &&
+                                 clock->bootMs < interaction.scope().deadlineBootMs));
+        if (!valid) {
+            mutationFault = true;
+            if (completionGrant)
+                completionGrant->invalidate();
+            return false;
+        }
+        mutationClock = *clock;
+        return true;
+    }
+    bool refresh()
+    {
+        if (currentMode)
+            return refreshCurrent();
+        if (((originalRestoration ||
+              interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery)
+                 ? !startupRecoveryAvailable()
+                 : startupBlocked()) ||
+            closed || !supportedPresentation() || !Pointer::mgr() ||
+            !Pointer::mgr()->protectedCursorFenceReady())
+            return false;
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        const bool devices = devicesCurrent();
+        if (mutation) {
+            if (ordinaryRelease && nativeReleaseSpent &&
+                (!ordinaryGrant || !ordinaryGrant->live())) {
+                mutationFault = true;
+                interaction.cancel();
+                return false;
+            }
+            if (originalRestoration &&
+                (!originalAlive || !originalAlive() ||
+                 (completionGrant ? !completionGrant->live()
+                                  : terminalGrant && !terminalGrant->live()))) {
+                mutationFault = true;
+                interaction.cancel();
+                return false;
+            }
+            if (!devices) {
+                mutationFault = true; // Retire authority, retain opaque rendering.
+                interaction.cancel();
+            }
+            if (!facts || !clock || !mutationScope(*facts)) {
+                mutationFault = true;
+                return false;
+            }
+            // Geometry may vary only inside this reserved compositor write.
+            // Outside that stack, even a compatible-looking external change
+            // fences the attempt instead of being adopted as desired state.
+            if (!(writing && ownedModesetInProgress()) && *facts != stableInventory) {
+                mutationFault = true;
+                return false;
+            }
+            if (clock->unixMs < mutationClock.unixMs || clock->bootMs < mutationClock.bootMs)
+                mutationFault = true;
+            else
+                mutationClock = *clock;
+            if (terminalActive && (clock->unixMs >= interaction.scope().deadlineUnixMs ||
+                                   clock->bootMs >= interaction.scope().deadlineBootMs))
+                mutationFault = true;
+            if ((decisionActive || (terminalActive && !terminalConsumed)) &&
+                !interaction.refresh(*facts, *clock))
+                mutationFault = true;
+            // LNRX is irreversible: an unobserved frame cannot silently
+            // remain eligible indefinitely or gain a new release window.
+            // The existing compositor watchdog rechecks the original window,
+            // retaining every Root/S17/input/power/startup fence on failure.
+            if (nativeReleaseSpent &&
+                (!nativeReleaseGate || !nativeReleaseGate->retain(*facts, *clock))) {
+                mutationFault = true;
+                interaction.cancel();
+                return false;
+            }
+            return true;
+        }
+        if (!devices || !facts || !clock || !interaction.refresh(*facts, *clock)) {
+            interaction.cancel();
+            return false;
+        }
+        return true;
+    }
+    // Deliberately independent of StartupFence::currentAvailable: this is the
+    // new callback owned by that fence and must never recurse through it.
+    bool successorScopeAlive()
+    {
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        const bool valid = mutation && !closed && !ownerLost && !mutationFault && successorRoot &&
+                           successorRoot->live() && originalAlive && originalAlive() &&
+                           (successorPreparing || (successorCurrent && successorCurrent->live())) &&
+                           facts && clock && devicesCurrent() && mutationScope(*facts) &&
+                           ((writing && ownedModesetInProgress()) || *facts == stableInventory) &&
+                           clock->unixMs >= mutationClock.unixMs &&
+                           clock->bootMs >= mutationClock.bootMs;
+        if (!valid) {
+            mutationFault = true;
+            if (successorRoot)
+                successorRoot->invalidate();
+            return false;
+        }
+        mutationClock = *clock;
+        return true;
+    }
+    void cancelInput() noexcept
+    {
+        interaction.cancel();
+        if (mutation)
+            mutationFault = true;
+    }
+    bool mutationScope(const Snapshot &facts) const
+    {
+        if (facts.generation != mutationInventory.generation ||
+            facts.securityEpoch != mutationInventory.securityEpoch ||
+            facts.heads.size() != mutationInventory.heads.size() ||
+            (facts.coverage != Coverage::Unlocked && facts.coverage != Coverage::Secure) ||
+            (mutationInventory.coverage == Coverage::Secure && facts.coverage != Coverage::Secure))
+            return false;
+        for (std::size_t i = 0; i < facts.heads.size(); ++i) {
+            const auto &head = facts.heads[i];
+            const auto &original = mutationInventory.heads[i];
+            if (head.key != original.key || head.modes != original.modes ||
+                (head.baseRuleWitness != original.baseRuleWitness &&
+                 !(originalRestoration && writing && ownedModesetInProgress() &&
+                   restoredSources.contains(head.key) &&
+                   restoredSources.at(head.key) == head.baseRuleWitness)) ||
+                head.outputIdentityWitness != original.outputIdentityWitness ||
+                (head.current.enabled && facts.coverage == Coverage::Secure && !head.covered))
+                return false;
+        }
+        return true;
+    }
+    void invalidateFrames()
+    {
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
+            surface.selectedOrdinaryFrame = false;
+            surface.frame.invalidate();
+            surface.renderedBuffer.reset();
+            surface.submittedBuffer.reset();
+        }
+        if (g_pSeatManager) {
+            g_pSeatManager->setKeyboardFocus(nullptr);
+            g_pSeatManager->setPointerFocus(nullptr, {});
+        }
+        damage();
+    }
+    void damage()
+    {
+        if (!State::monitorState() || !g_pHyprRenderer)
+            return;
+        for (const auto &monitor : State::monitorState()->monitors())
+            if (monitor && monitor->m_enabled)
+                g_pHyprRenderer->damageMonitor(monitor);
+    }
+    void close() noexcept
+    {
+        if (closed)
+            return;
+        // Every close route, including wl_surface destruction, reaches this
+        // boundary. Only the actual final-retirement lifetime detaches obsolete
+        // review ownership; early Committed/current transfer cannot do so.
+        try {
+            if (currentMode && retiredCurrent && retiredCurrent->live() && refreshCurrent())
+                return;
+        } catch (...) {
+            // Unknown current continuity still follows the faulting close path.
+        }
+        if (mutation) {
+            // Losing authentication/input resources cancels continuation, not
+            // the opaque native fence. The independent transaction timer sees
+            // ownerLost and reserves compensation after the current write.
+            ownerLost = true;
+            interaction.cancel();
+            invalidateFrames();
+            return;
+        }
+        closed = true;
+        if (timer) {
+            wl_event_source_remove(timer);
+            timer = nullptr;
+        }
+        if (activeNative == this) {
+            const auto clock = compositorClock();
+            const bool explicitExit = exitBootMs != 0 && clock && clock->bootMs >= exitBootMs &&
+                                      clock->bootMs - exitBootMs <= 500 &&
+                                      exitEpoch == interaction.epoch() &&
+                                      interaction.phase() != ProtectedInteraction::Phase::Cancelled;
+            inputRetirement.close(explicitExit, heldInput());
+            activeNative = nullptr;
+            active.reset();
+            // Unknown loss also quarantines subsequent typing. Returning to an
+            // ordinary focus needs a new physical Escape and a complete drain.
+            if (drainTimer && draining())
+                wl_event_source_timer_update(drainTimer, 100);
+            if (g_pSeatManager) {
+                g_pSeatManager->setKeyboardFocus(nullptr);
+                g_pSeatManager->setPointerFocus(nullptr, {});
+            }
+        }
+        interaction.cancel();
+        if (Pointer::mgr())
+            Pointer::mgr()->refreshProtectedCursorFence();
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            surface.commit.reset();
+            surface.destroy.reset();
+            surface.present.reset();
+            surface.result.reset();
+            if (const auto resource = surface.resource.lock();
+                resource && resource->m_role == surface.role) {
+                resource->unmap();
+                // The private role remains assigned for the wl_surface lifetime.
+                // A closed authentication surface cannot become an application.
+            }
+        }
+        keyboards.clear();
+        pointers.clear();
+        damage();
+        if (!draining())
+            scheduleRefocus();
+    }
+    ~NativeData()
+    {
+        close();
+    }
+    Surface *forMonitor(Monitor::CMonitor *monitor)
+    {
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            if (surface.monitor.lock().get() == monitor)
+                return &surface;
+        }
+        return nullptr;
+    }
+    SP<CWLSurfaceResource> focused()
+    {
+        if (!refresh())
+            return nullptr;
+        for (auto &[key, surface] : surfaces) {
+            const auto resource = surface.resource.lock();
+            const auto monitor = surface.monitor.lock();
+            if (resource && monitor && monitor->m_dpmsStatus && !monitor->isMirror() &&
+                surface.acknowledged) {
+                interaction.focus(key);
+                return resource;
+            }
+        }
+        interaction.focus(std::nullopt);
+        return nullptr;
+    }
+    bool interactiveContent() const noexcept
+    {
+        return !mutation || decisionActive ||
+               (terminalActive && !terminalConsumed && !ownerLost && !mutationFault);
+    }
+    bool inputReady()
+    {
+        if (!interactiveContent())
+            return false;
+        if (!refresh())
+            return false;
+        const auto resource = focused();
+        if (!resource || !g_pSeatManager || g_pSeatManager->m_state.keyboardFocus != resource) {
+            interaction.focus(std::nullopt);
+            return false;
+        }
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        return facts && clock && interaction.eligible(interaction.epoch(), *facts, *clock);
+    }
+    bool ownsKeyboardFocus() const
+    {
+        return g_pSeatManager && std::ranges::any_of(surfaces, [&](const auto &item) {
+                   const auto resource = item.second.resource.lock();
+                   return resource && resource == g_pSeatManager->m_state.keyboardFocus;
+               });
+    }
+};
+class PinnedMutation final : public MutationProtection
+{
+  public:
+    explicit PinnedMutation(std::shared_ptr<NativeData> data) : data_(std::move(data)) {}
+    ~PinnedMutation() override
+    {
+        if (!wrote_)
+            release(); // Rejection before the first possible native write.
+    }
+    bool healthy() override
+    {
+        return data_->mutation && data_->refresh() && !data_->ownerLost && !data_->mutationFault;
+    }
+    bool beginWrite(Write kind, const Snapshot &captured) override
+    {
+        auto *backend = nativeBackend();
+        const auto current = backend ? backend->snapshot() : std::nullopt;
+        if (!data_->mutation || data_->writing || !current || *current != captured ||
+            !data_->mutationScope(*current) || (kind == Write::Apply && (wrote_ || !healthy())) ||
+            (data_->originalRestoration && (kind != Write::Restore || wrote_ || !healthy())))
+            return false;
+        if (data_->originalRestoration) {
+            const auto now = backend->clock();
+            const auto &review = data_->interaction.scope();
+            if (!now || now->unixMs >= review.deadlineUnixMs ||
+                now->bootMs >= review.deadlineBootMs ||
+                now->unixMs >= data_->bound.deadlineUnixMs ||
+                now->bootMs >= data_->mutationDeadlineBootMs ||
+                now->unixMs < data_->mutationClock.unixMs ||
+                now->bootMs < data_->mutationClock.bootMs)
+                return false;
+        }
+        // Compensation remains confined to this original baseline even if the
+        // owner or human proof has gone away. No new client gains an effect.
+        wrote_ = true;
+        data_->lastWrite = kind;
+        data_->writing = true;
+        data_->decisionActive = false;
+        const auto &targets = kind == Write::Apply ? data_->desired : data_->baseline;
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            auto &surface = data_->surfaces.at(targets[i].output);
+            surface.disableCommit = 0;
+            surface.disableSubmitted = !targets[i].enabled && !captured.heads[i].current.enabled;
+        }
+        data_->invalidateFrames();
+        return true;
+    }
+    void endWrite(Write kind) noexcept override
+    {
+        try {
+            const auto sample = nativeBackend()->snapshot();
+            bool originalSources = true;
+            if (data_->originalRestoration) {
+                originalSources = sample && data_->restoredSources.size() == sample->heads.size();
+                if (sample)
+                    for (const auto &head : sample->heads) {
+                        const auto expected = data_->restoredSources.find(head.key);
+                        originalSources = originalSources &&
+                                          expected != data_->restoredSources.end() &&
+                                          expected->second == head.baseRuleWitness;
+                    }
+            }
+            // During the reserved write only the exact retained post-source may
+            // replace its preimage. Outside that stack the new witnesses are
+            // fixed; a partial source write cannot become a healthy result.
+            if (!sample || !originalSources || !data_->mutationScope(*sample) ||
+                data_->lastWrite != kind)
+                data_->mutationFault = true;
+            else {
+                data_->stableInventory = *sample;
+                if (data_->originalRestoration)
+                    data_->mutationInventory = *sample;
+            }
+            data_->invalidateFrames();
+            if (data_->postWriteEpoch == std::numeric_limits<std::uint64_t>::max())
+                data_->mutationFault = true;
+            else
+                ++data_->postWriteEpoch;
+        } catch (...) {
+            data_->mutationFault = true;
+        }
+        data_->writing = false;
+    }
+
+    bool presented(Write kind) override
+    {
+        if (!data_->mutation || data_->writing || data_->lastWrite != kind || !data_->refresh())
+            return false;
+        const auto &targets = kind == Write::Apply ? data_->desired : data_->baseline;
+        if (targets.size() != data_->stableInventory.heads.size())
+            return false;
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            const auto &target = targets[i];
+            const auto surface = data_->surfaces.find(target.output);
+            if (target != data_->stableInventory.heads[i].current ||
+                (target.enabled &&
+                 (surface == data_->surfaces.end() || !surface->second.frame.completed())) ||
+                (!target.enabled &&
+                 (surface == data_->surfaces.end() || !surface->second.disableSubmitted)))
+                return false;
+        }
+        return true;
+    }
+    bool consumeKeepDecision() override
+    {
+        return consumeDecision(ProtectedInteraction::Purpose::Keep);
+    }
+    bool consumeRevertDecision() override
+    {
+        return consumeDecision(ProtectedInteraction::Purpose::Revert);
+    }
+    void release() noexcept override
+    {
+        if (!data_->mutation || wrote_ || data_->successorAttempted)
+            return; // Any native write retains protection until qualified Control
+                    // retirement. Ordinary Keep/Revert are not an exception.
+                    // This path only clears never-written pre-effect scenes.
+        data_->mutation = false;
+        if (mutationFence == data_)
+            mutationFence.reset();
+        data_->close();
+    }
+
+  private:
+    bool consumeDecision(ProtectedInteraction::Purpose purpose)
+    {
+        if (!healthy() || !data_->decisionActive || data_->decisionUsed ||
+            data_->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data_->interaction.scope().purpose != purpose || !presented(Write::Apply))
+            return false;
+        data_->decisionUsed = true;
+        return true;
+    }
+    std::shared_ptr<NativeData> data_;
+    bool wrote_ = false;
+};
+std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison();
+class PinnedScene final : public ProtectedScene
+{
+  public:
+    std::shared_ptr<NativeData> data;
+    explicit PinnedScene(std::shared_ptr<NativeData> native) : data(std::move(native)) {}
+    ~PinnedScene() override
+    {
+        close();
+    }
+    void close() noexcept override
+    {
+        data->close();
+    }
+    std::shared_ptr<MutationProtection>
+    reserveMutation(const Correlation &bound, const Layout &baseline, const Layout &desired,
+                    const Snapshot &captured, ClockSample capturedClock) override
+    {
+        return reserve(bound, baseline, desired, captured, capturedClock, false, {}, {}, {});
+    }
+    std::shared_ptr<MutationProtection>
+    reserveSuccessorMutation(OwnedNativeFd descriptor, const Correlation &bound,
+                             const Layout &baseline, const Layout &desired,
+                             const Snapshot &captured, ClockSample capturedClock) override
+    {
+        const auto previous = mutationFence;
+        const auto bytes = SealedNativeMaterial::read<OriginalSuccessorCodec::MaxPreparation>(
+            std::move(descriptor));
+        const auto now = compositorClock();
+        const auto facts = nativeBackend() ? nativeBackend()->snapshot() : std::nullopt;
+        if (!previous || previous == data || !bytes || !now || !facts || *facts != captured ||
+            !previous->retiredCurrent || !previous->retiredCurrent->live() ||
+            !previous->refreshCurrent() || !previous->sameReleasedSource(captured) ||
+            data->successorAttempted || data->mutation || !data->refresh() ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
+            data->surfaces.size() != captured.heads.size() || heldInput().any ||
+            capturedClock.unixMs == 0 || capturedClock.bootMs == 0 ||
+            bound.deadlineUnixMs <= capturedClock.unixMs ||
+            bound.deadlineUnixMs - capturedClock.unixMs > DisplayTransaction::WindowMs ||
+            capturedClock.bootMs > std::numeric_limits<std::uint64_t>::max() -
+                                       (bound.deadlineUnixMs - capturedClock.unixMs))
+            return {};
+        // The source guard is recomputed from this exact native inventory;
+        // neither the sealed bytes nor Root's acknowledgement can supply it.
+        auto materialBytes = std::string_view(*bytes);
+        const auto domain = OriginalGrantCodec::field(materialBytes, 64);
+        const auto parent = OriginalGrantCodec::field(
+            materialBytes, OriginalFinalRetirementCodec::MaxPreparation + 512);
+        const auto material = OriginalGrantCodec::field(materialBytes, 4096);
+        const auto intent = material ? OriginalGrantCodec::intent(*material) : std::nullopt;
+        const auto guard =
+            intent ? nativeBaselineGuard(captured, intent->baselineText) : std::nullopt;
+        if (!domain || !parent || !intent || !guard ||
+            !OriginalSuccessorCodec::matches(*bytes, previous->retiredCurrent->comparisonDigest(),
+                                             bound, baseline, desired, captured, capturedClock,
+                                             *now, *guard))
+            return {};
+        for (std::size_t i = 0; i < captured.heads.size(); ++i)
+            if (!data->surfaces.contains(captured.heads[i].key) ||
+                baseline[i] != captured.heads[i].current)
+                return {};
+        const auto digest = nativeSha256(*bytes);
+        if (!digest)
+            return {};
+        auto lease = std::make_shared<PinnedMutation>(data);
+        data->mutationInventory = data->stableInventory = captured;
+        data->baseline = baseline;
+        data->desired = desired;
+        data->bound = bound;
+        data->mutationEpoch = data->interaction.epoch();
+        data->mutationDeadlineBootMs =
+            capturedClock.bootMs + bound.deadlineUnixMs - capturedClock.unixMs;
+        data->mutationClock = capturedClock;
+        data->mutation = true;
+        data->successorAttempted = data->successorPreparing = true;
+        data->predecessor = previous; // Retain both sides through every ambiguous path.
+        data->successorRoot = std::move(previous->completionGrant);
+        data->originalAlive = std::move(previous->originalAlive);
+        mutationFence = data; // New opaque protection exists before the sole Root spend.
+        const auto refuse = [&]() -> std::shared_ptr<MutationProtection> {
+            data->successorPreparing = false;
+            data->mutationFault = true;
+            data->successorRoot->invalidate();
+            data->damage();
+            return {};
+        };
+        std::weak_ptr<NativeData> successor = data;
+        auto current = data->successorRoot->transferSuccessor(*digest, [successor] {
+            const auto live = successor.lock();
+            return live && live->successorScopeAlive();
+        });
+        const auto finished = compositorClock();
+        const auto after = nativeBackend()->snapshot();
+        if (!current || !finished || !after || *after != captured || heldInput().any ||
+            !OriginalSuccessorCodec::matches(*bytes, previous->retiredCurrent->comparisonDigest(),
+                                             bound, baseline, desired, captured, capturedClock,
+                                             *finished, *guard))
+            return refuse();
+        data->successorCurrent = std::move(current);
+        data->successorPreparing = false;
+        // Only after the new actual protection and Root lifetime both exist may
+        // the obsolete scene/timer be retired. Recovery bytes stay in Root.
+        if (previous->timer) {
+            wl_event_source_remove(previous->timer);
+            previous->timer = nullptr;
+        }
+        previous->mutation = false;
+        previous->closed = true;
+        data->predecessor.reset();
+        return data->successorScopeAlive() && data->refresh() ? lease : refuse();
+    }
+    std::shared_ptr<MutationProtection>
+    reserveOriginalRestoration(const Correlation &bound, const Layout &baseline,
+                               const Layout &desired, const Snapshot &captured, ClockSample clock,
+                               const std::map<OutputKey, std::string> &sources,
+                               const std::string &material, std::function<bool()> alive) override
+    {
+        return reserve(bound, baseline, desired, captured, clock, true, sources, material,
+                       std::move(alive));
+    }
+    std::shared_ptr<MutationProtection> reserve(const Correlation &bound, const Layout &baseline,
+                                                const Layout &desired, const Snapshot &captured,
+                                                ClockSample capturedClock, bool original,
+                                                const std::map<OutputKey, std::string> &sources,
+                                                const std::string &material,
+                                                std::function<bool()> alive)
+    {
+        if (data->mutation || mutationFence || !data->refresh() ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data->interaction.scope().purpose != (original
+                                                      ? ProtectedInteraction::Purpose::Recovery
+                                                      : ProtectedInteraction::Purpose::Apply) ||
+            (original && (!alive || !alive() || sources.size() != captured.heads.size() ||
+                          !OriginalGrantCodec::materialFields(material))) ||
+            data->surfaces.size() != captured.heads.size() || (!original && baseline == desired) ||
+            !DisplayTransaction::validLayout(baseline, captured) ||
+            !DisplayTransaction::validLayout(desired, captured) || capturedClock.unixMs == 0 ||
+            capturedClock.bootMs == 0 || bound.deadlineUnixMs <= capturedClock.unixMs ||
+            bound.deadlineUnixMs - capturedClock.unixMs > DisplayTransaction::WindowMs ||
+            capturedClock.bootMs > std::numeric_limits<std::uint64_t>::max() -
+                                       (bound.deadlineUnixMs - capturedClock.unixMs))
+            return {};
+        const auto now = nativeBackend()->snapshot();
+        if (!now || *now != captured)
+            return {};
+        for (std::size_t i = 0; i < captured.heads.size(); ++i)
+            if (!data->surfaces.contains(captured.heads[i].key) ||
+                baseline[i] != captured.heads[i].current ||
+                (original && !sources.contains(captured.heads[i].key)))
+                return {};
+        auto lease = std::make_shared<PinnedMutation>(data);
+        data->mutationInventory = data->stableInventory = captured;
+        data->originalRestoration = original;
+        data->restoredSources = sources;
+        data->originalAlive = std::move(alive);
+        data->originalMaterial = material;
+        data->baseline = original ? desired : baseline;
+        data->desired = desired;
+        data->bound = bound;
+        data->mutationEpoch = data->interaction.epoch();
+        data->mutationDeadlineBootMs =
+            capturedClock.bootMs + bound.deadlineUnixMs - capturedClock.unixMs;
+        data->mutationClock = capturedClock;
+        data->mutation = true;
+        mutationFence = data;
+        return lease;
+    }
+    bool beginDecision(const ProtectedInteraction::Scope &scope) override
+    {
+        if (!data->mutation || !data->refresh() || data->ownerLost || data->mutationFault ||
+            data->writing || data->decisionStarted ||
+            data->lastWrite != MutationProtection::Write::Apply ||
+            (scope.purpose != ProtectedInteraction::Purpose::Keep &&
+             scope.purpose != ProtectedInteraction::Purpose::Revert) ||
+            scope.digest == data->interaction.scope().digest ||
+            scope.deadlineUnixMs != data->bound.deadlineUnixMs ||
+            scope.deadlineBootMs != data->mutationDeadlineBootMs || heldInput().any)
+            return false;
+        for (std::size_t i = 0; i < data->desired.size(); ++i)
+            if (data->stableInventory.heads[i].current != data->desired[i])
+                return false;
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto decision = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!decision || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->decisionStarted = true;
+        data->interaction = std::move(*decision);
+        data->invalidateFrames();
+        data->decisionActive = true;
+        return reconfigureReview();
+    }
+    bool beginOrdinaryRelease(const ProtectedInteraction::Scope &scope,
+                              const std::string &material) override
+    {
+        if (!data->mutation || data->originalRestoration || data->currentMode || data->writing ||
+            data->terminalActive || data->ownerLost || data->mutationFault ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            scope.purpose != ProtectedInteraction::Purpose::OrdinaryRelease ||
+            scope.digest == data->interaction.scope().digest || !data->postWriteEpoch ||
+            heldInput().any || !data->refresh())
+            return false;
+        const auto intent = OrdinaryReleaseCodec::decode(material);
+        const auto phase =
+            nativeTransactions() ? nativeTransactions()->status(data->bound) : std::nullopt;
+        const auto expected = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                                  ? CompositorDisplayService::Phase::Confirmed
+                                  : CompositorDisplayService::Phase::Restored;
+        if (!intent || phase != std::optional{expected} ||
+            !OrdinaryReleaseCodec::matchesHeld(*intent, data->bound, data->baseline, data->desired,
+                                               data->stableInventory))
+            return false;
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto review = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!review || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->interaction = std::move(*review);
+        data->decisionActive = false;
+        data->ordinaryRelease = data->terminalActive = true;
+        data->terminalMaterial = material;
+        data->invalidateFrames();
+        return reconfigureReview();
+    }
+    bool spendOrdinaryRelease(OwnedNativeFd descriptor, const Correlation &release) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->nativeReleaseAttempted)
+            return refuse();
+        data->nativeReleaseAttempted = true;
+        if (!data->ordinaryRelease || data->originalRestoration || !data->mutation ||
+            !data->terminalActive || !data->terminalConsumed || !data->terminalEpoch ||
+            data->writing || data->ordinaryGrant || data->ownerLost || data->mutationFault ||
+            heldInput().any || release.transaction == data->bound.transaction ||
+            release.dispatchDigest == data->bound.dispatchDigest || !data->refresh() ||
+            release.deadlineUnixMs > data->interaction.scope().deadlineUnixMs)
+            return refuse();
+        const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
+        const auto phase =
+            nativeTransactions() ? nativeTransactions()->status(data->bound) : std::nullopt;
+        const auto expected = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                                  ? CompositorDisplayService::Phase::Confirmed
+                                  : CompositorDisplayService::Phase::Restored;
+        if (!intent || phase != std::optional{expected} ||
+            !OrdinaryReleaseCodec::matchesHeld(*intent, data->bound, data->baseline, data->desired,
+                                               data->stableInventory))
+            return refuse();
+        auto grant =
+            receiveOrdinaryReleaseGrant(std::move(descriptor), release, data->terminalMaterial);
+        if (!grant || grant->window().deadline.unixMs > data->interaction.scope().deadlineUnixMs ||
+            grant->window().deadline.bootMs > data->interaction.scope().deadlineBootMs)
+            return refuse();
+        data->ordinaryGrant = std::move(grant);
+        const auto held = data->stableInventory;
+        auto gate = nativeOrdinaryFirstFrameArm(data->bound, held);
+        const auto window = data->ordinaryGrant->window();
+        if (!gate || !gate->narrowProducerWindow(window.observed, window.deadline) ||
+            !data->refresh() || data->ownerLost || data->mutationFault || heldInput().any ||
+            !data->ordinaryGrant->spend())
+            return refuse();
+        data->nativeReleaseParent = data->ordinaryGrant->record();
+        const auto current = nativeBackend()->snapshot();
+        const auto clock = compositorClock();
+        const auto history = nativeOrdinaryOutputHighWater(data->bound, held);
+        const auto kernel = nativeOrdinaryFrameKernel(data->bound, held);
+        if (!current || !clock || !history || !kernel || !data->ordinaryGrant->spent() ||
+            !gate->spend(*current, *clock, *history, *kernel) || !data->refresh() ||
+            data->ownerLost || data->mutationFault || heldInput().any)
+            return refuse();
+        data->terminalBound = release;
+        data->nativeReleaseGate.emplace(std::move(*gate));
+        data->nativeReleaseSpent = data->nativeHandoffActive = true;
+        data->invalidateFrames();
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !monitor->m_output || !data->refresh() || data->mutationFault ||
+                data->ownerLost || heldInput().any)
+                return refuse();
+            surface.disableCommit = 0;
+            surface.disableSubmitted = false;
+            if (monitor->m_enabled)
+                continue;
+            const auto &pending = monitor->m_output->state->state();
+            if (pending.enabled ||
+                (pending.committed & ~static_cast<std::uint32_t>(
+                                         Aquamarine::COutputState::AQ_OUTPUT_STATE_ENABLED)) != 0)
+                return refuse();
+            monitor->m_output->state->setEnabled(false);
+            if (commitProtectedDisplay(monitor.get()) != std::optional{true})
+                return refuse();
+        }
+        data->damage();
+        return true; // First presentation only; every other protective fence stays held.
+    }
+    bool beginFinalization(const ProtectedInteraction::Scope &scope,
+                           const std::string &material) override
+    {
+        if (!data->mutation || !data->originalRestoration || !data->refresh() || data->ownerLost ||
+            data->mutationFault || data->writing || data->terminalActive || data->decisionStarted ||
+            data->lastWrite != MutationProtection::Write::Restore || data->postWriteEpoch == 0 ||
+            scope.purpose != ProtectedInteraction::Purpose::Finalization ||
+            scope.digest == data->interaction.scope().digest || heldInput().any)
+            return false;
+        const auto intent = OriginalFinalizationCodec::decode(material);
+        if (!intent ||
+            !OriginalFinalizationCodec::matchesHeld(*intent, data->originalMaterial, data->bound,
+                                                    data->stableInventory, data->postWriteEpoch))
+            return false;
+        // Review can begin only from actual held post-write safety frames, never
+        // an old owner frame, a pre-write buffer or an incomplete disabled head.
+        for (const auto &head : data->stableInventory.heads) {
+            const auto surface = data->surfaces.find(head.key);
+            if (surface == data->surfaces.end())
+                return false;
+            const auto &frame = surface->second;
+            if (head.current.enabled
+                    ? (!frame.submittedBuffer ||
+                       frame.frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+                       frame.frame.completedBuffer() != frame.submittedBuffer->buffer.get() ||
+                       frame.frame.completedCommit() == 0)
+                    : !frame.disableSubmitted)
+                return false;
+        }
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto terminal = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!terminal || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->interaction = std::move(*terminal);
+        data->terminalActive = true;
+        data->terminalMaterial = material;
+        data->invalidateFrames();
+        return reconfigureReview();
+    }
+    bool quiesceFinalization(OwnedNativeFd descriptor, const Correlation &bound,
+                             std::uint64_t sampledBootMs) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            return false; // Protection remains compositor-owned.
+        };
+        if (data->terminalQuiescenceAttempted)
+            return refuse();
+        data->terminalQuiescenceAttempted = true;
+        if (!data->originalRestoration || !data->mutation || !data->terminalActive ||
+            !data->terminalConsumed || data->terminalEpoch == 0 || data->writing ||
+            data->terminalGrant || heldInput().any ||
+            bound.transaction == data->bound.transaction ||
+            bound.dispatchDigest == data->bound.dispatchDigest || !data->refresh() ||
+            data->ownerLost || data->mutationFault)
+            return refuse();
+        const auto material = OriginalFinalizationCodec::decode(data->terminalMaterial);
+        if (!material ||
+            !OriginalFinalizationCodec::matchesHeld(*material, data->originalMaterial, data->bound,
+                                                    data->stableInventory, data->postWriteEpoch))
+            return refuse();
+        auto grant = receiveOriginalFinalizationGrant(std::move(descriptor), bound,
+                                                      data->terminalMaterial, sampledBootMs);
+        // Current KMS plus hardware-completed opaque buffers, not owner frames
+        // or acknowledgement, surround the actual-native Root transition.
+        if (!grant || !originalRestorationPresented(data->bound) || !data->refresh() ||
+            !grant->quiesce() || !originalRestorationPresented(data->bound) || !data->refresh() ||
+            !grant->verify())
+            return refuse();
+        data->terminalBound = bound;
+        data->terminalGrant = std::move(grant);
+        return true; // No witness, power, lock, input or startup fence is released.
+    }
+    bool spendNativeRelease(OwnedNativeFd descriptor, const Correlation &terminal,
+                            std::uint64_t sampledBootMs, std::uint64_t controlVersion,
+                            std::string_view controlBinding,
+                            std::string_view controlObservation) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            return false;
+        };
+        if (data->nativeReleaseAttempted)
+            return refuse();
+        // Permanently consume this original scene's chance BEFORE a possible
+        // Root/Unix send, even when the FD or independent sample is missing.
+        data->nativeReleaseAttempted = true;
+        if (!data->terminalBound ||
+            !OriginalNativeReleaseGrantCodec::continues(*data->terminalBound, terminal))
+            return refuse();
+        if (!data->originalRestoration || !data->mutation)
+            return refuse();
+        if (!data->terminalActive || !data->terminalConsumed)
+            return refuse();
+        if (!data->terminalQuiescenceAttempted || !data->terminalGrant)
+            return refuse();
+        if (!data->terminalGrant->verify() || data->writing)
+            return refuse();
+        if (data->ownerLost || data->mutationFault || heldInput().any)
+            return refuse();
+        // A refresh can latch mutationFault while returning a sampled result;
+        // never let that sampled result authorize an irreversible grant spend.
+        if (!data->refresh() || data->ownerLost || data->mutationFault ||
+            !originalRestorationPresented(data->bound))
+            return refuse();
+        const auto held = data->stableInventory;
+        auto gate = nativeFirstFrameArm(data->bound, held);
+        if (!gate || !gate->narrowWindow({terminal.deadlineUnixMs, sampledBootMs}))
+            return refuse();
+        if (!gate || !data->refresh() || data->ownerLost || data->mutationFault ||
+            !data->terminalGrant->verify() || heldInput().any)
+            return refuse();
+        // Root authenticates the current original compositor peer and writes
+        // LNRX:1 durably BEFORE returning this one-use ACK. There is no
+        // recovery-by-retrying after a missing or refused ACK.
+        const auto parent = consumeOriginalNativeReleaseGrant(
+            std::move(descriptor), terminal, data->terminalMaterial, sampledBootMs, controlVersion,
+            controlBinding, controlObservation);
+        if (!parent)
+            return refuse();
+        data->nativeReleaseParent = *parent;
+        const auto current = nativeBackend()->snapshot();
+        const auto clock = compositorClock();
+        const auto history = nativeOutputHighWater(data->bound, held);
+        const auto kernel = nativeFirstFrameKernel(data->bound, held);
+        if (!current || !clock || !history || !kernel ||
+            !gate->spend(*current, *clock, *history, *kernel) || !data->refresh() ||
+            data->ownerLost || data->mutationFault || heldInput().any ||
+            !data->terminalGrant->verify())
+            return refuse();
+        data->nativeReleaseGate.emplace(std::move(*gate));
+        data->nativeReleaseSpent = true;
+        // The live one-use grant, prepared Control lineage, same retained
+        // terminal scene and fresh native/KMS checks authorize only this
+        // initial presentation handoff. LNRX history by itself cannot enter
+        // this branch. Input, S17, power and Root admission remain held.
+        data->nativeHandoffActive = true;
+        data->invalidateFrames();
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !monitor->m_output || !data->refresh() || data->mutationFault ||
+                data->ownerLost || heldInput().any)
+                return refuse();
+            surface.disableCommit = 0;
+            surface.disableSubmitted = false;
+            if (monitor->m_enabled)
+                continue;
+            // Already-disabled outputs need a NEW, narrowly enabled-only
+            // native commit after the spend watermark. Never submit unrelated
+            // pending native state or recycle the restoration's old disable.
+            const auto &pending = monitor->m_output->state->state();
+            if (pending.enabled ||
+                (pending.committed & ~static_cast<std::uint32_t>(
+                                         Aquamarine::COutputState::AQ_OUTPUT_STATE_ENABLED)) != 0)
+                return refuse();
+            monitor->m_output->state->setEnabled(false);
+            if (commitProtectedDisplay(monitor.get()) != std::optional{true})
+                return refuse();
+        }
+        data->damage();
+        return true;
+    }
+    bool commitCurrent(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->currentCommitAttempted)
+            return refuse();
+        data->currentCommitAttempted = true;
+        const auto bytes = SealedNativeMaterial::read<OriginalCurrentCommitCodec::MaxPreparation>(
+            std::move(descriptor));
+        if (!bytes || nativeSha256(*bytes) != std::optional{std::string(digest)} ||
+            !data->refreshCurrent() || !data->nativePowerRetired || data->committedCurrent ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Open || heldInput().any)
+            return refuse();
+        const auto current = [&] {
+            const auto frame = readNativeCurrentComparison();
+            const auto now = compositorClock();
+            return frame && now &&
+                   OriginalCurrentCommitCodec::matches(
+                       *bytes, data->completionGrant->comparisonDigest(), *frame, *now)
+                       .has_value();
+        };
+        if (!current())
+            return refuse();
+        auto committed = data->completionGrant->commitCurrent(digest);
+        if (!committed || !committed->live() || !data->refreshCurrent() || heldInput().any ||
+            !current())
+            return refuse();
+        data->committedCurrent = std::move(committed);
+        return data->refreshCurrent() ? true : refuse();
+    }
+    bool retireCurrent(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->finalRetirementAttempted)
+            return refuse();
+        data->finalRetirementAttempted = true;
+        const auto bytes = SealedNativeMaterial::read<OriginalFinalRetirementCodec::MaxPreparation>(
+            std::move(descriptor));
+        if (!bytes || nativeSha256(*bytes) != std::optional{std::string(digest)} ||
+            !data->refreshCurrent() || !data->nativePowerRetired || !data->committedCurrent ||
+            data->retiredCurrent ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Open || heldInput().any)
+            return refuse();
+        const auto current = [&] {
+            const auto frame = readNativeCurrentComparison();
+            const auto now = compositorClock();
+            return frame && now &&
+                   OriginalFinalRetirementCodec::matches(
+                       *bytes, data->committedCurrent->comparisonDigest(), *frame, *now)
+                       .has_value();
+        };
+        if (!current())
+            return refuse();
+        auto retired = data->completionGrant->retireCurrent(digest);
+        if (!retired || !retired->live() || !data->refreshCurrent() || heldInput().any ||
+            !current())
+            return refuse();
+        data->retiredCurrent = std::move(retired);
+        // Retire only the obsolete physical input/review dependency. The live
+        // original Root, source ownership, frame tracking and provenance remain.
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            surface.commit.reset();
+            surface.destroy.reset();
+        }
+        data->keyboards.clear();
+        data->pointers.clear();
+        return data->refreshCurrent() ? true : refuse();
+    }
+    bool retirePower(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->powerRetirementAttempted)
+            return refuse();
+        data->powerRetirementAttempted = true;
+        const auto bytes = SealedNativeMaterial::read<OriginalPowerRetirementCodec::MaxPreparation>(
+            std::move(descriptor));
+        if (!bytes || nativeSha256(*bytes) != std::optional{std::string(digest)} ||
+            !data->refreshCurrent() || data->nativePowerRetired ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Open || heldInput().any)
+            return refuse();
+        const auto current = [&]() {
+            const auto frame = readNativeCurrentComparison();
+            const auto now = compositorClock();
+            return frame && now &&
+                   OriginalPowerRetirementCodec::matches(
+                       *bytes, data->completionGrant->comparisonDigest(), *frame, *now)
+                       .has_value();
+        };
+        if (!current() || !data->completionGrant->retirePower(digest) || !data->refreshCurrent() ||
+            heldInput().any || !current() || !retireNativePowerFence())
+            return refuse();
+        data->nativePowerRetired = true;
+        data->damage();
+        return data->refreshCurrent() ? true : refuse();
+    }
+    bool transferCompletion(OwnedNativeFd descriptor, std::string_view digest) override
+    {
+        const auto refuse = [&] {
+            data->mutationFault = true;
+            data->damage();
+            return false;
+        };
+        if (data->completionAttempted)
+            return refuse();
+        data->completionAttempted = true; // Consume before reading or sending.
+        if (!data->terminalBound ||
+            (data->ordinaryRelease ? !data->ordinaryGrant : !data->terminalGrant) ||
+            data->completionGrant || !data->nativeReleaseSpent ||
+            data->nativeReleaseParent.empty() || !OriginalGrantCodec::digest(digest) ||
+            data->writing || heldInput().any)
+            return refuse();
+        const auto physical = readHandoffComparison(*data->terminalBound, data->ordinaryRelease);
+        if (!physical || !data->refresh() || data->mutationFault || data->ownerLost)
+            return refuse();
+        auto grant =
+            data->ordinaryRelease
+                ? receiveOrdinaryCompletionGrant(std::move(descriptor), digest,
+                                                 data->nativeReleaseParent, data->bound, *physical)
+                : receiveOriginalCompletionGrant(std::move(descriptor), digest,
+                                                 data->nativeReleaseParent, data->bound, *physical);
+        const auto before = grant
+                                ? readHandoffComparison(*data->terminalBound, data->ordinaryRelease)
+                                : std::nullopt;
+        const auto clock = compositorClock();
+        const auto history = data->ordinaryRelease
+                                 ? nativeOrdinaryOutputHighWater(data->bound, data->stableInventory)
+                                 : nativeOutputHighWater(data->bound, data->stableInventory);
+        const auto kernel = data->ordinaryRelease
+                                ? nativeOrdinaryFrameKernel(data->bound, data->stableInventory)
+                                : nativeFirstFrameKernel(data->bound, data->stableInventory);
+        auto current = before && clock && history && kernel
+                           ? NativeCurrentFrameGate::arm(
+                                 {data->stableInventory, *before, *clock, *history, *kernel})
+                           : std::nullopt;
+        if (!grant || !current ||
+            inputRetirement.phase() != ProtectedInputRetirement::Phase::Private ||
+            !data->refresh() || data->mutationFault || data->ownerLost || heldInput().any ||
+            !grant->transferLifetime())
+            return refuse();
+        // The original Root moves, rather than reconstructs, its live anchor
+        // before ACK. Replace the local watcher atomically on the compositor
+        // thread before the old channel's expected EOF is observed.
+        data->completionGrant = std::move(grant);
+        data->terminalGrant.reset();
+        data->ordinaryGrant.reset();
+        const auto activated = compositorClock();
+        const auto afterCommits =
+            data->ordinaryRelease
+                ? nativeOrdinaryOutputHighWater(data->bound, data->stableInventory)
+                : nativeOutputHighWater(data->bound, data->stableInventory);
+        const auto afterKernel = data->ordinaryRelease
+                                     ? nativeOrdinaryFrameKernel(data->bound, data->stableInventory)
+                                     : nativeFirstFrameKernel(data->bound, data->stableInventory);
+        if (!activated || !afterCommits || !afterKernel || heldInput().any ||
+            !data->completionGrant->handoffWindowCurrent() ||
+            !current->activate(data->stableInventory, *activated, *afterCommits, *afterKernel))
+            return refuse();
+        data->currentFrames.emplace(std::move(*current));
+        data->currentMode = true;
+        // No synthetic "physical exit" boolean: pending and newly queued
+        // typing remains quarantined until a fresh native Escape/drain edge.
+        inputRetirement.close(false, heldInput());
+        std::weak_ptr<NativeData> retained = data;
+        if (!data->completionGrant->admitCurrent([retained] {
+                const auto live = retained.lock();
+                return live && live->refreshCurrent();
+            }))
+            return refuse();
+        if (activeNative != data.get() || active.lock() != data)
+            return refuse();
+        activeNative = nullptr;
+        active.reset();
+        // Native output observers and the original Root lifetime remain in
+        // mutationFence; this is intentional handoff, never owner-loss close.
+        startupAdmissionChanged();
+        data->damage();
+        return data->refreshCurrent() ? true : refuse();
+    }
+    bool reconfigureReview()
+    {
+        // Retain roles, physical input bindings and native commit high-water
+        // marks. Every enabled head receives a fresh logical-size configure.
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !monitor->m_output || !surface.resource.lock())
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            if (monitor->m_size.x < 1 || monitor->m_size.x > 32768 || monitor->m_size.y < 1 ||
+                monitor->m_size.y > 32768 || monitor->m_size.x != std::floor(monitor->m_size.x) ||
+                monitor->m_size.y != std::floor(monitor->m_size.y))
+                return false;
+            surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+            if (!data->interaction.configure(key, surface.serial))
+                return false;
+        }
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            const auto monitor = surface.monitor.lock();
+            if (!monitor->m_enabled)
+                continue;
+            surface.resource.lock()->enter(monitor->m_self.lock());
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        data->damage();
+        return true;
+    }
+    bool attach(OutputKey key, wl_resource *wire, Configure configure) override
+    {
+        if (!data->refresh() || !configure || data->surfaces.contains(key))
+            return false;
+        const auto resource = CWLSurfaceResource::fromResource(wire);
+        const auto monitor = nativeOutputMonitor(key);
+        if (!resource || !monitor || !monitor->m_output ||
+            (resource->m_role && resource->m_role->role() != SURFACE_ROLE_UNASSIGNED) ||
+            resource->m_current.buffer || resource->m_pending.buffer || resource->m_mapped ||
+            !resource->m_subsurfaces.empty() ||
+            (monitor->m_enabled &&
+             (monitor->m_size.x < 1 || monitor->m_size.y < 1 || monitor->m_size.x > 32768 ||
+              monitor->m_size.y > 32768 || monitor->m_size.x != std::floor(monitor->m_size.x) ||
+              monitor->m_size.y != std::floor(monitor->m_size.y))) ||
+            !(monitor->m_output->commitCapabilities() &
+              Aquamarine::IOutput::AQ_OUTPUT_COMMIT_CAPABILITY_QUEUED))
+            return false;
+        auto [at, inserted] = data->surfaces.try_emplace(key);
+        if (!inserted)
+            return false;
+        auto &surface = at->second;
+        surface.output = key;
+        surface.monitor = monitor->m_self;
+        surface.resource = resource;
+        surface.role = makeShared<PrivateRole>();
+        resource->m_role = surface.role;
+        surface.configure = std::move(configure);
+        surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+        if (monitor->m_enabled && !data->interaction.configure(key, surface.serial))
+            return false;
+        const auto weak = std::weak_ptr<NativeData>(data);
+        surface.destroy = resource->m_events.destroy.listen([weak] {
+            if (const auto live = weak.lock())
+                live->close();
+        });
+        surface.commit = resource->m_events.commit.listen([weak, key] {
+            const auto live = weak.lock();
+            if (!live || !live->refresh())
+                return;
+            auto &surface = live->surfaces.at(key);
+            const auto resource = surface.resource.lock();
+            const auto monitor = surface.monitor.lock();
+            if (!resource || !monitor || !surface.acknowledged || !resource->m_current.buffer ||
+                !resource->m_current.texture || resource->m_current.size != monitor->m_size ||
+                !resource->m_subsurfaces.empty()) {
+                live->cancelInput();
+                return;
+            }
+            if (!resource->m_mapped)
+                resource->map();
+            surface.contentCommitted = true;
+            live->damage();
+        });
+        surface.result = monitor->m_output->events.commitResult.listen(
+            [weak, key](const Aquamarine::IOutput::SCommitResult &event) {
+                const auto live = weak.lock();
+                if (!live || live->closed)
+                    return;
+                auto &surface = live->surfaces.at(key);
+                if (event.id != 0 && event.id == surface.disableCommit) {
+                    surface.disableSubmitted =
+                        event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                        event.error == 0;
+                    if (!surface.disableSubmitted)
+                        live->mutationFault = true;
+                    return;
+                }
+                if (!surface.frame.submitted(
+                        event.id, event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                                      event.error == 0)) {
+                    live->cancelInput();
+                    live->damage();
+                    return;
+                }
+            });
+        surface.present = monitor->m_output->events.present.listen(
+            [weak, key](const Aquamarine::IOutput::SPresentEvent &event) {
+                const auto live = weak.lock();
+                if (!live || !live->refresh())
+                    return;
+                auto &surface = live->surfaces.at(key);
+                const auto presentation = surface.frame.presented(
+                    event.commitID,
+                    event.presented &&
+                        (event.flags & Aquamarine::IOutput::AQ_OUTPUT_PRESENT_HW_COMPLETION));
+                if (presentation == ProtectedFrame::Presentation::Failed) {
+                    live->cancelInput();
+                    live->damage();
+                    return;
+                }
+                if (presentation != ProtectedFrame::Presentation::Content)
+                    return;
+                if (!live->interactiveContent())
+                    return;
+                live->interaction.presented(key, event.commitID, true);
+                const auto focus = live->focused();
+                if (focus && g_pSeatManager)
+                    g_pSeatManager->setKeyboardFocus(focus);
+            });
+        if (monitor->m_enabled) {
+            resource->enter(monitor->m_self.lock());
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        return true;
+    }
+    bool acknowledge(OutputKey key, std::uint32_t serial) override
+    {
+        if (!data->refresh())
+            return false;
+        const auto at = data->surfaces.find(key);
+        if (at == data->surfaces.end() || serial != at->second.serial || at->second.acknowledged)
+            return false;
+        at->second.acknowledged = true;
+        return true;
+    }
+    bool refreshPresentation() override
+    {
+        if (!data->refresh() || data->interaction.phase() != ProtectedInteraction::Phase::Ready ||
+            data->surfaces.empty())
+            return false;
+        // Change every configure/input epoch before any callback can publish a
+        // revision. No original Ready frame can attest the replacement content.
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor)
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
+            surface.frame.invalidate();
+            surface.renderedBuffer.reset();
+            if (!data->interaction.configure(key, surface.serial))
+                return false;
+        }
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !surface.configure)
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        data->damage();
+        return true;
+    }
+    std::optional<ProtectedSceneStatus> status() override
+    {
+        if (!data->refresh())
+            return std::nullopt;
+        if (data->terminalActive && (data->ownerLost || data->mutationFault))
+            return std::nullopt;
+        const auto facts = nativeBackend()->snapshot();
+        if (facts && data->terminalActive && data->terminalConsumed)
+            return ProtectedSceneStatus{compositorInstance(), facts->generation,
+                                        data->terminalEpoch, ProtectedInteraction::Phase::Consumed};
+        return facts ? std::optional(ProtectedSceneStatus{
+                           compositorInstance(), facts->generation,
+                           data->mutation && !data->decisionActive && !data->terminalActive
+                               ? data->mutationEpoch
+                               : data->interaction.epoch(),
+                           data->mutation && !data->decisionActive && !data->terminalActive
+                               ? ProtectedInteraction::Phase::Consumed
+                               : data->interaction.phase()})
+                     : std::nullopt;
+    }
+    bool consume(const std::string &digest, std::uint64_t epoch) override
+    {
+        if (!data->inputReady())
+            return false;
+        const auto facts = nativeBackend()->snapshot();
+        const auto clock = compositorClock();
+        auto scope = data->interaction.scope();
+        scope.digest = digest;
+        if (!facts || !clock || !data->interaction.consume(scope, epoch, *facts, *clock))
+            return false;
+        if (data->terminalActive) {
+            data->terminalConsumed = true;
+            data->terminalEpoch = epoch;
+            data->invalidateFrames(); // Fresh opaque frames for Control's post-review proof.
+        }
+        return true;
+    }
+};
+} // namespace
+void initializeProtectedDisplay(wl_display &display)
+{
+    if (endpoint)
+        return;
+    drainTimer = wl_event_loop_add_timer(
+        g_pCompositor->m_wlEventLoop,
+        [](void *) {
+            if (!g_pInputManager)
+                return 0;
+            std::erase_if(heldButtons, [](const auto &button) {
+                const auto original = button.second.lock();
+                return !original ||
+                       !std::ranges::any_of(g_pInputManager->m_pointers, [&](const auto &pointer) {
+                           return pointer == original;
+                       });
+            });
+            inputRetirement.poll(heldInput());
+            if (draining() && drainTimer)
+                wl_event_source_timer_update(drainTimer, 100);
+            else
+                scheduleRefocus();
+            return 0;
+        },
+        nullptr);
+    if (!drainTimer)
+        return;
+    endpoint = std::make_unique<ProtectedWireEndpoint>(
+        display, attestDisplayOwner,
+        [](const ProtectedInteraction::Scope &scope) -> std::unique_ptr<ProtectedScene> {
+            if ((scope.purpose == ProtectedInteraction::Purpose::Recovery
+                     ? !startupRecoveryAvailable()
+                     : startupBlocked()) ||
+                !supportedPresentation() || !active.expired() || draining() || !nativeBackend() ||
+                !g_pInputManager || !g_pSeatManager || !Pointer::mgr() || keysHeld() ||
+                !g_pInputManager->getKeysFromAllKBs().empty() ||
+                g_pInputManager->hasHeldButtons() || g_pInputManager->m_keyboards.empty() ||
+                g_pInputManager->m_keyboards.size() > 16 ||
+                g_pInputManager->m_pointers.size() > 16 ||
+                !std::ranges::any_of(g_pInputManager->m_keyboards,
+                                     [](const auto &keyboard) {
+                                         return nativeKeyboardDevice(keyboard) &&
+                                                keyboard->m_xkbKeymap && keyboard->m_enabled &&
+                                                keyboard->m_allowed;
+                                     }) ||
+                nextEpoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+                return nullptr;
+            if (scope.purpose == ProtectedInteraction::Purpose::Apply && mutationFence &&
+                (!mutationFence->currentMode || !mutationFence->retiredCurrent ||
+                 !mutationFence->retiredCurrent->live() || !mutationFence->refreshCurrent()))
+                return nullptr;
+            const auto facts = nativeBackend()->snapshot();
+            const auto clock = compositorClock();
+            if (!facts || !clock)
+                return nullptr;
+            auto interaction = ProtectedInteraction::start(scope, *facts, *clock, nextEpoch++);
+            if (!interaction || !scopes.reserve(scope, *clock))
+                return nullptr;
+            auto data = std::make_shared<NativeData>(std::move(*interaction));
+            for (auto &keyboard : data->keyboards) {
+                const auto device = keyboard.device.lock();
+                if (!device)
+                    return nullptr;
+                keyboard.changed = device->m_keyboardEvents.keymap.listen(
+                    [weak = std::weak_ptr<NativeData>(data)](const IKeyboard::SKeymapEvent &) {
+                        if (const auto live = weak.lock())
+                            live->cancelInput();
+                    });
+            }
+            auto scene = std::make_unique<PinnedScene>(data);
+            if (!inputRetirement.begin(heldInput()))
+                return nullptr;
+            activeNative = data.get();
+            active = data;
+            Pointer::mgr()->refreshProtectedCursorFence();
+            if (!Pointer::mgr()->protectedCursorFenceReady()) {
+                data->close();
+                return nullptr;
+            }
+            data->timer = wl_event_loop_add_timer(
+                g_pCompositor->m_wlEventLoop,
+                [](void *context) {
+                    auto &native = *static_cast<NativeData *>(context);
+                    if (!native.refresh()) {
+                        native.close();
+                        return 0;
+                    }
+                    if (native.timer)
+                        wl_event_source_timer_update(native.timer, 100);
+                    return 0;
+                },
+                data.get());
+            if (!data->timer || wl_event_source_timer_update(data->timer, 100) != 0) {
+                data->close();
+                return nullptr;
+            }
+            g_pSeatManager->setKeyboardFocus(nullptr);
+            g_pSeatManager->setPointerFocus(nullptr, {});
+            data->damage();
+            return scene;
+        });
+}
+void shutdownProtectedDisplay()
+{
+    endpoint.reset();
+    if (const auto data = active.lock()) {
+        data->mutation = false; // Compositor teardown, after its compensation.
+        data->close();
+    }
+    mutationFence.reset();
+    active.reset();
+    if (drainTimer) {
+        wl_event_source_remove(drainTimer);
+        drainTimer = nullptr;
+    }
+}
+namespace {
+bool startupBlocksProtectedScene()
+{
+    const auto data = active.lock();
+    return startupBlocked() &&
+           !(data &&
+             (data->originalRestoration ||
+              data->interaction.scope().purpose == ProtectedInteraction::Purpose::Recovery) &&
+             startupRecoveryAvailable());
+}
+} // namespace
+bool protectedDisplayActive()
+{
+    return startupBlocked() || !active.expired() || (mutationFence && mutationFence->currentMode);
+}
+void startupAdmissionChanged()
+{
+    if (g_pSeatManager) {
+        g_pSeatManager->setKeyboardFocus(nullptr);
+        g_pSeatManager->setPointerFocus(nullptr, {});
+    }
+    if (!startupBlocked())
+        inputRetirement.drainStartup(heldInput());
+    if (Pointer::mgr())
+        Pointer::mgr()->refreshProtectedCursorFence();
+    if (draining() && drainTimer)
+        wl_event_source_timer_update(drainTimer, 100);
+    scheduleRefocus();
+}
+bool protectedInputExclusive()
+{
+    return startupBlocked() || !active.expired() || draining();
+}
+bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &now)
+{
+    const auto data = active.lock();
+    if (!data && !startupBlocked())
+        return false;
+    if (!monitor || !g_pHyprRenderer)
+        return true; // An unavailable safety renderer never admits the scene.
+    CRectPassElement::SRectData black;
+    black.box = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+    black.color = CHyprColor(0, 0, 0, 1);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(black));
+    if (startupBlocksProtectedScene())
+        return true;
+    auto *surface = data->forMonitor(monitor);
+    if (surface) {
+        surface->selectedFrame = false;
+        surface->selectedOrdinaryFrame = false;
+        // A previous rendered-but-unsubmitted buffer cannot be adopted by
+        // this pass. The actual completion callback supplies its own identity.
+        surface->renderedBuffer.reset();
+    }
+    if (surface && data->nativeHandoffActive && data->refresh() && !data->mutationFault &&
+        !data->ownerLost) {
+        // Keep all focus/input/Root/power fences, direct-scanout exclusion and
+        // source ownership while the native renderer supplies ordinary pixels.
+        surface->selectedOrdinaryFrame = true;
+        return false;
+    }
+    if (!data->refresh() || !surface || (data->terminalActive && !data->interactiveContent()))
+        return true;
+    const auto resource = surface->resource.lock();
+    if (!surface->acknowledged || !surface->contentCommitted || !resource || !resource->m_mapped ||
+        !resource->m_current.texture)
+        return true;
+    CSurfacePassElement::SRenderData frame{monitor->m_self, now, monitor->m_position, {}};
+    frame.surface = resource;
+    frame.texture = resource->m_current.texture;
+    frame.decorate = false;
+    frame.w = monitor->m_size.x;
+    frame.h = monitor->m_size.y;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CSurfacePassElement>(frame));
+    surface->selectedFrame = true;
+    resource->frame(now);
+    return true;
+}
+void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buffer)
+{
+    const auto activeData = active.lock();
+    const auto data = activeData                                    ? activeData
+                      : mutationFence && mutationFence->currentMode ? mutationFence
+                                                                    : nullptr;
+    if (!data || !monitor || !monitor->m_output || !buffer || !data->refresh())
+        return;
+    auto *surface = data->forMonitor(monitor);
+    const auto current = monitor->m_output->state->state().buffer;
+    if (!surface || !current || current.get() != buffer)
+        return;
+    if (data->nativeHandoffActive && !data->currentMode && surface->frame.queuedCommit() != 0)
+        return; // A later render cannot replace the retained first-frame tracker.
+    const auto kind = data->currentMode || surface->selectedOrdinaryFrame
+                          ? ProtectedFrame::Kind::Ordinary
+                      : surface->selectedFrame ? ProtectedFrame::Kind::Content
+                                               : ProtectedFrame::Kind::Safety;
+    if (!surface->frame.rendered(buffer, kind)) {
+        data->cancelInput();
+        return;
+    }
+    surface->selectedFrame = false;
+    surface->selectedOrdinaryFrame = false;
+    surface->renderedBuffer = current;
+}
+std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
+{
+    if (startupBlocksProtectedScene()) {
+        if (!monitor || !monitor->m_output)
+            return false;
+        const auto &state = monitor->m_output->state->state();
+        if (state.enabled && (!state.buffer || !renderOpaqueBuffer(monitor, state.buffer)))
+            return false;
+        // Every startup submission is independently initialized opaque. No
+        // ordinary/stale/uninitialized buffer reaches KMS, even during initial
+        // modeset before a renderer-produced frame. This is not terminal proof.
+        const auto submitted = monitor->m_output->commitAsync({});
+        return submitted.id != 0 && submitted.error == 0;
+    }
+    const auto activeData = active.lock();
+    const auto data = activeData                                    ? activeData
+                      : mutationFence && mutationFence->currentMode ? mutationFence
+                                                                    : nullptr;
+    if (!data)
+        return std::nullopt;
+    auto *surface = data->forMonitor(monitor);
+    if (data->nativeHandoffActive && (data->ownerLost || data->mutationFault || !data->refresh())) {
+        // Loss during a physical handoff must be able to paint opaque safety
+        // pixels. This native-owned initialization never submits an ordinary
+        // buffer, changes layout, renews proof, or releases another fence.
+        if (!monitor || !monitor->m_output)
+            return false;
+        const auto &pending = monitor->m_output->state->state();
+        constexpr std::uint32_t pixels =
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_BUFFER |
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_DAMAGE |
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_EXPLICIT_IN_FENCE |
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_EXPLICIT_OUT_FENCE;
+        if (!pending.enabled || !pending.buffer || (pending.committed & ~pixels) != 0 ||
+            !renderOpaqueBuffer(monitor, pending.buffer))
+            return false;
+        const auto submission = monitor->m_output->commitAsync({});
+        return submission.id != 0 && submission.error == 0;
+    }
+    if (!data->refresh() || !surface || !monitor || !monitor->m_output)
+        return false;
+    if (data->nativeHandoffActive) {
+        const auto &pending = monitor->m_output->state->state();
+        constexpr std::uint32_t pixels =
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_BUFFER |
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_DAMAGE |
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_EXPLICIT_IN_FENCE |
+            Aquamarine::COutputState::AQ_OUTPUT_STATE_EXPLICIT_OUT_FENCE;
+        const std::uint32_t allowed =
+            pending.enabled
+                ? pixels
+                : static_cast<std::uint32_t>(Aquamarine::COutputState::AQ_OUTPUT_STATE_ENABLED);
+        if ((pending.committed & ~allowed) != 0) {
+            data->mutationFault = true;
+            data->damage();
+            return false; // Presentation handoff cannot smuggle a modeset or color write.
+        }
+    }
+    if (!monitor->m_output->state->state().enabled) {
+        const bool physicalDisable =
+            data->nativeHandoffActive && !data->writing && surface->disableCommit == 0;
+        if ((!physicalDisable &&
+             (!data->mutation || !data->writing || !ownedModesetInProgress())) ||
+            !ownedCommitAllowed())
+            return false;
+        const auto submission = monitor->m_output->commitAsync({});
+        if (submission.id == 0 || submission.error != 0) {
+            data->mutationFault = true;
+            return false;
+        }
+        surface->disableCommit = submission.id;
+        surface->disableSubmitted = false;
+        return true;
+    }
+    const auto buffer = monitor->m_output->state->state().buffer;
+    if (!buffer)
+        return false;
+    if (data->nativeHandoffActive && !data->currentMode && surface->frame.queuedCommit() != 0)
+        return false; // Freeze the immutable first buffer until durable completion.
+    if (surface->renderedBuffer != buffer || !surface->frame.prepared(buffer.get())) {
+        // Native-owned opaque initialization replaces the former unrendered
+        // placeholder refusal. Inventory/lease checks above stay mandatory;
+        // this does not make an unbound layout mutation eligible.
+        if (!ownedModesetInProgress() || !data->mutation || !data->writing ||
+            !renderOpaqueBuffer(monitor, buffer) ||
+            !surface->frame.rendered(buffer.get(), ProtectedFrame::Kind::Safety))
+            return false;
+        surface->renderedBuffer = buffer;
+    }
+    // Revoke old interaction evidence BEFORE a black frame can replace it.
+    // The opaque frame's own hardware event will remain safety-only.
+    if (data->interactiveContent() &&
+        surface->frame.pendingKind() == ProtectedFrame::Kind::Safety &&
+        !data->interaction.safetyFrame(surface->output))
+        return false;
+    // Rendering/importing the buffer can take time. Neither the original
+    // protection window nor the native power fence may expire during that work.
+    if (!data->refresh() || !ownedCommitAllowed())
+        return false;
+    const auto submission = monitor->m_output->commitAsync({});
+    surface->renderedBuffer.reset();
+    if (submission.id == 0 || submission.error != 0 ||
+        !surface->frame.queued(buffer.get(), submission.id) ||
+        (data->interactiveContent() &&
+         surface->frame.queuedKind() == ProtectedFrame::Kind::Content &&
+         !data->interaction.commit(surface->output, surface->serial, submission.id))) {
+        data->cancelInput();
+        return false;
+    }
+    if (data->originalRestoration || data->ordinaryRelease)
+        surface->submittedBuffer = std::make_shared<ImmutablePresentationBuffer>(buffer);
+    return true;
+}
+std::optional<OriginalRestorationFrame> originalRestorationFrame(Monitor::CMonitor *monitor,
+                                                                 const Correlation &bound)
+{
+    const auto data = mutationFence;
+    if (!data || !data->originalRestoration || !data->mutation || data->writing ||
+        data->bound != bound || data->postWriteEpoch == 0 || data->mutationFault ||
+        data->ownerLost || data->lastWrite != MutationProtection::Write::Restore ||
+        !data->refresh())
+        return std::nullopt;
+    const auto *surface = data->forMonitor(monitor);
+    if (!surface || !surface->submittedBuffer ||
+        surface->frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+        surface->frame.completedBuffer() != surface->submittedBuffer->buffer.get() ||
+        surface->frame.completedCommit() == 0)
+        return std::nullopt;
+    return OriginalRestorationFrame{surface->submittedBuffer->buffer,
+                                    surface->frame.completedCommit(), data->postWriteEpoch};
+}
+namespace {
+std::optional<NativeFirstFrameGate::Receipt> readHandoffComparison(const Correlation &terminal,
+                                                                   bool ordinary)
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    const auto grantLive = [&] {
+        if (!data || data->ordinaryRelease != ordinary)
+            return false;
+        return ordinary                ? data->ordinaryGrant && data->ordinaryGrant->live()
+               : data->completionGrant ? data->completionGrant->verify()
+                                       : data->terminalGrant && data->terminalGrant->verify();
+    };
+    if (!data || data->currentMode || !backend || !data->nativeHandoffActive ||
+        !data->nativeReleaseSpent || !data->nativeReleaseGate || !data->terminalBound ||
+        *data->terminalBound != terminal || data->writing || data->ownerLost ||
+        data->mutationFault || heldInput().any || !data->refresh() || data->ownerLost ||
+        data->mutationFault || !grantLive())
+        return std::nullopt;
+    const auto refuse = [&]() -> std::optional<NativeFirstFrameGate::Receipt> {
+        data->mutationFault = true;
+        data->nativeReleaseGate->fault();
+        data->damage();
+        return std::nullopt;
+    };
+    const auto held = data->stableInventory;
+    const auto before = backend->snapshot();
+    if (!before || *before != held)
+        return refuse();
+    const auto kernel = ordinary ? nativeOrdinaryFrameKernel(data->bound, held)
+                                 : nativeFirstFrameKernel(data->bound, held);
+    const auto commits = ordinary ? nativeOrdinaryOutputHighWater(data->bound, held)
+                                  : nativeOutputHighWater(data->bound, held);
+    if (!kernel || !commits || held.heads.size() != data->surfaces.size())
+        return refuse();
+    std::vector<NativeFirstFrameGate::NativeFrame> frames;
+    frames.reserve(held.heads.size());
+    for (const auto &head : held.heads) {
+        const auto found = data->surfaces.find(head.key);
+        if (found == data->surfaces.end() ||
+            found->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return refuse();
+        const auto &surface = found->second;
+        if (!head.current.enabled) {
+            frames.push_back(
+                {head.key, nullptr, nullptr, surface.disableCommit, surface.disableSubmitted, 0});
+            continue;
+        }
+        if (!surface.submittedBuffer) {
+            frames.push_back({head.key, nullptr, nullptr, 0, false, 0});
+            continue;
+        }
+        const auto &buffer = surface.submittedBuffer->buffer;
+        const auto framebuffer = nativeHandoffFramebuffer(head.key, buffer);
+        if (!framebuffer && surface.frame.completed())
+            return refuse();
+        frames.push_back(
+            {head.key, &surface.frame, buffer.get(), 0, false, framebuffer.value_or(0)});
+    }
+    const auto after = backend->snapshot();
+    if (!after || *after != held || !data->refresh() || data->ownerLost || data->mutationFault ||
+        heldInput().any || !grantLive())
+        return refuse();
+    const auto clock = compositorClock();
+    if (!clock)
+        return refuse();
+    const NativeFirstFrameGate::ObservationRequest sample{held, *clock, frames, *kernel, *commits};
+    auto &gate = *data->nativeReleaseGate;
+    const auto result = gate.phase() == NativeFirstFrameGate::Phase::Verified
+                            ? gate.reconcile(sample)
+                            : gate.observe(sample);
+    const auto finished = compositorClock();
+    if (!finished || !gate.retain(held, *finished))
+        return refuse();
+    return result;
+}
+} // namespace
+
+std::optional<NativeFirstFrameGate::Receipt>
+readNativeHandoffComparison(const Correlation &terminal)
+{
+    return readHandoffComparison(terminal, false);
+}
+
+std::optional<std::string> readOrdinaryHandoffPresentation()
+{
+    const auto data = mutationFence;
+    if (!data || !data->ordinaryRelease || !data->terminalBound || !data->ordinaryGrant)
+        return {};
+    const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
+    if (!intent)
+        return {};
+    const auto receipt = readHandoffComparison(*data->terminalBound, true);
+    if (!receipt || receipt->postWriteEpoch != data->postWriteEpoch ||
+        receipt->completedCount != data->stableInventory.heads.size() ||
+        !data->ordinaryGrant->live())
+        return {};
+    // Every free-form historical field remains in the complete Root record;
+    // only bounded canonical native identifiers/digests reach this JSON DTO.
+    const auto atom = [](std::string_view value) {
+        return !value.empty() && value.size() <= 256 &&
+               std::all_of(value.begin(), value.end(), [](char c) {
+                   return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ':' || c == '-';
+               });
+    };
+    if (!atom(intent->layout.topology) || !atom(data->bound.transaction) ||
+        !atom(data->terminalBound->transaction) ||
+        !OriginalGrantCodec::digest(data->bound.effectDigest) ||
+        !OriginalGrantCodec::digest(data->terminalBound->effectDigest) ||
+        !OriginalGrantCodec::digest(data->terminalBound->dispatchDigest))
+        return {};
+    std::string proof = "{\"schema\":1";
+    const auto text = [&](std::string_view key, std::string_view value) {
+        proof += ",\"" + std::string(key) + "\":\"" + std::string(value) + "\"";
+    };
+    const auto number = [&](std::string_view key, std::uint64_t value) {
+        text(key, std::to_string(value));
+    };
+    text("topology", intent->layout.topology);
+    text("original_transaction", data->bound.transaction);
+    text("original_effect", data->bound.effectDigest);
+    text("original_dispatch", data->bound.dispatchDigest);
+    text("release_transaction", data->terminalBound->transaction);
+    text("release_effect", data->terminalBound->effectDigest);
+    text("release_dispatch", data->terminalBound->dispatchDigest);
+    text("preparation_digest", data->ordinaryGrant->comparisonDigest());
+    text("terminal_record", intent->terminal);
+    text("checkpoint", intent->checkpoint);
+    text("signed_binding", intent->signedBinding);
+    text("source_guard", intent->source);
+    text("outcome", intent->outcome == OrdinaryReleaseCodec::Outcome::Keep     ? "keep"
+                    : intent->outcome == OrdinaryReleaseCodec::Outcome::Revert ? "revert"
+                                                                               : "expired");
+    number("sampled_unix_ms", receipt->observedUnixMs);
+    number("sampled_boot_ms", receipt->observedBootMs);
+    number("deadline_unix_ms", receipt->deadlineUnixMs);
+    number("deadline_boot_ms", receipt->deadlineBootMs);
+    number("post_write_epoch", receipt->postWriteEpoch);
+    number("security_epoch", receipt->securityEpoch);
+    proof += ",\"heads\":[";
+    for (std::size_t i = 0; i < receipt->completedCount; ++i) {
+        if (i)
+            proof += ',';
+        const auto &row = receipt->completed[i];
+        const auto &kernel = row.kernel;
+        proof += "{\"handle\":\"" + std::to_string(kernel.key.handle) + "\",\"generation\":\"" +
+                 std::to_string(kernel.key.generation) +
+                 "\",\"enabled\":" + (kernel.active ? "true" : "false") +
+                 ",\"connector\":" + std::to_string(kernel.connector) +
+                 ",\"crtc\":" + std::to_string(kernel.crtc) +
+                 ",\"plane\":" + std::to_string(kernel.plane) +
+                 ",\"framebuffer\":" + std::to_string(kernel.framebuffer) +
+                 ",\"spend_high_water\":\"" + std::to_string(row.spendHighWater) +
+                 "\",\"completed_commit\":\"" + std::to_string(row.completedCommit) + "\"}";
+    }
+    proof += "]}";
+    return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;
+}
+
+namespace {
+std::optional<NativeCurrentFrameGate::Receipt> readNativeCurrentComparison()
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    if (!data || !data->currentMode || !backend || !data->terminalBound || !data->currentFrames ||
+        !data->completionGrant || !data->refreshCurrent())
+        return std::nullopt;
+    const auto refuse = [&]() -> std::optional<NativeCurrentFrameGate::Receipt> {
+        data->mutationFault = true;
+        data->completionGrant->invalidate();
+        data->damage();
+        return std::nullopt;
+    };
+    if (data->retiredCurrent) {
+        const auto now = backend->snapshot();
+        if (now && data->sameReleasedSource(*now) && *now != data->stableInventory)
+            return std::nullopt; // Obsolete S17 scope: no current proof or authority.
+    }
+    const auto started = compositorClock();
+    const auto held = data->stableInventory;
+    if (!started || !data->completionGrant->verify())
+        return refuse();
+    const auto kernel = nativeCurrentFrameKernel(data->bound, held);
+    const auto commits = nativeCurrentOutputHighWater(data->bound, held);
+    if (!kernel || !commits || data->surfaces.size() != held.heads.size())
+        return refuse();
+    std::vector<NativeCurrentFrameGate::Frame> frames;
+    frames.reserve(held.heads.size());
+    for (const auto &head : held.heads) {
+        const auto found = data->surfaces.find(head.key);
+        if (found == data->surfaces.end() ||
+            found->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return refuse();
+        const auto &surface = found->second;
+        if (!head.current.enabled) {
+            frames.push_back(
+                {head.key, nullptr, nullptr, surface.disableCommit, surface.disableSubmitted, 0});
+        } else if (!surface.submittedBuffer) {
+            frames.push_back({head.key, nullptr, nullptr, 0, false, 0});
+        } else {
+            const auto &buffer = surface.submittedBuffer->buffer;
+            const auto framebuffer = nativeHandoffFramebuffer(head.key, buffer);
+            if (!framebuffer && surface.frame.completed())
+                return refuse();
+            frames.push_back(
+                {head.key, &surface.frame, buffer.get(), 0, false, framebuffer.value_or(0)});
+        }
+    }
+    const auto after = backend->snapshot();
+    const auto finished = compositorClock();
+    if (!after || !finished || *after != held || !data->refreshCurrent() ||
+        !data->completionGrant->verify())
+        return refuse();
+    const auto result =
+        data->currentFrames->observe({held, *started, *finished, frames, *kernel, *commits});
+    if (data->currentFrames->phase() != NativeCurrentFrameGate::Phase::Active)
+        return refuse();
+    const auto end = compositorClock();
+    if (!end || end->unixMs < finished->unixMs || end->bootMs < finished->bootMs ||
+        end->unixMs - started->unixMs >= 2000 || end->bootMs - started->bootMs >= 2000 ||
+        !data->refreshCurrent())
+        return refuse();
+    return result;
+}
+
+std::optional<std::string> framePresentation(bool current)
+{
+    const auto data = mutationFence;
+    if (!data || data->currentMode != current || !data->terminalBound || !data->nativeHandoffActive)
+        return std::nullopt;
+    // A separately protected successor review deliberately covers ordinary
+    // frames. Do not report that coverage as the predecessor's ordinary proof
+    // or fault its still-held Root lifetime by sampling a different scene.
+    if (current) {
+        const auto review = active.lock();
+        if (review && review != data)
+            return std::nullopt;
+    }
+    const auto terminal = OriginalFinalizationCodec::decode(data->terminalMaterial);
+    const auto original = OriginalGrantCodec::materialFields(data->originalMaterial);
+    const auto restored = original ? OriginalGrantCodec::intent((*original)[5]) : std::nullopt;
+    const auto atom = [](std::string_view text, std::size_t bound) {
+        return !text.empty() && text.size() <= bound &&
+               std::all_of(text.begin(), text.end(), [](char c) {
+                   return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ':' || c == '-';
+               });
+    };
+    if (!terminal || !original || !restored || !atom(restored->topology, 256) ||
+        !atom(data->bound.transaction, 256) || !atom(data->terminalBound->transaction, 256) ||
+        !OriginalGrantCodec::digest(data->bound.effectDigest) ||
+        !OriginalGrantCodec::digest(data->bound.dispatchDigest) ||
+        !OriginalGrantCodec::digest(data->terminalBound->effectDigest) ||
+        !OriginalGrantCodec::digest(data->terminalBound->dispatchDigest))
+        return std::nullopt;
+    const auto receipt =
+        current ? readNativeCurrentComparison() : readNativeHandoffComparison(*data->terminalBound);
+    if (!receipt || receipt->postWriteEpoch != terminal->postWriteEpoch ||
+        receipt->completedCount != data->stableInventory.heads.size())
+        return std::nullopt;
+    std::string heads;
+    for (std::size_t i = 0; i < receipt->completedCount; ++i) {
+        const auto &row = receipt->completed[i];
+        const auto &kernel = row.kernel;
+        if (!heads.empty())
+            heads += ',';
+        heads += "{\"handle\":\"" + std::to_string(kernel.key.handle) + "\",\"generation\":\"" +
+                 std::to_string(kernel.key.generation) +
+                 "\",\"enabled\":" + (kernel.active ? "true" : "false") +
+                 ",\"connector\":" + std::to_string(kernel.connector) +
+                 ",\"crtc\":" + std::to_string(kernel.crtc) +
+                 ",\"plane\":" + std::to_string(kernel.plane) +
+                 ",\"framebuffer\":" + std::to_string(kernel.framebuffer) +
+                 (current ? ",\"handoff_commit\":\"" : ",\"spend_high_water\":\"") +
+                 std::to_string(row.spendHighWater) + "\",\"completed_commit\":\"" +
+                 std::to_string(row.completedCommit) + "\"}";
+    }
+    std::string proof =
+        std::string(current ? "{\"schema\":3,\"topology\":\"" : "{\"schema\":1,\"topology\":\"") +
+        std::string(restored->topology) + "\",\"original_dispatch\":\"" +
+        std::string((*original)[1]) + "\",\"checkpoint\":\"" + std::string((*original)[2]) +
+        "\",\"restoration_transaction\":\"" + data->bound.transaction +
+        "\",\"restoration_effect\":\"" + data->bound.effectDigest +
+        "\",\"restoration_dispatch\":\"" + data->bound.dispatchDigest +
+        "\",\"terminal_transaction\":\"" + data->terminalBound->transaction +
+        "\",\"terminal_effect\":\"" + data->terminalBound->effectDigest +
+        "\",\"terminal_dispatch\":\"" + data->terminalBound->dispatchDigest +
+        "\",\"terminal_link\":\"" + std::string(terminal->terminalLink) + "\",\"source_guard\":\"" +
+        std::string(terminal->sourceGuard) + "\",\"sampled_unix_ms\":\"" +
+        std::to_string(receipt->observedUnixMs) + "\",\"sampled_boot_ms\":\"" +
+        std::to_string(receipt->observedBootMs) + "\",\"deadline_unix_ms\":\"" +
+        std::to_string(receipt->deadlineUnixMs) + "\",\"deadline_boot_ms\":\"" +
+        std::to_string(receipt->deadlineBootMs) + "\",\"post_write_epoch\":\"" +
+        std::to_string(receipt->postWriteEpoch) + "\",\"security_epoch\":\"" +
+        std::to_string(receipt->securityEpoch) + "\"";
+    if (current) {
+        if (!data->completionGrant || !data->completionGrant->live())
+            return std::nullopt;
+        // Frame sampling above independently observed the held native power
+        // fence. Input state comes only from native physical retirement.
+        proof +=
+            ",\"current_commit_digest\":\"" +
+            (data->committedCurrent ? data->committedCurrent->comparisonDigest()
+                                    : std::string(64, '0')) +
+            "\",\"final_retirement_digest\":\"" +
+            (data->retiredCurrent ? data->retiredCurrent->comparisonDigest()
+                                  : std::string(64, '0')) +
+            "\",\"completion_digest\":\"" + data->completionGrant->comparisonDigest() +
+            "\",\"input_retired\":" +
+            (inputRetirement.phase() == ProtectedInputRetirement::Phase::Open && !heldInput().any
+                 ? "true"
+                 : "false") +
+            ",\"power_fence_held\":" + (nativePowerFenceHeld() ? "true" : "false");
+    }
+    proof += ",\"heads\":[" + heads + "]}";
+    return proof.size() <= 16 * 1024 ? std::optional{std::move(proof)} : std::nullopt;
+}
+} // namespace
+
+std::optional<std::string> readNativeHandoffPresentation()
+{
+    return framePresentation(false);
+}
+std::optional<std::string> readNativeCurrentPresentation()
+{
+    return framePresentation(true);
+}
+
+NativeProtectedBaseline readProtectedBaseline(const Correlation &bound, const Snapshot &expected)
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    if (!data || !backend)
+        return std::nullopt;
+    if (!data->mutation || !data->originalRestoration)
+        return std::nullopt;
+    if (data->closed || data->writing || data->ownerLost || data->mutationFault)
+        return std::nullopt;
+    if (data->bound != bound || !data->terminalActive || !data->terminalConsumed)
+        return std::nullopt;
+    if (!data->terminalQuiescenceAttempted || !data->terminalGrant)
+        return std::nullopt;
+    if (data->postWriteEpoch == 0 || heldInput().any)
+        return std::nullopt;
+    if (expected.heads.empty() || expected.heads.size() > DisplayTransaction::MaxHeads)
+        return std::nullopt;
+    if (expected.heads.size() != data->surfaces.size())
+        return std::nullopt;
+    const auto first = backend->snapshot();
+    if (!first || *first != expected)
+        return std::nullopt;
+    if (expected != data->stableInventory)
+        return std::nullopt;
+    if (!data->refresh())
+        return std::nullopt;
+    if (!data->terminalGrant->verify())
+        return std::nullopt;
+    if (!originalRestorationPresented(bound))
+        return std::nullopt;
+    NativeProtectedFrameBaseline result;
+    result.postWriteEpoch = data->postWriteEpoch;
+    result.before.reserve(expected.heads.size());
+    for (const auto &head : expected.heads) {
+        const auto surface = data->surfaces.find(head.key);
+        if (surface == data->surfaces.end())
+            return std::nullopt;
+        if (surface->second.output != head.key)
+            return std::nullopt;
+        if (surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return std::nullopt;
+        const auto &held = surface->second;
+        const auto highWater = held.frame.highWater();
+        if (!highWater)
+            return std::nullopt;
+        if (*highWater == std::numeric_limits<std::uint64_t>::max())
+            return std::nullopt;
+        if (held.disableCommit == std::numeric_limits<std::uint64_t>::max())
+            return std::nullopt;
+        if (head.current.enabled) {
+            if (!held.submittedBuffer)
+                return std::nullopt;
+            if (held.frame.queuedKind() != ProtectedFrame::Kind::Safety)
+                return std::nullopt;
+            if (held.frame.completedBuffer() != held.submittedBuffer->buffer.get())
+                return std::nullopt;
+            if (held.frame.completedCommit() != *highWater || !*highWater)
+                return std::nullopt;
+        } else if (!held.disableSubmitted) {
+            return std::nullopt;
+        }
+        result.before.push_back({head.key, std::max(*highWater, held.disableCommit)});
+    }
+    const auto last = backend->snapshot();
+    if (!last || *last != expected)
+        return std::nullopt;
+    if (!data->refresh())
+        return std::nullopt;
+    if (!data->terminalGrant->verify())
+        return std::nullopt;
+    if (data->postWriteEpoch != result.postWriteEpoch)
+        return std::nullopt;
+    if (data->ownerLost || data->mutationFault || heldInput().any)
+        return std::nullopt;
+    return result;
+}
+NativeProtectedBaseline readOrdinaryProtectedBaseline(const Correlation &bound,
+                                                      const Snapshot &expected)
+{
+    const auto data = mutationFence;
+    auto *backend = nativeBackend();
+    if (!data || !backend || !data->mutation || !data->ordinaryRelease ||
+        data->originalRestoration || data->currentMode || data->closed || data->writing ||
+        data->ownerLost || data->mutationFault || data->bound != bound || !data->terminalActive ||
+        !data->terminalConsumed || !data->ordinaryGrant || !data->postWriteEpoch ||
+        heldInput().any || expected.heads.empty() ||
+        expected.heads.size() > DisplayTransaction::MaxHeads ||
+        expected.heads.size() != data->surfaces.size() || expected != data->stableInventory ||
+        !data->refresh())
+        return {};
+    const auto first = backend->snapshot();
+    const auto intent = OrdinaryReleaseCodec::decode(data->terminalMaterial);
+    const auto phase = nativeTransactions() ? nativeTransactions()->status(bound) : std::nullopt;
+    const auto wanted = intent && intent->outcome == OrdinaryReleaseCodec::Outcome::Keep
+                            ? CompositorDisplayService::Phase::Confirmed
+                            : CompositorDisplayService::Phase::Restored;
+    if (!first || *first != expected || !intent || phase != std::optional{wanted} ||
+        !OrdinaryReleaseCodec::matchesHeld(*intent, bound, data->baseline, data->desired, expected))
+        return {};
+    NativeProtectedFrameBaseline result;
+    result.postWriteEpoch = data->postWriteEpoch;
+    result.before.reserve(expected.heads.size());
+    for (const auto &head : expected.heads) {
+        const auto surface = data->surfaces.find(head.key);
+        if (surface == data->surfaces.end() || surface->second.output != head.key ||
+            surface->second.monitor.lock().get() != nativeOutputMonitor(head.key))
+            return {};
+        const auto &held = surface->second;
+        const auto high = held.frame.highWater();
+        if (!high || *high == std::numeric_limits<std::uint64_t>::max() ||
+            held.disableCommit == std::numeric_limits<std::uint64_t>::max())
+            return {};
+        if (head.current.enabled) {
+            if (!held.submittedBuffer || held.frame.queuedKind() != ProtectedFrame::Kind::Safety ||
+                held.frame.completedBuffer() != held.submittedBuffer->buffer.get() ||
+                held.frame.completedCommit() != *high || !*high)
+                return {};
+        } else if (!held.disableSubmitted)
+            return {};
+        result.before.push_back({head.key, std::max(*high, held.disableCommit)});
+    }
+    const auto after = backend->snapshot();
+    if (!after || *after != expected || !data->refresh() || data->ownerLost ||
+        data->mutationFault || heldInput().any || result.postWriteEpoch != data->postWriteEpoch)
+        return {};
+    return result;
+}
+
+bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
+{
+    if (startupBlocksProtectedScene())
+        return !resource;
+    const auto data = active.lock();
+    if (!resource) {
+        if (data && keyboard)
+            data->interaction.focus(std::nullopt);
+        return true;
+    }
+    if (!data)
+        return !draining();
+    for (const auto &[key, surface] : data->surfaces) {
+        (void)key;
+        if (surface.resource.lock() == resource) {
+            if (keyboard)
+                data->interaction.focus(key);
+            return true;
+        }
+    }
+    data->interaction.focus(std::nullopt);
+    return false;
+}
+bool protectedKeyboardFocusAllowed(const SP<CWLSurfaceResource> &surface)
+{
+    return focusAllowed(surface, true);
+}
+bool protectedPointerFocusAllowed(const SP<CWLSurfaceResource> &surface)
+{
+    return focusAllowed(surface, false);
+}
+bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard> &keyboard)
+{
+    if (startupBlocksProtectedScene())
+        return true;
+    const auto data = active.lock();
+    if (!data) {
+        if (!inputRetirement.blocked())
+            return false;
+        if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+            event.state != WL_KEYBOARD_KEY_STATE_RELEASED)
+            return true;
+        const bool physical =
+            nativeKeyboardDevice(keyboard) && keyboard->m_enabled && keyboard->m_allowed;
+        if (!inputRetirement.key(physical, event.keycode == KEY_ESC,
+                                 event.state == WL_KEYBOARD_KEY_STATE_PRESSED, heldInput()))
+            return false;
+        if (!draining())
+            scheduleRefocus();
+        return true;
+    }
+    if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+        event.state != WL_KEYBOARD_KEY_STATE_RELEASED) {
+        data->close();
+        return true;
+    }
+    if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
+        data->cancelInput();
+        return true;
+    }
+    const bool ready = data->inputReady();
+    const auto held = heldInput();
+    if (event.keycode == KEY_ESC) {
+        if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            const auto clock = compositorClock();
+            if (!data->escapeDown && !held.other && clock) {
+                data->exitBootMs = clock->bootMs;
+                data->exitEpoch = data->interaction.epoch();
+            }
+            data->escapeDown = true;
+        } else if (!held.escape)
+            data->escapeDown = false;
+    } else if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED)
+        data->exitBootMs = 0;
+    const auto source = std::ranges::find_if(
+        data->keyboards, [&](const auto &bound) { return bound.device.lock() == keyboard; });
+    if (source == data->keyboards.end()) {
+        data->close();
+        return true;
+    }
+    const auto delivery =
+        data->keys.edge(static_cast<std::size_t>(std::distance(data->keyboards.begin(), source)),
+                        event.keycode, event.state == WL_KEYBOARD_KEY_STATE_PRESSED, ready);
+    if (delivery != ProtectedKeyDelivery::Edge::Ignore && data->ownsKeyboardFocus() &&
+        !data->closed && data->interaction.phase() != ProtectedInteraction::Phase::Cancelled) {
+        g_pSeatManager->setKeyboard(keyboard);
+        g_pSeatManager->sendKeyboardKey(event.timeMs, event.keycode, event.state);
+    } else if (!ready && event.keycode == KEY_ESC && event.state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+               data->exitBootMs != 0) {
+        data->close(); // Physical cancellation can abandon an unready prompt.
+    }
+    return true;
+}
+bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
+{
+    if (startupBlocksProtectedScene())
+        return true;
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
+        data->cancelInput();
+        return true;
+    }
+    const bool bound = std::ranges::any_of(
+        data->keyboards, [&](const auto &original) { return original.device.lock() == keyboard; });
+    if (!bound) {
+        data->close();
+        return true;
+    }
+    // Modifier snapshots do not admit a key or a proof. Keep the same private
+    // owner's XKB state current while new presses wait for a replacement frame;
+    // otherwise a dropped Shift release could contaminate the next PAM prompt.
+    if (data->refresh() && data->ownsKeyboardFocus() && !data->closed &&
+        data->interaction.phase() != ProtectedInteraction::Phase::Cancelled) {
+        const auto &mods = keyboard->m_modifiersState;
+        g_pSeatManager->setKeyboard(keyboard);
+        g_pSeatManager->sendKeyboardMods(mods.depressed, mods.latched, mods.locked, mods.group);
+    }
+    return true;
+}
+bool protectedPointerRefocus(std::uint32_t time)
+{
+    if (startupBlocksProtectedScene())
+        return true;
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    const auto focus = data->focused();
+    if (!focus || !data->inputReady()) {
+        g_pSeatManager->setPointerFocus(nullptr, {});
+        return true;
+    }
+    const auto position = g_pInputManager->getMouseCoordsInternal();
+    for (auto &[key, surface] : data->surfaces) {
+        (void)key;
+        const auto monitor = surface.monitor.lock();
+        const auto resource = surface.resource.lock();
+        if (monitor && resource &&
+            CBox{monitor->m_position, monitor->m_size}.containsPoint(position)) {
+            const auto local = position - monitor->m_position;
+            g_pSeatManager->setPointerFocus(resource, local);
+            g_pSeatManager->sendPointerMotion(time, local);
+            g_pSeatManager->sendPointerFrame();
+            return true;
+        }
+    }
+    g_pSeatManager->setPointerFocus(nullptr, {});
+    return true;
+}
+bool protectedPointerMove(const IPointer::SMotionEvent &event)
+{
+    if (startupBlocksProtectedScene())
+        return true;
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    if (!nativePointerDevice(event.device) || !event.device->m_connected) {
+        data->cancelInput();
+        return true;
+    }
+    Pointer::mgr()->move(event.delta);
+    (void)protectedPointerRefocus(event.timeMs);
+    return true;
+}
+bool protectedPointerWarp(const IPointer::SMotionAbsoluteEvent &event)
+{
+    if (startupBlocksProtectedScene())
+        return true;
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    // Absolute physical pointers/touch/tablets have distinct device semantics;
+    // they cannot be relabelled as an authenticated physical relative pointer.
+    (void)event;
+    data->cancelInput();
+    return true;
+}
+bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPointer> &pointer)
+{
+    const auto data = active.lock();
+    if (!data && !draining() && !startupBlocked())
+        return false;
+    if (event.button > KEY_MAX) {
+        if (data)
+            data->cancelInput();
+        return true;
+    }
+    if (!nativePointerDevice(pointer)) {
+        if (data)
+            data->cancelInput();
+        return true;
+    }
+    const auto key = std::pair{pointer.get(), event.button};
+    if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        heldButtons.insert_or_assign(key, pointer);
+        if (data)
+            data->exitBootMs = 0;
+    } else
+        heldButtons.erase(key);
+    inputRetirement.poll(heldInput());
+    if (startupBlocksProtectedScene())
+        return true;
+    if (!data) {
+        if (!draining())
+            scheduleRefocus();
+        return true;
+    }
+    if (!pointer->m_connected) {
+        data->cancelInput();
+        return true;
+    }
+    (void)protectedPointerRefocus(event.timeMs);
+    if (data->inputReady()) {
+        g_pSeatManager->sendPointerButton(event.timeMs, event.button, event.state);
+        g_pSeatManager->sendPointerFrame();
+    }
+    return true;
+}
+} // namespace Linura::HyprlandDisplay

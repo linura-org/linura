@@ -195,7 +195,7 @@ def load_spec(root: Path = ROOT) -> dict[str, Any]:
         if (
             not {"requires", "ubuntu", "arch"}
             <= set(profile)
-            <= {"requires", "ubuntu", "arch", "supported"}
+            <= {"requires", "ubuntu", "arch", "supported", "preparation"}
         ):
             raise PreparationError("invalid_profile_contract")
         for key in ("requires", "ubuntu", "arch"):
@@ -216,6 +216,22 @@ def load_spec(root: Path = ROOT) -> dict[str, Any]:
             raise PreparationError("invalid_package_name")
         if "supported" in profile and profile["supported"] != ["arch"]:
             raise PreparationError("invalid_profile_platform")
+        if "preparation" in profile and (
+            name != "hyprland-build" or profile["preparation"] != "s21-pinned-substrate"
+        ):
+            raise PreparationError("invalid_profile_preparation")
+        if name == "hyprland-build" and (
+            profile.get("preparation") != "s21-pinned-substrate"
+            or profile.get("supported") != ["arch"]
+            or profile["requires"]
+            or profile["ubuntu"]
+        ):
+            raise PreparationError("invalid_profile_preparation")
+        if name == "hyprland-build":
+            from tools.hyprland_display_environment import REQUIRED
+
+            if set(profile["arch"]) != REQUIRED | {"python"}:
+                raise PreparationError("compositor_sdk_dependency_inventory_drift")
     return spec
 
 
@@ -239,6 +255,16 @@ def profiles(selected: list[str], spec: dict[str, Any]) -> list[str]:
     for name in ["core", *selected]:
         visit(name)
     return sorted(result)
+
+
+def host_preparation_profiles(spec: dict[str, Any]) -> list[str]:
+    # Preserve the existing --all host preparation selection. The standalone
+    # SDK inventory has its explicitly pinned disposable-substrate driver.
+    return sorted(
+        name
+        for name, profile in spec["profile"].items()
+        if "preparation" not in profile
+    )
 
 
 def host(spec: dict[str, Any]) -> dict[str, str]:
@@ -574,6 +600,13 @@ def plan(
             "supported", ["ubuntu", "arch"]
         ):
             raise PreparationError("profile_requires_native_arch_builder")
+    if "hyprland-build" in selected:
+        # This profile inventories the explicitly pinned SDK, not the host's
+        # rolling package set. Use the existing disposable-substrate driver;
+        # never downgrade a maintained host or relax generic Arch protections.
+        raise PreparationError(
+            "hyprland_build_requires_s21_pinned_substrate_preparation"
+        )
     source = source_state(commands)
     inputs = input_identity(root)
     names = sorted(
@@ -673,8 +706,14 @@ def main() -> int:
     try:
         commands = Commands()
         selected: list[str] = (
-            list(doctor.PROFILES) if args.all else (args.profile or ["core"])
+            host_preparation_profiles(load_spec())
+            if args.all
+            else (args.profile or ["core"])
         )
+        if "hyprland-build" in selected:
+            raise PreparationError(
+                "hyprland_build_requires_s21_pinned_substrate_preparation"
+            )
         repair = args.command == "maintain" or (
             args.command == "plan" and args.maintenance
         )

@@ -1,4 +1,6 @@
 #include "native_runtime.h"
+#include "native_display_restoration.h"
+#include "native_display_startup.h"
 #include "authentication_agent.h"
 #include "native_deadline.h"
 #include "native_endpoint.h"
@@ -9,10 +11,16 @@
 #include "native_unlock_status.h"
 #include "native_assistive.h"
 #include "native_transition_fence.h"
+#include "native_display_watchdog.h"
+#include "native_display_flow.h"
+#include "native_display_finalization.h"
+#include "native_display_ordinary_release.h"
 #include "peer_guard.h"
 #include "session_bootstrap.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QtEndian>
 #include <QGuiApplication>
 #include <QDBusPendingCallWatcher>
 #include <QThread>
@@ -54,8 +62,14 @@ class NativeRuntime::Impl final
     std::unique_ptr<NativeWaylandLock> backend;
     std::unique_ptr<NativeLockProtocol> protocol;
     std::unique_ptr<AuthenticationAgent> authentication;
+    std::unique_ptr<NativeDisplayFlow> display;
+    bool displayRetiring = false;
+    // Presentation only: never a native-success flag or permission to replay.
+    bool displayRecoveryNotice = false;
     std::optional<NativePeerIdentity> approvalPeer;
     std::optional<NativeApprovalScope> approvalScope;
+    quint64 approvalInputGeneration = 0;
+    quint64 approvalProofGeneration = 0;
     NativeTransitionFence transitionFence;
     NativeSleepFence sleepFence;
     bool sleepNotVerified = false;
@@ -92,6 +106,7 @@ class NativeRuntime::Impl final
             delete endpoint;
             endpoint = nullptr;
         }
+        display.reset();
         authentication.reset();
         assistive.reset();
         protocol.reset();
@@ -134,6 +149,11 @@ class NativeRuntime::Impl final
         // Clear before invoking callbacks, which can emit presentation signals.
         approvalScope.reset();
         approvalPeer.reset();
+        approvalInputGeneration = 0;
+        approvalProofGeneration = 0;
+        auto retiredDisplay = std::move(display);
+        if (retiredDisplay)
+            retiredDisplay->cancel();
         if (backend)
             backend->cancelLockConfirmation();
         if (authentication)
@@ -143,8 +163,12 @@ class NativeRuntime::Impl final
     {
         if (!initialized || !authentication || !presentation || !backend)
             return;
-        if (transitionFence.active() || sleepFence.active())
+        if (display && display->fenced())
+            return; // Display composition owns only its fixed protected view.
+        if (displayRetiring || transitionFence.active() || sleepFence.active())
             presentation->present(NativePresentation::State::Recovering);
+        else if (displayRecoveryNotice)
+            presentation->present(NativePresentation::State::DisplayRecoveryRequired);
         else if (approvalScope && approvalScope->purpose != ApprovalPurpose::ConfirmLock)
             presentation->presentAuthentication(approvalScope->purpose);
         else if (authentication->confirmationPending())
@@ -158,7 +182,8 @@ class NativeRuntime::Impl final
     {
         if (assistive && presentation && backend)
             assistive->publish(presentation->assistiveProjection(
-                backend->secureCoverage() || backend->lockConfirmationVisible()));
+                backend->secureCoverage() || backend->lockConfirmationVisible() ||
+                (display && display->fenced() && backend->protectedInputFocused())));
     }
 };
 
@@ -275,6 +300,30 @@ bool NativeRuntime::initialize(NativeStartup startup)
             }) ||
         !impl_->backend->initialize())
         return runtimeUnavailable("linura-security-owner: runtime/protected-input\n");
+    switch (admitNativeDisplayStartup(*impl_->peers, *impl_->binding, *impl_->backend)) {
+    case NativeDisplayStartupAdmission::Ready:
+        break;
+    case NativeDisplayStartupAdmission::NativeSample:
+        return runtimeUnavailable("linura-security-owner: startup/native-sample\n");
+    case NativeDisplayStartupAdmission::Session:
+        return runtimeUnavailable("linura-security-owner: startup/session\n");
+    case NativeDisplayStartupAdmission::NativeImage:
+        return runtimeUnavailable("linura-security-owner: startup/native-image\n");
+    case NativeDisplayStartupAdmission::OriginalGuard:
+        return runtimeUnavailable("linura-security-owner: startup/original-guard\n");
+    case NativeDisplayStartupAdmission::GuardReply:
+        return runtimeUnavailable("linura-security-owner: startup/guard-reply\n");
+    case NativeDisplayStartupAdmission::GuardChanged:
+        return runtimeUnavailable("linura-security-owner: startup/guard-changed\n");
+    case NativeDisplayStartupAdmission::SessionChanged:
+        return runtimeUnavailable("linura-security-owner: startup/session-changed\n");
+    case NativeDisplayStartupAdmission::KernelPeer:
+        return runtimeUnavailable("linura-security-owner: startup/kernel-peer\n");
+    case NativeDisplayStartupAdmission::NativeTransfer:
+        return runtimeUnavailable("linura-security-owner: startup/native-transfer\n");
+    default:
+        return runtimeUnavailable("linura-security-owner: startup/unknown\n");
+    }
     impl_->protocol = std::make_unique<NativeLockProtocol>(*impl_->backend, impl_->binding->lock);
     if (!impl_->protocol->bound())
         return runtimeUnavailable("linura-security-owner: runtime/protocol-identity\n");
@@ -292,6 +341,17 @@ bool NativeRuntime::initialize(NativeStartup startup)
         return runtimeUnavailable("linura-security-owner: runtime/auth-registration\n");
     if (!impl_->authentication->setNativeProgress(impl_->probeProgress))
         return runtimeUnavailable("linura-security-owner: runtime/auth-progress\n");
+    if (!impl_->authentication->bindDisplayPromptPresentation(
+            [this](const NativeApprovalScope &scope, quint64 token,
+                   std::function<void(bool)> completed) {
+                if (!impl_->display || !impl_->display->matches(scope)) {
+                    if (completed)
+                        completed(false);
+                    return;
+                }
+                impl_->display->presentPrompt(scope, token, std::move(completed));
+            }))
+        return runtimeUnavailable("linura-security-owner: runtime/display-presentation-binding\n");
     impl_->assistive = std::make_unique<NativeAssistiveBridge>(startup.uid_);
     impl_->publishAssistiveMetadata();
     connect(impl_->presentation.get(), &NativePresentation::repaintRequested, this,
@@ -303,8 +363,13 @@ bool NativeRuntime::initialize(NativeStartup startup)
             &NativeWaylandLock::repaint, Qt::QueuedConnection);
     connect(impl_->authentication.get(), &AuthenticationAgent::presentationChanged, this,
             [this] { impl_->refreshPresentation(); });
-    connect(impl_->authentication.get(), &AuthenticationAgent::confirmationAvailable, this,
-            &NativeRuntime::approvalInteractionCompleted);
+    connect(impl_->authentication.get(), &AuthenticationAgent::confirmationAvailable, this, [this] {
+        // Capture the actual input lifetime when the native proof is
+        // produced, after the first dialog/lock focus. Later enter,
+        // leave, keymap or capability changes cannot migrate that proof.
+        impl_->approvalProofGeneration = impl_->backend->protectedInteractionGeneration();
+        Q_EMIT approvalInteractionCompleted();
+    });
     connect(impl_->authentication.get(), &AuthenticationAgent::scopeRetired, this,
             [this](const NativeApprovalScope &retired) {
                 if (!impl_->approvalScope || *impl_->approvalScope != retired)
@@ -327,6 +392,8 @@ bool NativeRuntime::initialize(NativeStartup startup)
                 impl_->refreshPresentation();
             });
     connect(impl_->authentication.get(), &AuthenticationAgent::denied, this, [this] {
+        if (impl_->display && impl_->display->fenced())
+            return; // Its scope-retirement callback owns display cancellation.
         impl_->approvalScope.reset();
         impl_->approvalPeer.reset();
         impl_->backend->cancelLockConfirmation();
@@ -341,6 +408,8 @@ bool NativeRuntime::initialize(NativeStartup startup)
             impl_->clearApproval();
         if (impl_->protocol->inspect() == LockMechanism::State::Faulted)
             failClosed();
+        if (impl_->display)
+            impl_->display->revalidateOrigin();
         if (impl_->sleepFence.active())
             recoverNativeSleepEntry();
         impl_->publishAssistiveMetadata();
@@ -370,10 +439,28 @@ void NativeRuntime::requestNativeUnlock()
         return;
     }
     if (!impl_->initialized || impl_->unlockRequestPending || impl_->approvalScope ||
+        impl_->displayRetiring || (impl_->display && impl_->display->fenced()) ||
         impl_->transitionFence.active() || !impl_->currentSession() ||
         impl_->protocol->inspect() != LockMechanism::State::Secure ||
         impl_->independentState() != NativeCompositorLockState::Locked)
         return;
+    // A canceled display approval is not evidence that its native mutation
+    // completed or restored. Refuse a new unlock conversation until the
+    // compositor independently reports no retained display safety fence.
+    if (!impl_->backend->displayAllowsSecurityTransition()) {
+        impl_->displayRecoveryNotice = true;
+        impl_->refreshPresentation();
+        return;
+    }
+    if (impl_->displayRecoveryNotice) {
+        // "Check display recovery" is an observation-only action. Even when
+        // the compositor has cleared its fence, the same physical input may
+        // not be promoted into a new unlock request or PAM interaction.
+        // Render the ordinary unlock prompt and require a separate gesture.
+        impl_->displayRecoveryNotice = false;
+        impl_->refreshPresentation();
+        return;
+    }
     const auto control = impl_->peers->namedPeer(NativePeerPurpose::ControlApproval);
     if (!control) {
         impl_->presentation->present(NativePresentation::State::Unavailable);
@@ -598,15 +685,189 @@ void NativeRuntime::recoverNativeUnlock()
             });
 }
 
+bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
+                                       const NativeApprovalScope &scope)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer ||
+        (scope.purpose != ApprovalPurpose::ApplyDisplay &&
+         scope.purpose != ApprovalPurpose::RestoreOriginalDisplay &&
+         scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
+         scope.purpose != ApprovalPurpose::ReleaseOrdinaryDisplay) ||
+        !scope.valid() || scope.lock != identity() || impl_->approvalScope ||
+        impl_->displayRetiring ||
+        (scope.purpose != ApprovalPurpose::FinalizeOriginalDisplay &&
+         scope.purpose != ApprovalPurpose::ReleaseOrdinaryDisplay && impl_->display &&
+         impl_->display->fenced()) ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest)
+        return false;
+    NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
+    const auto independent = impl_->independentState();
+    if (!independent)
+        return false;
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!settled || (*settled != NativeObservedLockState::Secure &&
+                     *settled != NativeObservedLockState::Unlocked))
+        return false;
+    if (scope.purpose == ApprovalPurpose::FinalizeOriginalDisplay)
+        return impl_->display && impl_->display->fenced() &&
+               impl_->display->beginFinalization(scope, *peer);
+    if (scope.purpose == ApprovalPurpose::ReleaseOrdinaryDisplay)
+        return impl_->display && impl_->display->fenced() &&
+               impl_->display->beginOrdinaryRelease(scope, *peer);
+    // An earlier display conversation can be canceled or lose its native owner
+    // while the compositor still holds a pending/recovery-failed mutation. Do
+    // not present another protected approval over that unresolved native fence.
+    // This is a refusal-only current-state check, never new mutation authority.
+    const bool recovery = scope.purpose == ApprovalPurpose::RestoreOriginalDisplay;
+    if (recovery ? !impl_->backend->displayRecoveryApprovalAvailable()
+                 : !impl_->backend->displayAllowsSecurityTransition()) {
+        // Only the settled locked session exposes the recheck input. In an
+        // unlocked session the caller receives an unsupported/blocked result,
+        // without a fake interactive confirmation surface.
+        if (*settled == NativeObservedLockState::Secure) {
+            impl_->displayRecoveryNotice = true;
+            impl_->refreshPresentation();
+        }
+        return false;
+    }
+    impl_->displayRecoveryNotice = false;
+    impl_->display.reset();
+    const auto lock = identity();
+    auto display = NativeDisplayFlow::create(
+        scope, *impl_->backend, *impl_->presentation, *impl_->authentication, *peer,
+        [this, peer = *peer, lock] {
+            return impl_->initialized && identity() == lock && impl_->currentSession() &&
+                   !impl_->transitionFence.active() && !impl_->sleepFence.active() &&
+                   !impl_->unlockRequestLock && !impl_->transitionRequest &&
+                   impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, peer);
+        });
+    if (!display) {
+        impl_->refreshPresentation();
+        return false;
+    }
+    connect(
+        display.get(), &NativeDisplayFlow::closed, this,
+        [this] {
+            impl_->refreshPresentation();
+            impl_->publishAssistiveMetadata();
+        },
+        Qt::QueuedConnection);
+    impl_->display = std::move(display);
+    return true;
+}
+
+std::optional<bool> NativeRuntime::displayApprovalReady(const QDBusMessage &received,
+                                                        const NativeApprovalScope &scope)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->matches(scope) || !impl_->display->fenced() || scope.lock != identity())
+        return std::nullopt;
+    const bool ready = impl_->display->readyForPolkit(scope);
+    return impl_->display->fenced() ? std::optional(ready) : std::nullopt;
+}
+
+bool NativeRuntime::consumeDisplayApproval(const QDBusMessage &received,
+                                           const NativeApprovalScope &scope)
+{
+    return impl_->caller(received, NativePeerPurpose::ControlApproval) && impl_->display &&
+           scope.lock == identity() && impl_->display->matches(scope) &&
+           impl_->display->consume(scope);
+}
+
+bool NativeRuntime::cancelDisplayApproval(const QDBusMessage &received,
+                                          const NativeApprovalScope &scope)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        scope.lock != identity() || !impl_->display->matches(scope))
+        return false;
+    impl_->display->cancel();
+    return true;
+}
+
+bool NativeRuntime::armDisplayDecision(const QDBusMessage &received,
+                                       const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->fenced() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest)
+        return false;
+    const auto intent = NativeDisplayIntent::parse(challenge.material);
+    return intent && intent->lock == identity() && impl_->display->beginDecision(challenge);
+}
+std::optional<bool>
+NativeRuntime::displayDecisionReady(const QDBusMessage &received,
+                                    const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->fenced() || !impl_->display->matchesDecision(challenge))
+        return std::nullopt;
+    const bool ready = impl_->display->decisionReady(challenge);
+    return impl_->display->fenced() ? std::optional(ready) : std::nullopt;
+}
+bool NativeRuntime::consumeDisplayDecision(const QDBusMessage &received,
+                                           const NativeDisplayChoiceChallenge &challenge)
+{
+    return impl_->caller(received, NativePeerPurpose::ControlApproval) && impl_->display &&
+           impl_->display->fenced() && impl_->display->consumeDecision(challenge);
+}
+bool NativeRuntime::cancelDisplayDecision(const QDBusMessage &received,
+                                          const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->matchesDecision(challenge))
+        return false;
+    impl_->display->cancel();
+    return true;
+}
+
+bool NativeRuntime::retireDisplayForSecurity(const QDBusMessage &received,
+                                             const NativeLockIdentity &lock)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || lock != identity())
+        return false;
+    if (impl_->display && impl_->display->fenced()) {
+        // Retire human authority before touching its wire resources. The
+        // compositor retains its opaque/input fence and original compensation;
+        // no key can become lock confirmation or unlock authentication here.
+        impl_->displayRetiring = true;
+        impl_->display->cancel();
+        impl_->refreshPresentation();
+    }
+    const bool ready = impl_->backend->displayAllowsSecurityTransition();
+    if (!impl_->currentSession() || identity() != lock ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return false;
+    if (!ready && impl_->display) {
+        impl_->displayRetiring = true;
+        impl_->refreshPresentation();
+    }
+    if (ready && impl_->displayRetiring) {
+        impl_->display.reset();
+        impl_->displayRetiring = false;
+        impl_->displayRecoveryNotice = false;
+        impl_->refreshPresentation();
+    }
+    return ready;
+}
+
 bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprovalScope &scope)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
-    if (!peer || impl_->approvalScope || impl_->transitionFence.active() ||
+    if (!peer || impl_->approvalScope || impl_->displayRetiring ||
+        (impl_->display && impl_->display->fenced()) || impl_->transitionFence.active() ||
         impl_->sleepFence.active() || !scope.valid() || scope.lock != identity())
         return false;
     NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto state = impl_->independentState();
-    if (!state || !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+    if (!state ||
+        (scope.purpose != ApprovalPurpose::ConfirmLock &&
+         !impl_->backend->displayAllowsSecurityTransition()) ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return false;
     const auto mechanism = impl_->protocol->inspect();
     const bool secure = *state == NativeCompositorLockState::Locked;
@@ -617,6 +878,8 @@ bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprov
         return false;
     impl_->approvalScope = scope;
     impl_->approvalPeer = *peer;
+    impl_->approvalInputGeneration = impl_->backend->protectedInputGeneration();
+    impl_->approvalProofGeneration = 0;
     impl_->inCall = true;
     const bool armed = impl_->authentication->arm(scope, secure, *peer);
     impl_->inCall = false;
@@ -658,6 +921,26 @@ bool NativeRuntime::consumeApproval(const QDBusMessage &received, const NativeAp
     const auto expected = scope.purpose == ApprovalPurpose::ConfirmLock
                               ? NativeCompositorLockState::Unlocked
                               : NativeCompositorLockState::Locked;
+    // This probe drains the owned Wayland connection and may deliver hotplug,
+    // configure or protected-input events. It must precede the final proof/input
+    // generation checks; no pre-probe eligibility survives those callbacks.
+    if (scope.purpose != ApprovalPurpose::ConfirmLock &&
+        !impl_->backend->displayAllowsSecurityTransition()) {
+        impl_->clearApproval();
+        return false;
+    }
+    if (impl_->approvalInputGeneration != impl_->backend->protectedInputGeneration()) {
+        impl_->clearApproval();
+        return false;
+    }
+    if (impl_->approvalProofGeneration == 0)
+        return false; // Polling an in-progress interaction does not cancel it.
+    if (impl_->approvalProofGeneration != impl_->backend->protectedInteractionGeneration() ||
+        (scope.purpose != ApprovalPurpose::ConfirmLock &&
+         !impl_->backend->protectedInputFocused())) {
+        impl_->clearApproval();
+        return false;
+    }
     if (state != expected || !impl_->authentication->consume(scope))
         return false;
     if (scope.transition)
@@ -678,7 +961,8 @@ bool NativeRuntime::dispatchPrepared(const QDBusMessage &received, const NativeL
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
     if (!peer || lock != identity() || impl_->approvalScope || impl_->transitionFence.active() ||
-        impl_->sleepFence.active())
+        impl_->sleepFence.active() || impl_->displayRetiring ||
+        !impl_->backend->displayAllowsSecurityTransition())
         return false;
     // Only the separately attested root session executor can call this. A human
     // approval or its identifiers never reach dispatch as reusable authority.
@@ -723,19 +1007,538 @@ std::optional<NativeObservedLockState> NativeRuntime::observe(const QDBusMessage
                                    impl_->backend->secureCoverage());
 }
 
+std::optional<NativeDisplaySample> NativeRuntime::observeDisplay(const QDBusMessage &received)
+{
+    return displaySample(received, NativePeerPurpose::ControlApproval);
+}
+
+std::optional<NativeDisplaySample>
+NativeRuntime::observePreparedDisplay(const QDBusMessage &received)
+{
+    return displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+}
+
+std::optional<QString>
+NativeRuntime::observeOriginalDisplayPresentation(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::Restoration);
+}
+
+std::optional<QString> NativeRuntime::observeNativeDisplayHandoff(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::First);
+}
+std::optional<QString> NativeRuntime::observeOrdinaryDisplayHandoff(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::Ordinary);
+}
+
+std::optional<QString> NativeRuntime::observeNativeDisplayCurrent(const QDBusMessage &received)
+{
+    return observeDisplayPresentation(received, DisplayPresentation::Current);
+}
+
+std::optional<QString> NativeRuntime::observeDisplayPresentation(const QDBusMessage &received,
+                                                                 DisplayPresentation kind)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->binding || impl_->binding->seat.isEmpty())
+        return std::nullopt;
+    const auto sample = impl_->backend->displayStartupSample();
+    const auto independent = impl_->independentState();
+    if (!sample)
+        return std::nullopt;
+    const auto &presentation =
+        kind == DisplayPresentation::Restoration ? sample->originalRestorationPresentation
+        : kind == DisplayPresentation::First     ? sample->nativeHandoffPresentation
+        : kind == DisplayPresentation::Ordinary  ? sample->ordinaryHandoffPresentation
+                                                 : sample->nativeCurrentPresentation;
+    const auto expectedPhase = kind == DisplayPresentation::Current ? 4U : 2U;
+    const auto presentationCount =
+        static_cast<unsigned>(!sample->originalRestorationPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->nativeHandoffPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->nativeCurrentPresentation.isEmpty()) +
+        static_cast<unsigned>(!sample->ordinaryHandoffPresentation.isEmpty());
+    const bool expectedStartup =
+        kind == DisplayPresentation::Ordinary
+            ? (sample->startupPhase == 1 || sample->startupPhase == 4)
+            : (sample->startupPhase == expectedPhase ||
+               (kind == DisplayPresentation::Current && sample->startupPhase == 5));
+    if (!independent || !sample->fenced || !expectedStartup || presentation.isEmpty() ||
+        presentation.size() > 16 * 1024 || presentationCount != 1 ||
+        sample->compositor != impl_->backend->displayInvocation() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!settled ||
+        (*settled != NativeObservedLockState::Secure &&
+         *settled != NativeObservedLockState::Unlocked) ||
+        sample->coverage != (*settled == NativeObservedLockState::Secure ? 1U : 0U))
+        return std::nullopt;
+    const auto text = QString::fromUtf8(presentation);
+    return text.toUtf8() == presentation ? std::optional{text} : std::nullopt;
+}
+
+QString NativeDisplaySample::correlationDigest() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto &field :
+         {QStringLiteral("linura.native.display-sample.v1"), resource, compositor, seat, topology,
+          monitors, secure ? QStringLiteral("true") : QStringLiteral("false")}) {
+        const auto bytes = field.toUtf8();
+        const auto size = qToBigEndian(static_cast<quint64>(bytes.size()));
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(&size), sizeof(size)));
+        hash.addData(bytes);
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+std::optional<NativeDisplaySample> NativeRuntime::displaySample(const QDBusMessage &received,
+                                                                NativePeerPurpose purpose)
+{
+    const auto peer = impl_->caller(received, purpose);
+    if (!peer || !impl_->binding || impl_->binding->seat.isEmpty())
+        return std::nullopt;
+    const auto before = impl_->backend->observeDisplayTopology();
+    if (!before)
+        return std::nullopt;
+    const auto independent = impl_->independentState();
+    const auto monitors = observeNativeHyprlandOutputs(impl_->compositorSocket, *impl_->binding);
+    if (!independent || !monitors || monitors->isEmpty() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(purpose, *peer))
+        return std::nullopt;
+    const auto after = impl_->backend->observeDisplayTopology();
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!after || *before != *after || !settled ||
+        (*settled != NativeObservedLockState::Secure &&
+         *settled != NativeObservedLockState::Unlocked))
+        return std::nullopt;
+    const QString topology = after->encode();
+    // Round-trip UTF-8 strictly; invalid native metadata must not be normalized
+    // into different JSON bytes before the typed Rust decoder sees it.
+    const QString metadata = QString::fromUtf8(*monitors);
+    if (topology.isEmpty() || metadata.toUtf8() != *monitors)
+        return std::nullopt;
+    const QString recovery = purpose == NativePeerPurpose::PreparedSessionDispatch
+                                 ? after->recoveryPreimage()
+                                 : QString{};
+    if (purpose == NativePeerPurpose::PreparedSessionDispatch && recovery.isEmpty())
+        return std::nullopt;
+    return NativeDisplaySample{identity().resource,
+                               impl_->backend->displayInvocation(),
+                               impl_->binding->seat,
+                               topology,
+                               metadata,
+                               *settled == NativeObservedLockState::Secure,
+                               recovery};
+}
+
+std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
+    const QDBusMessage &received, const NativeDisplayIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    const QString &nativeBaselineGuard)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || intent.lock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    // Root's strict Rust decoder validated this exact raw native sample, not
+    // merely a connector name, client layout, epoch or digest credential. Read
+    // again on the same owned connection; drift invalidates the handoff.
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs))
+        return std::nullopt;
+    if (!impl_->display || !impl_->display->redeem(intent, correlation))
+        return std::nullopt; // No exact live consumed human receipt, no native effect.
+    // No Qt/D-Bus event processing or caller callbacks intervene. The backend
+    // samples once more and reserves exactly one private native apply. A lost
+    // response is ambiguity, never permission to invoke this call again.
+    return impl_->backend->dispatchPreparedDisplay(intent, correlation, sampledBootMs,
+                                                   nativeBaselineGuard);
+}
+
+std::optional<quint32> NativeRuntime::dispatchPreparedSuccessorDisplay(
+    const QDBusMessage &received, const NativeDisplayIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    const QString &nativeBaselineGuard, const QByteArray &preparation)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (preparation.isEmpty() || preparation.size() > 64 * 1024 || !peer || !clock ||
+        intent.lock != identity() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    // Root's strict Rust decoder validated this exact raw native sample, not
+    // merely a connector name, client layout, epoch or digest credential. Read
+    // again on the same owned connection; drift invalidates the handoff.
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs))
+        return std::nullopt;
+    if (!impl_->display || !impl_->display->redeem(intent, correlation))
+        return std::nullopt; // No exact live consumed human receipt, no native effect.
+    // No Qt/D-Bus event processing or caller callbacks intervene. The backend
+    // samples once more and reserves exactly one private native apply. A lost
+    // response is ambiguity, never permission to invoke this call again.
+    return impl_->backend->dispatchPreparedSuccessorDisplay(intent, correlation, sampledBootMs,
+                                                            nativeBaselineGuard, preparation);
+}
+
+std::optional<quint32> NativeRuntime::restoreOriginalDisplay(
+    const QDBusMessage &received, const NativeDisplayRestorationIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    int originalGrant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || originalGrant < 0 || intent.replacement.lock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayRestorationIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs) ||
+        !impl_->display || !impl_->display->redeemOriginal(intent, correlation))
+        return std::nullopt;
+    // No event processing separates the exact consumed Recovery receipt from
+    // the one-use native request. The compositor authenticates Root itself.
+    return impl_->backend->restoreOriginalDisplay(intent, correlation, sampledBootMs,
+                                                  originalGrant);
+}
+
+std::optional<quint32> NativeRuntime::quiesceOriginalDisplayFinalization(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    int terminalGrant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || terminalGrant < 0 || intent.currentLock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayFinalizationIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs) ||
+        !impl_->display || !impl_->display->redeemFinalization(intent, correlation))
+        return std::nullopt;
+    // The exact retired terminal receipt is spent before the sole wire attempt.
+    // No ordinary Apply/Recovery/Keep/unlock receipt can enter this path.
+    return impl_->backend->quiesceOriginalDisplayFinalization(intent, correlation, sampledBootMs,
+                                                              terminalGrant);
+}
+
+bool NativeRuntime::spendOrdinaryDisplayRelease(const QDBusMessage &received,
+                                                const NativeDisplayOrdinaryReleaseIntent &intent,
+                                                const NativeDisplayCorrelation &bound,
+                                                const QString &sampleDigest, quint64 sampledBootMs,
+                                                int grant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || grant < 0 || intent.currentLock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest || !NativeDisplayOrdinaryReleaseIntent::parse(intent.encode()) ||
+        !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs))
+        return false;
+    const auto sample = displaySample(received, NativePeerPurpose::ControlApproval);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return false;
+    const auto after = NativeDisplayClock::sample();
+    if (!after || !bound.dispatchWindow(sampledBootMs, after->bootMs, after->unixMs) ||
+        !impl_->display || !impl_->backend || !impl_->display->redeemOrdinaryRelease(intent, bound))
+        return false;
+    return impl_->backend->spendOrdinaryDisplayRelease(intent, bound, sampledBootMs, grant);
+}
+
+std::optional<quint32> NativeRuntime::spendOriginalDisplayNativeRelease(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &sampleDigest, quint64 sampledBootMs,
+    quint64 controlVersion, const QString &controlBinding, const QString &controlObservation,
+    int nativeGrant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || nativeGrant < 0 || !controlVersion || intent.currentLock != identity() ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !bound.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayFinalizationIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto sample = displaySample(received, NativePeerPurpose::ControlApproval);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto finished = NativeDisplayClock::sample();
+    if (!finished || !bound.dispatchWindow(sampledBootMs, finished->bootMs, finished->unixMs) ||
+        !impl_->display || !impl_->backend ||
+        !impl_->display->continuesFinalization(intent, bound, *peer) ||
+        !impl_->backend->heldOriginalDisplayFinalization(bound))
+        return std::nullopt;
+    return impl_->backend->spendOriginalDisplayNativeRelease(intent, bound, sampledBootMs,
+                                                             controlVersion, controlBinding,
+                                                             controlObservation, nativeGrant);
+}
+
+std::optional<quint32> NativeRuntime::retireOriginalDisplayCurrent(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, const QByteArray &preparation)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->backend || !impl_->backend->currentOriginalDisplayHandoff(bound) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    if (!impl_->backend->heldOriginalDisplayFinalization(bound))
+        return std::nullopt;
+    const auto result =
+        impl_->backend->retireOriginalDisplayCurrent(intent, bound, digest, preparation);
+    return impl_->currentSession() &&
+                   impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer)
+               ? result
+               : std::nullopt;
+}
+
+std::optional<quint32> NativeRuntime::commitOriginalDisplayCurrent(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, const QByteArray &preparation)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->backend || !impl_->backend->currentOriginalDisplayHandoff(bound) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    if (!impl_->backend->heldOriginalDisplayFinalization(bound))
+        return std::nullopt;
+    const auto result =
+        impl_->backend->commitOriginalDisplayCurrent(intent, bound, digest, preparation);
+    return impl_->currentSession() &&
+                   impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer)
+               ? result
+               : std::nullopt;
+}
+
+std::optional<quint32> NativeRuntime::retireOriginalDisplayPower(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, const QByteArray &preparation)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->backend || !impl_->backend->currentOriginalDisplayHandoff(bound) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    if (!impl_->backend->heldOriginalDisplayFinalization(bound))
+        return std::nullopt;
+    const auto result =
+        impl_->backend->retireOriginalDisplayPower(intent, bound, digest, preparation);
+    return impl_->currentSession() &&
+                   impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer)
+               ? result
+               : std::nullopt;
+}
+
+std::optional<quint32> NativeRuntime::transferOriginalDisplayCompletion(
+    const QDBusMessage &received, const NativeDisplayFinalizationIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, int grant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || grant < 0 || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||
+        bound.deadlineUnixMs - clock->unixMs > 2000 || intent.currentLock != identity() ||
+        !impl_->currentSession() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest ||
+        !impl_->backend || !impl_->display ||
+        !impl_->display->continuesFinalization(intent, bound, *peer) ||
+        !impl_->backend->heldOriginalDisplayFinalization(bound) ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto phase = impl_->backend->transferDisplayCompletion(bound, digest, grant);
+    // A missing transfer reply may still have performed the handoff. Observe
+    // the exact native lifetime once; never retry the effect or infer Control
+    // completion from phase 8. Old Control retirement cannot destroy a lifetime
+    // that the actual native compositor has already handed off to Root.
+    const bool observed = impl_->display->retireAfterCurrentHandoff(bound);
+    return observed ? phase : std::nullopt;
+}
+
+std::optional<quint32> NativeRuntime::transferOrdinaryDisplayCompletion(
+    const QDBusMessage &received, const NativeDisplayOrdinaryReleaseIntent &intent,
+    const NativeDisplayCorrelation &bound, const QString &digest, int grant)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || grant < 0 || !bound.valid() || clock->unixMs >= bound.deadlineUnixMs ||
+        bound.deadlineUnixMs - clock->unixMs > 2000 || intent.currentLock != identity() ||
+        !impl_->currentSession() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest ||
+        !impl_->backend || !impl_->display ||
+        !impl_->display->continuesOrdinaryRelease(intent, bound, *peer) ||
+        !impl_->backend->heldOrdinaryDisplayRelease(bound) ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return {};
+    const auto phase = impl_->backend->transferDisplayCompletion(bound, digest, grant);
+    const bool observed = impl_->display->retireAfterCurrentHandoff(bound);
+    return observed ? phase : std::nullopt;
+}
+
+// This narrow effect is reachable only from the current supervised executor.
+// Control separately consumed and durably reserved the protected human choice.
+// Comparison hashes never substitute for either authenticated boundary.
+std::optional<quint32> NativeRuntime::continuePreparedDisplay(const QDBusMessage &received,
+                                                              const NativeDisplayIntent &intent,
+                                                              const NativeDisplayDecision &decision)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!peer || !clock || !decision.valid() || intent.lock != identity() || !impl_->binding ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto independent = impl_->independentState();
+    if (!independent)
+        return std::nullopt;
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!settled || (*settled != NativeObservedLockState::Secure &&
+                     *settled != NativeObservedLockState::Unlocked))
+        return std::nullopt;
+    const auto topology = impl_->backend->observeDisplayTopology();
+    const auto &lock = identity();
+    const auto exactTopology = topology ? QStringLiteral("display:topology:%1:%2:%3:%4:%5:%6:%7")
+                                              .arg(lock.boot)
+                                              .arg(lock.uid)
+                                              .arg(lock.session)
+                                              .arg(lock.createdMonotonicUs)
+                                              .arg(impl_->binding->seat)
+                                              .arg(impl_->backend->displayInvocation())
+                                              .arg(topology->generation)
+                                        : QString{};
+    if (!topology || !intent.nativeOptions(*topology, exactTopology, lock) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    if (!impl_->display || !impl_->display->redeemDecision(intent, decision) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    return impl_->backend->continuePreparedDisplay(intent, decision, clock->bootMs);
+}
+
+std::optional<NativeDisplayAttemptSample>
+NativeRuntime::observeDisplayAttempt(const QDBusMessage &received,
+                                     const NativeDisplayIntent &intent,
+                                     const NativeDisplayCorrelation &correlation)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->binding || !correlation.valid() || intent.lock != identity() ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto before = impl_->backend->observeDisplayTopology();
+    if (!before)
+        return std::nullopt;
+    const auto &lock = identity();
+    const auto topology = QStringLiteral("display:topology:%1:%2:%3:%4:%5:%6:%7")
+                              .arg(lock.boot)
+                              .arg(lock.uid)
+                              .arg(lock.session)
+                              .arg(lock.createdMonotonicUs)
+                              .arg(impl_->binding->seat)
+                              .arg(impl_->backend->displayInvocation())
+                              .arg(before->generation);
+    if (!intent.nativeOptions(*before, topology, lock))
+        return std::nullopt;
+    const auto phase = impl_->backend->observeDisplayAttempt(correlation);
+    const auto independent = impl_->independentState();
+    if (!phase || *phase < 2 || *phase > 7 || !independent || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto after = impl_->backend->observeDisplayTopology();
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!after || *after != *before || !settled ||
+        (*settled != NativeObservedLockState::Secure &&
+         *settled != NativeObservedLockState::Unlocked))
+        return std::nullopt;
+    // The native protocol matches the complete immutable correlation. Echoed
+    // query data alone is not evidence; only its bounded native phase is used.
+    // Layout and per-output coverage are independently verified by Control.
+    return NativeDisplayAttemptSample{lock.resource,
+                                      topology,
+                                      correlation.transaction,
+                                      correlation.deadlineUnixMs,
+                                      *phase,
+                                      *settled == NativeObservedLockState::Secure};
+}
+
 bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
                                             const NativeTransitionIdentity &target)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
     if (!peer || impl_->approvalScope || impl_->sleepFence.active() || impl_->unlockRequestLock ||
-        !impl_->transitionRequest || impl_->transitionRequest->first != target ||
+        !impl_->backend->displayAllowsSecurityTransition() || !impl_->transitionRequest ||
+        impl_->transitionRequest->first != target ||
         impl_->protocol->inspect() != LockMechanism::State::Secure ||
         impl_->independentState() != NativeCompositorLockState::Locked)
         return false;
     const auto cycles = target.transition == NativeSessionTransition::Suspend
                             ? nativeSuccessfulSuspendCycles()
                             : std::nullopt;
-    if (!impl_->currentSession() ||
+    if (!impl_->currentSession() || !impl_->backend->displayAllowsSecurityTransition() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
         return false;
     const bool armed = impl_->transitionFence.arm(target, identity(), true, cycles);
@@ -828,6 +1631,8 @@ bool NativeRuntime::fenceSleepEntry(const QDBusMessage &received,
         return runtimeUnavailable("native-sleep-owner-denied reason=binding\n");
     if (impl_->approvalScope || impl_->unlockRequestLock)
         return runtimeUnavailable("native-sleep-owner-denied reason=scope\n");
+    if (!impl_->backend->displayAllowsSecurityTransition())
+        return runtimeUnavailable("native-sleep-owner-denied reason=display\n");
     if (impl_->protocol->inspect() != LockMechanism::State::Secure)
         return runtimeUnavailable("native-sleep-owner-denied reason=mechanism\n");
     if (impl_->independentState() != NativeCompositorLockState::Locked)
@@ -849,6 +1654,8 @@ bool NativeRuntime::fenceSleepEntry(const QDBusMessage &received,
         return runtimeUnavailable("native-sleep-owner-denied reason=counter-generation\n");
     if (impl_->independentState() != NativeCompositorLockState::Locked)
         return runtimeUnavailable("native-sleep-owner-denied reason=coverage\n");
+    if (!impl_->backend->displayAllowsSecurityTransition())
+        return runtimeUnavailable("native-sleep-owner-denied reason=display-generation\n");
     // This is solely a fence around already-verified coverage. It cannot make
     // the pre-start helper's receipt into lock, power or unlock authority.
     const bool fenced = impl_->sleepFence.arm(event, lock, true, cycles, *unit);

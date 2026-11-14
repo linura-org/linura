@@ -48,6 +48,11 @@ class ComponentMaturityContractTests(unittest.TestCase):
             path.mkdir(parents=True, exist_ok=True)
             if component["kind"] == "planned-app":
                 (path / "README.md").write_text("planned\n", encoding="utf-8")
+            elif component["kind"] == "native-adapter":
+                (path / "README.md").write_text("native adapter\n", encoding="utf-8")
+                (path / "CMakeLists.txt").write_text(
+                    "cmake_minimum_required(VERSION 3.24)\n", encoding="utf-8"
+                )
             elif component["kind"] == "shell":
                 (path / "README.md").write_text("shell\n", encoding="utf-8")
                 (path / "shell.qml").write_text(
@@ -78,6 +83,33 @@ class ComponentMaturityContractTests(unittest.TestCase):
     def test_repository_component_maturity_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_adapter_requires_build_sources_and_cannot_claim_release_binary(
+        self,
+    ) -> None:
+        for fault in ("missing-build", "workspace", "release"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._copy_fixture(root)
+                contract = root / "contracts/components.toml"
+                if fault == "missing-build":
+                    (root / "apps/linura-hyprland-display/CMakeLists.txt").unlink()
+                else:
+                    key = (
+                        "workspace_member"
+                        if fault == "workspace"
+                        else "release_artifact"
+                    )
+                    self._replace_component_block(
+                        contract,
+                        "linura-hyprland-display",
+                        lambda block: block.replace(
+                            key + " = false", key + " = true", 1
+                        ),
+                    )
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("native adapter", result.stderr)
 
     def test_roadmap_scaffold_cannot_be_promoted_to_release_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

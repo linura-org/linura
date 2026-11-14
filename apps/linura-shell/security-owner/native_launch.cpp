@@ -22,9 +22,11 @@ bool exactNativeLaunch(const NativeLaunchFacts &facts, const QString &image,
             return false;
     } else if (image == QLatin1String("/usr/lib/linura/linura-executor-session") &&
                arguments.size() == 2) {
-        // The suspend pre-exec hook is a separate, exact, non-Polkit
-        // privileged helper profile, never a generic two-argument allowance.
-        if (arguments.last() != QLatin1String("--protect-before-sleep"))
+        // Suspend pre-exec and independent display protection are distinct
+        // fixed supervised profiles. Each caller still checks its exact argv;
+        // neither is a generic two-argument or executor admission allowance.
+        if (arguments.last() != QLatin1String("--protect-before-sleep") &&
+            arguments.last() != QLatin1String("--display-protection"))
             return false;
     } else if (arguments.size() != 1) {
         return false;

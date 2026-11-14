@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<node name="/org/linura/DisplayProtection1">
+  <interface name="org.linura.DisplayProtection1">
+    <annotation name="org.linura.ContractId" value="dbus.org.linura.DisplayProtection1"/>
+    <annotation name="org.linura.ContractVersion" value="1"/>
+    <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Private bounded original-witness and prepared handoff mechanisms.
+         Control owns authority/orchestration; this process never writes outputs. -->
+    <method name="ReserveSuccessor">
+      <!-- Supervised executor only, after fresh canonical managed preparation.
+           The new protected checkpoint is retained before predecessor spend. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+    </method>
+    <method name="ReadSuccessor">
+      <!-- Control observes actual retained permission, never physical completion. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="spent" type="b" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryOriginal">
+      <!-- Supervised Control only. Same actual original invocation with its
+           live original kernel/power/startup witnesses; no release authority. -->
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="out"/>
+    </method>
+    <method name="ReserveOrdinaryRelease">
+      <!-- Exact supervised Control only; immutable separate LNOR managed
+           binding and original preimage ancestry. No physical effect or grant. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReserveOrdinaryReleaseGrant">
+      <!-- The original admitted Control alone may transfer one Root channel.
+           Its credentialed native spend records LNOS before ACK, not release. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryRelease">
+      <!-- Read-only actual Root invocation/witness facts, never authority. -->
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="spent" type="b" direction="out"/>
+    </method>
+    <method name="ReadOriginal">
+      <!-- Supervised Control only; exact historical bytes plus live retained
+           witness checks. No credential, restoration grant or output write. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="checkpoint" type="ay" direction="out"/>
+    </method>
+    <method name="ReadFinalization">
+      <!-- Supervised Control only; immutable restoration correlation plus live
+           Root mechanism state, with no mutation or release credential. Only
+           protected/reserved/quiesced/RootRetiredHeld comparison phases
+           and separately spent-before-effect comparison phases are produced;
+           physical release remains unavailable. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="restoration" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+      <arg name="terminal" type="ay" direction="out"/>
+    </method>
+    <method name="ReserveFinalRetirement">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="CompleteReleasedCurrent">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadFinalRetirement">
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+      <arg name="completion" type="ay" direction="out"/>
+    </method>
+    <method name="ReserveCurrentCommit">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="RetireRootPower">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadRootPower">
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="preimage" type="ay" direction="out"/>
+      <arg name="current_commit_record" type="ay" direction="out"/>
+      <arg name="retired" type="b" direction="out"/>
+    </method>
+    <method name="ReservePowerRetirement">
+      <!-- Exact original Control only. LNPP before a separately authenticated
+           LNPR spend. This retires no Root protection or startup barrier. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReadPowerRetirement">
+      <!-- Prepared (1) or grant-spent (2), never physical retirement proof. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
+    <method name="ReadOrdinaryCompletion">
+      <arg name="ordinary_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
+    <method name="ReserveOrdinaryCompletionGrant">
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="ReadCompletion">
+      <!-- Live original Root only. Prepared (1) or transferred lifetime (2)
+           comparison; neither phase proves input/power retirement or
+           ReleasedCurrent. Durable history alone cannot reconstruct either. -->
+      <arg name="recovery_scope" type="s" direction="in"/>
+      <arg name="preparation" type="ay" direction="out"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
+    <method name="ReserveCompletionGrant">
+      <!-- Supervised Control only, after its durable one-use completion
+           preparation and independent first-frame join. Exact original
+           native credentials are checked on every fragment. Root syncs LNCP
+           and LNCS before handing over the existing quiescence lifetime.
+           The grant cannot be recreated after uncertainty or restart. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="ReserveRestoration">
+      <!-- Exact supervised executor only, following a fresh Control prepare.
+           Synced one-use reservation precedes the original-root-created
+           endpoint. No root output write, policy or orchestration. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="ReserveFinalization">
+      <!-- Exact supervised executor only, after fresh Control terminal prepare.
+           Exclusive synced reservation binds actual retained restoration. Shared
+           worker/transfer limits and original sample/dispatch windows apply.
+           The endpoint admits only the actual native process for one held-scene
+           quiescence message and fresh continuity. No retirement or release. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="PrepareRetirement">
+      <!-- Supervised Control only; retains a synced, immutable preparation
+           anchored to the actual live Root quiescence and terminal records.
+           Caller-supplied Control digests are comparison data, not proof
+           of release. No input, S17, power or ordinary-admission release. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="RetireHeld">
+      <!-- Supervised Control only. Advances the original Root lifetime from
+           durably Prepared to durably RootRetiredHeld, after re-authenticating
+           current Root witnesses, quiescence and exact immutable parents.
+           It cannot unlock S17, release the compositor scene, drop inhibitors,
+           authorize ordinary startup, or claim physical first-frame evidence. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReserveNativeRelease">
+      <!-- Supervised Control only, after exact durable RootRetiredHeld,
+           matching live original owner and quiescence. Synced write-once
+           before-effect reservation; a missing reply is non-retryable.
+           This endpoint makes no native call and can NEVER unlock native
+           frames/input, S17 locks, power inhibitors or ordinary startup. -->
+      <arg name="preparation" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ReserveNativeReleaseGrant">
+      <!-- Supervised Control only, after the exact live LNRN reservation.
+           Original compositor credentials are independently authenticated on
+           EVERY grant fragment. Root writes immutable LNRX and fsyncs before
+           acknowledging one spend. This is not physical release, Control
+           completion, input unlock or ordinary startup admission. -->
+      <arg name="reservation" type="ay" direction="in"/>
+      <arg name="dispatch_deadline_unix_ms" type="t" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="grant" type="h" direction="out"/>
+    </method>
+    <method name="NativeStartup">
+      <!-- Only the freshly attested, independently supervised native owner.
+           Tuple: original lock/login, native PID, seat, compositor invocation,
+           integration digest, installed native image digest. No principal input.
+           Root independently verifies the admitted leader's actual executable;
+           the installed digest is comparison data, never image authority. -->
+      <arg name="request" type="(sussss)" direction="in"/>
+      <arg name="lease" type="h" direction="out"/>
+      <arg name="ordinary_allowed" type="b" direction="out"/>
+    </method>
+    <method name="Begin">
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Reserve">
+      <arg name="checkpoint" type="ay" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Verify">
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+  </interface>
+</node>

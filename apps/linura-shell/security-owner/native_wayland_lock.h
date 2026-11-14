@@ -2,6 +2,8 @@
 
 #include "native_managed_lock_backend.h"
 #include "native_keyboard.h"
+#include "native_display_topology.h"
+#include "native_display_prompt.h"
 #include <QImage>
 #include <QSize>
 #include <cstddef>
@@ -10,8 +12,15 @@
 struct wl_display;
 
 namespace Linura::SecurityOwner {
+struct NativeDisplayRestorationIntent;
+struct NativeDisplayFinalizationIntent;
+struct NativeDisplayOrdinaryReleaseIntent;
 
 class SecretEntry;
+struct NativeDisplayCorrelation;
+struct NativeDisplayDecision;
+struct NativeDisplayIntent;
+struct NativePinnedDisplaySample;
 
 // Owns its exclusive actual Wayland connection. The private runtime factory must
 // attest this SAME connection/session and secure-exec protection before binding
@@ -40,15 +49,111 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                           PointerHitTest hitTest = {});
     [[nodiscard]] bool protectedInputAvailable() const noexcept;
     [[nodiscard]] bool protectedInputFocused() const;
+    // Local native lifetime, never approval. Every output add/remove/configure
+    // invalidates proofs captured against an earlier generation.
+    [[nodiscard]] quint64 protectedInputGeneration() const noexcept;
+    [[nodiscard]] quint64 protectedInteractionGeneration() const noexcept;
     // Bounded observation of already available native events; no effect dispatch.
     void refreshNativeState();
     // Progress already queued native replies between bounded metadata reads.
     // Skip nested native callbacks/rendering; never process Qt/D-Bus/timer events.
     void progressNativeState();
+    // Read-only sync-fenced native inventory and per-output lock-surface facts.
+    // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
+    [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
+    [[nodiscard]] bool displayAllowsSecurityTransition();
+    [[nodiscard]] bool displaySuccessorReviewAvailable();
+    // Read-only phase check. It grants neither restoration nor lock release.
+    [[nodiscard]] bool displayRecoveryApprovalAvailable();
+    [[nodiscard]] std::optional<NativePinnedDisplaySample> displayStartupSample();
+    [[nodiscard]] bool displayStartupRequired() const noexcept;
+    [[nodiscard]] bool admitDisplayStartup(int lease, bool ordinaryAllowed, quint32 guardPid,
+                                           const QString &compositorInstance);
+    // Original owned/attested connection; this sends get_status only. It never
+    // configures, confirms, restores or acquires continuation rights.
+    [[nodiscard]] std::optional<quint32> observeDisplayAttempt(const NativeDisplayCorrelation &);
+    // Private prepared runtime only. One fresh snapshot and one apply on the
+    // original owned connection; no reconnection, retry or continuation.
+    [[nodiscard]] std::optional<quint32>
+    dispatchPreparedDisplay(const NativeDisplayIntent &, const NativeDisplayCorrelation &,
+                            quint64 validatedSampledBootMs, const QString &nativeBaselineGuard);
+    [[nodiscard]] std::optional<quint32>
+    dispatchPreparedSuccessorDisplay(const NativeDisplayIntent &, const NativeDisplayCorrelation &,
+                                     quint64 validatedSampledBootMs,
+                                     const QString &nativeBaselineGuard,
+                                     const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    restoreOriginalDisplay(const NativeDisplayRestorationIntent &, const NativeDisplayCorrelation &,
+                           quint64 validatedSampledBootMs, int originalGrant);
+    [[nodiscard]] std::optional<quint32>
+    quiesceOriginalDisplayFinalization(const NativeDisplayFinalizationIntent &,
+                                       const NativeDisplayCorrelation &,
+                                       quint64 validatedSampledBootMs, int terminalGrant);
+    [[nodiscard]] std::optional<quint32>
+    spendOriginalDisplayNativeRelease(const NativeDisplayFinalizationIntent &,
+                                      const NativeDisplayCorrelation &, quint64 sampledBootMs,
+                                      quint64 controlVersion, const QString &controlBinding,
+                                      const QString &controlObservation, int nativeGrant);
+    [[nodiscard]] std::optional<quint32> transferDisplayCompletion(const NativeDisplayCorrelation &,
+                                                                   const QString &digest,
+                                                                   int completionGrant);
+    [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const NativeDisplayIntent &,
+                                                                 const NativeDisplayDecision &,
+                                                                 quint64 originalSampledBootMs);
+    [[nodiscard]] const QString &displayInvocation() const noexcept;
+    // Separate native display conversation. The caller must arm the exact
+    // canonical/purpose-bound authentication first. S17 state is independent.
+    [[nodiscard]] bool showProtectedDisplay(const NativeDisplayPromptScope &,
+                                            const NativeDisplayIntent &);
+    [[nodiscard]] std::optional<NativeDisplayPromptStatus> protectedDisplayStatus();
+    [[nodiscard]] std::optional<quint64>
+    displayDecisionBootDeadline(const NativeDisplayCorrelation &);
+    [[nodiscard]] std::optional<quint64>
+    displayRestorationBootDeadline(const NativeDisplayCorrelation &);
+    // Holding consumed Recovery is not a renewal of approval/dispatch. This
+    // probes the actual retained native attempt and its original Root witness.
+    [[nodiscard]] bool heldOriginalDisplayRestoration(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool heldOriginalDisplayFinalization(const NativeDisplayCorrelation &);
+    // Read-only exact native phase after the spent completion attempt. It
+    // cannot admit another invocation or prove post-effect durable completion.
+    [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayCurrent(const NativeDisplayFinalizationIntent &intent,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    commitOriginalDisplayCurrent(const NativeDisplayFinalizationIntent &intent,
+                                 const NativeDisplayCorrelation &, const QString &digest,
+                                 const QByteArray &preparation);
+    [[nodiscard]] std::optional<quint32>
+    retireOriginalDisplayPower(const NativeDisplayFinalizationIntent &intent,
+                               const NativeDisplayCorrelation &, const QString &digest,
+                               const QByteArray &preparation);
+    [[nodiscard]] bool currentOrdinaryDisplayHandoff(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool currentOriginalDisplayHandoff(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginProtectedDisplayFinalization(const NativeDisplayPromptScope &,
+                                                         const QString &material,
+                                                         const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginProtectedOrdinaryDisplayRelease(const NativeDisplayPromptScope &,
+                                                            const QString &material,
+                                                            const NativeDisplayCorrelation &);
+    [[nodiscard]] bool spendOrdinaryDisplayRelease(const NativeDisplayOrdinaryReleaseIntent &,
+                                                   const NativeDisplayCorrelation &,
+                                                   quint64 sampledBootMs, int grant);
+    [[nodiscard]] bool heldOrdinaryDisplayRelease(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginProtectedDisplayDecision(const NativeDisplayPromptScope &,
+                                                     const NativeDisplayIntent &,
+                                                     const NativeDisplayCorrelation &);
+    [[nodiscard]] bool refreshProtectedDisplay(const NativeDisplayPromptScope &,
+                                               quint64 originalEpoch);
+    [[nodiscard]] bool consumeProtectedDisplay(const NativeDisplayPromptScope &,
+                                               quint64 originalEpoch);
+    void cancelProtectedDisplay();
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh
     // confirmation through Control separately. Closing/expiry means denial.
     using LockConfirmation = std::function<void(bool)>;
+    [[nodiscard]] bool armProtectedDisplayReview(const NativeDisplayPromptScope &,
+                                                 quint64 originalEpoch, LockConfirmation);
     [[nodiscard]] bool showLockConfirmation(LockConfirmation completion);
     void cancelLockConfirmation();
     [[nodiscard]] bool lockConfirmationVisible() const noexcept;

@@ -8,6 +8,51 @@
 
 mod account;
 mod bus;
+mod display_kernel;
+mod display_observer;
+mod display_restoration_reservation;
+pub use display_restoration_reservation::{
+    MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION, NativeDisplayRestorationReservation,
+};
+mod display_finalization_reservation;
+pub use display_finalization_reservation::{
+    MAX_NATIVE_DISPLAY_FINALIZATION_RESERVATION, NativeDisplayFinalizationReservation,
+};
+mod display_retirement_preparation;
+pub use display_retirement_preparation::{
+    MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION, NativeDisplayRetirementPreparation,
+};
+mod display_ordinary_completion_preparation;
+pub use display_ordinary_completion_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_COMPLETION, NativeDisplayOrdinaryCompletionPreparation,
+};
+mod display_ordinary_release_preparation;
+mod display_successor_preparation;
+pub use display_ordinary_release_preparation::{
+    MAX_NATIVE_DISPLAY_ORDINARY_RELEASE, NativeDisplayOrdinaryReleasePreparation,
+};
+pub use display_successor_preparation::{
+    MAX_NATIVE_DISPLAY_SUCCESSOR_PREPARATION, NativeDisplaySuccessorPreparation,
+};
+mod display_completion_preparation;
+pub use display_completion_preparation::current_commit::{
+    MAX_NATIVE_DISPLAY_CURRENT_COMMIT, NativeDisplayCurrentCommitPreparation,
+};
+pub use display_completion_preparation::final_retirement::{
+    MAX_NATIVE_DISPLAY_FINAL_RETIREMENT, NativeDisplayFinalRetirementPreparation,
+    NativeDisplayReleasedCurrentRecord,
+};
+pub use display_completion_preparation::power::{
+    MAX_NATIVE_DISPLAY_POWER_RETIREMENT, NativeDisplayPowerRetirementPreparation,
+};
+pub use display_completion_preparation::root_retirement::{
+    MAX_NATIVE_DISPLAY_ROOT_RETIREMENT, NativeDisplayRootRetirementPreparation,
+};
+pub use display_completion_preparation::{
+    MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION, NativeDisplayCompletionPreparation,
+};
+mod original_display_observer;
+pub use original_display_observer::NativeOriginalDisplayObserver;
 mod observer;
 mod owner;
 mod service;
@@ -16,9 +61,15 @@ mod sleep_helper;
 mod sleep_observer;
 
 pub use bus::{NativeSessionChannel, NativeSessionRole};
+pub use display_kernel::{NativeDisplayKernelSubscription, NativeDisplayKernelWitness};
+pub use display_observer::NativeDisplayObserver;
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
-    NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject, NativeOwnerIdentity,
+    NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject,
+    NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
+    NativeDisplayDecisionRequest, NativeDisplayPowerFence, NativeDisplayRecoveryCheckpoint,
+    NativeDisplayRetiredPowerFence, NativeDisplaySafetyRequest, NativeDisplayStartupPeer,
+    NativeDisplayStartupRequest, NativeOwnerIdentity,
 };
 pub use service::protect_before_native_sleep;
 pub use sleep_gate::NativeSleepEntry;

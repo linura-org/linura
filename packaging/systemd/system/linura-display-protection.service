@@ -1,0 +1,46 @@
+[Unit]
+Description=Linura independent original display protection
+After=dbus.service systemd-logind.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.linura.DisplayProtection1
+ExecStart=/usr/lib/linura/linura-executor-session --display-protection
+User=root
+Group=root
+UMask=0077
+StateDirectory=linura/display-recovery
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# Read only the independently admitted, nondumpable compositor's executable.
+# No ptrace/memory API, arbitrary target or capability in the protected owner.
+CapabilityBoundingSet=CAP_SYS_PTRACE
+AmbientCapabilities=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+LimitCORE=0
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=15s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target
