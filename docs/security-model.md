@@ -1283,3 +1283,12 @@ Root/native spend. Root/compositor replacement cannot recreate that lifetime fro
 files. All predecessor references remain held pending qualified shared-reference
 retirement and cleanup; ordinary Begin and public display mutation remain closed.
 See ADR 0048 for the current implementation and qualification boundary.
+
+
+Repeated display release cycles compare retained owners through a bounded ordered
+chain of fully validated, purpose-specific spent successor records. Root rejects
+prepared-only transfers, forks, cycles and unrelated same-seat owners. Control
+requires the exact signed ancestor snapshots, canonical requests, predecessor
+claims and immutable independent transfer proof. This historical ancestry grants
+no effect or deletion permission; the current Root/native lifetime and new
+plan-bound review remain mandatory. Missing ancestry fails closed across restart.

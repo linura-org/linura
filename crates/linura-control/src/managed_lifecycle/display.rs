@@ -100,7 +100,7 @@ mod successor;
 /// Exact immutable predecessor comparison. Only the final-retirement workflow
 /// constructs this after checking ReleasedCurrent and its signed ancestry.
 /// It is never a permit and never opens ordinary Begin admission.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DisplayRestorationSuccessorContext {
     terminal: linura_transaction::TransactionSnapshot,
     restoration: linura_transaction::TransactionSnapshot,
@@ -116,7 +116,7 @@ pub enum DisplaySuccessorPredecessor {
     Restoration(linura_core::DisplayRecoveryScope),
     Ordinary(linura_core::DisplayOrdinaryReleaseScope),
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DisplayOrdinarySuccessorContext {
     terminal: linura_transaction::TransactionSnapshot,
     original: linura_transaction::TransactionSnapshot,
@@ -126,18 +126,12 @@ struct DisplayOrdinarySuccessorContext {
     root_released: String,
     root_final: String,
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum DisplaySuccessorContext {
     Restoration(DisplayRestorationSuccessorContext),
     Ordinary(DisplayOrdinarySuccessorContext),
 }
 impl DisplaySuccessorContext {
-    fn owns(&self, snapshot: &linura_transaction::TransactionSnapshot) -> bool {
-        match self {
-            Self::Restoration(v) => snapshot == &v.terminal || snapshot == &v.restoration,
-            Self::Ordinary(v) => snapshot == &v.terminal || snapshot == &v.original,
-        }
-    }
     fn into_predecessor(self) -> DisplaySuccessorPredecessor {
         match self {
             Self::Restoration(v) => DisplaySuccessorPredecessor::Restoration(v.scope),
@@ -749,6 +743,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         const MAX_OWNERS: usize = 32;
         let target = material(request)?;
         let mut seen = BTreeSet::new();
+        let transferred_owners = successor
+            .map(|context| self.successor_ownership_closure(context))
+            .transpose()?
+            .unwrap_or_default();
         self.display_journal()?.integrity_check().map_err(|_| {
             ManagedLifecycleError::Authority(
                 "display completion ownership history unavailable".into(),
@@ -869,7 +867,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                         finalization.restoration().original().topology().seat()
                             == target.topology().seat()
                     };
-                    let transferred = successor.is_some_and(|owner| owner.owns(&snapshot));
+                    let transferred =
+                        transferred_owners.get(&snapshot.transaction_id) == Some(&snapshot);
                     if blocked && !transferred {
                         return Err(ManagedLifecycleError::Indeterminate("display completion ownership remains retained for this seat; Committed is not successor, release or cleanup authority".into()));
                     }

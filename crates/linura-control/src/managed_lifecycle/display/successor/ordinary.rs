@@ -117,6 +117,30 @@ impl DisplayOrdinarySuccessorContext {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
+    pub(in crate::managed_lifecycle::display) fn ordinary_historical_successor_fields(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        context: &DisplayOrdinarySuccessorContext,
+    ) -> Result<Vec<String>, ManagedLifecycleError> {
+        let pid = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        self.require_ordinary_successor_claim(&pid, request, context)?;
+        let key = claim_key("verified", request.request_id.as_str())?;
+        let record = self
+            .display_journal()?
+            .load(&pid, &key)
+            .map_err(|_| invalid())?;
+        let fields = record_fields(record.canonical())?;
+        if record.principal() != &pid
+            || record.request_id() != &key
+            || fields.first().map(String::as_str)
+                != Some("linura.display.ordinary-successor-verified.v1")
+        {
+            return Err(invalid());
+        }
+        Ok(fields)
+    }
+
     pub(in crate::managed_lifecycle::display) fn ordinary_successor_for_request(
         &self,
         principal: &AuthenticatedPrincipal,

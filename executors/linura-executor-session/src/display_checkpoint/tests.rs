@@ -2528,6 +2528,62 @@ fn ordinary_successor_checkpoint(use_byte: u8) -> Vec<u8> {
     encoded
 }
 
+fn ordinary_release_for_successor(
+    next: &NativeDisplayOrdinarySuccessorPreparation,
+    payload: &[u8],
+) -> NativeDisplayOrdinaryReleasePreparation {
+    use linura_core::{
+        DisplayLayoutMaterial, DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial,
+        DisplayOrdinaryReleaseOutcome, RequestId,
+    };
+    let original =
+        DisplayLayoutMaterial::decode(next.material()).unwrap_or_else(|e| unreachable!("{e}"));
+    let material = DisplayOrdinaryReleaseMaterial::encode(
+        &DisplayOrdinaryReleaseLineage {
+            original_request: RequestId::new("request:v010:display-layout:second-cycle")
+                .unwrap_or_else(|e| unreachable!("{e}")),
+            original_dispatch: &next.binding().dispatch_digest.to_hex(),
+            terminal_record: &"e".repeat(64),
+            original_checkpoint: &ComponentDigest::from_bytes(Sha256::digest(payload).into())
+                .to_hex(),
+            signed_binding: &next.binding().authority_binding_digest.to_hex(),
+            generation: next.binding().generation,
+            state_version: next.binding().state_version + 2,
+            current_source_guard: &next.source_guard().to_hex(),
+        },
+        DisplayOrdinaryReleaseOutcome::Keep,
+        original.lock(),
+        next.material(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let effect = linura_provider_sdk::display_ordinary_release_effect(&material)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let binding = linura_provider_sdk::ExecutionBinding::new(
+        "transaction:ordinary-release-second-cycle",
+        0,
+        1,
+        ComponentDigest::from_bytes([27; 32]),
+        ComponentDigest::from_bytes([28; 32]),
+        &effect,
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    let release = NativeDisplayOrdinaryReleasePreparation::new(
+        &material,
+        &binding,
+        linura_observation::DisplayNativeHandoffWindow {
+            observed_unix_ms: 5000,
+            observed_boot_ms: 4000,
+            deadline_unix_ms: 6000,
+            deadline_boot_ms: 5000,
+        },
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    release
+        .validate_original(payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    release
+}
+
 fn ordinary_completion_fixture(
     parent: &NativeDisplayOrdinaryReleasePreparation,
 ) -> NativeDisplayOrdinaryCompletionPreparation {
@@ -3071,6 +3127,16 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     )
     .unwrap_or_else(|e| unreachable!("{e}"));
     let successor_bytes = next.canonical_bytes();
+    let second_release = ordinary_release_for_successor(&next, &next_payload);
+    let publish_second_release = || {
+        reserve_kind_at(
+            &fixture.fd,
+            fixture.uid,
+            &second_release.binding().dispatch_digest,
+            &second_release.canonical_bytes(),
+            Kind::OrdinaryReleasePrepared,
+        )
+    };
     assert_eq!(
         NativeDisplayOrdinarySuccessorPreparation::decode(&successor_bytes)
             .unwrap_or_else(|e| unreachable!("{e}"))
@@ -3117,6 +3183,15 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
     assert!(next_publish(Kind::OrdinarySuccessorSpent).is_err());
     next_publish(Kind::OrdinarySuccessorPrepared).unwrap_or_else(|e| unreachable!("{e}"));
     assert!(next_publish(Kind::OrdinarySuccessorPrepared).is_err());
+    // Retained completion and a fresh prepared successor cannot replace the
+    // actual one-use spend. Refusal must happen before exclusive publication.
+    assert!(publish_second_release().is_err());
+    assert!(
+        !fixture
+            .path
+            .join(Kind::OrdinaryReleasePrepared.name(&second_release.binding().dispatch_digest,))
+            .exists()
+    );
     assert_eq!(
         read_ordinary_successor_at(&fixture.fd, fixture.uid, first.scope(), false)
             .unwrap_or_else(|e| unreachable!("{e}"))
@@ -3134,6 +3209,21 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
         successor_bytes
     );
     assert!(read_ordinary_successor_at(&fixture.fd, fixture.uid + 1, first.scope(), true).is_err());
+    // A fully validated spent transfer permits the next separately authorized
+    // release on this seat, while retaining the complete first-cycle ancestry.
+    publish_second_release().unwrap_or_else(|e| unreachable!("{e}"));
+    assert!(publish_second_release().is_err());
+    let reopened = fs::open(
+        &fixture.path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        read_ordinary_release_at(&reopened, fixture.uid, &second_release)
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        second_release.canonical_bytes()
+    );
 
     // The ordinary Root producer carries the immutable full before-final frame
     // checkpoint. A new outer sample never renews its historical window.
@@ -3227,6 +3317,23 @@ fn ordinary_power_requires_complete_spent_ancestry_and_retains_history_on_uncert
             .is_err()
         );
     }
+    let spent_path = fixture
+        .path
+        .join(Kind::OrdinarySuccessorSpent.name(&next.binding().dispatch_digest));
+    let spent_bytes = std::fs::read(&spent_path).unwrap_or_else(|e| unreachable!("{e}"));
+    std::fs::remove_file(&spent_path).unwrap_or_else(|e| unreachable!("{e}"));
+    // Removing the earlier spent link after reopening must quarantine the
+    // otherwise valid second release, rather than infer it from Committed or
+    // accept a merely prepared predecessor transfer.
+    assert!(read_ordinary_release_at(&reopened, fixture.uid, &second_release).is_err());
+    std::fs::write(&spent_path, &spent_bytes).unwrap_or_else(|e| unreachable!("{e}"));
+    std::fs::set_permissions(&spent_path, std::fs::Permissions::from_mode(0o600))
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(
+        read_ordinary_release_at(&reopened, fixture.uid, &second_release)
+            .unwrap_or_else(|e| unreachable!("{e}")),
+        second_release.canonical_bytes()
+    );
     let path = fixture.path.join(format!(
         "ordinary-completion-spent-{}.checkpoint",
         parent.binding().dispatch_digest.to_hex()

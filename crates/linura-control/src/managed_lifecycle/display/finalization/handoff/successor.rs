@@ -107,6 +107,40 @@ impl DisplayRestorationSuccessorContext {
 }
 
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
+    pub(in crate::managed_lifecycle::display) fn restoration_successor_origin(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        context: &DisplayRestorationSuccessorContext,
+    ) -> Result<PlanDesiredStateRequest, ManagedLifecycleError> {
+        let history = self.finalization_history(principal, &context.restoration.request_id)?;
+        if history.restoration_snapshot != context.restoration {
+            return Err(invalid());
+        }
+        Ok(history.original)
+    }
+    pub(in crate::managed_lifecycle::display) fn restoration_historical_successor_fields(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        context: &DisplayRestorationSuccessorContext,
+    ) -> Result<Vec<String>, ManagedLifecycleError> {
+        let pid = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        self.require_restoration_successor_claim(&pid, request, context)?;
+        let key = claim_key("verified", request.request_id.as_str())?;
+        let record = self
+            .display_journal()?
+            .load(&pid, &key)
+            .map_err(|_| invalid())?;
+        let fields = record_fields(record.canonical())?;
+        if record.principal() != &pid
+            || record.request_id() != &key
+            || fields.first().map(String::as_str) != Some("linura.display.successor-verified.v1")
+        {
+            return Err(invalid());
+        }
+        Ok(fields)
+    }
+
     pub(in crate::managed_lifecycle::display) fn restoration_successor_for_request(
         &self,
         principal: &AuthenticatedPrincipal,

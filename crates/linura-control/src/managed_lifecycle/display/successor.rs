@@ -2,6 +2,7 @@
 //! canonical Apply path. Neither adoption nor Committed opens ordinary Begin.
 use super::*;
 mod ordinary;
+mod ownership;
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
     pub(super) fn successor_for_request(
         &self,

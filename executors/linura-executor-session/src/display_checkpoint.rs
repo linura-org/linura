@@ -65,6 +65,8 @@ const MAX_PAYLOAD: usize = 384 * 1024;
 const MAX_RECORDS: usize = 256;
 const HEADER: usize = MAGIC.len() + 32 + 8;
 
+mod supersession;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Kind {
     Original,
@@ -784,32 +786,6 @@ impl TerminalLineage {
         }
         for (dispatch, record) in &self.ordinary_releases {
             record.validate_original(self.originals.get(dispatch).ok_or_else(unavailable)?)?;
-            let material = record.decoded_material()?;
-            let topology = material.original().topology();
-            for (other_dispatch, other) in &self.ordinary_releases {
-                if other_dispatch == dispatch {
-                    continue;
-                }
-                let other = other.decoded_material()?;
-                let other_topology = other.original().topology();
-                if topology.session().boot() == other_topology.session().boot()
-                    && topology.session().uid() == other_topology.session().uid()
-                    && topology.seat() == other_topology.seat()
-                {
-                    return Err(unavailable());
-                }
-            }
-            for restoration in self.restorations.values() {
-                let old = restoration.decoded_material()?;
-                let replacement = old.replacement().topology();
-                if old.original_dispatch() == dispatch
-                    || (replacement.session().boot() == topology.session().boot()
-                        && replacement.session().uid() == topology.session().uid()
-                        && replacement.seat() == topology.seat())
-                {
-                    return Err(unavailable());
-                }
-            }
         }
         // Every retained finalization must have the exact actual restoration
         // transaction and bound material, even when it is for another scope.
@@ -979,7 +955,10 @@ impl TerminalLineage {
                 return Err(unavailable());
             }
         }
-        Ok(())
+        // Only now are every released parent, fresh child checkpoint and
+        // distinct spent marker validated. A prepared transfer alone cannot
+        // relax competing ownership, and historical ancestry is not a grant.
+        self.verify_supersession_ownership()
     }
 }
 
@@ -1277,8 +1256,6 @@ fn reserve_kind_at(
                 if old_kind == Kind::Finalization {
                     let old = NativeDisplayFinalizationReservation::decode(&previous)?;
                     let old = old.decoded_material()?;
-                    let new_scope = material.restoration().replacement().topology();
-                    let old_scope = old.restoration().replacement().topology();
                     if matches!(
                         kind,
                         Kind::Quiescence
@@ -1292,12 +1269,8 @@ fn reserve_kind_at(
                             return Err(unavailable());
                         }
                         terminal_seen = true; // Only the same immutable LNRT parent.
-                    } else if material.restoration_dispatch() == old.restoration_dispatch()
-                        || (new_scope.session().boot() == old_scope.session().boot()
-                            && new_scope.session().uid() == old_scope.session().uid()
-                            && new_scope.seat() == old_scope.seat())
-                    {
-                        return Err(unavailable()); // Explicit qualified supersession only.
+                    } else if material.restoration_dispatch() == old.restoration_dispatch() {
+                        return Err(unavailable());
                     }
                 }
             }
@@ -1351,13 +1324,7 @@ fn reserve_kind_at(
                     .as_ref()
                     .ok_or_else(unavailable)?
                     .decoded_material()?;
-                let a = old.restoration().replacement().topology();
-                let b = current.restoration().replacement().topology();
-                if old.restoration_dispatch() == current.restoration_dispatch()
-                    || (a.session().boot() == b.session().boot()
-                        && a.session().uid() == b.session().uid()
-                        && a.seat() == b.seat())
-                {
+                if old.restoration_dispatch() == current.restoration_dispatch() {
                     return Err(unavailable()); // Orphan marker cannot be superseded.
                 }
             }
@@ -1366,13 +1333,7 @@ fn reserve_kind_at(
                 let old = NativeDisplayRestorationReservation::decode(&previous)?;
                 let new = new.decoded_material()?;
                 let old = old.decoded_material()?;
-                let new_scope = new.replacement().topology();
-                let old_scope = old.replacement().topology();
-                if new.original_dispatch() == old.original_dispatch()
-                    || (new_scope.session().boot() == old_scope.session().boot()
-                        && new_scope.session().uid() == old_scope.session().uid()
-                        && new_scope.seat() == old_scope.seat())
-                {
+                if new.original_dispatch() == old.original_dispatch() {
                     // No concurrent attempt or retry can supersede an unresolved
                     // original or competing seat ownership. Qualified
                     // supersession requires qualified old-attempt retirement proof.

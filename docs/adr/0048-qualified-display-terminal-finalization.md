@@ -1096,3 +1096,25 @@ Stage 5 work. All actual predecessor dependencies and recovery provenance remain
 retained; a signed commit or a new intent cannot close them or authorize deletion.
 Public mutation remains Unsupported. These source changes do not supply real
 Level A/B acceptance, physical Level C/Q11 qualification or independent signoff.
+
+
+### Ordered successor ancestry and repeated release cycles
+
+A second ordinary release or restoration on the same seat must not be rejected
+merely because its completed predecessors remain retained. Root compares the
+complete directory-wide ancestry first: exact ReleasedCurrent parents, fresh
+child checkpoint bindings, purpose-specific successor preparation and spend,
+unique child/parent ownership and an acyclic bounded ordered chain. Only then
+may historical owners in that chain coexist. A prepared successor, unrelated
+owner, duplicate source, fork, missing link or cycle cannot qualify supersession.
+
+Control likewise reloads every exact signed ancestor snapshot and retained
+canonical intent, both purpose-specific claims, and the immutable independent
+transfer verification bound to that ancestor's original dispatch. Its bounded
+ownership closure cannot transfer an unrelated, changed or unavailable snapshot.
+The newest predecessor still needs fresh actual Root/native completion and the
+new Apply still needs its own canonical managed review and preparation. Neither
+the historical closure nor signed Committed permits ordinary Begin, physical
+release, old-handle closure or deletion. All shared recovery ancestry remains
+retained. Reference-aware cleanup and replacement-invocation continuation remain
+separate implementation work.
