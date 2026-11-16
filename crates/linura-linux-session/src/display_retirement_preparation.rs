@@ -39,15 +39,25 @@ impl NativeDisplayRetirementPreparation {
         control_binding: ComponentDigest,
         control_observation: ComponentDigest,
     ) -> Result<Self, String> {
+        Self::from_terminal(
+            NativeDisplayFinalizationReservation::decode(&terminal.canonical_bytes())?,
+            control_state_version,
+            control_binding,
+            control_observation,
+        )
+    }
+    fn from_terminal(
+        terminal: NativeDisplayFinalizationReservation,
+        control_state_version: u64,
+        control_binding: ComponentDigest,
+        control_observation: ComponentDigest,
+    ) -> Result<Self, String> {
         if control_state_version == 0
             || control_binding == ComponentDigest::from_bytes([0; 32])
             || control_observation == ComponentDigest::from_bytes([0; 32])
         {
             return Err(invalid());
         }
-        // A checked reconstruction prevents caller-created aggregates from
-        // silently substituting the terminal's immutable effect or binding.
-        let terminal = NativeDisplayFinalizationReservation::decode(&terminal.canonical_bytes())?;
         let result = Self {
             terminal,
             control_state_version,
@@ -61,6 +71,8 @@ impl NativeDisplayRetirementPreparation {
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        #[cfg(test)]
+        crate::display_completion_preparation::count_decode(0);
         if bytes.is_empty() || bytes.len() > MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION {
             return Err(invalid());
         }
@@ -102,7 +114,7 @@ impl NativeDisplayRetirementPreparation {
             Ok(parsed)
         };
         let terminal = NativeDisplayFinalizationReservation::decode(parts[4])?;
-        let parsed = Self::new(&terminal, version, digest(parts[2])?, digest(parts[3])?)?;
+        let parsed = Self::from_terminal(terminal, version, digest(parts[2])?, digest(parts[3])?)?;
         if parsed.canonical_bytes() != bytes {
             return Err(invalid());
         }

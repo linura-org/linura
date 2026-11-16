@@ -4,6 +4,8 @@
 use super::current_records::{Entry, Kind, digest, number};
 use super::*;
 use linura_transaction::{CommittedStateMaterial, ContentDigest, TransactionStoreError};
+mod semantics;
+use semantics::AdoptedSemantics;
 
 #[derive(Debug)]
 pub struct OrdinaryDisplayCommittedAdoption {
@@ -13,13 +15,35 @@ pub struct OrdinaryDisplayCommittedAdoption {
     record: ContentDigest,
     first_adopted_at: u64,
     observation: ObservationEnvelope,
+    semantics: AdoptedSemantics,
+    state_record: ContentDigest,
 }
 impl OrdinaryDisplayCommittedAdoption {
-    pub const fn request(&self) -> &PlanDesiredStateRequest {
+    pub const fn release_request(&self) -> &PlanDesiredStateRequest {
         &self.request
     }
-    pub const fn material(&self) -> &CommittedStateMaterial {
+    pub const fn release_material(&self) -> &CommittedStateMaterial {
         &self.material
+    }
+    pub const fn original_request(&self) -> &PlanDesiredStateRequest {
+        &self.semantics.original
+    }
+    pub const fn original_snapshot(&self) -> &linura_transaction::TransactionSnapshot {
+        &self.semantics.snapshot
+    }
+    pub const fn outcome(&self) -> linura_core::DisplayOrdinaryReleaseOutcome {
+        self.semantics.outcome
+    }
+    pub const fn current_layout(&self) -> &linura_core::DisplayLayout {
+        &self.semantics.layout
+    }
+    /// Only Keep fulfills the original desired intent. Revert and expiry retain
+    /// its provenance as history while adopting the independently restored baseline.
+    pub const fn kept_intent_material(&self) -> Option<&CommittedStateMaterial> {
+        self.semantics.kept.as_ref()
+    }
+    pub const fn state_record_digest(&self) -> &ContentDigest {
+        &self.state_record
     }
     pub const fn released_record(&self) -> &ContentDigest {
         &self.released
@@ -149,6 +173,34 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             }
             Err(_) => return Err(invalid_original()),
         };
+        let semantics =
+            self.ordinary_adopted_semantics(&principal, &retained, current.current_layout())?;
+        let tail = semantics.fields(adopted.digest())?;
+        // A distinct kind preserves the meaning and exact bytes of the older
+        // release-protocol adoption. It cannot masquerade as original intent.
+        let state = match self
+            .display_journal()?
+            .load(&pid, &Kind::AdoptedState.key(request)?)
+        {
+            Err(TransactionStoreError::NotFound) => Entry::retain(
+                self.request_journal
+                    .as_deref_mut()
+                    .ok_or_else(invalid_original)?,
+                Kind::AdoptedState,
+                &pid,
+                &retained,
+                tail.clone(),
+            )?,
+            Ok(_) => {
+                let old =
+                    Entry::load(self.display_journal()?, Kind::AdoptedState, &pid, &retained)?;
+                if old.fields[5..] != tail {
+                    return Err(invalid_original());
+                }
+                old
+            }
+            Err(_) => return Err(invalid_original()),
+        };
         // Publication is a boundary: re-observe, re-authenticate all history,
         // and compare the exact committed lineage again. ACKs cannot adopt.
         let fresh = self.verify_ordinary_display_final_retirement(
@@ -163,6 +215,16 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 .authority
                 .display_committed_material(&principal, &retained)?
                 != material
+            || self.ordinary_adopted_semantics(
+                &principal,
+                &retained,
+                fresh
+                    .qualified()
+                    .inspection()
+                    .power()
+                    .current()
+                    .current_layout(),
+            )? != semantics
         {
             return Err(invalid_original());
         }
@@ -170,6 +232,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             let _checked = self.checked_display_history()?;
             released.readback(self.display_journal()?, &pid, &retained)?;
             adopted.readback(self.display_journal()?, &pid, &retained)?;
+            state.readback(self.display_journal()?, &pid, &retained)?;
         }
         let observation = fresh
             .qualified()
@@ -188,6 +251,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             record: adopted.digest(),
             first_adopted_at: number(&adopted.fields[14])?,
             observation,
+            semantics,
+            state_record: state.digest(),
         })
     }
 }

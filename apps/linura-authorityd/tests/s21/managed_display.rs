@@ -1046,6 +1046,7 @@ impl ApprovedRequestJournal for FailingJournal {
                 "final-verified",
                 "released",
                 "adopted",
+                "adopted-state",
             ]
             .iter()
             .position(|phase| {

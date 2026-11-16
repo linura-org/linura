@@ -16,6 +16,20 @@ pub(crate) mod final_retirement;
 pub(crate) mod power;
 pub(crate) mod root_retirement;
 
+#[cfg(test)]
+thread_local! {
+    static DECODE_COUNTS: std::cell::Cell<Option<[usize; 7]>> = const { std::cell::Cell::new(None) };
+}
+#[cfg(test)]
+pub(super) fn count_decode(level: usize) {
+    DECODE_COUNTS.with(|cell| {
+        if let Some(mut counts) = cell.get() {
+            counts[level] += 1;
+            cell.set(Some(counts));
+        }
+    });
+}
+
 const DOMAIN: &[u8] = b"linura.native-display.completion-preparation.v1";
 pub const MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION: usize =
     crate::MAX_NATIVE_DISPLAY_RETIREMENT_PREPARATION + 8 * 1024;
@@ -76,7 +90,23 @@ impl NativeDisplayCompletionPreparation {
         frames: &DisplayNativeHandoffFacts,
         expires_at_unix_ms: u64,
     ) -> Result<Self, String> {
-        let parent = NativeDisplayRetirementPreparation::decode(&parent.canonical_bytes())?;
+        Self::from_parent(
+            NativeDisplayRetirementPreparation::decode(&parent.canonical_bytes())?,
+            preparation,
+            verification,
+            frames,
+            expires_at_unix_ms,
+        )
+    }
+    // A decoded parent has already passed every ancestry and canonical-byte
+    // check. Consume it once instead of recursively validating it a second time.
+    fn from_parent(
+        parent: NativeDisplayRetirementPreparation,
+        preparation: ComponentDigest,
+        verification: ComponentDigest,
+        frames: &DisplayNativeHandoffFacts,
+        expires_at_unix_ms: u64,
+    ) -> Result<Self, String> {
         let material = parent.terminal().decoded_material()?;
         let scope = material.recovery_scope().map_err(|_| invalid())?;
         let binding = parent.terminal().binding();
@@ -138,6 +168,8 @@ impl NativeDisplayCompletionPreparation {
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        #[cfg(test)]
+        count_decode(1);
         if bytes.is_empty() || bytes.len() > MAX_NATIVE_DISPLAY_COMPLETION_PREPARATION {
             return Err(invalid());
         }
@@ -221,8 +253,8 @@ impl NativeDisplayCompletionPreparation {
         }
         let frames = DisplayNativeHandoffFacts::new(scope, lineage, window, outputs)
             .map_err(|_| invalid())?;
-        let result = Self::new(
-            &parent,
+        let result = Self::from_parent(
+            parent,
             preparation,
             verification,
             &frames,
@@ -715,6 +747,37 @@ mod tests {
                 .canonical_bytes(),
             final_bytes
         );
+        let released = value(final_retirement::NativeDisplayReleasedCurrentRecord::new(
+            &final_record,
+            ComponentDigest::from_bytes([15; 32]),
+            window,
+        ));
+        let released_bytes = released.canonical_bytes();
+        DECODE_COUNTS.with(|cell| cell.set(Some([0; 7])));
+        let decoded = final_retirement::NativeDisplayReleasedCurrentRecord::decode(&released_bytes);
+        // Check work, not elapsed wall time: a valid deepest record validates
+        // each ancestor exactly once even on a slow or contended TCG guest.
+        assert_eq!(DECODE_COUNTS.with(|cell| cell.replace(None)), Some([1; 7]));
+        assert_eq!(value(decoded).canonical_bytes(), released_bytes);
+        fn corrupt_ancestor(bytes: &[u8], depth: usize) -> Vec<u8> {
+            let mut fields = parts(bytes);
+            if depth == 0 {
+                fields[0] = b"wrong-purpose".to_vec();
+            } else {
+                fields[1] = corrupt_ancestor(&fields[1], depth - 1);
+            }
+            encoded(&fields)
+        }
+        for depth in 0..7 {
+            assert!(
+                final_retirement::NativeDisplayReleasedCurrentRecord::decode(&corrupt_ancestor(
+                    &released_bytes,
+                    depth,
+                ))
+                .is_err(),
+                "released ancestry depth {depth}"
+            );
+        }
         assert!(
             current_commit::NativeDisplayCurrentCommitPreparation::decode(&final_bytes).is_err()
         );

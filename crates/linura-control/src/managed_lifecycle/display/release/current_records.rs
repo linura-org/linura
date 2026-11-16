@@ -15,6 +15,7 @@ pub(in crate::managed_lifecycle::display) enum Kind {
     FinalVerified,
     Released,
     Adopted,
+    AdoptedState,
 }
 impl Kind {
     fn name(self) -> &'static str {
@@ -28,6 +29,7 @@ impl Kind {
             Self::FinalVerified => "final-verified",
             Self::Released => "released",
             Self::Adopted => "adopted",
+            Self::AdoptedState => "adopted-state",
         }
     }
     fn domain(self) -> String {
@@ -59,6 +61,7 @@ impl Kind {
             Self::FinalVerified => 14,
             Self::Released => 10,
             Self::Adopted => 15,
+            Self::AdoptedState => 17,
         }
     }
 }

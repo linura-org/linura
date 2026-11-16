@@ -1292,3 +1292,14 @@ requires the exact signed ancestor snapshots, canonical requests, predecessor
 claims and immutable independent transfer proof. This historical ancestry grants
 no effect or deletion permission; the current Root/native lifetime and new
 plan-bound review remain mandatory. Missing ancestry fails closed across restart.
+
+
+Ordinary adopted semantic state is distinct from release-protocol bookkeeping.
+Keep requires the exact original signed committed intent and authenticated
+desired-state/graph/provenance lineage. Revert and expiry retain historical
+RecoveryBlocked provenance but cannot claim the original desired intent was
+fulfilled. A separate immutable correlation binds that distinction to the fresh
+independent native target; both signed lineage and physical state are checked
+again after publication. Neither correlation reconstructs execution authority,
+admits a replacement Root/compositor, retires shared references or permits
+checkpoint removal.

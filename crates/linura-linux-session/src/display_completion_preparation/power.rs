@@ -30,7 +30,21 @@ impl NativeDisplayPowerRetirementPreparation {
         frames: &DisplayNativeCurrentFacts,
         expiry: u64,
     ) -> Result<Self, String> {
-        let parent = NativeDisplayCompletionPreparation::decode(&parent.canonical_bytes())?;
+        Self::from_parent(
+            NativeDisplayCompletionPreparation::decode(&parent.canonical_bytes())?,
+            preparation,
+            checkpoint,
+            frames,
+            expiry,
+        )
+    }
+    fn from_parent(
+        parent: NativeDisplayCompletionPreparation,
+        preparation: ComponentDigest,
+        checkpoint: ComponentDigest,
+        frames: &DisplayNativeCurrentFacts,
+        expiry: u64,
+    ) -> Result<Self, String> {
         let window = frames.window();
         let end = window
             .observed_unix_ms
@@ -63,6 +77,8 @@ impl NativeDisplayPowerRetirementPreparation {
         Ok(result)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        #[cfg(test)]
+        super::count_decode(2);
         if bytes.is_empty() || bytes.len() > MAX_NATIVE_DISPLAY_POWER_RETIREMENT {
             return Err(invalid());
         }
@@ -129,7 +145,7 @@ impl NativeDisplayPowerRetirementPreparation {
             None,
         )
         .map_err(|_| invalid())?;
-        let result = Self::new(&parent, preparation, checkpoint, &frames, expiry)?;
+        let result = Self::from_parent(parent, preparation, checkpoint, &frames, expiry)?;
         if result.canonical_bytes() != bytes {
             return Err(invalid());
         }

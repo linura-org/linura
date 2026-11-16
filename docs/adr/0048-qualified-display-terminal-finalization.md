@@ -1118,3 +1118,23 @@ the historical closure nor signed Committed permits ordinary Begin, physical
 release, old-handle closure or deletion. All shared recovery ancestry remains
 retained. Reference-aware cleanup and replacement-invocation continuation remain
 separate implementation work.
+
+
+### Semantic intent after ordinary adoption
+
+The release operation's committed graph/provenance and the original display
+intent have distinct identities. Ordinary adoption retains a separate immutable
+`adopted-state` correlation to the exact original canonical request, signed
+snapshot, outcome and independently verified typed current layout. Keep reloads
+the original intent's authenticated committed desired-state, graph and provenance
+material. Revert and expiry preserve the original RecoveryBlocked lineage as
+history and expose no fulfilled original intent; their current state is the
+independently restored baseline. Neither outcome relabels the release protocol's
+commit as the original desired intent.
+
+The new record preserves all previous adoption bytes and is independently
+read back. After publication Control repeats the full physical join and reloads
+the exact signed semantic lineage. Restart or missing acknowledgments permit
+metadata reconciliation only; the record provides no effect, successor, handle
+retirement or deletion authority. Replacement-invocation adoption and qualified
+reference-aware retirement/cleanup remain separate required source work.

@@ -26,8 +26,12 @@ pub struct OrdinaryDisplayCurrentInspection {
     release: TransactionSnapshot,
     comparison_release: TransactionSnapshot,
     request: PlanDesiredStateRequest,
+    layout: linura_core::DisplayLayout,
 }
 impl OrdinaryDisplayCurrentInspection {
+    pub const fn current_layout(&self) -> &linura_core::DisplayLayout {
+        &self.layout
+    }
     #[must_use]
     pub const fn observation(&self) -> &ObservationEnvelope {
         &self.observation
@@ -388,6 +392,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             comparison_release: snapshot,
             release: actual,
             request,
+            layout: target,
         })
     }
 }

@@ -994,13 +994,23 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
         &mut verifier,
         &mut OrdinaryFinalPort(machine.clone(), 0),
     ));
-    value(restarted.complete_ordinary_display_released_current(
+    let completed = value(restarted.complete_ordinary_display_released_current(
         principal(),
         &receipt.request_id,
         &mut port,
         &mut verifier,
         &mut OrdinaryReleasedPort(machine.clone(), 0),
     ));
+    let expired = value(restarted.adopt_ordinary_display_committed_state(
+        principal(),
+        &receipt.request_id,
+        &mut port,
+        &mut verifier,
+    ));
+    assert_eq!(expired.released_record(), completed.record_digest());
+    assert_ordinary_adopted_semantics(&expired, &machine);
+    assert_eq!(expired.outcome(), linura_core::DisplayOrdinaryReleaseOutcome::Expired);
+    assert!(expired.kept_intent_material().is_none());
     drop(restarted);
     let mut restarted =
         open_with_previews(database.path(), &machine, 0, previews_inner(&machine, true));
@@ -3709,7 +3719,10 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
     for fault in [1, 2, publication_fault] {
         {
             let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
-            m.ordinary_current_commit_store_phase = 9;
+            // Keep exercises the original adoption publication, including a
+            // source change at publication. Revert exercises the distinct new
+            // semantic-state publication, including false and lost ACKs.
+            m.ordinary_current_commit_store_phase = if publication_fault == 4 { 9 } else { 10 };
             m.ordinary_current_commit_store_fault = fault;
         }
         let before = machine
@@ -3733,17 +3746,18 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
         value(control.adopt_ordinary_display_committed_state(principal(), request, port, verifier));
     assert_eq!(adopted.released_record(), released);
     assert_eq!(
-        adopted.material().snapshot.state,
+        adopted.release_material().snapshot.state,
         linura_transaction::TransactionState::Committed
     );
     assert_ne!(
-        adopted.material().graph_digest,
+        adopted.release_material().graph_digest,
         linura_transaction::ContentDigest::zero()
     );
     assert_ne!(
-        adopted.material().provenance_digest,
+        adopted.release_material().provenance_digest,
         linura_transaction::ContentDigest::zero()
     );
+    assert_ordinary_adopted_semantics(&adopted, machine);
     let mut restarted = open_with_previews(database, machine, 0, previews_inner(machine, true));
     for fault in [6, 10] {
         machine
@@ -3772,8 +3786,14 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
         current.first_adopted_at_unix_ms(),
         adopted.first_adopted_at_unix_ms()
     );
-    assert_eq!(current.material(), adopted.material());
-    assert_eq!(current.request(), adopted.request());
+    assert_eq!(current.release_material(), adopted.release_material());
+    assert_eq!(current.release_request(), adopted.release_request());
+    assert_eq!(current.state_record_digest(), adopted.state_record_digest());
+    assert_eq!(current.original_request(), adopted.original_request());
+    assert_eq!(current.original_snapshot(), adopted.original_snapshot());
+    assert_eq!(current.kept_intent_material(), adopted.kept_intent_material());
+    assert_eq!(current.outcome(), adopted.outcome());
+    assert_eq!(current.current_layout(), adopted.current_layout());
     assert_eq!(current.released_record(), adopted.released_record());
     ordinary_successor_requires_completed_adoption_and_fresh_apply(
         &mut restarted,
@@ -3782,6 +3802,61 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
         request,
         &adopted,
     );
+}
+
+fn assert_ordinary_adopted_semantics(
+    adopted: &linura_control::OrdinaryDisplayCommittedAdoption,
+    machine: &Arc<Mutex<Machine>>,
+) {
+    use linura_core::DisplayOrdinaryReleaseOutcome;
+    let bytes = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .ordinary_release_record
+        .clone()
+        .unwrap_or_else(|| unreachable!());
+    let prepared =
+        value(linura_linux_session::NativeDisplayOrdinaryReleasePreparation::decode(&bytes));
+    let material = value(prepared.decoded_material());
+    assert_eq!(adopted.outcome(), material.outcome());
+    assert_eq!(
+        &adopted.original_request().request_id,
+        &material.lineage().original_request
+    );
+    assert_eq!(
+        adopted.original_request().desired_state["layout"],
+        material.original_text()
+    );
+    assert_ne!(adopted.original_request(), adopted.release_request());
+    assert_ne!(adopted.state_record_digest(), adopted.record_digest());
+    assert_ne!(
+        adopted.state_record_digest(),
+        &linura_transaction::ContentDigest::zero()
+    );
+    if adopted.outcome() == DisplayOrdinaryReleaseOutcome::Keep {
+        let kept = adopted
+            .kept_intent_material()
+            .unwrap_or_else(|| unreachable!("missing kept intent"));
+        assert_eq!(&kept.snapshot, adopted.original_snapshot());
+        assert_eq!(
+            &kept.snapshot.request_id,
+            &adopted.original_request().request_id
+        );
+        assert_ne!(kept, adopted.release_material());
+        assert_ne!(kept.graph_digest, linura_transaction::ContentDigest::zero());
+        assert_ne!(
+            kept.provenance_digest,
+            linura_transaction::ContentDigest::zero()
+        );
+        assert_eq!(adopted.current_layout(), &layouts().1);
+    } else {
+        assert!(adopted.kept_intent_material().is_none());
+        assert_eq!(
+            adopted.original_snapshot().state,
+            linura_transaction::TransactionState::RecoveryBlocked
+        );
+        assert_eq!(adopted.current_layout(), &layouts().0);
+    }
 }
 
 pub(super) fn observe_successor(
@@ -4020,7 +4095,7 @@ fn ordinary_successor_requires_completed_adoption_and_fresh_apply(
             baseline: if old_desired { b.clone() } else { a.clone() },
             layout: if old_desired { a } else { b },
             lock: s17_managed_lock::lock_id(),
-            reason: adopted.request().reason.clone(),
+            reason: adopted.release_request().reason.clone(),
         }
         .desired_request(),
     );

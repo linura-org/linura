@@ -29,7 +29,21 @@ impl NativeDisplayFinalRetirementPreparation {
         frames: &DisplayNativeCurrentFacts,
         expiry: u64,
     ) -> Result<Self, String> {
-        let parent = NativeDisplayCurrentCommitPreparation::decode(&parent.canonical_bytes())?;
+        Self::from_parent(
+            NativeDisplayCurrentCommitPreparation::decode(&parent.canonical_bytes())?,
+            preparation,
+            verification,
+            frames,
+            expiry,
+        )
+    }
+    fn from_parent(
+        parent: NativeDisplayCurrentCommitPreparation,
+        preparation: ComponentDigest,
+        verification: ComponentDigest,
+        frames: &DisplayNativeCurrentFacts,
+        expiry: u64,
+    ) -> Result<Self, String> {
         let window = frames.window();
         let end = window
             .observed_unix_ms
@@ -61,6 +75,8 @@ impl NativeDisplayFinalRetirementPreparation {
         Ok(result)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        #[cfg(test)]
+        super::count_decode(5);
         if bytes.is_empty() || bytes.len() > MAX_NATIVE_DISPLAY_FINAL_RETIREMENT {
             return Err(invalid());
         }
@@ -127,7 +143,7 @@ impl NativeDisplayFinalRetirementPreparation {
             None,
         )
         .map_err(|_| invalid())?;
-        let result = Self::new(&parent, preparation, verification, &frames, expiry)?;
+        let result = Self::from_parent(parent, preparation, verification, &frames, expiry)?;
         if result.canonical_bytes() != bytes {
             return Err(invalid());
         }
@@ -203,6 +219,17 @@ impl NativeDisplayReleasedCurrentRecord {
         verification: ComponentDigest,
         window: DisplayNativeHandoffWindow,
     ) -> Result<Self, String> {
+        Self::from_parent(
+            NativeDisplayFinalRetirementPreparation::decode(&parent.canonical_bytes())?,
+            verification,
+            window,
+        )
+    }
+    fn from_parent(
+        parent: NativeDisplayFinalRetirementPreparation,
+        verification: ComponentDigest,
+        window: DisplayNativeHandoffWindow,
+    ) -> Result<Self, String> {
         window.valid_for_ms().map_err(|_| invalid())?;
         if verification == ComponentDigest::from_bytes([0; 32])
             || window.observed_unix_ms < parent.frames().window().observed_unix_ms
@@ -211,12 +238,14 @@ impl NativeDisplayReleasedCurrentRecord {
             return Err(invalid());
         }
         Ok(Self {
-            parent: NativeDisplayFinalRetirementPreparation::decode(&parent.canonical_bytes())?,
+            parent,
             verification,
             window,
         })
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        #[cfg(test)]
+        super::count_decode(6);
         if bytes.is_empty() || bytes.len() > MAX_NATIVE_DISPLAY_FINAL_RETIREMENT + 512 {
             return Err(invalid());
         }
@@ -238,7 +267,7 @@ impl NativeDisplayReleasedCurrentRecord {
         if !rest.is_empty() {
             return Err(invalid());
         }
-        let result = Self::new(&parent, verification, window)?;
+        let result = Self::from_parent(parent, verification, window)?;
         if result.canonical_bytes() != bytes {
             return Err(invalid());
         }
