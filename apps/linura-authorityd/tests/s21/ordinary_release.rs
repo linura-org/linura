@@ -1009,7 +1009,10 @@ pub(super) fn early_automatic_restoration_is_not_expiry_release_authority() {
     ));
     assert_eq!(expired.released_record(), completed.record_digest());
     assert_ordinary_adopted_semantics(&expired, &machine);
-    assert_eq!(expired.outcome(), linura_core::DisplayOrdinaryReleaseOutcome::Expired);
+    assert_eq!(
+        expired.outcome(),
+        linura_core::DisplayOrdinaryReleaseOutcome::Expired
+    );
     assert!(expired.kept_intent_material().is_none());
     drop(restarted);
     let mut restarted =
@@ -3791,7 +3794,10 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
     assert_eq!(current.state_record_digest(), adopted.state_record_digest());
     assert_eq!(current.original_request(), adopted.original_request());
     assert_eq!(current.original_snapshot(), adopted.original_snapshot());
-    assert_eq!(current.kept_intent_material(), adopted.kept_intent_material());
+    assert_eq!(
+        current.kept_intent_material(),
+        adopted.kept_intent_material()
+    );
     assert_eq!(current.outcome(), adopted.outcome());
     assert_eq!(current.current_layout(), adopted.current_layout());
     assert_eq!(current.released_record(), adopted.released_record());
