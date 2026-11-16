@@ -391,10 +391,7 @@ mod tests {
     fn actual_native_pidfd_distinguishes_live_dead_and_reaped_invocations() {
         // One fixed unprivileged fixture process; no shell, caller program or
         // effect path exists in the production startup mechanism.
-        let mut child = std::process::Command::new("/usr/bin/python3")
-            .args(["-I", "-S", "-c", "import time; time.sleep(30)"])
-            .spawn()
-            .unwrap_or_else(|e| unreachable!("{e}"));
+        let mut child = image::test_child(false);
         let pid = child.id();
         let process = rustix::process::pidfd_open(
             rustix::process::Pid::from_raw(pid as i32).unwrap_or_else(|| unreachable!()),

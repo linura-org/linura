@@ -3522,7 +3522,8 @@ fn ordinary_final_retirement_requires_matching_physical_and_durable_completion()
             assert_eq!(
                 final_ack.is_ok(),
                 fault != 1 && fault != 3 && fault != 18 && !(5..=7).contains(&fault),
-                "final dispatch {action:?}/{fault}"
+                "final dispatch {action:?}/{fault}: {error:?}",
+                error = final_ack.as_ref().err()
             );
             if fault == 15 || fault == 17 {
                 machine

@@ -14,6 +14,64 @@ fn unavailable() -> String {
     "native executable attestation unavailable; ordinary presentation remains fenced".into()
 }
 
+fn unavailable_at(stage: &'static str) -> String {
+    // Closed stages only: no executable paths, process identity or digest bytes.
+    format!(
+        "native executable attestation unavailable at {stage}; ordinary presentation remains fenced"
+    )
+}
+
+#[cfg(test)]
+pub(super) fn test_child(exec_after_input: bool) -> std::process::Child {
+    use rustix::event::{PollFd, PollFlags, Timespec};
+    use std::process::Stdio;
+    // spawn() can return while the kernel is still replacing the child's mm.
+    // Observe readiness from the new executable, never the pre-exec process.
+    let program = if exec_after_input {
+        "import os,sys; sys.stdout.buffer.write(b'R'); sys.stdout.buffer.flush(); sys.stdin.buffer.read(1); os.execv('/usr/bin/sleep', ['sleep', '30'])"
+    } else {
+        "import sys; sys.stdout.buffer.write(b'R'); sys.stdout.buffer.flush(); sys.stdin.buffer.read(1)"
+    };
+    let mut child = std::process::Command::new("/usr/bin/python3")
+        .args(["-I", "-S", "-c", program])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let ready = (|| {
+        let output = child.stdout.as_mut().ok_or(())?;
+        let mut events = [PollFd::new(&*output, PollFlags::IN)];
+        if rustix::event::poll(
+            &mut events,
+            Some(&Timespec {
+                tv_sec: 2,
+                tv_nsec: 0,
+            }),
+        )
+        .map_err(|_| ())?
+            != 1
+            || events[0].revents() != PollFlags::IN
+        {
+            return Err(());
+        }
+        let mut byte = [0];
+        output.read_exact(&mut byte).map_err(|_| ())?;
+        if byte != *b"R" {
+            return Err(());
+        }
+        Ok(())
+    })();
+    if ready.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    assert!(
+        ready.is_ok(),
+        "fixed executable fixture did not become ready"
+    );
+    child
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Identity {
     device: u64,
@@ -133,11 +191,11 @@ impl NativeDisplayImage {
         // Bind the secure-entry metadata checked by the caller through image
         // capture and hashing; never silently adopt a later installation state.
         if &identity != admitted || !identity.valid() {
-            return Err(unavailable());
+            return Err(unavailable_at("installed identity"));
         }
-        let image = Self::executing(pid)?;
+        let image = Self::executing(pid).map_err(|_| unavailable_at("executing descriptor"))?;
         if Identity::new(&image.metadata().map_err(|_| unavailable())?) != identity {
-            return Err(unavailable()); // Never hash an unadmitted image.
+            return Err(unavailable_at("executing identity")); // Never hash an unadmitted image.
         }
         let mut hash = Sha256::new();
         let mut buffer = [0; 65_536];
@@ -150,7 +208,7 @@ impl NativeDisplayImage {
                 .read_at(&mut buffer, consumed)
                 .map_err(|_| unavailable())?;
             if started.elapsed() >= Duration::from_secs(1) {
-                return Err(unavailable());
+                return Err(unavailable_at("image hash deadline"));
             }
             if size == 0 {
                 break;
@@ -165,10 +223,12 @@ impl NativeDisplayImage {
             || &ComponentDigest::from_bytes(hash.finalize().into()) != expected
             || Identity::new(&installed.metadata().map_err(|_| unavailable())?) != identity
         {
-            return Err(unavailable());
+            return Err(unavailable_at("image hash comparison"));
         }
         let retained = Self { image, identity };
-        retained.live_identity(pid)?;
+        retained
+            .live_identity(pid)
+            .map_err(|_| unavailable_at("retained identity"))?;
         Ok(retained)
     }
     /// Metadata-only revalidation: hashing is performed once per admission,
@@ -250,7 +310,6 @@ fn secure_auxv(bytes: &[u8]) -> bool {
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::process::Stdio;
 
     #[test]
     fn secure_exec_auxiliary_vector_is_kernel_shaped_unique_complete_and_bounded() {
@@ -356,13 +415,11 @@ mod tests {
         let installed = File::open("/usr/bin/python3").unwrap_or_else(|e| unreachable!("{e}"));
         let bytes = std::fs::read("/usr/bin/python3").unwrap_or_else(|e| unreachable!("{e}"));
         let expected = ComponentDigest::from_bytes(Sha256::digest(&bytes).into());
-        let mut child = std::process::Command::new("/usr/bin/python3")
-            .args(["-I", "-S", "-c", "import time; time.sleep(30)"])
-            .spawn()
-            .unwrap_or_else(|e| unreachable!("{e}"));
+        let mut child = test_child(false);
         let pid = child.id();
         let admitted = Identity::new(&installed.metadata().unwrap_or_else(|e| unreachable!("{e}")));
         let result = NativeDisplayImage::from_installed(pid, &installed, &expected, &admitted);
+        let live = result.as_ref().map(|image| image.live_identity(pid));
         let mut changed_admission = admitted.clone();
         changed_admission.mode ^= 0o2000;
         let changed =
@@ -379,15 +436,14 @@ mod tests {
         child.kill().unwrap_or_else(|e| unreachable!("{e}"));
         child.wait().unwrap_or_else(|e| unreachable!("{e}"));
         assert!(wrong.is_err() && substituted.is_err() && changed.is_err());
+        assert!(matches!(live, Ok(Ok(()))));
         let retained = result.unwrap_or_else(|e| unreachable!("{e}"));
         assert!(retained.live_identity(pid).is_err());
     }
 
     #[test]
     fn exec_in_the_same_live_pid_invalidates_the_retained_image() {
-        let mut child = std::process::Command::new("/usr/bin/python3")
-            .args(["-I", "-S", "-c", "import os,sys; sys.stdin.buffer.read(1); os.execv('/usr/bin/sleep', ['sleep', '30'])"])
-            .stdin(Stdio::piped()).spawn().unwrap_or_else(|e| unreachable!("{e}"));
+        let mut child = test_child(true);
         let pid = child.id();
         let ticks = super::super::super::process_start(pid).unwrap_or_else(|e| unreachable!("{e}"));
         let image = NativeDisplayImage::test_process(pid);
