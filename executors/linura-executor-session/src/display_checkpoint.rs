@@ -787,6 +787,18 @@ impl TerminalLineage {
         for (dispatch, record) in &self.ordinary_releases {
             record.validate_original(self.originals.get(dispatch).ok_or_else(unavailable)?)?;
         }
+        // Restoration itself owns a reference to its complete original
+        // checkpoint. Check it directory-wide, including when another scope is
+        // queried, so missing/shared ancestry cannot disappear behind a later
+        // valid terminal record. Historical bytes still grant no live authority.
+        for record in self.restorations.values() {
+            let material = record.decoded_material()?;
+            record.validate_original(
+                self.originals
+                    .get(material.original_dispatch())
+                    .ok_or_else(unavailable)?,
+            )?;
+        }
         // Every retained finalization must have the exact actual restoration
         // transaction and bound material, even when it is for another scope.
         for (scope, record) in &self.terminals {

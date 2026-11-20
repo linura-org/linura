@@ -415,11 +415,15 @@ fn restoration_on_seat(
         .replace("c2:42", "c3:99")
         .replace("0:100:0:-", "0:0:0:-");
     let mut material = "LNRI:1;".to_owned();
-    let dispatch = ComponentDigest::from_bytes([original; 32]).to_hex();
+    let payload = original_preimage(&original_intent, original);
+    let dispatch = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"))
+        .to_hex();
+    let checkpoint = ComponentDigest::from_bytes(Sha256::digest(&payload).into()).to_hex();
     for field in [
-        "request:v010:display-layout:original",
+        &format!("request:v010:display-layout:original-{original}"),
         &dispatch,
-        &"b".repeat(64),
+        &checkpoint,
         &"c".repeat(64),
         &original_intent,
         &replacement,
@@ -441,6 +445,46 @@ fn restoration_on_seat(
     NativeDisplayRestorationReservation::new(&material, &binding)
         .unwrap_or_else(|e| unreachable!("{e}"))
 }
+fn retain_restoration_original(fixture: &Fixture, record: &NativeDisplayRestorationReservation) {
+    let material = record
+        .decoded_material()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let expected = material.original_dispatch();
+    let use_id = material
+        .original_request()
+        .as_str()
+        .strip_prefix("request:v010:display-layout:original-")
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or_else(|| unreachable!("explicit fixture use ID"));
+    let old = material.original();
+    let topology = old
+        .topology()
+        .resource_id()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let lock = old
+        .lock()
+        .resource_id()
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    let lock = lock.as_str();
+    let topology = topology.as_str();
+    let original = format!(
+        "LNDI:1;{lock};LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
+    );
+    let bytes = original_preimage(&original, use_id);
+    let dispatch = NativeDisplayRecoveryCheckpoint::stored_dispatch(&bytes)
+        .unwrap_or_else(|e| unreachable!("{e}"));
+    assert_eq!(dispatch.to_hex(), expected);
+    if fixture.path.join(Kind::Original.name(&dispatch)).exists() {
+        assert_eq!(
+            load_at(&fixture.fd, fixture.uid, &dispatch).unwrap_or_else(|e| unreachable!("{e}")),
+            bytes
+        );
+    } else {
+        reserve_at(&fixture.fd, fixture.uid, &dispatch, &bytes)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+    }
+}
+
 fn reserve_recovery(
     fixture: &Fixture,
     record: &NativeDisplayRestorationReservation,
@@ -453,6 +497,130 @@ fn reserve_recovery(
         Kind::Restoration,
     )
 }
+#[test]
+fn restoration_requires_exact_original_ancestry_and_missing_shared_history_fences_every_scope() {
+    use std::os::unix::fs::OpenOptionsExt;
+    for fault in 0..3 {
+        let fixture = Fixture::new();
+        let record = restoration(1, 2);
+        let scope = record
+            .decoded_material()
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .recovery_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        // Missing original ancestry fails BEFORE publication, not just at a
+        // later native call; neither a valid reservation nor its hash suffices.
+        assert!(reserve_recovery(&fixture, &record).is_err());
+        assert_eq!(
+            std::fs::read_dir(&fixture.path)
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .count(),
+            0
+        );
+        retain_restoration_original(&fixture, &record);
+        assert!(reserve_recovery(&fixture, &record).is_ok());
+        let other = restoration(4, 5);
+        retain_restoration_original(&fixture, &other);
+        assert!(reserve_recovery(&fixture, &other).is_ok());
+        let other_scope = other
+            .decoded_material()
+            .unwrap_or_else(|e| unreachable!("{e}"))
+            .recovery_scope()
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let dispatch = ComponentDigest::parse_hex(scope.original_dispatch())
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let path = fixture.path.join(Kind::Original.name(&dispatch));
+        let saved = std::fs::read(&path).unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(record.validate_original(&saved[HEADER..]).is_ok());
+        for bytes in [&[][..], &saved[HEADER..saved.len() - 1]] {
+            assert!(record.validate_original(bytes).is_err());
+        }
+        // The same checkpoint digest paired with another otherwise supported
+        // original intent must also fail, even with a valid fresh binding.
+        let changed = record.material().replacen("60000", "60001", 1);
+        let effect = linura_provider_sdk::display_restoration_effect(&changed)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        let binding = linura_provider_sdk::ExecutionBinding::new(
+            "transaction:restoration-substitution",
+            0,
+            1,
+            ComponentDigest::from_bytes([90; 32]),
+            ComponentDigest::from_bytes([91; 32]),
+            &effect,
+        )
+        .unwrap_or_else(|e| unreachable!("{e}"));
+        let substituted = NativeDisplayRestorationReservation::new(&changed, &binding)
+            .unwrap_or_else(|e| unreachable!("{e}"));
+        assert!(substituted.validate_original(&saved[HEADER..]).is_err());
+        match fault {
+            0 => std::fs::remove_file(&path).unwrap_or_else(|e| unreachable!("{e}")),
+            1 => {
+                // Still fully valid, same original binding/material/dispatch,
+                // but a different native preimage. Re-signing the unkeyed file
+                // envelope cannot repair its immutable restoration reference.
+                let mut changed = saved[HEADER..].to_vec();
+                let at = changed
+                    .windows(64)
+                    .position(|v| v == "d".repeat(64).as_bytes())
+                    .unwrap_or_else(|| unreachable!());
+                changed[at..at + 64].fill(b'e');
+                assert!(
+                    NativeDisplayRecoveryCheckpoint::validate_stored(&changed, &dispatch).is_ok()
+                );
+                let mut framed = saved[..HEADER].to_vec();
+                framed[MAGIC.len()..MAGIC.len() + 32].copy_from_slice(&Sha256::digest(&changed));
+                framed.extend_from_slice(&changed);
+                std::fs::write(&path, framed).unwrap_or_else(|e| unreachable!("{e}"));
+            }
+            _ => {
+                // A well-framed, digest-matching record with unsupported
+                // original state is also unavailable, never archival authority.
+                let changed = payload(&dispatch, b"unsupported original state");
+                let mut framed = MAGIC.to_vec();
+                framed.extend_from_slice(&Sha256::digest(&changed));
+                framed.extend_from_slice(&(changed.len() as u64).to_be_bytes());
+                framed.extend_from_slice(&changed);
+                std::fs::write(&path, framed).unwrap_or_else(|e| unreachable!("{e}"));
+            }
+        }
+        assert!(read_restoration_at(&fixture.fd, fixture.uid, &scope).is_err());
+        assert!(read_restoration_at(&fixture.fd, fixture.uid, &other_scope).is_err());
+        assert_eq!(startup_clear_at(&fixture.fd, fixture.uid), Ok(false));
+        assert!(
+            fixture
+                .reserve(9, b"unrelated new attempt must remain fenced")
+                .is_err()
+        );
+        assert!(reserve_recovery(&fixture, &restoration(4, 6)).is_err());
+        // Inspection did not repair, erase or replay any record. Restoring the
+        // exact historical parent permits only reads; the spend remains spent.
+        if fault == 0 {
+            let mut restored = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            restored
+                .write_all(&saved)
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            restored.sync_all().unwrap_or_else(|e| unreachable!("{e}"));
+        } else {
+            std::fs::write(&path, &saved).unwrap_or_else(|e| unreachable!("{e}"));
+        }
+        assert_eq!(
+            std::fs::metadata(&path)
+                .unwrap_or_else(|e| unreachable!("{e}"))
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(read_restoration_at(&fixture.fd, fixture.uid, &other_scope).is_ok());
+        assert!(reserve_recovery(&fixture, &record).is_err());
+    }
+}
+
 #[test]
 fn restoration_is_exclusive_durable_and_cannot_supersede_an_unresolved_attempt() {
     let fixture = Fixture::new();
@@ -468,6 +636,7 @@ fn restoration_is_exclusive_durable_and_cannot_supersede_an_unresolved_attempt()
         .and_then(|material| material.recovery_scope().map_err(|e| e.to_string()))
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert!(read_restoration_at(&fixture.fd, fixture.uid, &scope).is_err());
+    retain_restoration_original(&fixture, &record);
     assert!(reserve_recovery(&fixture, &record).is_ok());
     let observed = read_restoration_at(&fixture.fd, fixture.uid, &scope)
         .unwrap_or_else(|e| unreachable!("{e}"));
@@ -511,13 +680,16 @@ fn restoration_is_exclusive_durable_and_cannot_supersede_an_unresolved_attempt()
         std::fs::read(fixture.name(1)).unwrap_or_else(|e| unreachable!("{e}")),
         before
     );
-    assert!(reserve_recovery(&fixture, &restoration(4, 5)).is_ok());
+    let other = restoration(4, 5);
+    retain_restoration_original(&fixture, &other);
+    assert!(reserve_recovery(&fixture, &other).is_ok());
 }
 #[test]
 fn corruption_or_type_substitution_of_restoration_history_fences_all_new_reservations() {
     for kind in 0..4 {
         let fixture = Fixture::new();
         let record = restoration(1, 2);
+        retain_restoration_original(&fixture, &record);
         assert!(reserve_recovery(&fixture, &record).is_ok());
         let path = fixture
             .path
@@ -563,6 +735,7 @@ fn read_only_restoration_lookup_refuses_unknown_or_duplicate_history_without_rep
     for duplicate in [false, true] {
         let fixture = Fixture::new();
         let record = restoration(1, 2);
+        retain_restoration_original(&fixture, &record);
         assert!(reserve_recovery(&fixture, &record).is_ok());
         let saved = std::fs::read(
             fixture
@@ -611,7 +784,7 @@ fn read_only_restoration_lookup_refuses_unknown_or_duplicate_history_without_rep
             std::fs::read_dir(&fixture.path)
                 .unwrap_or_else(|e| unreachable!("{e}"))
                 .count(),
-            2
+            3 // Exact original parent, reservation, and injected invalid entry.
         );
         assert!(
             !startup_clear_at(&fixture.fd, fixture.uid).unwrap_or_else(|e| unreachable!("{e}"))
@@ -705,6 +878,7 @@ fn terminal_reservation_needs_actual_parent_and_is_immutable_exclusive_and_reope
     let (parent, record) = terminal(1, 2, 3, "seat0");
     assert!(record.validate_restoration(&parent).is_ok());
     assert!(reserve_terminal(&fixture, &record).is_err());
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(
         read_finalization_at(&fixture.fd, fixture.uid, &parent)
@@ -756,6 +930,7 @@ fn quiescence_is_write_once_and_requires_exact_terminal_and_restoration_parents(
         )
     };
     assert!(reserve().is_err());
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve().is_err());
     assert!(reserve_terminal(&fixture, &record).is_ok());
@@ -803,6 +978,7 @@ fn root_retirement_preparation_is_parent_bound_synced_and_write_once() {
         )
     };
     assert!(write(&preparation).is_err());
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal).is_ok());
     assert!(write(&preparation).is_err()); // Not before the durable native LNRQ marker.
@@ -860,6 +1036,7 @@ fn durable_root_retired_held_requires_exact_prepared_lineage_and_is_one_use() {
         )
     };
     assert!(publish(Kind::RootRetiredHeld).is_err());
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal).is_ok());
     assert!(publish(Kind::RootRetiredHeld).is_err());
@@ -921,6 +1098,7 @@ fn native_release_reservation_is_write_once_after_exact_root_held_parent() {
         )
     };
     assert!(publish(Kind::NativeReleaseReserved).is_err());
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal).is_ok());
     assert!(
@@ -997,6 +1175,7 @@ fn native_release_spent_requires_exact_parent_is_synced_and_cannot_replay() {
         )
     };
     assert!(publish(Kind::NativeReleaseSpent).is_err());
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal).is_ok());
     assert!(publish(Kind::NativeReleaseSpent).is_err());
@@ -1130,6 +1309,7 @@ fn completion_preparation_and_spend_need_exact_ancestry_and_never_allow_replay()
             kind,
         )
     };
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal).is_ok());
     assert!(publish(Kind::Quiescence, &terminal.canonical_bytes()).is_ok());
@@ -1198,7 +1378,9 @@ fn missing_torn_or_repermissioned_completion_ancestry_quarantines_other_scopes()
         )
         .unwrap_or_else(|e| unreachable!("{e}"));
         let record = completion(&parent, &retirement);
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
+        retain_restoration_original(&fixture, &other);
         assert!(reserve_recovery(&fixture, &other).is_ok());
         assert!(reserve_terminal(&fixture, &terminal).is_ok());
         for (kind, bytes) in [
@@ -1254,6 +1436,7 @@ fn missing_parent_torn_or_repermissioned_spent_marker_quarantines_every_scope() 
             ComponentDigest::from_bytes([4; 32]),
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &terminal).is_ok());
         assert!(
@@ -1283,6 +1466,7 @@ fn missing_parent_torn_or_repermissioned_spent_marker_quarantines_every_scope() 
                 .is_ok()
             );
         }
+        retain_restoration_original(&fixture, &other);
         assert!(reserve_recovery(&fixture, &other).is_ok());
         let spent = fixture
             .path
@@ -1321,6 +1505,7 @@ fn corrupted_or_orphan_native_release_reservation_fences_other_scopes() {
             ComponentDigest::from_bytes([4; 32]),
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &terminal).is_ok());
         assert!(
@@ -1349,6 +1534,7 @@ fn corrupted_or_orphan_native_release_reservation_fences_other_scopes() {
                 .is_ok()
             );
         }
+        retain_restoration_original(&fixture, &other);
         assert!(reserve_recovery(&fixture, &other).is_ok());
         let reserved = fixture
             .path
@@ -1387,6 +1573,7 @@ fn orphan_or_corrupt_root_retired_held_fences_unrelated_scope_and_admission() {
             ComponentDigest::from_bytes([4; 32]),
         )
         .unwrap_or_else(|e| unreachable!("{e}"));
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &native).is_ok());
         assert!(
@@ -1411,6 +1598,7 @@ fn orphan_or_corrupt_root_retired_held_fences_unrelated_scope_and_admission() {
                 .is_ok()
             );
         }
+        retain_restoration_original(&fixture, &other);
         assert!(reserve_recovery(&fixture, &other).is_ok());
         let held = fixture
             .path
@@ -1452,6 +1640,7 @@ fn corrupt_or_orphan_root_retirement_preparation_quarantines_every_scope() {
         let fixture = Fixture::new();
         let (parent, finished) = terminal(1, 2, 3, "seat0");
         let (other, _) = terminal(11, 12, 13, "seat12");
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &finished).is_ok());
         assert!(
@@ -1481,6 +1670,7 @@ fn corrupt_or_orphan_root_retirement_preparation_quarantines_every_scope() {
             )
             .is_ok()
         );
+        retain_restoration_original(&fixture, &other);
         assert!(reserve_recovery(&fixture, &other).is_ok());
         let checkpoint = fixture
             .path
@@ -1507,6 +1697,7 @@ fn missing_or_corrupt_quiescence_parent_cannot_repair_or_admit() {
     for fault in 0..3 {
         let fixture = Fixture::new();
         let (parent, record) = terminal(1, 2, 3, "seat0");
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &record).is_ok());
         assert!(
@@ -1545,6 +1736,7 @@ fn unrelated_orphan_quiescence_fences_all_scope_reads_and_writes() {
     let fixture = Fixture::new();
     let (first_parent, first_terminal) = terminal(1, 2, 3, "seat0");
     let (other_parent, other_terminal) = terminal(11, 12, 13, "seat12");
+    retain_restoration_original(&fixture, &first_parent);
     assert!(reserve_recovery(&fixture, &first_parent).is_ok());
     assert!(reserve_terminal(&fixture, &first_terminal).is_ok());
     assert!(
@@ -1557,6 +1749,7 @@ fn unrelated_orphan_quiescence_fences_all_scope_reads_and_writes() {
         )
         .is_ok()
     );
+    retain_restoration_original(&fixture, &other_parent);
     assert!(reserve_recovery(&fixture, &other_parent).is_ok());
     assert!(reserve_terminal(&fixture, &other_terminal).is_ok());
     // Deleting an unrelated synced terminal is adversarial corruption, not a
@@ -1579,8 +1772,10 @@ fn unrelated_missing_restoration_parent_fences_quiescence_and_other_reads() {
     let fixture = Fixture::new();
     let (parent, terminal_record) = terminal(1, 2, 3, "seat0");
     let (other_parent, _) = terminal(11, 12, 13, "seat12");
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal_record).is_ok());
+    retain_restoration_original(&fixture, &other_parent);
     assert!(reserve_recovery(&fixture, &other_parent).is_ok());
     // A complete terminal by itself cannot retain authority if the unrelated
     // restoration parent disappeared or its bytes were substituted.
@@ -1606,6 +1801,7 @@ fn corrupted_or_substituted_terminal_history_blocks_all_reads_and_reservations_w
     for fault in 0..7 {
         let fixture = Fixture::new();
         let (parent, record) = terminal(1, 2, 3, "seat0");
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &record).is_ok());
         let name = fixture
@@ -1667,6 +1863,7 @@ fn terminal_readback_requires_the_same_actual_parent_during_its_locked_scan() {
         let fixture = Fixture::new();
         let (parent, record) = terminal(1, 2, 3, "seat0");
         assert!(read_finalization_at(&fixture.fd, fixture.uid, &parent).is_err());
+        retain_restoration_original(&fixture, &parent);
         assert!(reserve_recovery(&fixture, &parent).is_ok());
         assert!(reserve_terminal(&fixture, &record).is_ok());
         std::fs::remove_file(
@@ -1683,6 +1880,7 @@ fn terminal_readback_requires_the_same_actual_parent_during_its_locked_scan() {
             // fixture instead of asking the protected writer to repair history.
             assert!(reserve_recovery(&fixture, &other).is_err());
             let foreign = Fixture::new();
+            retain_restoration_original(&foreign, &other);
             assert!(reserve_recovery(&foreign, &other).is_ok());
             std::fs::copy(
                 foreign
@@ -1705,8 +1903,10 @@ fn terminal_readback_requires_the_same_actual_parent_during_its_locked_scan() {
 fn terminal_reservation_does_not_increase_or_evict_full_checkpoint_quota() {
     let fixture = Fixture::new();
     let (parent, record) = terminal(1, 2, 3, "seat0");
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
-    for byte in 1..=255u8 {
+    // Complete original plus restoration already occupy two of the 256 slots.
+    for byte in 1..=254u8 {
         assert!(
             fixture
                 .reserve(byte, b"bounded retained quota fixture")
@@ -1802,6 +2002,7 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
             kind,
         )
     };
+    retain_restoration_original(&fixture, &parent);
     assert!(reserve_recovery(&fixture, &parent).is_ok());
     assert!(reserve_terminal(&fixture, &terminal).is_ok());
     for (kind, bytes) in [
@@ -2103,30 +2304,12 @@ fn native_power_records_require_every_parent_and_preserve_exclusive_spend_on_reo
     ));
 }
 
-// Full strictly validated original preimage for ordinary Root persistence
-// tests. All identities/rules are synthetic; no live witness is claimed.
-pub(crate) fn ordinary_release_fixture(
-    attempt: u8,
-) -> (Vec<u8>, NativeDisplayOrdinaryReleasePreparation) {
-    ordinary_release_fixture_with_original(attempt, 2)
-}
-fn ordinary_release_fixture_with_original(
-    attempt: u8,
-    original_use: u8,
-) -> (Vec<u8>, NativeDisplayOrdinaryReleasePreparation) {
-    use linura_core::{
-        DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial,
-        DisplayOrdinaryReleaseOutcome, RequestId,
-    };
-    use linura_provider_sdk::ExecutionBinding;
-    let topology = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3";
-    let lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-4222-8222-222222222222:1";
-    let original = format!(
-        "LNDI:1;{lock};LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
-    );
-    let effect = linura_provider_sdk::display_layout_effect(&original)
+// Complete historical native fixture shared by restoration and ordinary
+// lineage tests. Synthetic identities do not stand in for live mechanisms.
+fn original_preimage(original: &str, original_use: u8) -> Vec<u8> {
+    let effect = linura_provider_sdk::display_layout_effect(original)
         .unwrap_or_else(|e| unreachable!("{e}"));
-    let binding = ExecutionBinding::new(
+    let binding = linura_provider_sdk::ExecutionBinding::new(
         "transaction:ordinary-original",
         0,
         1,
@@ -2152,7 +2335,7 @@ fn ordinary_release_fixture_with_original(
         &binding.authority_use_digest.to_hex(),
         &binding.effect_digest.to_hex(),
         &binding.dispatch_digest.to_hex(),
-        &original,
+        original,
         "25000",
         "11111111-1111-4111-8111-111111111111",
         ":1.42",
@@ -2169,6 +2352,33 @@ fn ordinary_release_fixture_with_original(
     }
     NativeDisplayRecoveryCheckpoint::validate_stored(&payload, &binding.dispatch_digest)
         .unwrap_or_else(|e| unreachable!("{e}"));
+    payload
+}
+
+// Full strictly validated original preimage for ordinary Root persistence
+// tests. All identities/rules are synthetic; no live witness is claimed.
+pub(crate) fn ordinary_release_fixture(
+    attempt: u8,
+) -> (Vec<u8>, NativeDisplayOrdinaryReleasePreparation) {
+    ordinary_release_fixture_with_original(attempt, 2)
+}
+fn ordinary_release_fixture_with_original(
+    attempt: u8,
+    original_use: u8,
+) -> (Vec<u8>, NativeDisplayOrdinaryReleasePreparation) {
+    use linura_core::{
+        DisplayOrdinaryReleaseLineage, DisplayOrdinaryReleaseMaterial,
+        DisplayOrdinaryReleaseOutcome, RequestId,
+    };
+    use linura_provider_sdk::ExecutionBinding;
+    let topology = "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3";
+    let lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-4222-8222-222222222222:1";
+    let original = format!(
+        "LNDI:1;{lock};LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;{topology};1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
+    );
+    let payload = original_preimage(&original, original_use);
+    let original_dispatch = NativeDisplayRecoveryCheckpoint::stored_dispatch(&payload)
+        .unwrap_or_else(|e| unreachable!("{e}"));
     let checkpoint = ComponentDigest::from_bytes(Sha256::digest(&payload).into()).to_hex();
     let layout = linura_core::DisplayLayoutMaterial::decode(&original)
         .unwrap_or_else(|e| unreachable!("{e}"));
@@ -2176,7 +2386,7 @@ fn ordinary_release_fixture_with_original(
         &DisplayOrdinaryReleaseLineage {
             original_request: RequestId::new("request:v010:display-layout:ordinary-original")
                 .unwrap_or_else(|e| unreachable!("{e}")),
-            original_dispatch: &binding.dispatch_digest.to_hex(),
+            original_dispatch: &original_dispatch.to_hex(),
             terminal_record: &"e".repeat(64),
             original_checkpoint: &checkpoint,
             signed_binding: &"f".repeat(64),

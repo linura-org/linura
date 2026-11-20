@@ -4007,6 +4007,19 @@ mod tests {
                 .decoded_material()
                 .and_then(|m| m.recovery_scope().map_err(|e| e.to_string()))
                 .unwrap_or_else(|e| unreachable!("{e}"));
+            if seat == "seat1" {
+                // Memory exclusion also rejects a reused original identity on
+                // another seat. The full checkpoint fixture now correctly has
+                // seat-bound dispatches, so pin this deliberately conflicting
+                // memory correlation explicitly rather than pretending two
+                // different valid preimages have the same dispatch digest.
+                let retained = single.values_mut().next().unwrap_or_else(|| unreachable!());
+                retained.scope = linura_core::DisplayRecoveryScope::new(
+                    next_scope.original_dispatch(),
+                    retained.scope.replacement().clone(),
+                )
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            }
             assert!(
                 reserve_finalization_memory(&mut single, &next_scope, &next.canonical_bytes())
                     .is_err()

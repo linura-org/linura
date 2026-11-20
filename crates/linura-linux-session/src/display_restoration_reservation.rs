@@ -2,8 +2,9 @@
 //! Neither these bytes nor a validated execution binding authorizes an effect.
 //! The supervised executor must receive Control's prepared one-use handoff;
 //! the original Guard independently admits its caller and retained witnesses.
-use linura_core::DisplayRestorationMaterial;
+use linura_core::{DisplayLayoutMaterial, DisplayRestorationMaterial};
 use linura_provider_sdk::{ComponentDigest, ExecutionBinding, display_restoration_effect};
+use sha2::{Digest, Sha256};
 
 const DOMAIN: &str = "linura.native-display.restoration-reservation.v1";
 pub const MAX_NATIVE_DISPLAY_RESTORATION_RESERVATION: usize = 16 * 1024;
@@ -118,6 +119,42 @@ impl NativeDisplayRestorationReservation {
     pub fn material(&self) -> &str {
         &self.material
     }
+    /// Authenticate the complete immutable original parent, including its
+    /// native preimage and exact desired/baseline intent. This is a historical
+    /// reference check only; it cannot replace an actual original witness.
+    pub fn validate_original(&self, payload: &[u8]) -> Result<(), String> {
+        let material = self.decoded_material()?;
+        let dispatch =
+            ComponentDigest::parse_hex(material.original_dispatch()).map_err(|_| invalid())?;
+        crate::NativeDisplayRecoveryCheckpoint::validate_stored(payload, &dispatch)?;
+        if ComponentDigest::from_bytes(Sha256::digest(payload).into()).to_hex()
+            != material.original_checkpoint()
+            || dispatch == self.binding.dispatch_digest
+        {
+            return Err(invalid());
+        }
+        // validate_stored already checked the complete bounded 19-field frame.
+        // Compare the original transaction and typed intent as well as its hash:
+        // a valid checkpoint from a different request is never this parent.
+        let mut rest = payload;
+        for index in 0..9 {
+            let (size, body) = rest.split_at_checked(8).ok_or_else(invalid)?;
+            let size = usize::try_from(u64::from_be_bytes(size.try_into().map_err(|_| invalid())?))
+                .map_err(|_| invalid())?;
+            let (field, tail) = body.split_at_checked(size).ok_or_else(invalid)?;
+            let field = std::str::from_utf8(field).map_err(|_| invalid())?;
+            if index == 1 && field == self.binding.transaction_id
+                || index == 8
+                    && DisplayLayoutMaterial::decode(field).map_err(|_| invalid())?
+                        != *material.original()
+            {
+                return Err(invalid());
+            }
+            rest = tail;
+        }
+        Ok(())
+    }
+
     pub fn decoded_material(&self) -> Result<DisplayRestorationMaterial<'_>, String> {
         DisplayRestorationMaterial::decode(&self.material).map_err(|_| invalid())
     }
