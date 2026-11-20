@@ -25,6 +25,7 @@ concurrency:
 env:
   SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
   BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
+  BASE_IMAGE_DOWNLOAD_URL: https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
   BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
   VM_ACCELERATION: tcg
   QUALIFICATION_ENVIRONMENT_ID: qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless
@@ -103,6 +104,12 @@ jobs:
           LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
         run: bash scripts/prepare_qualification_storage.sh generic-vm
 
+      - name: Acquire reviewed Ubuntu image before expensive builds
+        uses: ./.github/actions/verified-ubuntu-image
+        with:
+          destination: ${{ env.LINURA_VM_DIR }}/ubuntu-noble-base.qcow2
+          sha256: ${{ env.BASE_IMAGE_SHA256 }}
+
       - name: Download exact-source qualification binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -131,12 +138,14 @@ jobs:
           set -euo pipefail
           case "$BASE_IMAGE_URL" in
             https://cloud-images.ubuntu.com/*) ;;
-            *) echo "untrusted base-image origin" >&2; exit 2 ;;
+            *) echo "base image origin drifted" >&2; exit 2 ;;
           esac
+          test "$BASE_IMAGE_DOWNLOAD_URL" = "https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
           image="$LINURA_VM_DIR/ubuntu-noble-base.qcow2"
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
-            --output "$image" "$BASE_IMAGE_URL"
+          [[ -f "$image" && ! -L "$image" ]]
+          test "$(stat -c %h "$image")" = 1
           printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$image" | sha256sum --check --strict
+          qemu-img info "$image"
           printf 'BASE_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
 
       - name: Exercise assigned restart, identity, security, migration and update boundaries

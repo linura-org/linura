@@ -19,6 +19,9 @@ on:
     paths:
       - ".github/workflows/v09-qualification.yml"
       - ".github/actions/qualification-envelope/**"
+      - ".github/actions/verified-ubuntu-image/**"
+      - "tools/qualification_base_image.py"
+      - "tests/tooling/test_qualification_base_image.py"
       - "contracts/qualification-execution-envelopes.toml"
       - "tools/qualification_envelope.py"
       - "tools/qualification_guest_identity.py"
