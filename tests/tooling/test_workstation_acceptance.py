@@ -115,6 +115,46 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 source_sha="b" * 40,
             )
 
+    def test_s21_physical_case_set_cannot_be_replaced_by_generic_display_capture(
+        self,
+    ) -> None:
+        required = {
+            "s21-display-keep",
+            "s21-display-revert",
+            "s21-display-expiry",
+            "s21-display-hotplug",
+            "s21-display-lock-power",
+            "s21-display-compositor-replacement",
+            "s21-display-retirement",
+        }
+        cases = {item["id"]: item for item in self.contract["level_c_case"]}
+        self.assertTrue(required.issubset(cases))
+        for case_id in sorted(required):
+            with self.subTest(case=case_id):
+                case = cases[case_id]
+                self.assertEqual(case["mechanism"], "physical-managed-display-effect")
+                self.assertEqual(case["prerequisite_slice"], "S21")
+                self.assertIn(
+                    "two-physical-outputs-identified", case["required_observations"]
+                )
+                with self.assertRaisesRegex(
+                    workstation_acceptance.AcceptanceError,
+                    "prerequisite S21 is planned, not complete",
+                ):
+                    workstation_acceptance.hardware_case_request(
+                        self.contract,
+                        case_id=case_id,
+                        run_id="q11-s21-test",
+                        fixture_id="physical-workstation",
+                        source_sha="b" * 40,
+                    )
+        for case_id in sorted(required):
+            reduced = copy.deepcopy(self.contract)
+            reduced["level_c_case"] = [
+                case for case in reduced["level_c_case"] if case["id"] != case_id
+            ]
+            self.assertTrue(workstation_acceptance.validate_contract(reduced))
+
     def test_level_c_full_run_refuses_before_partial_execution(self) -> None:
         with self.assertRaisesRegex(
             workstation_acceptance.AcceptanceError,
@@ -227,16 +267,13 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                     "fstat",
                     return_value=mock.Mock(st_mode=mode),
                 ),
-                mock.patch(
-                    "fcntl.ioctl",
-                    **(
-                        {"side_effect": api}
-                        if isinstance(api, OSError)
-                        else {"return_value": api}
-                    ),
-                ),
+                mock.patch("fcntl.ioctl") as ioctl,
                 mock.patch.object(workstation_acceptance.os, "close") as closed,
             ):
+                if isinstance(api, OSError):
+                    ioctl.side_effect = api
+                else:
+                    ioctl.return_value = api
                 self.assertEqual(workstation_acceptance._kvm_available(), usable)
                 opened.assert_called_once_with(
                     "/dev/kvm", os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
