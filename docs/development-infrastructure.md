@@ -256,6 +256,41 @@ Historical diagnostic failures remain recorded and do not automatically
 turn green; absence of the optional diagnostic is not evidence of a pass.
 Do not switch OFF to evade an already-required App check.
 
+## Digest-pinned Ubuntu qualification image cache
+
+The v0.4–v0.9 disposable Ubuntu guest lanes reuse **one immutable image
+identity**, not a mutable latest image: the reviewed Canonical
+release-20260725 Ubuntu 24.04 server cloud image with SHA-256
+d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac.
+The old Canonical origin now redirects to an HTTP archive, so the reviewed
+HTTPS transport is the exact ISCAS mirror URL in the workflows and acquisition
+helper. The mirror is an untrusted transport, not digest authority.
+
+.github/actions/verified-ubuntu-image/action.yml authenticates the reviewed
+image identity and storage before restoring a content-addressed GitHub Actions
+cache, then rehashes every cached byte. On a miss it downloads via HTTPS-only
+curl, strict HTTPS redirects, bounded retries and byte-range resumption;
+independently hashes the complete bytes, and exclusively publishes the
+authenticated image. Invalid, symlinked or hardlinked cached files are rejected,
+never silently repaired or counted as qualified. Cached files are opened through
+Linux no-follow file descriptors and checked against the opened inode, not only
+a prior pathname inspection. Both hashing and staging enforce a 1 GiB upper
+bound (the pinned image is approximately 595 MiB). Each job stages a fresh
+private guest input with a second independent SHA-256 check.
+
+Acquisition happens after guarded storage and source binding and before expensive
+builds. The existing pre-guest SHA-256 and QEMU image checks remain required.
+A missing image produces a qualification-image-infrastructure-error, not a
+passing guest result or a claim about product correctness. Cached images never
+become runtime binaries, credentials, authority or qualification evidence.
+
+GitHub's Actions cache is best-effort and can be evicted or PR-scoped; this is
+not a guaranteed durable artifact store. A permanent independent store (e.g.
+a separately provisioned and access-controlled R2 input bucket) requires its
+own reviewed endpoint and access contract, while retaining the repository SHA,
+HTTPS restrictions, fresh guest identity and fail-closed checks. Do not mix
+qualification inputs with qualification-evidence buckets.
+
 ## Dependency-input caching
 
 Canonical CI follows the same cache-authority boundary as the prepared v0.10 runtime substrate: caches accelerate immutable prerequisites but never become correctness authority. Repository-owned composite actions may retain Cargo registry/git inputs and Ubuntu package payloads only. Cache identities bind the reviewed implementation plus exact dependency/toolchain or runner-package resolution state; broad restore keys are forbidden.

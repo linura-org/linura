@@ -161,6 +161,9 @@ required_jobs = [
 paths = [
   ".github/workflows/vm-acceptance.yml",
   ".github/actions/qualification-envelope/**",
+  ".github/actions/verified-ubuntu-image/**",
+  "tools/qualification_base_image.py",
+  "tests/tooling/test_qualification_base_image.py",
   "contracts/qualification-execution-envelopes.toml",
   "tools/qualification_envelope.py",
   "tools/qualification_guest_identity.py",
@@ -275,6 +278,9 @@ required_jobs = [
 paths = [
   ".github/workflows/v04-durability-vm.yml",
   ".github/actions/qualification-envelope/**",
+  ".github/actions/verified-ubuntu-image/**",
+  "tools/qualification_base_image.py",
+  "tests/tooling/test_qualification_base_image.py",
   "contracts/qualification-execution-envelopes.toml",
   "tools/qualification_envelope.py",
   "tools/qualification_guest_identity.py",
@@ -316,6 +322,9 @@ required_jobs = [
 paths = [
   ".github/workflows/v04-enospc-recovery-vm.yml",
   ".github/actions/qualification-envelope/**",
+  ".github/actions/verified-ubuntu-image/**",
+  "tools/qualification_base_image.py",
+  "tests/tooling/test_qualification_base_image.py",
   "contracts/qualification-execution-envelopes.toml",
   "tools/qualification_envelope.py",
   "tools/qualification_guest_identity.py",
@@ -354,6 +363,9 @@ required_jobs = [
 paths = [
   ".github/workflows/v05-executor-verifier-vm.yml",
   ".github/actions/qualification-envelope/**",
+  ".github/actions/verified-ubuntu-image/**",
+  "tools/qualification_base_image.py",
+  "tests/tooling/test_qualification_base_image.py",
   "contracts/qualification-execution-envelopes.toml",
   "tools/qualification_envelope.py",
   "tools/qualification_guest_identity.py",
@@ -406,6 +418,9 @@ required_jobs = [
 paths = [
   ".github/workflows/v06-managed-lifecycle-vm.yml",
   ".github/actions/qualification-envelope/**",
+  ".github/actions/verified-ubuntu-image/**",
+  "tools/qualification_base_image.py",
+  "tests/tooling/test_qualification_base_image.py",
   "contracts/qualification-execution-envelopes.toml",
   "tools/qualification_envelope.py",
   "tools/qualification_guest_identity.py",
@@ -589,6 +604,9 @@ regression_required_jobs = [
 paths = [
   ".github/workflows/v09-qualification.yml",
   ".github/actions/qualification-envelope/**",
+  ".github/actions/verified-ubuntu-image/**",
+  "tools/qualification_base_image.py",
+  "tests/tooling/test_qualification_base_image.py",
   "contracts/qualification-execution-envelopes.toml",
   "tools/qualification_envelope.py",
   "tools/qualification_guest_identity.py",

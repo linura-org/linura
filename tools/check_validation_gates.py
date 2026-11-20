@@ -1969,6 +1969,7 @@ TOOLCHAIN_DATA_ENV_KEYS = frozenset(
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "BASE_IMAGE_CHECKSUM_URL",
+        "BASE_IMAGE_DOWNLOAD_URL",
         "BASE_IMAGE_SHA256",
         "BASE_IMAGE_URL",
         "BASE_SHA",
