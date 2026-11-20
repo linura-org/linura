@@ -993,6 +993,30 @@ def _require_v06_concurrent_matrix(
     )
 
 
+def _require_v06_environment(primary: dict[str, Any], envelope: dict[str, Any]) -> bool:
+    virtualization = _required_object(
+        primary.get("virtualization"), "v0.6 producer acceleration binding is missing"
+    )
+    _require(
+        virtualization.get("acceleration") == "kvm",
+        "v0.6 producer must require KVM; fallback is not qualified",
+    )
+    verified = _machine_environment_verified(
+        primary, envelope, virtualization="kvm", acceleration="kvm"
+    )
+    subject = _envelope_guest_environment(envelope)
+    verified = (
+        verified
+        and subject.get("distribution_id") == "ubuntu"
+        and subject.get("distribution_version") == "24.04"
+    )
+    _require(
+        verified,
+        "v0.6 independently observed guest must match the qualified KVM profile",
+    )
+    return verified
+
+
 def _verify_v06(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1009,7 +1033,7 @@ def _verify_v06(
         primary.get("managed_mutation_support") == "narrow-experimental",
         "v0.6 managed mutation scope drifted",
     )
-    _require_base_image_binding(primary, envelope)
+    environment_verified = _require_v06_environment(primary, envelope)
     transcript = _text(_bundle_file(bundle, "qualification.log"))
     matrix = _text(_bundle_file(bundle, "v06-matrix.log"))
     legacy_matrix = _text(_bundle_file(bundle, "v06-legacy-matrix.log"))
@@ -1165,7 +1189,7 @@ def _verify_v06(
             "concurrent-fault-matrix-77-of-77-passed",
             "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
-        environment_verified=_machine_environment_verified(primary, envelope),
+        environment_verified=environment_verified,
         details={
             "fault_matrix_cases": 11,
             "expanded_fault_matrix_cases": 77,

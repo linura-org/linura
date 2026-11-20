@@ -3841,6 +3841,7 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
                 .is_err(),
             "retained adoption must not replace fresh physical sources {fault}"
         );
+        assert_retained_kept_intent_is_historical(&restarted, &adopted, machine, request);
     }
     machine
         .lock()
@@ -3869,12 +3870,109 @@ fn ordinary_committed_adoption_preserves_lineage_after_restart(
     assert_eq!(current.outcome(), adopted.outcome());
     assert_eq!(current.current_layout(), adopted.current_layout());
     assert_eq!(current.released_record(), adopted.released_record());
+    if adopted.outcome() == linura_core::DisplayOrdinaryReleaseOutcome::Keep {
+        for prefix in [
+            "request:v010:display-ordinary-current-ready:",
+            "request:v010:display-ordinary-current-verified:",
+            "request:v010:display-ordinary-current-committed:",
+            "request:v010:display-ordinary-current-native-prepared:",
+            "request:v010:display-ordinary-current-native-verified:",
+            "request:v010:display-ordinary-current-final-prepared:",
+            "request:v010:display-ordinary-current-final-verified:",
+            "request:v010:display-ordinary-current-released:",
+            "request:v010:display-ordinary-current-adopted:",
+            "request:v010:display-ordinary-current-adopted-state:",
+            "request:v010:display-native-baseline:",
+        ] {
+            for substitute in [false, true] {
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_retained_history_fault = Some((prefix, substitute));
+                assert!(
+                    restarted
+                        .retained_ordinary_display_kept_intent(principal(), request)
+                        .is_err(),
+                    "missing/substituted {prefix}, substitute={substitute} cannot recover kept intent"
+                );
+                machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!())
+                    .ordinary_retained_history_fault = None;
+            }
+        }
+    }
+    assert_retained_kept_intent_is_historical(&restarted, &adopted, machine, request);
     ordinary_successor_requires_completed_adoption_and_fresh_apply(
         &mut restarted,
         database,
         machine,
         request,
         &adopted,
+    );
+}
+
+fn assert_retained_kept_intent_is_historical(
+    control: &ManagedLifecycleControl<SqliteTransactionStore>,
+    adopted: &linura_control::OrdinaryDisplayCommittedAdoption,
+    machine: &Arc<Mutex<Machine>>,
+    request: &RequestId,
+) {
+    let before = {
+        let m = machine.lock().unwrap_or_else(|_| unreachable!());
+        (
+            m.applies,
+            m.decisions,
+            m.ordinary_release_calls,
+            m.ordinary_final_calls,
+        )
+    };
+    assert!(
+        control
+            .retained_ordinary_display_kept_intent(
+                value(AuthenticatedPrincipal::new("unix:uid:1001")),
+                request,
+            )
+            .is_err()
+    );
+    let history = control.retained_ordinary_display_kept_intent(principal(), request);
+    if let Some(kept) = adopted.kept_intent_material() {
+        let history = value(history);
+        assert_eq!(history.original_request(), adopted.original_request());
+        assert_eq!(history.material(), kept);
+        assert_eq!(history.release_request(), adopted.release_request());
+        assert_eq!(history.release_material(), adopted.release_material());
+        assert_eq!(history.desired_layout(), adopted.current_layout());
+        assert_eq!(history.released_record(), adopted.released_record());
+        assert_eq!(history.adopted_record(), adopted.record_digest());
+        assert_eq!(history.state_record(), adopted.state_record_digest());
+        let (mapping, baseline, capabilities, old_baseline, desired) =
+            replacement_candidate_fixture();
+        let candidate = value(history.replacement_layout_candidate(
+            &mapping,
+            baseline.clone(),
+            &capabilities,
+            s17_managed_lock::lock_id(),
+        ));
+        assert_eq!(candidate.baseline(), &baseline);
+        assert_eq!(candidate.desired(), &desired);
+        assert_ne!(candidate.desired(), &old_baseline);
+    } else {
+        assert!(
+            history.is_err(),
+            "Revert/expiry cannot become historical kept intent"
+        );
+    }
+    let m = machine.lock().unwrap_or_else(|_| unreachable!());
+    assert_eq!(m.checked_history_reads, 0);
+    assert_eq!(
+        (
+            m.applies,
+            m.decisions,
+            m.ordinary_release_calls,
+            m.ordinary_final_calls
+        ),
+        before
     );
 }
 
@@ -3907,6 +4005,7 @@ fn assert_ordinary_adopted_semantics(
         adopted.state_record_digest(),
         &linura_transaction::ContentDigest::zero()
     );
+    assert_replacement_candidate_is_not_restoration_or_authority(adopted, machine);
     if adopted.outcome() == DisplayOrdinaryReleaseOutcome::Keep {
         let kept = adopted
             .kept_intent_material()
@@ -3931,6 +4030,102 @@ fn assert_ordinary_adopted_semantics(
         );
         assert_eq!(adopted.current_layout(), &layouts().0);
     }
+}
+
+fn replacement_candidate_fixture() -> (
+    linura_core::DisplayRecoveryMapping,
+    DisplayLayout,
+    Vec<NativeOutputCapabilities>,
+    DisplayLayout,
+    DisplayLayout,
+) {
+    let (_, _, original, _) = layouts();
+    let topology = value(DisplayTopologyId::new(
+        original.topology().session().clone(),
+        original.topology().seat(),
+        value(CompositorInvocationId::new(
+            "33223344-1234-4567-89ab-0123456789ab",
+        )),
+        1,
+    ));
+    let output = value(DisplayOutputId::new(topology.clone(), 91, 2));
+    let inventory = value(DisplayOutputSet::new(topology, vec![output.clone()]));
+    let mode = value(DisplayMode::new(1920, 1080, 60_000));
+    let capabilities = vec![value(NativeOutputCapabilities::new(
+        output.clone(),
+        vec![mode],
+        false,
+    ))];
+    let layout = |x| {
+        value(DisplayLayout::new(
+            &inventory,
+            &capabilities,
+            vec![DisplayOutputLayout::Enabled {
+                output: output.clone(),
+                mode,
+                scale: value(DisplayScale::new(1000)),
+                transform: DisplayTransform::Normal,
+                x,
+                y: 0,
+                mirror: None,
+            }],
+        ))
+    };
+    let mapping = value(linura_core::DisplayRecoveryMapping::new(
+        original.clone(),
+        inventory.clone(),
+        vec![(original.outputs()[0].clone(), output.clone())],
+    ));
+    let (baseline, current, desired) = (layout(0), layout(500), layout(100));
+    (mapping, current, capabilities, baseline, desired)
+}
+
+fn assert_replacement_candidate_is_not_restoration_or_authority(
+    adopted: &linura_control::OrdinaryDisplayCommittedAdoption,
+    machine: &Arc<Mutex<Machine>>,
+) {
+    let (mapping, current, capabilities, baseline, desired) = replacement_candidate_fixture();
+    let before = {
+        let m = machine.lock().unwrap_or_else(|_| unreachable!());
+        (
+            m.applies,
+            m.decisions,
+            m.ordinary_release_calls,
+            m.ordinary_final_calls,
+        )
+    };
+    let candidate = adopted.replacement_layout_candidate(
+        &mapping,
+        current.clone(),
+        &capabilities,
+        s17_managed_lock::lock_id(),
+    );
+    if adopted.outcome() == linura_core::DisplayOrdinaryReleaseOutcome::Keep {
+        let candidate = value(candidate);
+        assert_eq!(candidate.baseline(), &current);
+        assert_eq!(candidate.desired(), &desired);
+        assert_ne!(candidate.desired(), &baseline);
+        assert!(
+            adopted
+                .replacement_layout_candidate(&mapping, current, &[], s17_managed_lock::lock_id(),)
+                .is_err()
+        );
+    } else {
+        assert!(
+            candidate.is_err(),
+            "Revert/expiry cannot fulfill the original desired intent"
+        );
+    }
+    let m = machine.lock().unwrap_or_else(|_| unreachable!());
+    assert_eq!(
+        (
+            m.applies,
+            m.decisions,
+            m.ordinary_release_calls,
+            m.ordinary_final_calls
+        ),
+        before
+    );
 }
 
 pub(super) fn observe_successor(
@@ -4208,6 +4403,64 @@ fn ordinary_successor_requires_completed_adoption_and_fresh_apply(
             .is_err()
     );
     assert_eq!(port.calls, 0);
+    // A durably retained proposed successor can drift before the existing
+    // fresh review. That refusal must publish no predecessor ownership claim;
+    // another exact independently reviewed successor remains possible.
+    let before = machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .journal_keys
+        .clone();
+    let mut refused = next.clone();
+    refused.request_id = value(managed_request_id(
+        "ordinary-successor-sync-drift",
+        &refused,
+    ));
+    machine
+        .lock()
+        .unwrap_or_else(|_| unreachable!())
+        .original_intent_sync_fault = Some(true);
+    assert!(
+        control
+            .begin_ordinary_successor_display_layout(
+                principal(),
+                actor(true),
+                predecessor,
+                refused.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier,
+            )
+            .is_err()
+    );
+    assert_eq!(port.calls, 0);
+    {
+        let mut state = machine.lock().unwrap_or_else(|_| unreachable!());
+        assert!(
+            state.original_intent_synced_at.is_some(),
+            "refusal did not reach durable intent retention"
+        );
+        assert_eq!(state.desired, !old_desired);
+        assert!(state.journal_keys.contains(&(
+            value(PrincipalId::new(principal().as_str())),
+            refused.request_id
+        )));
+        for (_, key) in state.journal_keys.difference(&before) {
+            assert!(
+                !key.as_str()
+                    .starts_with("request:v010:display-ordinary-successor-owner:"),
+                "refused candidate claimed predecessor ownership"
+            );
+            assert!(
+                !key.as_str()
+                    .starts_with("request:v010:display-ordinary-successor-intent:"),
+                "refused candidate published a successor claim"
+            );
+        }
+        // Fixture re-observation of the original unchanged current layout;
+        // no effect was dispatched for the refused request.
+        state.desired = old_desired;
+    }
     let receipt = value(control.begin_ordinary_successor_display_layout(
         principal(),
         actor(true),

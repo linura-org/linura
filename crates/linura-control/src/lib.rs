@@ -130,8 +130,8 @@ pub use managed_lifecycle::{
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
     OriginalDisplayRetirementPreparationPort, OriginalDisplayRootPowerInspection,
-    OriginalDisplayRootPowerRetirementPort, TrustedDisplayDecision, TrustedHumanApproval,
-    managed_request_id,
+    OriginalDisplayRootPowerRetirementPort, RetainedOrdinaryDisplayKeptIntent,
+    TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

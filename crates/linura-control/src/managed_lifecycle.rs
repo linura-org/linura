@@ -44,7 +44,8 @@ pub use display::{
     OriginalDisplayRestorationPort, OriginalDisplayRestorationReceipt,
     OriginalDisplayRestorationRequest, OriginalDisplayRestorationTerminalReceipt,
     OriginalDisplayRetirementPreparationPort, OriginalDisplayRootPowerInspection,
-    OriginalDisplayRootPowerRetirementPort, TrustedDisplayDecision,
+    OriginalDisplayRootPowerRetirementPort, RetainedOrdinaryDisplayKeptIntent,
+    TrustedDisplayDecision,
 };
 
 use linura_core::{

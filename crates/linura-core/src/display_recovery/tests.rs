@@ -156,6 +156,150 @@ fn baseline_only_is_remapped_with_mirrors_disable_and_new_login_lock() {
 }
 
 #[test]
+fn adoption_candidate_preserves_desired_semantics_and_uses_the_new_baseline() {
+    let (old, new, original) = fixture();
+    // Connector/handle ordering cannot select the destination of the mirror.
+    let mut rows = pairs(&old, &new);
+    rows.rotate_left(1);
+    let map = value(DisplayRecoveryMapping::new(old, new.clone(), rows));
+    let current = layout(&new, -500, true);
+    let candidate = value(map.desired_state_candidate(
+        original.desired(),
+        current.clone(),
+        &capabilities(&new),
+        lock(&new),
+    ));
+    assert_eq!(candidate.baseline(), &current);
+    assert_eq!(candidate.lock(), &lock(&new));
+    assert_eq!(candidate.desired(), &layout(&new, 300, false));
+    assert_ne!(candidate.desired(), &layout(&new, 100, true));
+    let restoration =
+        value(map.restoration_intent(&original, current, &capabilities(&new), lock(&new)));
+    assert_ne!(candidate.desired(), restoration.desired());
+    // The existing baseline-only restoration contract must reject a candidate
+    // for the kept desired state; adoption is a distinct future managed purpose.
+    assert!(
+        DisplayRestorationMaterial::encode(
+            &value(RequestId::new("request:original")),
+            &"1".repeat(64),
+            &"2".repeat(64),
+            &"3".repeat(64),
+            &original,
+            &candidate,
+            &map,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn adoption_mapping_is_explicit_and_preserves_disabled_and_mirrored_targets() {
+    let (old, new, original) = fixture();
+    let mut rows = pairs(&old, &new);
+    let first = rows[0].1.clone();
+    rows[0].1 = rows[2].1.clone();
+    rows[2].1 = first;
+    let map = value(DisplayRecoveryMapping::new(old, new.clone(), rows));
+    let candidate = value(map.desired_state_candidate(
+        original.baseline(),
+        layout(&new, 200, false),
+        &capabilities(&new),
+        lock(&new),
+    ));
+    let mut expected = layout(&new, 100, true).outputs().to_vec();
+    for row in &mut expected {
+        match row {
+            DisplayOutputLayout::Disabled { output } => *output = new.outputs()[0].clone(),
+            DisplayOutputLayout::Enabled { output, mirror, .. } => {
+                if output == &new.outputs()[0] {
+                    *output = new.outputs()[2].clone();
+                }
+                if mirror.is_some() {
+                    *mirror = Some(new.outputs()[2].clone());
+                }
+            }
+        }
+    }
+    assert_eq!(
+        candidate.desired(),
+        &value(DisplayLayout::new(&new, &capabilities(&new), expected))
+    );
+}
+
+#[test]
+fn adoption_candidate_revalidates_both_layouts_and_complete_current_capabilities() {
+    let (old, new, original) = fixture();
+    let map = value(DisplayRecoveryMapping::new(
+        old.clone(),
+        new.clone(),
+        pairs(&old, &new),
+    ));
+    let current = layout(&new, 200, false);
+    let check = |target: &DisplayLayout,
+                 current: DisplayLayout,
+                 caps: &[NativeOutputCapabilities],
+                 lock| { map.desired_state_candidate(target, current, caps, lock) };
+    assert!(
+        check(
+            original.desired(),
+            current.clone(),
+            &capabilities(&new)[..2],
+            lock(&new)
+        )
+        .is_err()
+    );
+    assert!(
+        check(
+            original.desired(),
+            layout(&old, 200, false),
+            &capabilities(&new),
+            lock(&new)
+        )
+        .is_err()
+    );
+    assert!(check(&current, current.clone(), &capabilities(&new), lock(&new)).is_err());
+    assert!(
+        check(
+            original.desired(),
+            current.clone(),
+            &capabilities(&new),
+            lock(&old)
+        )
+        .is_err()
+    );
+    let mut changed = capabilities(&new);
+    changed[0] = value(NativeOutputCapabilities::new(
+        new.outputs()[0].clone(),
+        vec![value(DisplayMode::new(1920, 1080, 59_940))],
+        true,
+    ));
+    assert_eq!(
+        check(original.desired(), current.clone(), &changed, lock(&new)),
+        Err(DisplayLayoutError::UnsupportedMode)
+    );
+    let mut changed = capabilities(&new);
+    changed[2] = value(NativeOutputCapabilities::new(
+        new.outputs()[2].clone(),
+        changed[2].modes().iter().copied().collect(),
+        false,
+    ));
+    // Revalidate the supplied current baseline as well as the remapped target.
+    assert_eq!(
+        check(
+            original.desired(),
+            layout(&new, 200, true),
+            &changed,
+            lock(&new)
+        ),
+        Err(DisplayLayoutError::UnsupportedDisable)
+    );
+    assert_eq!(
+        check(original.baseline(), current, &changed, lock(&new)),
+        Err(DisplayLayoutError::UnsupportedDisable)
+    );
+}
+
+#[test]
 fn missing_extra_duplicate_foreign_or_recycled_pairs_fail_closed() {
     let (old, new, _) = fixture();
     for case in 0..7 {

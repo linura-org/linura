@@ -71,6 +71,85 @@ class QualificationEvidenceTests(unittest.TestCase):
                 {"base_image": {"sha256": "c" * 64}}, envelope
             )
 
+    def test_v06_semantic_admission_requires_both_producer_and_observed_kvm(self):
+        primary = {
+            "repository": "linura-org/linura",
+            "source_sha": "a" * 40,
+            "schema_version": 1,
+            "result": "passed",
+            "complete_lifecycle": True,
+            "managed_mutation_support": "narrow-experimental",
+            "base_image": {"sha256": "b" * 64},
+            "virtualization": {"acceleration": "kvm"},
+        }
+        subject = {
+            "kind": "virtual-machine",
+            "architecture": "x86_64",
+            "virtualization": "kvm",
+            "acceleration": "kvm",
+            "distribution_id": "ubuntu",
+            "distribution_version": "24.04",
+            "package_manifest_sha256": "c" * 64,
+            "image_digests": {"base_image_sha256": "b" * 64},
+        }
+        envelope = {"source": {"commit_sha": "a" * 40}, "execution_subject": subject}
+        self.assertTrue(semantic_verifier._require_v06_environment(primary, envelope))
+        for producer, virtualization, acceleration in [
+            (None, "kvm", "kvm"),
+            ("tcg", "kvm", "kvm"),
+            ("kvm", "qemu", "tcg"),
+            ("kvm", "qemu", "kvm"),
+            ("kvm", "kvm", "tcg"),
+            ("kvm", "kvm", None),
+            ("kvm", "none", "kvm"),
+        ]:
+            candidate = primary | {"virtualization": {"acceleration": producer}}
+            observed = envelope | {
+                "execution_subject": subject
+                | {"virtualization": virtualization, "acceleration": acceleration}
+            }
+            with self.subTest(
+                producer=producer,
+                virtualization=virtualization,
+                acceleration=acceleration,
+            ):
+                with self.assertRaisesRegex(semantic_verifier.VerificationError, "KVM"):
+                    semantic_verifier._require_v06_environment(candidate, observed)
+                # Exercise the real adapter, not only the shared helper. It
+                # must refuse these environments before consuming any bundle.
+                with (
+                    tempfile.TemporaryDirectory() as directory,
+                    self.assertRaisesRegex(semantic_verifier.VerificationError, "KVM"),
+                ):
+                    semantic_verifier._verify_v06(
+                        ROOT, Path(directory), candidate, observed
+                    )
+        with self.assertRaisesRegex(semantic_verifier.VerificationError, "base image"):
+            semantic_verifier._require_v06_environment(
+                primary | {"base_image": {"sha256": "d" * 64}}, envelope
+            )
+        for field, value in [
+            ("distribution_id", "arch"),
+            ("distribution_version", "rolling"),
+            ("architecture", "aarch64"),
+            ("package_manifest_sha256", "not-a-digest"),
+        ]:
+            with (
+                self.subTest(field=field),
+                self.assertRaises(semantic_verifier.VerificationError),
+            ):
+                semantic_verifier._require_v06_environment(
+                    primary, envelope | {"execution_subject": subject | {field: value}}
+                )
+        for value in [None, [], "kvm", True]:
+            with (
+                self.subTest(producer=value),
+                self.assertRaises(semantic_verifier.VerificationError),
+            ):
+                semantic_verifier._require_v06_environment(
+                    primary | {"virtualization": value}, envelope
+                )
+
     def test_v010_producer_acceleration_cannot_disagree_with_qualified_guest(self):
         primary = {
             "repository": "linura-org/linura",

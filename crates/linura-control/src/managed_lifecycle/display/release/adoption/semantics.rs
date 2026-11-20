@@ -57,6 +57,16 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         layout: &DisplayLayout,
     ) -> Result<AdoptedSemantics, ManagedLifecycleError> {
         let checked = self.checked_display_history()?;
+        self.ordinary_adopted_semantics_checked(&checked, principal, release, layout)
+    }
+
+    pub(super) fn ordinary_adopted_semantics_checked(
+        &self,
+        checked: &CheckedDisplayHistoryRead<'_>,
+        principal: &AuthenticatedPrincipal,
+        release: &PlanDesiredStateRequest,
+        layout: &DisplayLayout,
+    ) -> Result<AdoptedSemantics, ManagedLifecycleError> {
         let pid = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let intent = crate::display_ordinary_release_intent::OrdinaryReleaseIntent::load(
             self.display_journal()?,

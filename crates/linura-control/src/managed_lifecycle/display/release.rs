@@ -7,7 +7,7 @@
 
 use super::*;
 mod adoption;
-pub use adoption::OrdinaryDisplayCommittedAdoption;
+pub use adoption::{OrdinaryDisplayCommittedAdoption, RetainedOrdinaryDisplayKeptIntent};
 mod completion;
 mod current;
 mod current_commit;
@@ -196,6 +196,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         request_id: &RequestId,
     ) -> Result<OrdinaryReleaseHistory, ManagedLifecycleError> {
         let checked = self.checked_display_history()?;
+        self.ordinary_release_history_checked(&checked, principal, request_id)
+    }
+
+    fn ordinary_release_history_checked(
+        &self,
+        checked: &CheckedDisplayHistoryRead<'_>,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<OrdinaryReleaseHistory, ManagedLifecycleError> {
         let request = checked.original_request(principal, request_id)?;
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;

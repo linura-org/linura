@@ -1,6 +1,6 @@
-//! Deterministic replacement-invocation baseline derivation. These identities
+//! Deterministic replacement-invocation layout derivation. These identities
 //! are candidate comparison data, never continuity evidence or authorization.
-//! Control must independently establish the original live witness, current
+//! Control must independently establish the operation's actual live protection, current
 //! authenticated scope, canonical plan, fresh approval and durable prepare.
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -86,14 +86,34 @@ impl DisplayRecoveryMapping {
         capabilities: &[NativeOutputCapabilities],
         lock: SessionLockId,
     ) -> Result<DisplayLayoutIntent, DisplayLayoutError> {
-        if original.baseline().topology() != self.original.topology()
-            || original.baseline().outputs().len() != self.original.outputs().len()
-            || original
-                .baseline()
-                .outputs()
-                .iter()
-                .any(|row| !self.outputs.contains_key(row.output()))
-            || current.topology() != self.replacement.topology()
+        self.remapped_candidate(original.baseline(), current, capabilities, lock)
+    }
+
+    /// Remap structured desired state within this same-boot/user/seat mapping
+    /// for a separately reviewed replacement
+    /// adoption. This does not prove that the state was kept or committed. Only
+    /// Control can join that historical claim to authenticated intent, graph and
+    /// provenance. The caller must obtain a new canonical managed authorization
+    /// and actual new native/Root lifetime; neither this mapping nor the returned
+    /// intent establishes continuity or permits replay of the original Apply.
+    pub fn desired_state_candidate(
+        &self,
+        desired: &DisplayLayout,
+        current: DisplayLayout,
+        capabilities: &[NativeOutputCapabilities],
+        lock: SessionLockId,
+    ) -> Result<DisplayLayoutIntent, DisplayLayoutError> {
+        self.remapped_candidate(desired, current, capabilities, lock)
+    }
+
+    fn remapped_candidate(
+        &self,
+        target: &DisplayLayout,
+        current: DisplayLayout,
+        capabilities: &[NativeOutputCapabilities],
+        lock: SessionLockId,
+    ) -> Result<DisplayLayoutIntent, DisplayLayoutError> {
+        if current.topology() != self.replacement.topology()
             || lock.epoch() != self.replacement.topology().session()
         {
             return Err(DisplayLayoutError::ForeignOutput);
@@ -105,15 +125,11 @@ impl DisplayRecoveryMapping {
         DisplayLayoutIntent::new(
             lock,
             current,
-            DisplayLayout::new(
-                &self.replacement,
-                capabilities,
-                self.remap_baseline(original.baseline())?,
-            )?,
+            DisplayLayout::new(&self.replacement, capabilities, self.remap_layout(target)?)?,
         )
     }
 
-    pub(super) fn remap_baseline(
+    pub(super) fn remap_layout(
         &self,
         baseline: &DisplayLayout,
     ) -> Result<Vec<DisplayOutputLayout>, DisplayLayoutError> {

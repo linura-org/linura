@@ -6,6 +6,8 @@ use super::*;
 use linura_transaction::{CommittedStateMaterial, ContentDigest, TransactionStoreError};
 mod semantics;
 use semantics::AdoptedSemantics;
+mod retained;
+pub use retained::RetainedOrdinaryDisplayKeptIntent;
 
 #[derive(Debug)]
 pub struct OrdinaryDisplayCommittedAdoption {
@@ -57,6 +59,32 @@ impl OrdinaryDisplayCommittedAdoption {
     /// The current comparison expires independently of the immutable adoption.
     pub const fn observation(&self) -> &ObservationEnvelope {
         &self.observation
+    }
+
+    /// Derive candidate geometry from the original kept intent, never from the
+    /// release bookkeeping or its recovery baseline. All replacement inputs
+    /// remain candidate data: this does not establish fresh observation, a new
+    /// review, native continuity, reference transfer or execution authority.
+    /// Revert and expiry cannot be promoted into fulfilled original intent.
+    pub fn replacement_layout_candidate(
+        &self,
+        mapping: &linura_core::DisplayRecoveryMapping,
+        current: linura_core::DisplayLayout,
+        capabilities: &[linura_core::NativeOutputCapabilities],
+        lock: SessionLockId,
+    ) -> Result<linura_core::DisplayLayoutIntent, ManagedLifecycleError> {
+        let kept = self.semantics.kept.as_ref().ok_or_else(invalid_original)?;
+        if self.semantics.outcome != linura_core::DisplayOrdinaryReleaseOutcome::Keep
+            || kept.snapshot != self.semantics.snapshot
+            || kept.snapshot.state != TransactionState::Committed
+            || kept.snapshot.request_id != self.semantics.original.request_id
+            || self.semantics.layout.topology() != mapping.original().topology()
+        {
+            return Err(invalid_original());
+        }
+        mapping
+            .desired_state_candidate(&self.semantics.layout, current, capabilities, lock)
+            .map_err(|_| invalid_original())
     }
 }
 

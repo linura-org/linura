@@ -23,6 +23,9 @@ use linura_transaction::{ApprovedRequestJournal, RetainedRequest, TransactionSto
 #[derive(Debug, Default)]
 struct Machine {
     checked_history_reads: usize,
+    original_intent_sync_fault: Option<bool>,
+    original_intent_synced_at: Option<u64>,
+    original_intent_layout_samples: Vec<u64>,
     journal_keys: std::collections::BTreeSet<(PrincipalId, RequestId)>,
     desired: bool,
     state: Option<&'static str>,
@@ -42,6 +45,7 @@ struct Machine {
     ordinary_root_reads: u64,
     ordinary_root_fault: u8,
     ordinary_checkpoint_unavailable: bool,
+    ordinary_retained_history_fault: Option<(&'static str, bool)>,
     ordinary_release_approvals: usize,
     ordinary_release_calls: usize,
     ordinary_completion_calls: usize,
@@ -194,6 +198,7 @@ fn display_request(operation: &str) -> PlanDesiredStateRequest {
 
 #[test]
 fn replacement_review_reloads_authenticated_history_without_replaying_an_apply() {
+    original_intent_sync_precedes_the_existing_post_approval_fresh_review();
     ordinary_release::ordinary_release_dispatch_is_separately_approved_durable_and_never_replayed();
     ordinary_release::original_source_and_terminal_inspection_are_read_only_across_restart();
     ordinary_release::early_automatic_restoration_is_not_expiry_release_authority();
@@ -278,6 +283,64 @@ fn replacement_review_reloads_authenticated_history_without_replaying_an_apply()
         1
     );
 }
+// Exercise actual Control and SQLite. This is a component regression for
+// admission ordering, not a compositor or qualified performance claim.
+fn original_intent_sync_precedes_the_existing_post_approval_fresh_review() {
+    for drift in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine {
+            original_intent_sync_fault: Some(drift),
+            ..Machine::default()
+        }));
+        let mut control = open(database.path(), &machine, 0);
+        let mut port = Port(machine.clone());
+        let mut verifier = Verifier(machine.clone());
+        let original = display_request("post-intent-sync-review");
+        let result = control.begin_display_layout(
+            principal(),
+            actor(true),
+            original.clone(),
+            &approval(),
+            &mut port,
+            &mut verifier,
+        );
+        if drift {
+            assert!(
+                result.is_err(),
+                "layout drift during durable retention was accepted"
+            );
+            let machine = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert!(machine.original_intent_synced_at.is_some());
+            assert_eq!(machine.applies, 0);
+            assert_eq!(machine.decisions, 0);
+            assert!(machine.binding.is_none());
+        } else {
+            value(result);
+            let status = value(control.display_layout_status(
+                principal(),
+                actor(true),
+                &original.request_id,
+                &mut port,
+                &mut verifier,
+            ));
+            assert_eq!(status.request_id, original.request_id);
+            let machine = machine.lock().unwrap_or_else(|_| unreachable!());
+            assert!(machine.original_intent_synced_at.is_some());
+            assert_eq!(machine.applies, 1);
+            assert_eq!(machine.decisions, 0);
+        }
+        let machine = machine.lock().unwrap_or_else(|_| unreachable!());
+        let synced = machine
+            .original_intent_synced_at
+            .unwrap_or_else(|| unreachable!());
+        let [reviewed, refreshed] = machine.original_intent_layout_samples.as_slice() else {
+            unreachable!("expected exactly the original review and its existing fresh revalidation")
+        };
+        assert!(synced.saturating_sub(*reviewed) >= 2000);
+        assert!(*refreshed >= synced);
+    }
+}
+
 struct LiveFixtureObserver {
     machine: Arc<Mutex<Machine>>,
     template: ObservationEnvelope,
@@ -451,6 +514,15 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if sample.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+            && (machine.original_intent_sync_fault.is_some()
+                || machine.original_intent_synced_at.is_some())
+        {
+            machine
+                .original_intent_layout_samples
+                .push(sample.observed_at_unix_ms);
+        }
         if successor {
             let root = machine.successor.as_ref().ok_or_else(|| {
                 ProviderError::Unavailable("no simulated successor Root record".into())
@@ -1154,13 +1226,62 @@ impl ApprovedRequestJournal for FailingJournal {
                 .journal_failures += 1;
             return Err(TransactionStoreError::CapacityExceeded);
         }
-        self.inner.retain(record)
+        self.inner.retain(record)?;
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-layout:")
+        {
+            let fault = self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .original_intent_sync_fault
+                .take();
+            if let Some(drift) = fault {
+                // The real retained intent is durable, but its write returns
+                // only after the original observation has expired. Do not
+                // hold the fixture mutex while simulating storage latency.
+                std::thread::sleep(std::time::Duration::from_millis(2050));
+                let mut machine = self.machine.lock().unwrap_or_else(|_| unreachable!());
+                machine.original_intent_synced_at = Some(now_unix_ms());
+                if drift {
+                    machine.desired = !machine.desired;
+                }
+            }
+        }
+        Ok(())
     }
     fn load(
         &self,
         principal: &PrincipalId,
         request: &RequestId,
     ) -> Result<RetainedRequest, TransactionStoreError> {
+        let substitute = {
+            let machine = self.machine.lock().unwrap_or_else(|_| unreachable!());
+            if let Some((prefix, substitute)) = machine.ordinary_retained_history_fault
+                && request.as_str().starts_with(prefix)
+            {
+                if !substitute {
+                    return Err(TransactionStoreError::NotFound);
+                }
+                Some(
+                    machine
+                        .journal_keys
+                        .iter()
+                        .find(|(p, r)| p == principal && r != request)
+                        .map(|(_, r)| r.clone())
+                        .unwrap_or_else(|| {
+                            unreachable!("substitution requires another retained row")
+                        }),
+                )
+            } else {
+                None
+            }
+        };
+        if let Some(substitute) = substitute {
+            return self.inner.load(principal, &substitute);
+        }
         if request
             .as_str()
             .starts_with("request:v010:display-native-baseline:")

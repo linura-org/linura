@@ -177,6 +177,7 @@ pub use release::{
     OrdinaryDisplayReleaseRequest, OrdinaryDisplayReleasedCurrent,
     OrdinaryDisplayReleasedCurrentCompletion, OrdinaryDisplayReleasedCurrentPort,
     OrdinaryDisplayRootPowerInspection, OrdinaryDisplayRootPowerRetirementPort,
+    RetainedOrdinaryDisplayKeptIntent,
 };
 pub use restoration::{
     AuthorizedOriginalDisplayRestoration, OriginalDisplayRestorationPort,
@@ -346,6 +347,27 @@ fn now_ms() -> Result<u64, ManagedLifecycleError> {
     )
     .map_err(|_| ManagedLifecycleError::Contract("display clock overflow".into()))
 }
+// Private comparison of the original actual approval time. This cannot
+// issue or renew approval; every caller still needs the exact live canonical
+// challenge, unchanged fresh review, durable prepare and one-use handoff.
+fn display_approval_expiry(
+    approved_at_unix_seconds: u64,
+    now_unix_seconds: u64,
+) -> Result<u64, ManagedLifecycleError> {
+    let expiry = approved_at_unix_seconds
+        .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
+        .ok_or_else(|| ManagedLifecycleError::Contract("display approval clock overflow".into()))?;
+    if approved_at_unix_seconds == 0
+        || now_unix_seconds < approved_at_unix_seconds
+        || now_unix_seconds >= expiry
+    {
+        return Err(ManagedLifecycleError::ApprovalBoundary(
+            "original display approval expired or its clock changed during persistence".into(),
+        ));
+    }
+    Ok(expiry)
+}
+
 fn material(
     request: &PlanDesiredStateRequest,
 ) -> Result<DisplayLayoutMaterial<'_>, ManagedLifecycleError> {
@@ -1066,6 +1088,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             ));
         }
         let approver = self.authorize_candidate(&candidate, &request, approval_authorizer)?;
+        // Pin the existing approval lifetime at the actual authorized response,
+        // before any storage or refreshed observation. Slow persistence cannot
+        // turn that response into a newly issued full-lifetime approval.
+        let approved_at_unix_seconds = now_unix_seconds()?;
+        // The structured request has passed the canonical review and any
+        // required administrator decision. Retain it before the existing
+        // post-approval fresh sample, so journal synchronization cannot consume that sample's
+        // two-second authority window. These comparison records authorize no
+        // effect. The refreshed review must still match every approved semantic
+        // and the prepared binding is revalidated again at the sole handoff.
+        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
+        self.request_journal
+            .as_mut()
+            .ok_or_else(|| {
+                ManagedLifecycleError::Authority("display journal is unavailable".into())
+            })?
+            .retain(&retained)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         let (candidate, evidence) = if let Some(approver) = approver {
             let refreshed = self.refresh_candidate_after_approval(
                 &candidate,
@@ -1079,11 +1119,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 request.request_id.as_str()
             ))
             .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
-            let expiry = now_unix_seconds()?
-                .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
-                .ok_or_else(|| {
-                    ManagedLifecycleError::Contract("display approval clock overflow".into())
-                })?;
+            let expiry = display_approval_expiry(approved_at_unix_seconds, now_unix_seconds()?)?;
             let evidence = self
                 .authority
                 .issue_approval(id, &refreshed, &approver, expiry)?;
@@ -1091,18 +1127,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else {
             (candidate, None)
         };
+        // A predecessor owner claim remains after the fresh semantic review
+        // and approval. Refused drift must not claim a successor or prevent a
+        // later independently reviewed request from using that predecessor.
         if let Some(context) = successor.as_ref() {
             self.require_successor_root(&principal, context)?;
             self.retain_successor_claim(&principal_id, &request, context)?;
         }
-        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
-        self.request_journal
-            .as_mut()
-            .ok_or_else(|| {
-                ManagedLifecycleError::Authority("display journal is unavailable".into())
-            })?
-            .retain(&retained)
-            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         let mut prepared = self.authority.prepare(candidate, evidence)?;
         let checkpoint =
             crate::display_checkpoint::Checkpoint::capture(&prepared, &request, now_ms()?)?;
@@ -1852,5 +1883,41 @@ mod history_tests {
         assert!(load(&journal, &p, &reserved, TransactionState::Committed).is_err());
         id(next(&decision, Phase::Confirmed, 150).append(&mut journal, p.clone(), Some(&decision)));
         assert!(load(&journal, &p, &reserved, TransactionState::Committed).is_err());
+    }
+}
+
+#[cfg(test)]
+mod approval_deadline_tests {
+    use super::*;
+
+    #[test]
+    fn persistence_and_revalidation_never_renew_the_original_approval() {
+        let approved = 1000;
+        let original_expiry = approved + MANAGED_APPROVAL_TTL_SECONDS;
+        for now in [approved, approved + 2, original_expiry - 1] {
+            assert_eq!(
+                display_approval_expiry(approved, now).unwrap_or_else(|e| unreachable!("{e:?}")),
+                original_expiry
+            );
+        }
+        for (approved, now) in [
+            (approved, approved - 1),
+            (approved, original_expiry),
+            (approved, original_expiry + 1),
+            (0, 0),
+            (u64::MAX, u64::MAX),
+            (u64::MAX - MANAGED_APPROVAL_TTL_SECONDS + 1, u64::MAX),
+        ] {
+            assert!(display_approval_expiry(approved, now).is_err());
+        }
+        // The largest representable *original* deadline is not extended or
+        // saturated. Its exact exclusive endpoint still refuses.
+        let approved = u64::MAX - MANAGED_APPROVAL_TTL_SECONDS;
+        assert_eq!(
+            display_approval_expiry(approved, u64::MAX - 1)
+                .unwrap_or_else(|e| unreachable!("{e:?}")),
+            u64::MAX
+        );
+        assert!(display_approval_expiry(approved, u64::MAX).is_err());
     }
 }

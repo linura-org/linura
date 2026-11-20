@@ -106,7 +106,7 @@ impl<'a> DisplayRestorationMaterial<'a> {
             || !digest(original_checkpoint)
             || !digest(replacement_baseline_guard)
             || replacement.baseline().topology() != mapping.replacement().topology()
-            || mapping.remap_baseline(original.baseline())? != replacement.desired().outputs()
+            || mapping.remap_layout(original.baseline())? != replacement.desired().outputs()
         {
             return Err(invalid());
         }

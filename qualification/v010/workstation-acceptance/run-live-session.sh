@@ -5,6 +5,15 @@ source_root="${1:-/opt/linura-source}"
 evidence_root="${2:-/tmp/linura-workstation-live}"
 record="${LINURA_RECORD_VISUAL:-0}"
 source_sha="${LINURA_SOURCE_SHA:-}"
+native_s21="${LINURA_NATIVE_S21:-0}"
+[[ "$native_s21" == "0" || "$native_s21" == "1" ]] || exit 2
+if [[ "$native_s21" == "1" && "$source_root" != "/opt/linura-source" ]]; then
+    echo "native S21 requires the fixed root-owned guest source tree" >&2
+    exit 2
+fi
+native_pid=""
+native_invocation=""
+native_exec_identity=""
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || {
     echo "exact lowercase 40-hex LINURA_SOURCE_SHA is required" >&2
     exit 2
@@ -31,6 +40,9 @@ cleanup() {
     fi
     systemctl --user stop linura-shell-live.service >/dev/null 2>&1 || true
     systemctl --user stop linura-hyprland-live.service >/dev/null 2>&1 || true
+    if [[ "$native_s21" == "1" ]]; then
+        sudo -n systemctl stop linura-s17-session.service >/dev/null 2>&1 || cleanup_status=1
+    fi
     systemctl --user stop linurad.service >/dev/null 2>&1 || true
     systemctl --user stop wireplumber.service >/dev/null 2>&1 || true
     systemctl --user stop pipewire.service >/dev/null 2>&1 || true
@@ -51,6 +63,7 @@ done
 mkdir -p "$evidence_root"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export LIBSEAT_BACKEND=seatd
+[[ "$native_s21" == "0" ]] || export LIBSEAT_BACKEND=logind
 export AQ_NO_KMS_REQUIREMENT=1
 export LIBGL_ALWAYS_SOFTWARE=1
 export WLR_RENDERER_ALLOW_SOFTWARE=1
@@ -78,7 +91,35 @@ EOF
 
 systemctl --user import-environment XDG_RUNTIME_DIR LIBSEAT_BACKEND AQ_DRM_DEVICES AQ_NO_KMS_REQUIREMENT LIBGL_ALWAYS_SOFTWARE WLR_RENDERER_ALLOW_SOFTWARE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORM QML2_IMPORT_PATH QT_QUICK_BACKEND
 
-systemd-run --user --unit=linura-hyprland-live.service --collect --quiet --service-type=exec /usr/bin/Hyprland --config /tmp/linura-hyprland-live.conf
+if [[ "$native_s21" == "1" ]]; then
+    # This is the same genuine logind/S17 bootstrap as Level A. Its report
+    # explicitly claims bootstrap only, never S21 mutation or B acceptance.
+    sudo -n python3 /opt/linura-source/qualification/v010/session-security/check-native-session.py \
+        > "$evidence_root/native-session-bootstrap.json"
+    native_pid="$(sudo -n systemctl show --property=MainPID --value linura-s17-session.service)"
+    native_invocation="$(sudo -n systemctl show --property=InvocationID --value linura-s17-session.service)"
+    [[ "$native_pid" =~ ^[1-9][0-9]{0,9}$ && "$native_invocation" =~ ^[0-9a-f]{32}$ ]] \
+        || fail "native compositor service identity unavailable"
+    # The native compositor deliberately denies same-UID /proc inspection.
+    # Only the disposable fixture's root read observes its executing inode;
+    # never relax its nondumpability or native peer-admission guards.
+    native_exec_identity="$(sudo -n /usr/bin/stat -Lc '%d:%i' "/proc/$native_pid/exe")"
+    [[ "$native_exec_identity" == "$(stat -Lc '%d:%i' /usr/bin/Hyprland)" ]] \
+        || fail "native compositor executable identity changed"
+else
+    systemd-run --user --unit=linura-hyprland-live.service --collect --quiet --service-type=exec /usr/bin/Hyprland --config /tmp/linura-hyprland-live.conf
+fi
+
+compositor_current() {
+    if [[ "$native_s21" == "0" ]]; then
+        systemctl --user is-active --quiet linura-hyprland-live.service
+        return
+    fi
+    sudo -n systemctl is-active --quiet linura-s17-session.service &&
+        [[ "$(sudo -n systemctl show --property=MainPID --value linura-s17-session.service)" == "$native_pid" &&
+        "$(sudo -n systemctl show --property=InvocationID --value linura-s17-session.service)" == "$native_invocation" &&
+        "$(sudo -n /usr/bin/stat -Lc '%d:%i' "/proc/$native_pid/exe")" == "$native_exec_identity" ]]
+}
 
 wayland_socket=""
 for _ in $(seq 1 150); do
@@ -87,7 +128,7 @@ for _ in $(seq 1 150); do
         wayland_socket="$candidate"
         break
     fi
-    systemctl --user is-active --quiet linura-hyprland-live.service || fail "Hyprland exited before Wayland became ready"
+    compositor_current || fail "Hyprland exited before Wayland became ready"
     sleep 0.2
 done
 [[ -n "$wayland_socket" ]] || fail "interactive Hyprland Wayland readiness deadline exceeded"
@@ -105,6 +146,26 @@ for _ in $(seq 1 100); do
 done
 [[ -n "$hyprland_signature" ]] || fail "interactive Hyprland IPC signature was not published"
 export HYPRLAND_INSTANCE_SIGNATURE="$hyprland_signature"
+if [[ "$native_s21" == "1" ]]; then
+    compositor_current || fail "native compositor changed before socket binding"
+    python3 - "$native_pid" "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" \
+        "$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock" <<'PY'
+import os
+import socket
+import struct
+import sys
+
+expected = (int(sys.argv[1]), os.getuid())
+for path in sys.argv[2:]:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer.settimeout(2)
+        peer.connect(path)
+        pid, uid, _gid = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if (pid, uid) != expected:
+            raise SystemExit("native compositor socket belongs to another process/user")
+PY
+    compositor_current || fail "native compositor changed after socket binding"
+fi
 systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 
 systemctl --user start pipewire.service
@@ -154,7 +215,7 @@ fi
 printf '%s\n' "Linura interactive workstation session is live."
 printf '%s\n' "Use the QEMU GTK window or configured VNC display. Press Ctrl-C here to stop."
 while true; do
-    systemctl --user is-active --quiet linura-hyprland-live.service ||
+    compositor_current ||
         fail "interactive Hyprland session exited unexpectedly"
     systemctl --user is-active --quiet linura-shell-live.service ||
         fail "Linura Shell exited during interactive acceptance"
