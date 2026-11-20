@@ -65,6 +65,22 @@ impl OrdinaryDisplayNativePowerInspection {
     }
 }
 
+/// An unfinished read-only comparison, never execution or completion evidence.
+/// Its original current sample brackets every intervening Root/power read.
+pub(super) struct PendingNativePowerComparison {
+    principal: AuthenticatedPrincipal,
+    current: OrdinaryDisplayCurrentInspection,
+    before: ObservationEnvelope,
+    grant: DisplayOrdinaryPowerRetirementFacts,
+    prepared: PowerPrepared,
+    root_retired: bool,
+}
+impl PendingNativePowerComparison {
+    pub(super) fn before(&self) -> &ObservationEnvelope {
+        &self.before
+    }
+}
+
 fn key(request: &RequestId) -> Result<RequestId, ManagedLifecycleError> {
     RequestId::new(format!(
         "request:v010:display-ordinary-native-power-prepared:{}",
@@ -498,7 +514,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         verifier: &mut V,
         root_retired: bool,
     ) -> Result<OrdinaryDisplayNativePowerInspection, ManagedLifecycleError> {
-        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let current = self.inspect_current_ordinary_display_completion_phase(
             principal.clone(),
             request,
@@ -507,6 +522,25 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             false,
             root_retired,
         )?;
+        let pending =
+            self.begin_ordinary_native_power_comparison(principal, current, root_retired)?;
+        self.finish_ordinary_native_power_comparison(pending, attempt, verifier)
+    }
+
+    pub(super) fn begin_ordinary_native_power_comparison(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        current: OrdinaryDisplayCurrentInspection,
+        root_retired: bool,
+    ) -> Result<PendingNativePowerComparison, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
+        if current.release().principal != principal_id {
+            return Err(invalid_original());
+        }
+        current
+            .observation()
+            .require_current(now_ms()?)
+            .map_err(|_| invalid_original())?;
         let query = linura_protocol::ObservationRequest {
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid_original())?,
             capability: linura_core::CapabilityId::new(
@@ -550,6 +584,46 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid_original());
         }
+        Ok(PendingNativePowerComparison {
+            principal,
+            current,
+            before,
+            grant,
+            prepared,
+            root_retired,
+        })
+    }
+
+    /// Complete the same bounded comparison with new power/current samples.
+    /// No history guard crosses a provider read and no earlier completed
+    /// comparison substitutes for this bracket's independent after edge.
+    pub(super) fn finish_ordinary_native_power_comparison<
+        P: DisplayTransactionPort,
+        V: IndependentDisplayVerifier,
+    >(
+        &mut self,
+        pending: PendingNativePowerComparison,
+        attempt: &mut P,
+        verifier: &mut V,
+    ) -> Result<OrdinaryDisplayNativePowerInspection, ManagedLifecycleError> {
+        let PendingNativePowerComparison {
+            principal,
+            current,
+            before,
+            grant,
+            prepared,
+            root_retired,
+        } = pending;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
+        current
+            .observation()
+            .require_current(now_ms()?)
+            .map_err(|_| invalid_original())?;
+        let query = linura_protocol::ObservationRequest {
+            provider: before.provider.clone(),
+            capability: before.capability.clone(),
+            resource: before.resource.clone(),
+        };
         let after = self
             .previews
             .observe(&query)
@@ -569,7 +643,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         let mut latest = self.inspect_current_ordinary_display_completion_phase(
             principal,
-            request,
+            &current.request().request_id,
             attempt,
             verifier,
             false,
@@ -583,7 +657,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         {
             let _checked = self.checked_display_history()?;
-            prepared.readback(self.display_journal()?, &principal_id, request)?;
+            prepared.readback(
+                self.display_journal()?,
+                &principal_id,
+                &current.request().request_id,
+            )?;
         }
         // Retain fresh post-effect sources, never the old preparation expiry.
         for source in [&before, &after, current.observation()] {

@@ -170,9 +170,15 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid_original());
         }
-        self.require_ordinary_terminal_history(&principal, &request, &snapshot, &eligibility)?;
         {
-            let _checked = self.checked_display_history()?;
+            let checked = self.checked_display_history()?;
+            self.require_ordinary_terminal_history_checked(
+                &checked,
+                &principal,
+                &request,
+                &snapshot,
+                &eligibility,
+            )?;
             if crate::display_checkpoint::Checkpoint::load(
                 self.display_journal()?,
                 &request,

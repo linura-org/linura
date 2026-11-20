@@ -17,6 +17,25 @@ from tools import check_validation_gates as gates  # noqa: E402
 
 
 class ValidationGateTests(unittest.TestCase):
+    def test_image_download_location_is_data_and_does_not_allow_execution_overrides(
+        self,
+    ):
+        workflow = (
+            "env:\n  BASE_IMAGE_DOWNLOAD_URL: https://fixture.invalid/pinned.img\n"
+            "jobs:\n  check:\n    runs-on: ubuntu-24.04\n"
+        )
+        self.assertTrue(
+            gates.workflow_execution_context_guarded(workflow, data_only=True)
+        )
+        for name in ("BASE_IMAGE_EXECUTABLE", "CURL_CA_BUNDLE", "LD_PRELOAD", "PATH"):
+            with self.subTest(name=name):
+                self.assertFalse(
+                    gates.workflow_execution_context_guarded(
+                        workflow.replace("BASE_IMAGE_DOWNLOAD_URL", name),
+                        data_only=True,
+                    )
+                )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

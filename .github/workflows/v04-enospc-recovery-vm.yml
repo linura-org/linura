@@ -40,6 +40,8 @@ permissions:
 env:
   SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
   BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
+  # Transport mirror only; the upstream artifact identity and digest stay pinned.
+  BASE_IMAGE_DOWNLOAD_URL: https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
   BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
   VM_ACCELERATION: tcg
 
@@ -95,8 +97,10 @@ jobs:
             https://cloud-images.ubuntu.com/*) ;;
             *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
           esac
+          test "$BASE_IMAGE_DOWNLOAD_URL" = "https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
+          printf 'Pinned image download: %s\n' "$BASE_IMAGE_DOWNLOAD_URL"
           base_image="$LINURA_VM_DIR/ubuntu-noble-enospc-base.qcow2"
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output "$base_image" "$BASE_IMAGE_URL"
+          curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --output "$base_image" "$BASE_IMAGE_DOWNLOAD_URL"
           printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
           printf 'BASE_IMAGE=%s\n' "$base_image" >> "$GITHUB_ENV"
 

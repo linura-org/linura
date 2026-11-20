@@ -368,38 +368,30 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayRootPowerInspection, ManagedLifecycleError> {
         let pid = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
-        let power = self.inspect_ordinary_display_native_power_retirement_phase(
+        let current = self.inspect_current_ordinary_display_completion_phase(
             principal.clone(),
             request,
             attempt,
             verifier,
+            false,
             true,
         )?;
-        let scope = power.current().frames().scope();
+        let scope = current.frames().scope().clone();
         let q = linura_protocol::ObservationRequest {
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid_original())?,
             capability: linura_core::CapabilityId::new(DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY)
                 .map_err(|_| invalid_original())?,
             resource: scope.resource_id().map_err(|_| invalid_original())?,
         };
+        let pending = self.begin_ordinary_native_power_comparison(principal, current, true)?;
+        let native_power_before = pending.before().clone();
         let before = self
             .previews
             .observe(&q)
             .map_err(|_| invalid_original())?
             .observation;
-        let root = DisplayOrdinaryRootRetirementFacts::from_envelope(&before, scope, now_ms()?)
+        let root = DisplayOrdinaryRootRetirementFacts::from_envelope(&before, &scope, now_ms()?)
             .map_err(|_| invalid_original())?;
-        let prepared = {
-            let _checked = self.checked_display_history()?;
-            Prepared::load(self.display_journal()?, &pid, &power)?
-        };
-        if root.completion() != power.current().root()
-            || root.lineage().power_record != power.grant().record_digest()
-            || root.lineage().preparation != prepared.digest().hex()
-            || root.lineage().verification != prepared.verification.hex()
-        {
-            return Err(invalid_original());
-        }
         let after = self
             .previews
             .observe(&q)
@@ -407,35 +399,33 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .observation;
         if after.sequence <= before.sequence
             || after.observed_at_unix_ms < before.observed_at_unix_ms
-            || DisplayOrdinaryRootRetirementFacts::from_envelope(&after, scope, now_ms()?)
+            || DisplayOrdinaryRootRetirementFacts::from_envelope(&after, &scope, now_ms()?)
                 .map_err(|_| invalid_original())?
                 != root
         {
             return Err(invalid_original());
         }
-        let mut latest = self.inspect_ordinary_display_native_power_retirement_phase(
-            principal, request, attempt, verifier, true,
-        )?;
-        if latest.grant() != power.grant()
-            || latest.current().root() != power.current().root()
-            || latest.current().release() != power.current().release()
-            || !latest
-                .current()
-                .frames()
-                .reconciles(power.current().frames())
-        {
-            return Err(invalid_original());
-        }
-        {
+        let mut latest =
+            self.finish_ordinary_native_power_comparison(pending, attempt, verifier)?;
+        let prepared = {
             let _checked = self.checked_display_history()?;
+            let prepared = Prepared::load(self.display_journal()?, &pid, &latest)?;
+            if root.completion() != latest.current().root()
+                || root.lineage().power_record != latest.grant().record_digest()
+                || root.lineage().preparation != prepared.digest().hex()
+                || root.lineage().verification != prepared.verification.hex()
+            {
+                return Err(invalid_original());
+            }
             prepared.readback(self.display_journal()?, &pid, request)?;
-        }
+            prepared
+        };
         // Preserve the actual retired-Root envelope as the aggregate base. Its
         // capability must not be relabelled from an earlier held-power source.
         let mut joined = after;
         for (name, source) in [
             ("root_before", &before),
-            ("native_power", power.current().observation()),
+            ("native_power", &native_power_before),
             ("current", latest.current().observation()),
         ] {
             crate::plan_preview::restrict_session_validity(&mut joined, source, now_ms()?)

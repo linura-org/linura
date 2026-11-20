@@ -151,6 +151,48 @@ class ToolingTests(unittest.TestCase):
         )
         self.assertIn("VM-ACCEPTANCE-EVIDENCE.json", workflow)
 
+    def test_vm_mirror_preserves_exact_upstream_image_and_https_verification(
+        self,
+    ) -> None:
+        upstream = (
+            "https://cloud-images.ubuntu.com/releases/noble/release-20260725/"
+            "ubuntu-24.04-server-cloudimg-amd64.img"
+        )
+        mirror = (
+            "https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/"
+            "release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
+        )
+        digest = "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac"
+        for name in (
+            "vm-acceptance",
+            "v04-durability-vm",
+            "v04-enospc-recovery-vm",
+            "v05-executor-verifier-vm",
+            "v06-managed-lifecycle-vm",
+            "v09-adversarial-security",
+        ):
+            with self.subTest(workflow=name):
+                workflow = (ROOT / f".github/workflows/{name}.yml").read_text()
+                for key, expected in (
+                    ("BASE_IMAGE_URL", upstream),
+                    ("BASE_IMAGE_DOWNLOAD_URL", mirror),
+                    ("BASE_IMAGE_SHA256", digest),
+                ):
+                    self.assertEqual(
+                        re.findall(rf"^  {key}: (\S+)$", workflow, re.MULTILINE),
+                        [expected],
+                    )
+                self.assertIn(f'test "$BASE_IMAGE_DOWNLOAD_URL" = "{mirror}"', workflow)
+                self.assertIn("--proto '=https' --proto-redir '=https'", workflow)
+                self.assertIn('"$BASE_IMAGE_SHA256"', workflow)
+                target = "image" if name == "v09-adversarial-security" else "base_image"
+                download = workflow.index(
+                    f'--output "${target}" "$BASE_IMAGE_DOWNLOAD_URL"'
+                )
+                self.assertGreater(
+                    workflow.index("sha256sum --check --strict", download), download
+                )
+
     def test_v09_pr_routing_selects_full_for_shared_authority_changes(self) -> None:
         import tomllib
 

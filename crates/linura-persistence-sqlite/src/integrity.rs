@@ -1,11 +1,8 @@
 use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicU8, Ordering};
 
 use linura_transaction::{ContentDigest, TransactionStoreError, digest_bytes};
 use sha2::{Digest, Sha256};
-
-#[cfg(not(target_has_atomic = "8"))]
-compile_error!("linura-persistence-sqlite requires atomic 8-bit stores for non-elidable secret scrubbing");
+use zeroize::Zeroize;
 
 pub(crate) const INTEGRITY_KEY_BYTES: usize = 32;
 pub(crate) const INTEGRITY_TAG_BYTES: usize = 32;
@@ -101,13 +98,11 @@ fn validate_integrity_key_bytes(bytes: &mut [u8]) -> Result<(), TransactionStore
     Ok(())
 }
 
-/// Overwrite secret-bearing storage through atomic stores so the writes remain
-/// observable to the compiler and cannot be removed as dead stores before the
-/// allocation is released.
+/// Non-elidable volatile clearing, as used for transaction authority keys.
+/// These exclusively borrowed bytes carry no shared atomic synchronization
+/// obligation; erasing each tag must not serialize all processor memory.
 fn scrub_secret(bytes: &mut [u8]) {
-    for byte in bytes {
-        AtomicU8::from_mut(byte).store(0, Ordering::SeqCst);
-    }
+    bytes.zeroize();
 }
 
 fn hmac_sha256<'a>(

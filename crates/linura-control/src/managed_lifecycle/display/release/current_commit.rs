@@ -554,7 +554,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             prepared.readback(self.display_journal()?, &pid, c.request())?;
         }
         if now_ms()? < now || now_ms()? >= expiry {
-            return Err(invalid_original());
+            return Err(at("native preparation expiry after independent recheck"));
         }
         let permit = AuthorizedOrdinaryDisplayCurrentCommit {
             root: fresh.root().clone(),

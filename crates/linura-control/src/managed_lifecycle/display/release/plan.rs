@@ -254,8 +254,28 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         snapshot: &linura_transaction::TransactionSnapshot,
         eligibility: &OrdinaryDisplayReleaseInspection,
     ) -> Result<(), ManagedLifecycleError> {
-        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         let checked = self.checked_display_history()?;
+        self.require_ordinary_terminal_history_checked(
+            &checked,
+            principal,
+            request,
+            snapshot,
+            eligibility,
+        )
+    }
+
+    /// Join adjacent metadata comparisons in one fully authenticated snapshot.
+    /// The actual read guard is required; no provider or native port may run
+    /// until the caller drops it. This does not retain facts across boundaries.
+    pub(super) fn require_ordinary_terminal_history_checked(
+        &self,
+        checked: &CheckedDisplayHistoryRead<'_>,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        snapshot: &linura_transaction::TransactionSnapshot,
+        eligibility: &OrdinaryDisplayReleaseInspection,
+    ) -> Result<(), ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
         if checked.original_request(principal, &request.request_id)? != *request
             || self
                 .authority

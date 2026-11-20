@@ -264,6 +264,23 @@ Historical diagnostic failures remain recorded and do not automatically
 turn green; absence of the optional diagnostic is not evidence of a pass.
 Do not switch OFF to evade an already-required App check.
 
+## Immutable Ubuntu image transport
+
+The v0.4–v0.9 VM lanes retain the original Ubuntu release URL as the canonical
+upstream artifact identity and keep its existing SHA-256 pin. That upstream URL
+now redirects the retired image to an HTTP archive. The workflows therefore use
+a separate, exact HTTPS download URL at the ISCAS Ubuntu cloud-image mirror for
+the same released image. The selected transport is recorded in the workflow
+environment and download log; it does not change QualificationEnvironment or
+First Boot artifact identity.
+
+The mirror is an untrusted byte source. Workflows require the exact reviewed
+download URL, HTTPS for both the initial request and redirects, and the unchanged
+repository-owned image digest before guest construction. They do not obtain the
+expected digest from the mirror or select a newer image. Download failure or
+different bytes stops qualification. Historical qualification and frozen release
+records retain the upstream identity they originally qualified.
+
 ## Dependency-input caching
 
 Canonical CI follows the same cache-authority boundary as the prepared v0.10 runtime substrate: caches accelerate immutable prerequisites but never become correctness authority. Repository-owned composite actions may retain Cargo registry/git inputs and Ubuntu package payloads only. Cache identities bind the reviewed implementation plus exact dependency/toolchain or runner-package resolution state; broad restore keys are forbidden.

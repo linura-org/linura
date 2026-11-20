@@ -1977,6 +1977,7 @@ pub(super) fn observe_power(
     resource: &ResourceId,
     capability: &CapabilityId,
 ) -> Result<ObservationEnvelope, ProviderError> {
+    m.ordinary_power_comparison_open = true;
     use linura_observation::{
         DISPLAY_ORDINARY_POWER_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
         DisplayOrdinaryPowerRetirementFacts,
@@ -2098,6 +2099,20 @@ fn observe_root_power(
     resource: &ResourceId,
     capability: &CapabilityId,
 ) -> Result<ObservationEnvelope, ProviderError> {
+    // Change state only inside the native-power/Root comparison bracket,
+    // after its first power sample and before its second sample/current join.
+    if m.ordinary_power_comparison_open {
+        m.ordinary_power_comparison_open = false;
+        if m.ordinary_power_comparison_fault != 0 {
+            m.ordinary_power_comparison_fault_hits += 1;
+        }
+        match m.ordinary_power_comparison_fault {
+            1 => m.ordinary_current_fault = 6,
+            2 => m.ordinary_power_grant_fault = 2,
+            3 => std::thread::sleep(std::time::Duration::from_millis(2001)),
+            _ => (),
+        }
+    }
     use linura_observation::{
         DisplayCompletionLineage, DisplayOrdinaryCompletionFacts,
         DisplayOrdinaryOriginalComparison, DisplayOrdinaryRootRetirementFacts,
@@ -2904,6 +2919,37 @@ fn ordinary_root_power_requires_same_review_and_independent_absence() {
                     .lock()
                     .unwrap_or_else(|_| unreachable!())
                     .ordinary_root_power_read_fault = 0;
+                value(restarted.inspect_ordinary_display_root_power_retirement(
+                    principal(),
+                    &receipt.request_id,
+                    &mut port,
+                    &mut verifier,
+                ));
+                for changed in 1..=3 {
+                    {
+                        let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                        m.ordinary_power_comparison_fault = changed;
+                        m.ordinary_power_comparison_open = false;
+                        m.ordinary_power_comparison_fault_hits = 0;
+                    }
+                    assert!(
+                        restarted
+                            .inspect_ordinary_display_root_power_retirement(
+                                principal(),
+                                &receipt.request_id,
+                                &mut port,
+                                &mut verifier,
+                            )
+                            .is_err(),
+                        "Root/power bracket accepted changed current, power lineage or expired evidence: {changed}"
+                    );
+                    let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                    assert!(m.ordinary_power_comparison_fault_hits > 0);
+                    m.ordinary_power_comparison_fault = 0;
+                    m.ordinary_power_comparison_open = false;
+                    m.ordinary_current_fault = 0;
+                    m.ordinary_power_grant_fault = 0;
+                }
                 value(restarted.inspect_ordinary_display_root_power_retirement(
                     principal(),
                     &receipt.request_id,

@@ -319,13 +319,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(unavailable_at("post-read frame and Root reconciliation"));
         }
-        self.require_ordinary_terminal_history(
+        let checked = self.checked_display_history()?;
+        self.require_ordinary_terminal_history_checked(
+            &checked,
             &principal,
             original.request(),
             original.original_snapshot(),
             original.eligibility(),
         )?;
-        let checked = self.checked_display_history()?;
         if self
             .authority
             .matching_request_snapshot(&principal, &request)?
