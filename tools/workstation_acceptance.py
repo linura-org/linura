@@ -717,6 +717,25 @@ def _which(command: str) -> bool:
     return shutil.which(command) is not None
 
 
+def _kvm_available() -> bool:
+    """Probe this account's actual KVM access; QEMU must still initialize it."""
+    try:
+        import fcntl
+
+        fd = os.open(
+            "/dev/kvm", os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        )
+    except (ImportError, OSError):
+        return False
+    try:
+        # KVM_GET_API_VERSION is read-only. An openable path alone is not KVM.
+        return stat.S_ISCHR(os.fstat(fd).st_mode) and fcntl.ioctl(fd, 0xAE00) == 12
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 def doctor(
     mode: str,
     display: str,
@@ -754,6 +773,8 @@ def doctor(
         for command in commands:
             if not _which(command):
                 missing.append(command)
+        if mode == "interactive" and not _kvm_available():
+            missing.append("usable /dev/kvm (read/write access and KVM API version 12)")
     if mode == "interactive" and display == "gtk":
         if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             missing.append(

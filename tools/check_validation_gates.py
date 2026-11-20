@@ -1284,7 +1284,7 @@ REVIEWED_SHELL_EXECUTION = {
     "qualification/v010/shell-runtime/run-shell-runtime.sh": "69c489d06175c89840e38adbc80ecdbea7486d8ff6a955f3a68e1073c05d8755",
     "qualification/v010/shell-runtime/start-vm.sh": "c2f516674ee155d6cd6f25caab2cd90d6aaa264fc4ddb997a0d4c036dbd6267b",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
-    "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh": "8eeb86c06e0dbfcb427b9de64a6ddd98a01c3de273b710a38a9bdfa5866debf2",
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
     "qualification/v010/workstation-acceptance/run-live-session.sh": "e8013a8b52a6eeac5b53e1bfa3861a2a4879e4b33978f3d22b08ce634e06360f",
     "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",

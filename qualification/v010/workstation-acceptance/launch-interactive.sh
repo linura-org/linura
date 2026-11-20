@@ -313,6 +313,7 @@ cloud-localds --network-config="$work_root/network-config"     "$seed_image" "$w
 
 launcher_args=(
     --mode interactive
+    --acceleration kvm
     --display "$display_backend"
     --image "$vm_image"
     --seed "$seed_image"

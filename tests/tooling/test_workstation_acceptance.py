@@ -178,6 +178,104 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 workstation_acceptance.doctor("interactive", "vnc", record=True),
             )
 
+    def test_interactive_doctor_requires_usable_kvm_without_tcg_fallback(self) -> None:
+        with mock.patch.object(workstation_acceptance, "_which", return_value=True):
+            for usable in (False, True):
+                with (
+                    self.subTest(usable=usable),
+                    mock.patch.object(
+                        workstation_acceptance, "_kvm_available", return_value=usable
+                    ) as probe,
+                ):
+                    missing = workstation_acceptance.doctor("interactive", "vnc")
+                    self.assertEqual(
+                        missing,
+                        []
+                        if usable
+                        else [
+                            "usable /dev/kvm (read/write access and KVM API version 12)"
+                        ],
+                    )
+                    probe.assert_called_once_with()
+            with mock.patch.object(workstation_acceptance, "_kvm_available") as probe:
+                self.assertEqual(workstation_acceptance.doctor("automated", "none"), [])
+                probe.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "KVM is a Linux host prerequisite")
+    def test_kvm_probe_rejects_denial_nondevice_and_wrong_api_and_closes_fd(
+        self,
+    ) -> None:
+        import stat
+
+        with mock.patch.object(
+            workstation_acceptance.os, "open", side_effect=PermissionError
+        ):
+            self.assertFalse(workstation_acceptance._kvm_available())
+        for mode, api, usable in (
+            (stat.S_IFREG, 12, False),
+            (stat.S_IFCHR, 11, False),
+            (stat.S_IFCHR, OSError("KVM ioctl unavailable"), False),
+            (stat.S_IFCHR, 12, True),
+        ):
+            with (
+                self.subTest(mode=mode, api=api),
+                mock.patch.object(
+                    workstation_acceptance.os, "open", return_value=42
+                ) as opened,
+                mock.patch.object(
+                    workstation_acceptance.os,
+                    "fstat",
+                    return_value=mock.Mock(st_mode=mode),
+                ),
+                mock.patch(
+                    "fcntl.ioctl",
+                    **(
+                        {"side_effect": api}
+                        if isinstance(api, OSError)
+                        else {"return_value": api}
+                    ),
+                ),
+                mock.patch.object(workstation_acceptance.os, "close") as closed,
+            ):
+                self.assertEqual(workstation_acceptance._kvm_available(), usable)
+                opened.assert_called_once_with(
+                    "/dev/kvm", os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+                )
+                closed.assert_called_once_with(42)
+
+    def test_level_b_launcher_explicitly_requires_kvm(self) -> None:
+        launcher = (
+            ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+        ).read_text(encoding="utf-8")
+        start = launcher.index("launcher_args=(")
+        end = launcher.index('\nif [[ "$display_backend"', start)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "set -euo pipefail\n"
+                + launcher[start:end]
+                + '\nprintf "%s\\n" "${launcher_args[@]}"',
+            ],
+            env={
+                **os.environ,
+                "display_backend": "vnc",
+                "vm_image": "/guest/image",
+                "seed_image": "/guest/seed",
+                "nic_mac": "52:54:00:12:34:56",
+                "ssh_port": "2224",
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        arguments = result.stdout.splitlines()
+        self.assertEqual(arguments[arguments.index("--acceleration") + 1], "kvm")
+        self.assertEqual(arguments[arguments.index("--memory") + 1], "6144")
+        self.assertEqual(arguments[arguments.index("--cpus") + 1], "4")
+        self.assertNotIn("tcg", arguments)
+
     def test_automated_doctor_requires_mandatory_recording_verifier(self) -> None:
         available = {
             "qemu-system-x86_64",
