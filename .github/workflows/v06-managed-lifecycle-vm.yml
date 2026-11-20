@@ -19,6 +19,9 @@ on:
     paths:
       - ".github/workflows/v06-managed-lifecycle-vm.yml"
       - ".github/actions/qualification-envelope/**"
+      - ".github/actions/verified-ubuntu-image/**"
+      - "tools/qualification_base_image.py"
+      - "tests/tooling/test_qualification_base_image.py"
       - "contracts/qualification-execution-envelopes.toml"
       - "tools/qualification_envelope.py"
       - "tools/qualification_guest_identity.py"
@@ -140,6 +143,12 @@ jobs:
           LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
         run: bash scripts/prepare_qualification_storage.sh generic-vm
 
+      - name: Acquire reviewed Ubuntu image before expensive builds
+        uses: ./.github/actions/verified-ubuntu-image
+        with:
+          destination: ${{ env.LINURA_VM_DIR }}/ubuntu-noble-v06-base.qcow2
+          sha256: ${{ env.BASE_IMAGE_SHA256 }}
+
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -190,16 +199,15 @@ jobs:
           set -euo pipefail
           case "$BASE_IMAGE_URL" in
             https://cloud-images.ubuntu.com/*) ;;
-            *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
+            *) echo "base image origin drifted" >&2; exit 2 ;;
           esac
           test "$BASE_IMAGE_DOWNLOAD_URL" = "https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
-          printf 'Pinned image download: %s\n' "$BASE_IMAGE_DOWNLOAD_URL"
-          [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          base_image="$LINURA_VM_DIR/ubuntu-noble-v06-base.qcow2"
-          curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --output "$base_image" "$BASE_IMAGE_DOWNLOAD_URL"
-          printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
-          qemu-img info "$base_image"
-          printf 'BASE_IMAGE=%s\n' "$base_image" >> "$GITHUB_ENV"
+          image="$LINURA_VM_DIR/ubuntu-noble-v06-base.qcow2"
+          [[ -f "$image" && ! -L "$image" ]]
+          test "$(stat -c %h "$image")" = 1
+          printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$image" | sha256sum --check --strict
+          qemu-img info "$image"
+          printf 'BASE_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
 
       - name: Create disposable guest identity
         run: |

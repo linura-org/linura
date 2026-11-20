@@ -151,13 +151,7 @@ class ToolingTests(unittest.TestCase):
         )
         self.assertIn("VM-ACCEPTANCE-EVIDENCE.json", workflow)
 
-    def test_vm_mirror_preserves_exact_upstream_image_and_https_verification(
-        self,
-    ) -> None:
-        upstream = (
-            "https://cloud-images.ubuntu.com/releases/noble/release-20260725/"
-            "ubuntu-24.04-server-cloudimg-amd64.img"
-        )
+    def test_ubuntu_vm_image_acquisition_is_shared_and_fail_closed(self) -> None:
         mirror = (
             "https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/"
             "release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
@@ -172,26 +166,49 @@ class ToolingTests(unittest.TestCase):
             "v09-adversarial-security",
         ):
             with self.subTest(workflow=name):
-                workflow = (ROOT / f".github/workflows/{name}.yml").read_text()
+                text = (ROOT / f".github/workflows/{name}.yml").read_text()
+                upstream = (
+                    "https://cloud-images.ubuntu.com/releases/noble/release-20260725/"
+                    "ubuntu-24.04-server-cloudimg-amd64.img"
+                )
                 for key, expected in (
                     ("BASE_IMAGE_URL", upstream),
                     ("BASE_IMAGE_DOWNLOAD_URL", mirror),
                     ("BASE_IMAGE_SHA256", digest),
                 ):
                     self.assertEqual(
-                        re.findall(rf"^  {key}: (\S+)$", workflow, re.MULTILINE),
+                        re.findall(rf"^  {key}: (\S+)$", text, re.MULTILINE),
                         [expected],
                     )
-                self.assertIn(f'test "$BASE_IMAGE_DOWNLOAD_URL" = "{mirror}"', workflow)
-                self.assertIn("--proto '=https' --proto-redir '=https'", workflow)
-                self.assertIn('"$BASE_IMAGE_SHA256"', workflow)
-                target = "image" if name == "v09-adversarial-security" else "base_image"
-                download = workflow.index(
-                    f'--output "${target}" "$BASE_IMAGE_DOWNLOAD_URL"'
+                self.assertIn(f'test "$BASE_IMAGE_DOWNLOAD_URL" = "{mirror}"', text)
+                self.assertIn(f"BASE_IMAGE_SHA256: {digest}", text)
+                self.assertIn("uses: ./.github/actions/verified-ubuntu-image", text)
+                self.assertIn("sha256: ${{ env.BASE_IMAGE_SHA256 }}", text)
+                self.assertIn("sha256sum --check --strict", text)
+                self.assertIn("qemu-img info", text)
+                self.assertNotIn("curl --fail --location --proto", text)
+                build_anchor = (
+                    "Install pinned Rust toolchain"
+                    if "Install pinned Rust toolchain" in text
+                    else "Install pinned disposable-VM dependencies"
+                    if "Install pinned disposable-VM dependencies" in text
+                    else "Download exact-source qualification binaries"
                 )
-                self.assertGreater(
-                    workflow.index("sha256sum --check --strict", download), download
+                self.assertLess(
+                    text.index("Acquire reviewed Ubuntu image before expensive builds"),
+                    text.index(build_anchor),
                 )
+        action = (ROOT / ".github/actions/verified-ubuntu-image/action.yml").read_text()
+        self.assertIn(
+            "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+            action,
+        )
+        self.assertIn(
+            "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+            action,
+        )
+        self.assertIn("steps.image-cache.outputs.cache-hit != 'true'", action)
+        self.assertNotIn("restore-keys:", action)
 
     def test_v09_pr_routing_selects_full_for_shared_authority_changes(self) -> None:
         import tomllib

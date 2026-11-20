@@ -1,0 +1,42 @@
+name: Acquire verified Ubuntu qualification image
+description: Restore independently authenticated image bytes or retrieve the exact pinned HTTPS artifact before expensive builds.
+inputs:
+  destination:
+    description: Private, source-bound guest image path below LINURA_VM_DIR
+    required: true
+  sha256:
+    description: Repository-reviewed immutable base image SHA-256
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Reject unreviewed image identity before cache access
+      shell: bash
+      env:
+        LINURA_APPROVED_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        test "$LINURA_APPROVED_SHA256" = "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac"
+        test "$BASE_IMAGE_SHA256" = "$LINURA_APPROVED_SHA256"
+        test "$BASE_IMAGE_URL" = "https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
+        test "$BASE_IMAGE_DOWNLOAD_URL" = "https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img"
+        [[ "$LINURA_VM_BASE_DIR" = /* && "$LINURA_VM_DIR" = /* ]]
+    - name: Restore untrusted content-addressed image cache
+      id: image-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.LINURA_VM_BASE_DIR }}/ubuntu-noble-${{ inputs.sha256 }}.img
+        key: linura-ubuntu-base-image-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.sha256 }}
+    - name: Independently verify and stage a fresh guest input
+      shell: bash
+      env:
+        LINURA_IMAGE_DESTINATION: ${{ inputs.destination }}
+      run: |
+        set -euo pipefail
+        python3 -I -S tools/qualification_base_image.py --destination "$LINURA_IMAGE_DESTINATION"
+    - name: Save only authenticated image bytes for later runs
+      if: steps.image-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.LINURA_VM_BASE_DIR }}/ubuntu-noble-${{ inputs.sha256 }}.img
+        key: ${{ steps.image-cache.outputs.cache-primary-key }}
