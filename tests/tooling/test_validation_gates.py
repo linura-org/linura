@@ -69,6 +69,41 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(before, source)
         file.write_text(source.replace(before, after, 1))
 
+    def test_v06_concurrent_guest_run_and_retention_cannot_be_removed_or_serialized(
+        self,
+    ):
+        for relative in (
+            "tests/acceptance/v06/qualify-guest.sh",
+            "tests/acceptance/v06/qualify-host.sh",
+        ):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        self.assertEqual(gates.check(self.root), [])
+        guest = self.root / "tests/acceptance/v06/qualify-guest.sh"
+        original = guest.read_text()
+        command = (
+            "/usr/libexec/linura/v06-qualification-matrix --test-threads=2 "
+            "2>&1 | tee /tmp/v06-concurrent-matrix.log"
+        )
+        self.assertIn(command, original)
+        for replacement in (command.replace("=2", "=1"), "true", "echo skipped"):
+            with self.subTest(replacement=replacement):
+                guest.write_text(original.replace(command, replacement, 1))
+                self.assertIn(
+                    "tests/acceptance/v06/qualify-guest.sh: unreviewed shell execution",
+                    gates.check(self.root),
+                )
+        guest.write_text(original)
+        host = self.root / "tests/acceptance/v06/qualify-host.sh"
+        original = host.read_text()
+        self.assertIn(" v06-concurrent-matrix.log", original)
+        host.write_text(original.replace(" v06-concurrent-matrix.log", "", 1))
+        self.assertIn(
+            "tests/acceptance/v06/qualify-host.sh: unreviewed shell execution",
+            gates.check(self.root),
+        )
+
     def test_tooling_runner_cannot_be_weakened_without_review(self):
         self.assertEqual(gates.check(self.root), [])
         path = self.root / "tools/run_tooling_tests.py"

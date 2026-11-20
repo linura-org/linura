@@ -80,7 +80,7 @@ guest_rc=${PIPESTATUS[0]}
 set -e
 
 matrix_evidence_rc=0
-for matrix_log in v06-matrix.log v06-legacy-matrix.log v06-native-session.log; do
+for matrix_log in v06-matrix.log v06-legacy-matrix.log v06-concurrent-matrix.log v06-native-session.log; do
     if ! scp "${ssh_common[@]}" -P "$ssh_port" \
         "linura@127.0.0.1:/tmp/$matrix_log" "$ARTIFACT_DIR/$matrix_log" >/dev/null 2>&1; then
         printf 'missing retained guest matrix evidence: %s\n' "$matrix_log" >&2

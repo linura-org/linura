@@ -1288,8 +1288,8 @@ REVIEWED_SHELL_EXECUTION = {
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
     "qualification/v010/workstation-acceptance/run-live-session.sh": "e8013a8b52a6eeac5b53e1bfa3861a2a4879e4b33978f3d22b08ce634e06360f",
     "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
-    "tests/acceptance/v06/qualify-guest.sh": "aa6c470357d28b0214a32432810188bb732e75c67ccd896f67ed90e0c2537c71",
-    "tests/acceptance/v06/qualify-host.sh": "16bdd54f2b5ed67461c09773df4b5ec398cfde23d4196256893332ebf94bd28c",
+    "tests/acceptance/v06/qualify-guest.sh": "eadef3f29b6bd8e82049b2108ec3f1737a348bc4a5b548c6d3a7be8ef2538b75",
+    "tests/acceptance/v06/qualify-host.sh": "4cce1f98860da21fe9536318a99fb10d32b87d7b2d2724ec63a6109862fa3d97",
     "tests/acceptance/v06/qualify-native-session.sh": "7b8d49ae79048f65c7c148e0f98df12cf93857e4bd9136fd4766e4222a43fc8f",
     # Development-only tools run at the caller's existing permissions.
     "scripts/lib/bootstrap_rustup.sh": "60db235ffa3f448b1182665285dc3347f017cbcb5785f087f056c3b30e836ad8",

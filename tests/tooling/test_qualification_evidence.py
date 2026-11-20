@@ -918,6 +918,10 @@ jobs:
         required = {item["filename"] for item in profile["artifact"]}
         self.assertIn("v06-matrix.log", required)
         self.assertIn("v06-legacy-matrix.log", required)
+        self.assertIn("v06-concurrent-matrix.log", required)
+        self.assertEqual(
+            profile["verifier_adapter"], "v06-managed-lifecycle-semantic-v2"
+        )
         self.assertIn("v06-native-session.log", required)
         workflow = (ROOT / ".github/workflows/v06-managed-lifecycle-vm.yml").read_text(
             encoding="utf-8"
@@ -990,6 +994,52 @@ jobs:
                                 filtered_out=filtered,
                                 expected_tests=expected,
                             )
+
+    def test_v06_concurrent_matrix_requires_all_cases_and_exact_worker_configuration(
+        self,
+    ):
+        inventory = semantic_verifier._v06_matrix_inventory(ROOT)
+        transcript = (
+            "running 77 tests\n"
+            + "".join(f"test {name} ... ok\n" for name in reversed(inventory))
+            + "test result: ok. 77 passed; 0 failed; 0 ignored; "
+            "0 measured; 0 filtered out; finished in 1.00s\n"
+        )
+        metadata = {"cases": 77, "test_threads": 2, "includes_original_cases": 11}
+        semantic_verifier._require_v06_concurrent_matrix(ROOT, transcript, metadata)
+        for value in (
+            None,
+            {},
+            metadata | {"test_threads": 1},
+            metadata | {"test_threads": 0},
+            metadata | {"test_threads": "2"},
+            metadata | {"cases": 76},
+            metadata | {"includes_original_cases": 10},
+            metadata | {"unreviewed": True},
+        ):
+            with (
+                self.subTest(metadata=value),
+                self.assertRaises(semantic_verifier.VerificationError),
+            ):
+                semantic_verifier._require_v06_concurrent_matrix(
+                    ROOT, transcript, value
+                )
+        for invalid in (
+            transcript.replace("77 passed", "76 passed"),
+            transcript.replace("0 ignored", "1 ignored"),
+            transcript.replace("0 filtered out", "1 filtered out"),
+            transcript.replace(f"test {inventory[0]} ... ok\n", ""),
+            transcript.replace(inventory[0], inventory[1]),
+            transcript + "FAILED\n",
+            "",
+        ):
+            with (
+                self.subTest(transcript=invalid),
+                self.assertRaises(semantic_verifier.VerificationError),
+            ):
+                semantic_verifier._require_v06_concurrent_matrix(
+                    ROOT, invalid, metadata
+                )
 
     def test_v06_matrix_inventory_rejects_ambiguous_or_changed_sets(self):
         inventory = ROOT / "tests/acceptance/v06/fault-matrix.txt"

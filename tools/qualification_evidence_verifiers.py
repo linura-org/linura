@@ -974,6 +974,22 @@ def _require_v06_original_read_admission(text: str) -> None:
             )
 
 
+def _require_v06_concurrent_matrix(
+    root: Path, transcript: str, metadata: object
+) -> None:
+    _require(
+        metadata == {"cases": 77, "test_threads": 2, "includes_original_cases": 11},
+        "v0.6 concurrent fault-matrix configuration mismatch",
+    )
+    _require_v06_matrix_result(
+        transcript,
+        77,
+        "v0.6 concurrent fault matrix",
+        filtered_out=0,
+        expected_tests=_v06_matrix_inventory(root),
+    )
+
+
 def _verify_v06(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
@@ -994,6 +1010,7 @@ def _verify_v06(
     transcript = _text(_bundle_file(bundle, "qualification.log"))
     matrix = _text(_bundle_file(bundle, "v06-matrix.log"))
     legacy_matrix = _text(_bundle_file(bundle, "v06-legacy-matrix.log"))
+    concurrent_matrix = _text(_bundle_file(bundle, "v06-concurrent-matrix.log"))
     session = _text(_bundle_file(bundle, "v06-native-session.log"))
     _require_markers(
         transcript,
@@ -1007,6 +1024,7 @@ def _verify_v06(
             "real-verification-not-satisfied-explicit-recovery=qualified",
             "real-crash-restart-explicit-no-effect-recovery=qualified",
             "deterministic-fault-matrix=77/77",
+            "deterministic-concurrent-fault-matrix=77/77",
         ],
         "v0.6 qualification transcript",
     )
@@ -1069,6 +1087,9 @@ def _verify_v06(
             if not name.startswith(("s17_managed_", "s21_managed_"))
         ),
     )
+    _require_v06_concurrent_matrix(
+        root, concurrent_matrix, primary.get("concurrent_fault_matrix")
+    )
     fault_matrix = primary.get("fault_matrix")
     _require(
         isinstance(fault_matrix, dict) and fault_matrix.get("cases") == 11,
@@ -1126,7 +1147,7 @@ def _verify_v06(
             root, record, f"v0.6 {name}", bundle=bundle, expected_path=expected[name]
         )
     return _outcome(
-        adapter="v06-managed-lifecycle-semantic-v1",
+        adapter="v06-managed-lifecycle-semantic-v2",
         test_ids=["qualification/v0.6/managed-lifecycle/result-v1"],
         contract_ids=["qualification/v0.6/managed-lifecycle/v1"],
         claims=[
@@ -1138,12 +1159,15 @@ def _verify_v06(
             "sqlite-integrity-proved",
             "fault-matrix-11-of-11-passed",
             "expanded-fault-matrix-77-of-77-passed",
+            "concurrent-fault-matrix-77-of-77-passed",
             "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
         details={
             "fault_matrix_cases": 11,
             "expanded_fault_matrix_cases": 77,
+            "concurrent_fault_matrix_cases": 77,
+            "concurrent_fault_matrix_test_threads": 2,
             "repository_artifacts": len(artifacts),
         },
     )
@@ -1622,7 +1646,7 @@ ADAPTER_IDS = {
     "v04-durability": "v04-durability-semantic-v1",
     "v04-enospc": "v04-enospc-semantic-v1",
     "v05-executor-verifier": "v05-executor-verifier-semantic-v1",
-    "v06-managed-lifecycle": "v06-managed-lifecycle-semantic-v1",
+    "v06-managed-lifecycle": "v06-managed-lifecycle-semantic-v2",
     "v07-library": "v07-library-semantic-v1",
     "v08-agent": "v08-agent-semantic-v1",
     "v09-qualification": "v09-qualification-semantic-v1",

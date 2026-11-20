@@ -91,21 +91,29 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             "| tee /tmp/v06-legacy-matrix.log",
             script,
         )
+        self.assertIn(
+            "--test-threads=2 2>&1 | tee /tmp/v06-concurrent-matrix.log", script
+        )
         self.assertIn("77 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
+stage() { printf 'stage=%s\\n' "$1"; }
 matrix() {
     if [[ " $* " == *" --skip s17_managed_ "* ]]; then
         [[ " $* " == *" --skip s21_managed_ "* ]] || return 99
         printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_TEST_BASELINE" "$LINURA_BASELINE_IGNORED"
         return "$LINURA_BASELINE_EXIT"
     fi
+    if [[ " $* " == *" --test-threads=2 "* ]]; then
+        printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_CONCURRENT_FULL" "$LINURA_CONCURRENT_IGNORED"
+        return "$LINURA_CONCURRENT_EXIT"
+    fi
     printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_TEST_FULL" "$LINURA_TEST_IGNORED"
     return "$LINURA_TEST_EXIT"
 }
 """
-        for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
+        cases = (
             (77, 11, 0, 0, 0, 0, True),
             (76, 11, 0, 0, 0, 0, False),
             (71, 11, 0, 0, 0, 0, False),
@@ -134,7 +142,24 @@ matrix() {
             (77, 11, 0, 1, 0, 0, False),
             (77, 11, 0, 0, 1, 0, False),
             (77, 11, 0, 0, 0, 1, False),
-        ):
+        )
+        cases = tuple((*case[:-1], 77, 0, 0, case[-1]) for case in cases) + (
+            (77, 11, 0, 0, 0, 0, 76, 0, 0, False),
+            (77, 11, 0, 0, 0, 0, 77, 1, 0, False),
+            (77, 11, 0, 0, 0, 0, 77, 0, 1, False),
+        )
+        for (
+            full,
+            baseline,
+            ignored,
+            baseline_ignored,
+            code,
+            baseline_code,
+            concurrent,
+            concurrent_ignored,
+            concurrent_code,
+            valid,
+        ) in cases:
             with (
                 self.subTest(
                     full=full,
@@ -159,6 +184,9 @@ matrix() {
                         "LINURA_BASELINE_IGNORED": str(baseline_ignored),
                         "LINURA_TEST_EXIT": str(code),
                         "LINURA_BASELINE_EXIT": str(baseline_code),
+                        "LINURA_CONCURRENT_FULL": str(concurrent),
+                        "LINURA_CONCURRENT_IGNORED": str(concurrent_ignored),
+                        "LINURA_CONCURRENT_EXIT": str(concurrent_code),
                     },
                     capture_output=True,
                     text=True,
@@ -171,7 +199,9 @@ matrix() {
             encoding="utf-8"
         )
         self.assertIn('"$ARTIFACT_DIR/$matrix_log"', host)
-        self.assertIn("v06-matrix.log v06-legacy-matrix.log", host)
+        self.assertIn(
+            "v06-matrix.log v06-legacy-matrix.log v06-concurrent-matrix.log", host
+        )
         self.assertIn(
             'if [[ "$guest_rc" -ne 0 || "$matrix_evidence_rc" -ne 0 ]]; then',
             host,
