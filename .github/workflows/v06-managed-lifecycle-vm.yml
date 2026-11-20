@@ -99,7 +99,7 @@ env:
   # Transport mirror only; the upstream artifact identity and digest stay pinned.
   BASE_IMAGE_DOWNLOAD_URL: https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
   BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
-  VM_ACCELERATION: tcg
+  VM_ACCELERATION: kvm
   SSH_PORT: "2222"
 
 jobs:
@@ -142,6 +142,47 @@ jobs:
           LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
           LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
         run: bash scripts/prepare_qualification_storage.sh generic-vm
+
+      - name: Verify usable KVM before expensive builds
+        run: |
+          set -euo pipefail
+          test "$VM_ACCELERATION" = kvm
+          if [[ ! -c /dev/kvm ]]; then
+            printf '%s\n' 'qualification-infrastructure-error: KVM device unavailable on runner' >&2
+            exit 2
+          fi
+          # The host runner is disposable; grant this job's uid exclusive KVM access.
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 0600 /dev/kvm
+          python3 -I -S - <<'PY'
+          import fcntl
+          import os
+          import stat
+
+          try:
+              fd = os.open("/dev/kvm", os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+          except OSError as error:
+              raise SystemExit(
+                  f"qualification-infrastructure-error: cannot open KVM: {error.strerror}"
+              ) from error
+          try:
+              if not stat.S_ISCHR(os.fstat(fd).st_mode):
+                  raise SystemExit("qualification-infrastructure-error: KVM is not a device")
+              # Linux KVM_GET_API_VERSION; merely seeing /dev/kvm is insufficient.
+              try:
+                  version = fcntl.ioctl(fd, 0xAE00, 0)
+              except OSError as error:
+                  raise SystemExit(
+                      f"qualification-infrastructure-error: cannot probe KVM: {error.strerror}"
+                  ) from error
+              if version != 12:
+                  raise SystemExit(
+                      f"qualification-infrastructure-error: unsupported KVM API {version}"
+                  )
+              print("qualification-infrastructure: KVM device open and API verified")
+          finally:
+              os.close(fd)
+          PY
 
       - name: Acquire reviewed Ubuntu image before expensive builds
         uses: ./.github/actions/verified-ubuntu-image

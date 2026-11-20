@@ -227,6 +227,62 @@ class QualificationEnvelopeTests(unittest.TestCase):
             ):
                 envelopes.verify_envelope(ROOT, path)
 
+    def test_v06_kvm_subject_is_distinct_from_unchanged_ubuntu_tcg(self):
+        contract = envelopes.load_contract(ROOT)
+        lane = envelopes.lane_by_id(contract, "v06-managed-lifecycle")
+        self.assertEqual(lane["guest_profile"], "ubuntu_24_04_qemu_kvm")
+        self.assertEqual(lane["profile_version"], 2)
+        capture = _ubuntu_guest_capture() | {"virtualization": "kvm"}
+        digests = {"base_image_sha256": "a" * 64}
+        observations = {"guest_package_manifest_sha256": "b" * 64}
+        subject = envelopes._execution_subject_binding(
+            contract,
+            lane,
+            {},
+            capture,
+            digests,
+            observations,
+            {"VM_ACCELERATION": "kvm"},
+        )
+        self.assertEqual(subject["virtualization"], "kvm")
+        self.assertEqual(subject["acceleration"], "kvm")
+        self.assertEqual(subject["image_digests"], digests)
+        for changed, acceleration in (
+            ({"virtualization": "qemu"}, "kvm"),
+            ({"virtualization": "none"}, "kvm"),
+            ({}, "tcg"),
+            ({"distribution_id": "arch"}, "kvm"),
+            ({"architecture": "aarch64"}, "kvm"),
+            ({"package_manager": "pacman"}, "kvm"),
+            ({"package_manifest_sha256": "c" * 64}, "kvm"),
+        ):
+            with (
+                self.subTest(changed=changed, acceleration=acceleration),
+                self.assertRaises(envelopes.EnvelopeError),
+            ):
+                envelopes._execution_subject_binding(
+                    contract,
+                    lane,
+                    {},
+                    capture | changed,
+                    digests,
+                    observations,
+                    {"VM_ACCELERATION": acceleration},
+                )
+        other = envelopes.lane_by_id(contract, "vm-acceptance")
+        self.assertEqual(other["guest_profile"], "ubuntu_24_04_qemu")
+        self.assertEqual(other["profile_version"], 1)
+        with self.assertRaises(envelopes.EnvelopeError):
+            envelopes._execution_subject_binding(
+                contract,
+                other,
+                {},
+                capture,
+                digests,
+                observations,
+                {"VM_ACCELERATION": "kvm"},
+            )
+
     def test_v010_subject_requires_arch_kvm_without_changing_ubuntu_tcg(self):
         contract = envelopes.load_contract(ROOT)
         lane = envelopes.lane_by_id(contract, "v010-shell-runtime")

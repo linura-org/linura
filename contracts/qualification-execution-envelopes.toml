@@ -59,6 +59,14 @@ distribution_id = "ubuntu"
 distribution_version = "24.04"
 package_manager = "dpkg"
 
+[guest_profile.ubuntu_24_04_qemu_kvm]
+architecture = "x86_64"
+virtualization = "kvm"
+acceleration = "kvm"
+distribution_id = "ubuntu"
+distribution_version = "24.04"
+package_manager = "dpkg"
+
 [guest_profile.arch_rolling_qemu_kvm]
 architecture = "x86_64"
 virtualization = "kvm"
@@ -243,9 +251,9 @@ required_observations = ["guest_package_manifest_sha256"]
 id = "v06-managed-lifecycle"
 execution_subject = "guest"
 kind = "github-hosted"
-guest_profile = "ubuntu_24_04_qemu"
+guest_profile = "ubuntu_24_04_qemu_kvm"
 workflow = ".github/workflows/v06-managed-lifecycle-vm.yml"
-profile_version = 1
+profile_version = 2
 input_files = ["crates/linura-lifecycle/Cargo.toml", "crates/linura-transaction/Cargo.toml", "tools/vm.py"]
 required_digests = ["base_image_sha256"]
 required_cache_digests = []

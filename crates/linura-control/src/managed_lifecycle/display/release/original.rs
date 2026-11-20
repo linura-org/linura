@@ -97,43 +97,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         use linura_observation::{
             DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY, DisplayOrdinaryRootRetirementFacts,
         };
-        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
-        let (request, snapshot, guard, deadline, dispatch) = {
-            let checked = self.checked_display_history()?;
-            let request = checked.original_request(&principal, request_id)?;
-            let snapshot = self
-                .authority
-                .matching_request_snapshot(&principal, &request)?;
-            let history = DisplayHistory::load(
-                self.display_journal()?,
-                &principal_id,
-                &crate::durable_authority::digest_request(&request)?,
-                &snapshot.transaction_id,
-                snapshot.state,
-                now_ms()?,
-            )?;
-            terminal_for_inspection(&history, snapshot.state)?;
-            let dispatched = history.dispatched.as_ref().ok_or_else(invalid_original)?;
-            let checkpoint = crate::display_checkpoint::Checkpoint::load(
-                self.display_journal()?,
-                &request,
-                &snapshot,
-                now_ms()?,
-            )?;
-            (
-                request,
-                snapshot,
-                checkpoint.native_guard,
-                dispatched.deadline_unix_ms,
-                dispatched
-                    .dispatch_digest
-                    .clone()
-                    .ok_or_else(invalid_original)?,
-            )
-        };
-        let scope =
-            DisplayOrdinaryReleaseScope::new(&dispatch, material(&request)?.topology().clone())
-                .map_err(|_| invalid_original())?;
+        let history = self.ordinary_release_history(&principal, request_id)?;
+        let scope = DisplayOrdinaryReleaseScope::new(
+            &history.dispatch_digest,
+            material(&history.request)?.topology().clone(),
+        )
+        .map_err(|_| invalid_original())?;
         let query = ObservationRequest {
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid_original())?,
             capability: CapabilityId::new(DISPLAY_ORDINARY_ROOT_RETIREMENT_CAPABILITY)
@@ -147,8 +116,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .observation;
         let root = DisplayOrdinaryRootRetirementFacts::from_envelope(&before, &scope, now_ms()?)
             .map_err(|_| invalid_original())?;
-        let eligibility =
-            self.inspect_ordinary_display_release(principal.clone(), request_id, port, verifier)?;
+        let pending = self.compare_ordinary_release_native(&history, port, verifier)?;
         let after = self
             .previews
             .observe(&query)
@@ -157,39 +125,29 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let again = DisplayOrdinaryRootRetirementFacts::from_envelope(&after, &scope, now_ms()?)
             .map_err(|_| invalid_original())?;
         let original = root.original();
+        let dispatched = history
+            .history
+            .dispatched
+            .as_ref()
+            .ok_or_else(invalid_original)?;
         if root != again
             || after.sequence <= before.sequence
             || after.observed_at_unix_ms < before.observed_at_unix_ms
-            || original.material != request.desired_state["layout"]
-            || original.transaction != snapshot.transaction_id.as_str()
-            || original.native_guard != guard.to_hex()
-            || original.original_deadline_unix_ms != deadline
-            || eligibility.transaction_id() != &snapshot.transaction_id
-            || eligibility.dispatch_digest() != dispatch
-            || eligibility.durable_binding_digest() != snapshot.binding_digest.as_str()
+            || original.material != history.request.desired_state["layout"]
+            || original.transaction != history.snapshot.transaction_id.as_str()
+            || original.native_guard != history.checkpoint.native_guard.to_hex()
+            || original.original_deadline_unix_ms != dispatched.deadline_unix_ms
         {
             return Err(invalid_original());
         }
+        let checked = self.checked_display_history()?;
+        let eligibility =
+            self.finish_ordinary_release_comparison(&checked, &principal, &history, pending)?;
+        if eligibility.transaction_id() != &history.snapshot.transaction_id
+            || eligibility.dispatch_digest() != history.dispatch_digest
+            || eligibility.durable_binding_digest() != history.snapshot.binding_digest.as_str()
         {
-            let checked = self.checked_display_history()?;
-            self.require_ordinary_terminal_history_checked(
-                &checked,
-                &principal,
-                &request,
-                &snapshot,
-                &eligibility,
-            )?;
-            if crate::display_checkpoint::Checkpoint::load(
-                self.display_journal()?,
-                &request,
-                &snapshot,
-                now_ms()?,
-            )?
-            .native_guard
-                != guard
-            {
-                return Err(invalid_original());
-            }
+            return Err(invalid_original());
         }
         crate::plan_preview::restrict_session_validity(&mut before, &after, now_ms()?)
             .map_err(|_| invalid_original())?;
@@ -206,8 +164,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .require_current(now_ms()?)
             .map_err(|_| invalid_original())?;
         Ok(OrdinaryCurrentOriginal {
-            request,
-            snapshot,
+            request: history.request,
+            snapshot: history.snapshot,
             eligibility,
             checkpoint: original.checkpoint.clone(),
             observation: before,
@@ -224,46 +182,22 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         port: &mut P,
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayOriginalInspection, ManagedLifecycleError> {
-        let checked = self.checked_display_history()?;
-        let request = checked.original_request(&principal, request_id)?;
-        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid_original())?;
-        let snapshot = self
-            .authority
-            .matching_request_snapshot(&principal, &request)?;
-        let digest = crate::durable_authority::digest_request(&request)?;
-        let history = DisplayHistory::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            &snapshot.transaction_id,
-            snapshot.state,
-            now_ms()?,
-        )?;
-        let terminal = terminal_for_inspection(&history, snapshot.state)?
-            .0
-            .digest()
-            .clone();
-        let dispatched = history.dispatched.as_ref().ok_or_else(invalid_original)?;
-        let dispatch = dispatched
-            .dispatch_digest
-            .as_deref()
-            .ok_or_else(invalid_original)?;
-        let material = material(&request)?;
-        let scope = DisplayOrdinaryReleaseScope::new(dispatch, material.topology().clone())
-            .map_err(|_| invalid_original())?;
-        let checkpoint = crate::display_checkpoint::Checkpoint::load(
-            self.display_journal()?,
-            &request,
-            &snapshot,
-            now_ms()?,
-        )?;
+        let history = self.ordinary_release_history(&principal, request_id)?;
+        let scope = DisplayOrdinaryReleaseScope::new(
+            &history.dispatch_digest,
+            material(&history.request)?.topology().clone(),
+        )
+        .map_err(|_| invalid_original())?;
         let query = ObservationRequest {
             provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid_original())?,
             capability: CapabilityId::new(DISPLAY_ORDINARY_ORIGINAL_CAPABILITY)
                 .map_err(|_| invalid_original())?,
             resource: scope.resource_id().map_err(|_| invalid_original())?,
         };
-        drop(checked);
+        // One full durable before/after comparison brackets BOTH independent
+        // source pairs. No read snapshot, cached observation or authority is
+        // carried across a provider boundary. The pending native comparison
+        // cannot become a public inspection until the final history check.
         let before = self
             .previews
             .observe(&query)
@@ -271,60 +205,36 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .observation;
         let root = DisplayOrdinaryOriginalFacts::from_envelope(&before, &scope, now_ms()?)
             .map_err(|_| invalid_original())?;
-        let eligibility =
-            self.inspect_ordinary_display_release(principal.clone(), request_id, port, verifier)?;
+        let pending = self.compare_ordinary_release_native(&history, port, verifier)?;
         let after = self
             .previews
             .observe(&query)
             .map_err(|_| invalid_original())?
             .observation;
-        let checked = DisplayOrdinaryOriginalFacts::from_envelope(&after, &scope, now_ms()?)
+        let again = DisplayOrdinaryOriginalFacts::from_envelope(&after, &scope, now_ms()?)
             .map_err(|_| invalid_original())?;
         let comparison = root.comparison();
-        if checked != root
+        let dispatched = history
+            .history
+            .dispatched
+            .as_ref()
+            .ok_or_else(invalid_original)?;
+        if again != root
             || after.sequence <= before.sequence
-            || comparison.material != request.desired_state["layout"]
-            || comparison.transaction != snapshot.transaction_id.as_str()
-            || comparison.native_guard != checkpoint.native_guard.to_hex()
+            || comparison.material != history.request.desired_state["layout"]
+            || comparison.transaction != history.snapshot.transaction_id.as_str()
+            || comparison.native_guard != history.checkpoint.native_guard.to_hex()
             || comparison.original_deadline_unix_ms != dispatched.deadline_unix_ms
-            || eligibility.transaction_id() != &snapshot.transaction_id
-            || eligibility.dispatch_digest() != dispatch
-            || eligibility.terminal_record_digest() != terminal.as_str()
-            || eligibility.durable_binding_digest() != snapshot.binding_digest.as_str()
         {
             return Err(invalid_original());
         }
         let checked = self.checked_display_history()?;
-        if self
-            .authority
-            .matching_request_snapshot(&principal, &request)?
-            != snapshot
-        {
-            return Err(invalid_original());
-        }
-        let retained = checked.original_request(&principal, request_id)?;
-        let latest = DisplayHistory::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            &snapshot.transaction_id,
-            snapshot.state,
-            now_ms()?,
-        )?;
-        if retained != request
-            || terminal_for_inspection(&latest, snapshot.state)?.0.digest() != &terminal
-            || latest
-                .dispatched
-                .as_ref()
-                .is_none_or(|v| v.digest() != dispatched.digest())
-            || crate::display_checkpoint::Checkpoint::load(
-                self.display_journal()?,
-                &request,
-                &snapshot,
-                now_ms()?,
-            )?
-            .native_guard
-                != checkpoint.native_guard
+        let eligibility =
+            self.finish_ordinary_release_comparison(&checked, &principal, &history, pending)?;
+        if eligibility.transaction_id() != &history.snapshot.transaction_id
+            || eligibility.dispatch_digest() != history.dispatch_digest
+            || eligibility.terminal_record_digest() != history.terminal_digest.as_str()
+            || eligibility.durable_binding_digest() != history.snapshot.binding_digest.as_str()
         {
             return Err(invalid_original());
         }
@@ -348,11 +258,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             ),
             (
                 "control.ordinary.terminal_record_digest",
-                terminal.as_str().into(),
+                history.terminal_digest.as_str().into(),
             ),
             (
                 "control.ordinary.signed_binding_digest",
-                snapshot.binding_digest.as_str().into(),
+                history.snapshot.binding_digest.as_str().into(),
             ),
             (
                 "control.ordinary.rechecked_root_digest",
@@ -372,8 +282,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             eligibility,
             root,
             observation,
-            request,
-            snapshot,
+            request: history.request,
+            snapshot: history.snapshot,
         })
     }
 }

@@ -977,8 +977,11 @@ def _require_v06_original_read_admission(text: str) -> None:
 def _require_v06_concurrent_matrix(
     root: Path, transcript: str, metadata: object
 ) -> None:
+    expected = {"cases": 77, "test_threads": 2, "includes_original_cases": 11}
     _require(
-        metadata == {"cases": 77, "test_threads": 2, "includes_original_cases": 11},
+        isinstance(metadata, dict)
+        and metadata == expected
+        and all(type(metadata[key]) is int for key in expected),
         "v0.6 concurrent fault-matrix configuration mismatch",
     )
     _require_v06_matrix_result(

@@ -78,6 +78,68 @@ expect_failure() {
     printf '%s-output=%q\n' "$label" "$output"
 }
 
+# Type=dbus owns the bus name before its object server necessarily exposes
+# the complete interface. Verify the real method surface, not just name
+# ownership or systemctl active. A replaced owner, unsupported interface or
+# unhealthy unit is a hard failure; only transient startup non-responsiveness
+# can be re-observed. This never turns a timeout into acceptance.
+require_live_contract() {
+    local service="$1" path="$2" interface="$3" method="$4" unit="$5"
+    local owner observed reply attempt
+    owner="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus GetNameOwner s "$service")"
+    [[ -n "$owner" ]] || {
+        echo "missing initial D-Bus owner: $service" >&2
+        return 1
+    }
+    for attempt in {1..8}; do
+        if ! sudo -n systemctl is-active --quiet "$unit"; then
+            printf 'D-Bus service stopped before contract readiness: %s\n' "$unit" >&2
+            return 1
+        fi
+        observed="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus GetNameOwner s "$service")" || return 1
+        if [[ "$observed" != "$owner" ]]; then
+            printf 'D-Bus owner changed during contract readiness: %s\n' "$service" >&2
+            return 1
+        fi
+        if reply="$(busctl --system --timeout=3s introspect \
+            "$service" "$path" "$interface" 2>&1)"; then
+            if ! grep -Fq "$method" <<<"$reply"; then
+                printf 'D-Bus interface lacks required method: %s.%s\n' \
+                    "$interface" "$method" >&2
+                return 1
+            fi
+            observed="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus \
+                org.freedesktop.DBus GetNameOwner s "$service")" || return 1
+            if [[ "$observed" != "$owner" ]]; then
+                printf 'D-Bus owner changed after contract proof: %s\n' "$service" >&2
+                return 1
+            fi
+            printf 'live-contract-ready service=%s owner=%s attempt=%s\n' \
+                "$service" "$owner" "$attempt" >&2
+            printf '%s\n' "$reply"
+            return 0
+        fi
+        case "$reply" in
+            *"Connection timed out"* | *"Unknown object"* | *"UnknownObject"*)
+                printf 'D-Bus contract not yet responsive service=%s attempt=%s: %s\n' \
+                    "$service" "$attempt" "$reply" >&2
+                ;;
+            *)
+                printf 'D-Bus contract failed unexpectedly service=%s: %s\n' \
+                    "$service" "$reply" >&2
+                return 1
+                ;;
+        esac
+        if [[ "$attempt" -lt 8 ]]; then
+            sleep 0.2
+        fi
+    done
+    printf 'D-Bus contract never became responsive: %s\n' "$service" >&2
+    return 1
+}
+
 stage install-assets
 if ! id -u linura-authority >/dev/null 2>&1; then
     sudo -n useradd --system --no-create-home --home-dir /var/lib/linura-authority --shell /usr/sbin/nologin linura-authority
@@ -115,8 +177,10 @@ sudo -n systemctl is-active --quiet linura-authorityd.service
 test -x /usr/bin/pkcheck
 
 stage live-contract-introspection
-authority_intro="$(busctl --system introspect "$authority_dest" "$authority_path" "$authority_iface")"
-executor_intro="$(busctl --system introspect "$executor_dest" "$executor_path" "$executor_iface")"
+authority_intro="$(require_live_contract "$authority_dest" "$authority_path" \
+    "$authority_iface" ConvergeSystemdActiveState linura-authorityd.service)"
+executor_intro="$(require_live_contract "$executor_dest" "$executor_path" \
+    "$executor_iface" SetManagedActiveState linura-executor-systemd.service)"
 grep -F 'ConvergeSystemdActiveState' <<<"$authority_intro"
 grep -F 'SetManagedActiveState' <<<"$executor_intro"
 echo "live-contracts=present"

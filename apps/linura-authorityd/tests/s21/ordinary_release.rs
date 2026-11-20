@@ -510,6 +510,18 @@ impl Observer for OriginalObserver {
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
         m.ordinary_root_reads += 1;
+        if m.ordinary_root_reads == 2 {
+            if m.ordinary_root_fault == 12 {
+                // The after probe stays fresh; the ORIGINAL before probe must
+                // still expire across the complete Root/native bracket.
+                std::thread::sleep(std::time::Duration::from_millis(2001));
+            }
+            if m.ordinary_root_fault == 13 {
+                // A complete native comparison cannot replace fresh durable
+                // parent authentication after the final independent probe.
+                m.ordinary_checkpoint_unavailable = true;
+            }
+        }
         if m.ordinary_root_fault == 1 || m.ordinary_root_power_retired {
             return Err(ProviderError::Unavailable(
                 "simulated original witness lost".into(),
@@ -606,7 +618,7 @@ pub(super) fn original_source_and_terminal_inspection_are_read_only_across_resta
         DisplayContinuationAction::Confirm,
         DisplayContinuationAction::Revert,
     ] {
-        for fault in 0..=11 {
+        for fault in 0..=13 {
             let database = TestDatabase::new();
             let machine = Arc::new(Mutex::new(Machine::default()));
             let mut control =
@@ -684,6 +696,16 @@ pub(super) fn original_source_and_terminal_inspection_are_read_only_across_resta
                 fault == 0,
                 "{action:?} fault {fault}: {report:?}"
             );
+            if matches!(fault, 12 | 13) {
+                assert_eq!(
+                    machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!())
+                        .ordinary_root_reads,
+                    2,
+                    "composed verification must reach the final Root probe for fault {fault}"
+                );
+            }
             {
                 let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
                 m.ordinary_root_fault = 0;

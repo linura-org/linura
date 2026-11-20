@@ -146,16 +146,34 @@ fn terminal_release_expires_at(
     Ok(deadline)
 }
 
+// Immutable authenticated comparison material, never a current observation or
+// authority. No store read guard survives construction or a provider boundary.
+struct OrdinaryReleaseHistory {
+    request: PlanDesiredStateRequest,
+    principal_id: PrincipalId,
+    transaction: TransactionId,
+    snapshot: linura_transaction::TransactionSnapshot,
+    request_digest: linura_transaction::ContentDigest,
+    history: DisplayHistory,
+    terminal_digest: linura_transaction::ContentDigest,
+    terminal_timestamp: u64,
+    expected_state: &'static str,
+    restored: bool,
+    dispatch_digest: String,
+    checkpoint: crate::display_checkpoint::Checkpoint,
+}
+
+// A private unfinished read-only comparison. It cannot escape as an inspection
+// until fresh complete durable history is checked after every native probe.
+#[derive(Debug)]
+struct PendingOrdinaryReleaseComparison {
+    after: ObservationEnvelope,
+}
+
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
-    /// Inspect eligibility only; never releases power, S17 input, startup
-    /// admission, native surface coverage, or checkpoint ownership.
-    ///
-    /// A historical Confirmed/Restored receipt is insufficient. The current
-    /// durable authority snapshot, immutable journal chain and native baseline
-    /// checkpoint must agree; two fresh attempt probes must straddle an
-    /// independent layout verification and preserve the terminal state. A
-    /// second durable read prevents a stale report from adopting changed
-    /// authority history. None of the returned digests is a capability token.
+    /// Inspect eligibility only. Every current source is independently probed;
+    /// complete authenticated durable history brackets those probes. This
+    /// produces no effect, approval, continuation or checkpoint-removal grant.
     pub fn inspect_ordinary_display_release<
         P: DisplayTransactionPort,
         V: IndependentDisplayVerifier,
@@ -166,16 +184,25 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         port: &mut P,
         verifier: &mut V,
     ) -> Result<OrdinaryDisplayReleaseInspection, ManagedLifecycleError> {
-        // Authenticate all immutable journal rows once for this synchronous
-        // read. End the snapshot before either independent provider is called.
+        let history = self.ordinary_release_history(&principal, request_id)?;
+        let pending = self.compare_ordinary_release_native(&history, port, verifier)?;
         let checked = self.checked_display_history()?;
-        let request = checked.original_request(&principal, request_id)?;
+        self.finish_ordinary_release_comparison(&checked, &principal, &history, pending)
+    }
+
+    fn ordinary_release_history(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<OrdinaryReleaseHistory, ManagedLifecycleError> {
+        let checked = self.checked_display_history()?;
+        let request = checked.original_request(principal, request_id)?;
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
-        self.authority
-            .assert_request_matches(&principal, &request)?;
         let transaction = TransactionId::for_namespace(&principal_id, request_id);
-        let snapshot = self.authority.snapshot(&transaction)?;
+        let snapshot = self
+            .authority
+            .matching_request_snapshot(principal, &request)?;
         let request_digest = crate::durable_authority::digest_request(&request)?;
         let history = DisplayHistory::load(
             self.display_journal()?,
@@ -205,27 +232,54 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             &snapshot,
             now_ms()?,
         )?;
-        let query = DisplayAttemptQuery::new(&request, dispatched)?;
-        drop(checked);
+        Ok(OrdinaryReleaseHistory {
+            request,
+            principal_id,
+            transaction,
+            snapshot,
+            request_digest,
+            history,
+            terminal_digest,
+            terminal_timestamp,
+            expected_state,
+            restored,
+            dispatch_digest,
+            checkpoint,
+        })
+    }
+
+    fn compare_ordinary_release_native<P: DisplayTransactionPort, V: IndependentDisplayVerifier>(
+        &self,
+        history: &OrdinaryReleaseHistory,
+        port: &mut P,
+        verifier: &mut V,
+    ) -> Result<PendingOrdinaryReleaseComparison, ManagedLifecycleError> {
+        let dispatched = history
+            .history
+            .dispatched
+            .as_ref()
+            .ok_or_else(invalid_original)?;
+        let query = DisplayAttemptQuery::new(&history.request, dispatched)?;
         let first = port
             .observe_attempt(&query)
             .map_err(ManagedLifecycleError::Verification)?;
-        if first.observed_at_unix_ms <= terminal_timestamp
-            || attempt_state_at(&first, &request, dispatched, now_ms()?)? != expected_state
+        if first.observed_at_unix_ms <= history.terminal_timestamp
+            || attempt_state_at(&first, &history.request, dispatched, now_ms()?)?
+                != history.expected_state
         {
             return Err(ManagedLifecycleError::Verification(
                 "ordinary display release has no fresh terminal native observation".into(),
             ));
         }
-        let target = if restored {
+        let target = if history.restored {
             DisplayVerificationTarget::Restored {
-                native_baseline_guard: checkpoint.native_guard,
+                native_baseline_guard: history.checkpoint.native_guard,
             }
         } else {
             DisplayVerificationTarget::Desired
         };
         if !matches!(
-            verifier.verify_layout(&request, target, first.observed_at_unix_ms),
+            verifier.verify_layout(&history.request, target, first.observed_at_unix_ms),
             Ok(outcome) if outcome.disposition == VerificationDisposition::Satisfied
         ) {
             return Err(ManagedLifecycleError::Verification(
@@ -238,67 +292,82 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if after.sequence <= first.sequence
             || after.observed_at_unix_ms < first.observed_at_unix_ms
             || after.attributes != first.attributes
-            || attempt_state_at(&after, &request, dispatched, now_ms()?)? != expected_state
+            || attempt_state_at(&after, &history.request, dispatched, now_ms()?)?
+                != history.expected_state
         {
             return Err(ManagedLifecycleError::Verification(
                 "ordinary display release changed during independent verification".into(),
             ));
         }
-        // A new full check sees changes made across the provider boundary.
-        let checked = self.checked_display_history()?;
-        if checked.original_request(&principal, request_id)? != request {
+        Ok(PendingOrdinaryReleaseComparison { after })
+    }
+
+    fn finish_ordinary_release_comparison(
+        &self,
+        checked: &CheckedDisplayHistoryRead<'_>,
+        principal: &AuthenticatedPrincipal,
+        history: &OrdinaryReleaseHistory,
+        pending: PendingOrdinaryReleaseComparison,
+    ) -> Result<OrdinaryDisplayReleaseInspection, ManagedLifecycleError> {
+        if checked.original_request(principal, &history.request.request_id)? != history.request {
             return Err(invalid_original());
         }
-        let current = self.authority.snapshot(&transaction)?;
-        if current != snapshot {
+        let current = self
+            .authority
+            .matching_request_snapshot(principal, &history.request)?;
+        if current != history.snapshot {
             return Err(ManagedLifecycleError::Authority(
                 "ordinary display release authority changed during verification".into(),
             ));
         }
         let current_history = DisplayHistory::load(
             self.display_journal()?,
-            &principal_id,
-            &request_digest,
-            &transaction,
+            &history.principal_id,
+            &history.request_digest,
+            &history.transaction,
             current.state,
             now_ms()?,
         )?;
         let (current_terminal, current_state, current_restored) =
             terminal_for_inspection(&current_history, current.state)?;
-        if current_terminal.digest() != &terminal_digest
-            || current_state != expected_state
-            || current_restored != restored
-            || current_history
-                .dispatched
-                .as_ref()
-                .is_none_or(|record| record.digest() != dispatched.digest())
+        if current_terminal.digest() != &history.terminal_digest
+            || current_state != history.expected_state
+            || current_restored != history.restored
+            || current_history.dispatched.as_ref().is_none_or(|record| {
+                history
+                    .history
+                    .dispatched
+                    .as_ref()
+                    .is_none_or(|old| record.digest() != old.digest())
+            })
             || crate::display_checkpoint::Checkpoint::load(
                 self.display_journal()?,
-                &request,
+                &history.request,
                 &current,
                 now_ms()?,
             )?
             .native_guard
-                != checkpoint.native_guard
+                != history.checkpoint.native_guard
         {
             return Err(ManagedLifecycleError::Authority(
                 "ordinary display release durable provenance changed".into(),
             ));
         }
+        let after = pending.after;
         let expires_at_unix_ms =
             terminal_release_expires_at(after.observed_at_unix_ms, after.valid_for_ms, now_ms()?)?;
         Ok(OrdinaryDisplayReleaseInspection {
-            request_id: request.request_id,
-            transaction_id: transaction,
-            dispatch_digest,
-            terminal_record_digest: terminal_digest.as_str().into(),
+            request_id: history.request.request_id.clone(),
+            transaction_id: history.transaction.clone(),
+            dispatch_digest: history.dispatch_digest.clone(),
+            terminal_record_digest: history.terminal_digest.as_str().into(),
             durable_binding_digest: current.binding_digest.as_str().into(),
             observation_digest: crate::durable_authority::digest_observation(&after)?
                 .as_str()
                 .into(),
             observed_at_unix_ms: after.observed_at_unix_ms,
             expires_at_unix_ms,
-            restored,
+            restored: history.restored,
         })
     }
 }

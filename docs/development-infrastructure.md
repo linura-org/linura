@@ -299,6 +299,51 @@ own reviewed endpoint and access contract, while retaining the repository SHA,
 HTTPS restrictions, fresh guest identity and fail-closed checks. Do not mix
 qualification inputs with qualification-evidence buckets.
 
+## v0.6 VM accelerator and S21 fault-matrix observability
+
+The v0.6 managed-lifecycle qualification on GitHub-hosted Ubuntu x86_64 uses
+**explicit KVM** instead of QEMU TCG software emulation. This is a qualification
+*execution-substrate* change, not permission to modify native effects or remove
+tests. The job exclusively owns its disposable `/dev/kvm` access and checks the
+opened KVM character device and kernel API version **before** image retrieval,
+toolchain setup or any expensive build. A runner without usable KVM fails the
+infrastructure prerequisite; do **not** silently downgrade to TCG, change
+matrix acceptance or claim a qualified guest.
+
+The QEMU launch remains explicit (`--accel kvm`) and source-bound. The guest
+disk and cloud-init identities remain per-run disposable, with the original
+Ubuntu image hash and independent post-effect/SQLite evidence requirements.
+The record retains the requested accelerator; QEMU cannot start with the
+specified KVM accelerator if the host cannot create the VM.
+
+The qualification-execution envelope binds this v0.6 lane to the separately
+reviewed `ubuntu_24_04_qemu_kvm` guest profile (version 2), including the
+independently captured `virtualization=kvm` result and explicit
+`VM_ACCELERATION=kvm`. Other Ubuntu qualification lanes remain pinned to
+their established `ubuntu_24_04_qemu`/TCG profile. An old or substituted
+guest profile fails envelope validation; a successful guest test alone cannot
+overrule this identity binding.
+
+After native guest service installation, the host must not use a
+`Type=dbus` service name or `systemctl is-active` as proof that its object
+server is ready. The v0.6 guest checks the actual required Authority1 and
+Executor.Systemd1 methods, pins each independent D-Bus name owner throughout
+readiness, and rejects changed ownership, stopped units and incorrect
+interfaces immediately. Only startup-time transport nonresponse is retried
+under a bounded method-call budget; failure to obtain a real contract proof
+fails qualification and retains diagnostics, never a synthetic pass.
+
+The S21 guest regression retains three mandatory executions: 77 sequential
+fault tests, 77 two-thread concurrent tests and the original 11-case regression.
+The nested ordinary handoff test executes all 33 fault scenarios without
+injecting progress messages into the canonical Rust test-harness transcript.
+The independent evidence verifier requires exactly one intact harness result
+per reviewed test and rejects malformed or missing results. Performance
+measurements belong in a separately retained diagnostic stream, not in the
+accepted test transcript. This v0.6 VM does not replace S21 Level A actual-
+display acceptance, Level B interactive qualification or Level C/Q11 physical
+workstation tests.
+
 ## Dependency-input caching
 
 Canonical CI follows the same cache-authority boundary as the prepared v0.10 runtime substrate: caches accelerate immutable prerequisites but never become correctness authority. Repository-owned composite actions may retain Cargo registry/git inputs and Ubuntu package payloads only. Cache identities bind the reviewed implementation plus exact dependency/toolchain or runner-package resolution state; broad restore keys are forbidden.
