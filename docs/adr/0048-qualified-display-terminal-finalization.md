@@ -1190,3 +1190,32 @@ source changes during persistence refuse without claiming the original.
 This ordering removes avoidable synchronization from the independent-evidence
 window without widening that window, repeating probes or serializing the
 required concurrent gate.
+
+### Purpose-separated kept replacement comparison
+
+Kept adoption has a separate bounded `LNKA:1` material format and
+`display:adopt-kept` resource scope. It retains the complete original Keep
+release/layout material, committed kept and release desired-state/graph/
+provenance identities, released/adopted/state ancestry, explicit complete output
+bijection, current baseline/desired/lock/source guard and actual new protection
+service invocation. Its comparison mapping permits Root-only replacement with
+unchanged compositor/geometry. Original-baseline restoration keeps its distinct
+changed-compositor restriction and ordinary Apply keeps its native no-change
+refusal. Canonical layout order does not constrain native inventory enumeration;
+all complete generation-bound output identities must still match.
+
+The protection-generation probe uses the existing immutable supervised-service
+and kernel-credential attestation before/after within one original two-second
+deadline. It returns an identity-only canonical `ObservationEnvelope` on an
+exact boot-scoped resource. It attests neither scanout nor held protection,
+ownership, rollback, Keep, retirement or permission. Closed schema, authority,
+provider/capability/resource, nonzero sequence and original expiry remain required.
+
+Control derives candidate bytes from the authenticated retained kept/release
+reader and separately fresh display and generation envelopes. Exact comparison
+rederives all material; a decodable or formerly returned candidate has no special
+standing. This comparison source does not complete replacement admission:
+current S17/logind/KMS/source qualification, actual replacement/loss, canonical
+managed plan/review, fresh protected approval, durable preparation/revalidation,
+new Root/native lifetime, independent completion and reference-aware bounded
+cleanup remain required. Public display mutations remain Unsupported.

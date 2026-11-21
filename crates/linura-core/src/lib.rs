@@ -1,8 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod display_adoption;
 mod display_intent;
 mod display_layout;
 mod display_recovery;
+pub use display_adoption::{
+    DisplayKeptAdoptionLineage, DisplayKeptAdoptionMapping, DisplayKeptAdoptionMaterial,
+    DisplayKeptAdoptionReplacement, DisplayKeptAdoptionScope, DisplayProtectionInvocationId,
+    MAX_DISPLAY_KEPT_ADOPTION_BYTES,
+};
 pub use display_intent::{DisplayLayoutIntent, DisplayLayoutMaterial, MAX_DISPLAY_INTENT_BYTES};
 pub use display_layout::{
     DisplayLayout, DisplayLayoutError, DisplayMode, DisplayOutputLayout, DisplayScale,

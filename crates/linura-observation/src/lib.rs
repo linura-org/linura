@@ -32,6 +32,10 @@ pub use display_ordinary_release::{
     DisplayOrdinaryReleaseFacts,
 };
 mod display;
+mod display_protection_generation;
+pub use display_protection_generation::{
+    DISPLAY_PROTECTION_GENERATION_CAPABILITY, DisplayProtectionGenerationFacts,
+};
 mod display_completion;
 mod display_current;
 mod display_root_retirement;

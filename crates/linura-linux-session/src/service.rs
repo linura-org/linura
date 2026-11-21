@@ -69,6 +69,64 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    /// A read-only identity observation from the existing fixed supervisor and
+    /// kernel-credential attestation. No old record or caller-supplied UUID can
+    /// select the actual service invocation. All rechecks share one deadline.
+    pub(crate) fn observe_display_protection_generation(
+        &self,
+        boot: &linura_core::BootId,
+        sequence: u64,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        use linura_observation::{
+            DISPLAY_PROTECTION_GENERATION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
+            DisplayProtectionGenerationFacts, ObservationAuthority, ObservationEnvelope,
+        };
+        let started = Instant::now();
+        self.require_role(NativeSessionRole::Control)?;
+        let invalid = || "current protection generation unavailable".to_owned();
+        let began_boot = crate::owner::boot_ms()?;
+        let began_wall = crate::owner::unix_ms()?;
+        if sequence == 0 || crate::owner::current_boot()? != *boot {
+            return Err(invalid());
+        }
+        let identity = self.trusted_service(NativeSessionRole::DisplayProtection, started)?;
+        let invocation = protection_invocation(&identity.invocation)?;
+        if self.trusted_service(NativeSessionRole::DisplayProtection, started)? != identity
+            || crate::owner::current_boot()? != *boot
+        {
+            return Err(invalid());
+        }
+        let end_boot = crate::owner::boot_ms()?;
+        let now = crate::owner::unix_ms()?;
+        if began_boot == 0
+            || began_wall == 0
+            || end_boot
+                .checked_sub(began_boot)
+                .is_none_or(|age| age >= 2000)
+            || now.checked_sub(began_wall).is_none_or(|age| age >= 2000)
+            || started.elapsed() >= Duration::from_secs(2)
+        {
+            return Err(invalid());
+        }
+        let facts = DisplayProtectionGenerationFacts::new(boot.clone(), invocation, began_boot)
+            .map_err(|_| invalid())?;
+        let sample = ObservationEnvelope {
+            provider: linura_core::ProviderId::new(DISPLAY_RECOVERY_PROVIDER)
+                .map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(DISPLAY_PROTECTION_GENERATION_CAPABILITY)
+                .map_err(|_| invalid())?,
+            resource: DisplayProtectionGenerationFacts::resource(boot).map_err(|_| invalid())?,
+            authority: ObservationAuthority::NativeApi,
+            observed_at_unix_ms: began_wall,
+            valid_for_ms: 2000,
+            sequence,
+            attributes: facts.attributes(),
+        };
+        DisplayProtectionGenerationFacts::from_envelope(&sample, boot, now)
+            .map_err(|_| invalid())?;
+        Ok(sample)
+    }
+
     pub(crate) fn observe_original_display_completion(
         &self,
         scope: &linura_core::DisplayRecoveryScope,
@@ -2458,6 +2516,27 @@ impl NativeSessionChannel {
     }
 }
 
+fn protection_invocation(
+    bytes: &[u8],
+) -> Result<linura_core::DisplayProtectionInvocationId, String> {
+    let bytes: &[u8; 16] = bytes
+        .try_into()
+        .map_err(|_| "protection invocation has an invalid length")?;
+    let text = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    linura_core::DisplayProtectionInvocationId::new(format!(
+        "{}-{}-{}-{}-{}",
+        &text[..8],
+        &text[8..12],
+        &text[12..16],
+        &text[16..20],
+        &text[20..]
+    ))
+    .map_err(|_| "protection invocation is invalid".into())
+}
+
 pub(crate) fn field<'a, T: TryFrom<&'a OwnedValue>>(
     properties: &'a HashMap<String, OwnedValue>,
     name: &str,
@@ -2486,6 +2565,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protection_generation_decodes_exact_supervisor_bytes_without_transport_identity() {
+        let bytes = [
+            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0x4d, 0xef, 0x81, 0x23, 0x45, 0x67, 0x89, 0xab,
+            0xcd, 0xef,
+        ];
+        assert_eq!(
+            protection_invocation(&bytes).map(|v| v.as_str().to_owned()),
+            Ok("12345678-9abc-4def-8123-456789abcdef".into())
+        );
+        for length in [0, 1, 15, 17, 32] {
+            assert!(protection_invocation(&vec![1; length]).is_err());
+        }
+        assert!(protection_invocation(&[0; 16]).is_err());
+        let mut changed = bytes;
+        changed[15] ^= 1;
+        assert_ne!(
+            protection_invocation(&bytes),
+            protection_invocation(&changed)
+        );
+    }
 
     #[test]
     fn protection_mode_is_not_an_executor_or_control_launch() {

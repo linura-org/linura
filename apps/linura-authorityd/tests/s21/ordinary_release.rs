@@ -4092,6 +4092,7 @@ fn assert_retained_kept_intent_is_historical(
         assert_eq!(candidate.baseline(), &baseline);
         assert_eq!(candidate.desired(), &desired);
         assert_ne!(candidate.desired(), &old_baseline);
+        assert_replacement_material_is_fresh_and_bound(&history);
     } else {
         assert!(
             history.is_err(),
@@ -4109,6 +4110,189 @@ fn assert_retained_kept_intent_is_historical(
         ),
         before
     );
+}
+
+// Explicitly simulated canonical observations. These exercise real retained
+// Control/SQLite joins, never a native service restart or qualified VM evidence.
+fn assert_replacement_material_is_fresh_and_bound(
+    history: &linura_control::RetainedOrdinaryDisplayKeptIntent,
+) {
+    use linura_core::{DisplayKeptAdoptionMapping, DisplayProtectionInvocationId};
+    use linura_observation::{
+        DISPLAY_PROTECTION_GENERATION_CAPABILITY, DisplayProtectionGenerationFacts,
+    };
+    for root_only in [false, true] {
+        let (mapping, baseline, capabilities) = if root_only {
+            let (_, _, inventory, caps) = layouts();
+            let mapping = value(DisplayKeptAdoptionMapping::new(
+                inventory.clone(),
+                inventory.clone(),
+                inventory
+                    .outputs()
+                    .iter()
+                    .cloned()
+                    .zip(inventory.outputs().iter().cloned())
+                    .collect(),
+            ));
+            (mapping, history.desired_layout().clone(), caps)
+        } else {
+            let (mapping, baseline, caps, _, _) = replacement_candidate_fixture();
+            (mapping, baseline, caps)
+        };
+        let now = 1000;
+        let inventory = mapping.current();
+        let mut display = s17_managed_lock::session_observation(1);
+        display.provider = value(ProviderId::new("hyprland"));
+        display.capability = value(CapabilityId::new("display.outputs.observe"));
+        display.resource = value(inventory.topology().resource_id());
+        display.observed_at_unix_ms = now;
+        display.valid_for_ms = 2000;
+        let metadata = inventory
+            .outputs()
+            .iter()
+            .map(|id| {
+                (
+                    id.clone(),
+                    value(DisplayRecoveryMetadata::new(
+                        root_only,
+                        "a".repeat(64),
+                        "b".repeat(64),
+                    )),
+                )
+            })
+            .collect();
+        display.attributes = value(display_recovery_observation_attributes(
+            inventory,
+            &capabilities,
+            &baseline,
+            &inventory.outputs().iter().cloned().collect(),
+            &metadata,
+        ));
+        let generation = value(DisplayProtectionGenerationFacts::new(
+            inventory.topology().session().boot().clone(),
+            value(DisplayProtectionInvocationId::new(
+                "77777777-7777-4777-8777-777777777777",
+            )),
+            100,
+        ));
+        let mut protection = display.clone();
+        protection.provider = value(ProviderId::new(
+            linura_observation::DISPLAY_RECOVERY_PROVIDER,
+        ));
+        protection.capability = value(CapabilityId::new(DISPLAY_PROTECTION_GENERATION_CAPABILITY));
+        protection.resource = value(DisplayProtectionGenerationFacts::resource(
+            generation.boot(),
+        ));
+        protection.attributes = generation.attributes();
+        let text = value(history.replacement_candidate_material(
+            &mapping,
+            &display,
+            &protection,
+            s17_managed_lock::lock_id(),
+            now,
+        ));
+        value(history.validate_replacement_candidate_material(&text, &display, &protection, now));
+        let decoded = value(linura_core::DisplayKeptAdoptionMaterial::decode(&text));
+        assert_eq!(
+            decoded.lineage().kept_graph,
+            history.material().graph_digest.hex()
+        );
+        assert_eq!(
+            decoded.lineage().kept_provenance,
+            history.material().provenance_digest.hex()
+        );
+        assert_eq!(
+            decoded.lineage().release_binding,
+            history.release_material().snapshot.binding_digest.hex()
+        );
+        assert_eq!(decoded.lineage().state_record, history.state_record().hex());
+        assert_eq!(decoded.protection(), generation.invocation());
+        for time in [999, 3000] {
+            assert!(
+                history
+                    .validate_replacement_candidate_material(&text, &display, &protection, time)
+                    .is_err()
+            );
+        }
+        let mut changed = protection.clone();
+        changed.attributes.insert(
+            "protection_invocation".into(),
+            ObservedValue::Text("88888888-8888-4888-8888-888888888888".into()),
+        );
+        assert!(
+            history
+                .validate_replacement_candidate_material(&text, &display, &changed, now)
+                .is_err()
+        );
+        let fresh = value(history.replacement_candidate_material(
+            &mapping,
+            &display,
+            &changed,
+            s17_managed_lock::lock_id(),
+            now,
+        ));
+        assert_ne!(fresh, text);
+        value(history.validate_replacement_candidate_material(&fresh, &display, &changed, now));
+        for index in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] {
+            let mut fields = kept_adoption_fields(&text);
+            fields[index] = match index {
+                0 => "another-retained-release".into(),
+                3 => "9".into(),
+                4 => "999".into(),
+                14 => "99999999-9999-4999-8999-999999999999".into(),
+                _ => "f".repeat(64),
+            };
+            let changed = format!(
+                "LNKA:1;{}",
+                fields
+                    .iter()
+                    .map(|f| format!("{}:{f};", f.len()))
+                    .collect::<String>()
+            );
+            value(linura_core::DisplayKeptAdoptionMaterial::decode(&changed));
+            assert!(
+                history
+                    .validate_replacement_candidate_material(&changed, &display, &protection, now)
+                    .is_err(),
+                "field {index}"
+            );
+        }
+        let mut stale_display = display.clone();
+        stale_display.observed_at_unix_ms = 1;
+        assert!(
+            history
+                .validate_replacement_candidate_material(
+                    &text,
+                    &stale_display,
+                    &protection,
+                    now + 1001
+                )
+                .is_err()
+        );
+        let mut wrong = protection.clone();
+        wrong.authority = ObservationAuthority::SyntheticTest;
+        assert!(
+            history
+                .validate_replacement_candidate_material(&text, &display, &wrong, now)
+                .is_err()
+        );
+    }
+}
+
+fn kept_adoption_fields(text: &str) -> Vec<String> {
+    let mut rest = text
+        .strip_prefix("LNKA:1;")
+        .unwrap_or_else(|| unreachable!());
+    let mut fields = Vec::new();
+    while !rest.is_empty() {
+        let (n, tail) = rest.split_once(':').unwrap_or_else(|| unreachable!());
+        let n: usize = value(n.parse());
+        fields.push(tail[..n].into());
+        rest = tail[n..]
+            .strip_prefix(';')
+            .unwrap_or_else(|| unreachable!());
+    }
+    fields
 }
 
 fn assert_ordinary_adopted_semantics(
@@ -4168,7 +4352,7 @@ fn assert_ordinary_adopted_semantics(
 }
 
 fn replacement_candidate_fixture() -> (
-    linura_core::DisplayRecoveryMapping,
+    linura_core::DisplayKeptAdoptionMapping,
     DisplayLayout,
     Vec<NativeOutputCapabilities>,
     DisplayLayout,
@@ -4206,7 +4390,7 @@ fn replacement_candidate_fixture() -> (
             }],
         ))
     };
-    let mapping = value(linura_core::DisplayRecoveryMapping::new(
+    let mapping = value(linura_core::DisplayKeptAdoptionMapping::new(
         original.clone(),
         inventory.clone(),
         vec![(original.outputs()[0].clone(), output.clone())],

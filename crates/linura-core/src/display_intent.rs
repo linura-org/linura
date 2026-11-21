@@ -134,6 +134,37 @@ impl<'a> DisplayLayoutMaterial<'a> {
     pub const fn topology(&self) -> &DisplayTopologyId {
         &self.topology
     }
+    /// Structural selector comparison only, for complete private mapping
+    /// framing before native validation. Modes, layout safety, source identity
+    /// and current support still require `validate_native`; no capabilities are
+    /// synthesized from historical text or the supplied comparison inventory.
+    pub(crate) fn references_exact_output_set(&self, inventory: &DisplayOutputSet) -> bool {
+        if inventory.topology() != &self.topology {
+            return false;
+        }
+        let ordered: std::collections::BTreeSet<_> = inventory.outputs().iter().collect();
+        let Ok(resource) = self.topology.resource_id() else {
+            return false;
+        };
+        [self.baseline, self.desired].into_iter().all(|layout| {
+            let Some(body) = layout.strip_suffix(';') else {
+                return false;
+            };
+            let mut rows = body.split(';');
+            if rows.next() != Some("LNDL:1") || rows.next() != Some(resource.as_str()) {
+                return false;
+            }
+            for output in &ordered {
+                let Some(row) = rows.next() else {
+                    return false;
+                };
+                if !row.starts_with(&format!("{}:{}:", output.handle(), output.generation())) {
+                    return false;
+                }
+            }
+            rows.next().is_none()
+        })
+    }
     /// Exact historical layout comparison for a same-invocation successor.
     /// This does not establish current state, validate native capabilities, or
     /// authorize ownership transfer. Those require fresh independent evidence.

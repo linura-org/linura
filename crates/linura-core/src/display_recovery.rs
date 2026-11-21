@@ -34,23 +34,7 @@ impl DisplayRecoveryMapping {
         {
             return Err(DisplayLayoutError::ForeignOutput);
         }
-        if pairs.len() != original.outputs().len() || pairs.len() != replacement.outputs().len() {
-            return Err(DisplayLayoutError::IncompleteTopology);
-        }
-        let mut outputs = BTreeMap::new();
-        let mut destinations = BTreeSet::new();
-        for (source, destination) in pairs {
-            if !original.outputs().contains(&source)
-                || !replacement.outputs().contains(&destination)
-            {
-                return Err(DisplayLayoutError::ForeignOutput);
-            }
-            if !destinations.insert(destination.clone())
-                || outputs.insert(source, destination).is_some()
-            {
-                return Err(DisplayLayoutError::AmbiguousOutput);
-            }
-        }
+        let outputs = checked_bijection(&original, &replacement, pairs)?;
         Ok(Self {
             original,
             replacement,
@@ -133,45 +117,76 @@ impl DisplayRecoveryMapping {
         &self,
         baseline: &DisplayLayout,
     ) -> Result<Vec<DisplayOutputLayout>, DisplayLayoutError> {
-        if baseline.topology() != self.original.topology()
-            || baseline.outputs().len() != self.outputs.len()
-        {
+        remap_layout(&self.original, &self.outputs, baseline)
+    }
+}
+
+// Common bounded output comparison only. Purpose-specific constructors retain
+// their distinct lifetime restrictions; no provider or authority is inferred.
+pub(crate) fn checked_bijection(
+    original: &DisplayOutputSet,
+    replacement: &DisplayOutputSet,
+    pairs: Vec<(DisplayOutputId, DisplayOutputId)>,
+) -> Result<BTreeMap<DisplayOutputId, DisplayOutputId>, DisplayLayoutError> {
+    if pairs.len() != original.outputs().len() || pairs.len() != replacement.outputs().len() {
+        return Err(DisplayLayoutError::IncompleteTopology);
+    }
+    let mut outputs = BTreeMap::new();
+    let mut destinations = BTreeSet::new();
+    for (source, destination) in pairs {
+        if !original.outputs().contains(&source) || !replacement.outputs().contains(&destination) {
             return Err(DisplayLayoutError::ForeignOutput);
         }
-        let lookup = |source: &DisplayOutputId| {
-            self.outputs
-                .get(source)
-                .cloned()
-                .ok_or(DisplayLayoutError::ForeignOutput)
-        };
-        let mut restored = Vec::with_capacity(self.outputs.len());
-        for row in baseline.outputs() {
-            restored.push(match row {
-                DisplayOutputLayout::Disabled { output } => DisplayOutputLayout::Disabled {
-                    output: lookup(output)?,
-                },
-                DisplayOutputLayout::Enabled {
-                    output,
-                    mode,
-                    scale,
-                    transform,
-                    x,
-                    y,
-                    mirror,
-                } => DisplayOutputLayout::Enabled {
-                    output: lookup(output)?,
-                    mode: *mode,
-                    scale: *scale,
-                    transform: *transform,
-                    x: *x,
-                    y: *y,
-                    mirror: mirror.as_ref().map(lookup).transpose()?,
-                },
-            });
+        if !destinations.insert(destination.clone())
+            || outputs.insert(source, destination).is_some()
+        {
+            return Err(DisplayLayoutError::AmbiguousOutput);
         }
-        restored.sort_by(|a, b| a.output().cmp(b.output()));
-        Ok(restored)
     }
+    Ok(outputs)
+}
+
+pub(crate) fn remap_layout(
+    original: &DisplayOutputSet,
+    outputs: &BTreeMap<DisplayOutputId, DisplayOutputId>,
+    baseline: &DisplayLayout,
+) -> Result<Vec<DisplayOutputLayout>, DisplayLayoutError> {
+    if baseline.topology() != original.topology() || baseline.outputs().len() != outputs.len() {
+        return Err(DisplayLayoutError::ForeignOutput);
+    }
+    let lookup = |source: &DisplayOutputId| {
+        outputs
+            .get(source)
+            .cloned()
+            .ok_or(DisplayLayoutError::ForeignOutput)
+    };
+    let mut restored = Vec::with_capacity(outputs.len());
+    for row in baseline.outputs() {
+        restored.push(match row {
+            DisplayOutputLayout::Disabled { output } => DisplayOutputLayout::Disabled {
+                output: lookup(output)?,
+            },
+            DisplayOutputLayout::Enabled {
+                output,
+                mode,
+                scale,
+                transform,
+                x,
+                y,
+                mirror,
+            } => DisplayOutputLayout::Enabled {
+                output: lookup(output)?,
+                mode: *mode,
+                scale: *scale,
+                transform: *transform,
+                x: *x,
+                y: *y,
+                mirror: mirror.as_ref().map(lookup).transpose()?,
+            },
+        });
+    }
+    restored.sort_by(|a, b| a.output().cmp(b.output()));
+    Ok(restored)
 }
 
 #[cfg(test)]

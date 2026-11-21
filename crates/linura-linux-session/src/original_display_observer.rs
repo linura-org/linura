@@ -12,8 +12,9 @@ use linura_observation::{
     DISPLAY_ORDINARY_SUCCESSOR_CAPABILITY, DISPLAY_ORIGINAL_COMPLETION_CAPABILITY,
     DISPLAY_ORIGINAL_FINAL_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
     DISPLAY_ORIGINAL_POWER_RETIREMENT_CAPABILITY, DISPLAY_ORIGINAL_PROTECTION_CAPABILITY,
-    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_RECOVERY_PROVIDER,
-    DISPLAY_SUCCESSOR_CAPABILITY, ObservationEnvelope, ProviderAvailability, ProviderHealth,
+    DISPLAY_ORIGINAL_ROOT_RETIREMENT_CAPABILITY, DISPLAY_PROTECTION_GENERATION_CAPABILITY,
+    DISPLAY_RECOVERY_PROVIDER, DISPLAY_SUCCESSOR_CAPABILITY, DisplayProtectionGenerationFacts,
+    ObservationEnvelope, ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
 
@@ -40,6 +41,7 @@ impl Observer for NativeOriginalDisplayObserver {
     }
     fn observation_capabilities(&self) -> Vec<Capability> {
         [
+            DISPLAY_PROTECTION_GENERATION_CAPABILITY,
             DISPLAY_SUCCESSOR_CAPABILITY,
             DISPLAY_ORDINARY_SUCCESSOR_CAPABILITY,
             DISPLAY_ORDINARY_ORIGINAL_CAPABILITY,
@@ -61,7 +63,7 @@ impl Observer for NativeOriginalDisplayObserver {
                 .unwrap_or_else(|e| unreachable!("fixed capability: {e}")),
             provider: Some(self.observer_id()),
             support: SupportLevel::Supported,
-            reason: Some("retained original protection probe; no restoration authority".into()),
+            reason: Some("bounded protection observation; no execution authority".into()),
         })
         .collect()
     }
@@ -69,6 +71,7 @@ impl Observer for NativeOriginalDisplayObserver {
         matches!(
             capability.as_str(),
             DISPLAY_SUCCESSOR_CAPABILITY
+                | DISPLAY_PROTECTION_GENERATION_CAPABILITY
                 | DISPLAY_ORDINARY_SUCCESSOR_CAPABILITY
                 | DISPLAY_ORDINARY_ORIGINAL_CAPABILITY
                 | DISPLAY_ORDINARY_RELEASE_CAPABILITY
@@ -101,7 +104,7 @@ impl Observer for NativeOriginalDisplayObserver {
     }
     fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
         Err(ProviderError::Unsupported(
-            "original protection requires an exact retained-attempt and invocation scope".into(),
+            "protection observation requires an exact boot or retained-attempt scope".into(),
         ))
     }
     fn observe_authoritative(
@@ -122,6 +125,14 @@ impl Observer for NativeOriginalDisplayObserver {
             .map_err(|_| {
                 ProviderError::Unavailable("original display protection sequence exhausted".into())
             })?;
+        if capability.as_str() == DISPLAY_PROTECTION_GENERATION_CAPABILITY {
+            let boot = DisplayProtectionGenerationFacts::boot_from_resource(resource)
+                .map_err(|e| ProviderError::InvalidState(e.to_string()))?;
+            return self
+                .channel
+                .observe_display_protection_generation(&boot, sequence + 1)
+                .map_err(ProviderError::Unavailable);
+        }
         if capability.as_str() == DISPLAY_ORDINARY_FINAL_RETIREMENT_CAPABILITY {
             let scope = linura_core::DisplayOrdinaryReleaseScope::from_resource(resource)
                 .map_err(|e| ProviderError::InvalidState(e.to_string()))?;

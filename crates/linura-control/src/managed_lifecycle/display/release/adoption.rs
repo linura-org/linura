@@ -68,7 +68,7 @@ impl OrdinaryDisplayCommittedAdoption {
     /// Revert and expiry cannot be promoted into fulfilled original intent.
     pub fn replacement_layout_candidate(
         &self,
-        mapping: &linura_core::DisplayRecoveryMapping,
+        mapping: &linura_core::DisplayKeptAdoptionMapping,
         current: linura_core::DisplayLayout,
         capabilities: &[linura_core::NativeOutputCapabilities],
         lock: SessionLockId,
@@ -83,7 +83,7 @@ impl OrdinaryDisplayCommittedAdoption {
             return Err(invalid_original());
         }
         mapping
-            .desired_state_candidate(&self.semantics.layout, current, capabilities, lock)
+            .candidate(&self.semantics.layout, current, capabilities, lock)
             .map_err(|_| invalid_original())
     }
 }

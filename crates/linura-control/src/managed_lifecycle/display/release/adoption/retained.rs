@@ -14,6 +14,10 @@ pub struct RetainedOrdinaryDisplayKeptIntent {
     released: ContentDigest,
     adopted: ContentDigest,
     state: ContentDigest,
+    // Authenticated historical shape only; never exposed as a current sample.
+    historical: linura_observation::DisplayObservationFacts,
+    release_text: String,
+    release_dispatch: ComponentDigest,
 }
 impl RetainedOrdinaryDisplayKeptIntent {
     pub const fn original_request(&self) -> &PlanDesiredStateRequest {
@@ -48,14 +52,117 @@ impl RetainedOrdinaryDisplayKeptIntent {
     /// cannot stand in for that path or authorize reference/artifact retirement.
     pub fn replacement_layout_candidate(
         &self,
-        mapping: &linura_core::DisplayRecoveryMapping,
+        mapping: &linura_core::DisplayKeptAdoptionMapping,
         current: DisplayLayout,
         capabilities: &[linura_core::NativeOutputCapabilities],
         lock: SessionLockId,
     ) -> Result<linura_core::DisplayLayoutIntent, ManagedLifecycleError> {
         mapping
-            .desired_state_candidate(&self.desired, current, capabilities, lock)
+            .candidate(&self.desired, current, capabilities, lock)
             .map_err(|_| invalid_original())
+    }
+
+    /// Complete proposal derived from authenticated kept/release ancestry and
+    /// separately fresh canonical observations. It cannot establish Root loss,
+    /// native admission, approval, preparation or permission to retire anything.
+    pub fn replacement_candidate_material(
+        &self,
+        mapping: &linura_core::DisplayKeptAdoptionMapping,
+        display: &ObservationEnvelope,
+        protection: &ObservationEnvelope,
+        lock: SessionLockId,
+        now: u64,
+    ) -> Result<String, ManagedLifecycleError> {
+        use linura_core::{DisplayKeptAdoptionLineage, DisplayKeptAdoptionMaterial};
+        use linura_observation::{DisplayObservationFacts, DisplayProtectionGenerationFacts};
+        let current =
+            DisplayObservationFacts::from_envelope(display, mapping.current().topology(), now)
+                .map_err(|_| invalid_original())?;
+        let root = DisplayProtectionGenerationFacts::from_envelope(
+            protection,
+            current.inventory().topology().session().boot(),
+            now,
+        )
+        .map_err(|_| invalid_original())?;
+        let text = self
+            .original
+            .desired_state
+            .get("layout")
+            .ok_or_else(invalid_original)?;
+        let original = DisplayLayoutMaterial::decode(text)
+            .map_err(|_| invalid_original())?
+            .validate_native(self.historical.inventory(), self.historical.capabilities())
+            .map_err(|_| invalid_original())?;
+        if original.desired() != &self.desired {
+            return Err(invalid_original());
+        }
+        let candidate = self.replacement_layout_candidate(
+            mapping,
+            current.layout().clone(),
+            current.capabilities(),
+            lock,
+        )?;
+        let guard = linura_provider_sdk::display_baseline_guard(&current)
+            .map_err(|_| invalid_original())?;
+        let snapshot = &self.release_material.snapshot;
+        let release = linura_core::DisplayOrdinaryReleaseMaterial::decode(&self.release_text)
+            .map_err(|_| invalid_original())?;
+        if snapshot.state != TransactionState::Committed
+            || snapshot.request_id != self.release.request_id
+            || release.lineage().original_request != self.original.request_id
+        {
+            return Err(invalid_original());
+        }
+        DisplayKeptAdoptionMaterial::encode(
+            &DisplayKeptAdoptionLineage {
+                release_request: self.release.request_id.clone(),
+                release_dispatch: &self.release_dispatch.to_hex(),
+                release_binding: snapshot.binding_digest.hex(),
+                release_generation: snapshot.current_generation,
+                release_state_version: snapshot.state_version,
+                release_desired: self.release_material.desired_state_digest.hex(),
+                release_graph: self.release_material.graph_digest.hex(),
+                release_provenance: self.release_material.provenance_digest.hex(),
+                kept_desired: self.material.desired_state_digest.hex(),
+                kept_graph: self.material.graph_digest.hex(),
+                kept_provenance: self.material.provenance_digest.hex(),
+                released_record: self.released.hex(),
+                adopted_record: self.adopted.hex(),
+                state_record: self.state.hex(),
+            },
+            root.invocation(),
+            &guard.to_hex(),
+            &self.release_text,
+            &original,
+            &candidate,
+            mapping,
+        )
+        .map_err(|_| invalid_original())
+    }
+
+    /// Exact comparison for later canonical planning/revalidation. A previously
+    /// returned proposal is rederived from the current envelopes and all full
+    /// authenticated historical identities, never trusted because it decodes.
+    pub fn validate_replacement_candidate_material(
+        &self,
+        text: &str,
+        display: &ObservationEnvelope,
+        protection: &ObservationEnvelope,
+        now: u64,
+    ) -> Result<(), ManagedLifecycleError> {
+        let material = linura_core::DisplayKeptAdoptionMaterial::decode(text)
+            .map_err(|_| invalid_original())?;
+        let derived = self.replacement_candidate_material(
+            material.mapping(),
+            display,
+            protection,
+            material.current().lock().clone(),
+            now,
+        )?;
+        if derived != text {
+            return Err(invalid_original());
+        }
+        Ok(())
     }
 }
 
@@ -285,6 +392,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             released: released.digest(),
             adopted: adopted.digest(),
             state: state.digest(),
+            historical: history.checkpoint.historical_facts.clone(),
+            release_text: intent.material().into(),
+            release_dispatch: ComponentDigest::parse_hex(&ready.fields[8])
+                .map_err(|_| invalid_original())?,
         })
     }
 }

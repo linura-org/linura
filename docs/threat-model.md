@@ -1509,3 +1509,29 @@ status probes remain mandatory. A fresh terminal scope has new independently bou
 review clocks, never a renewed old execution window. Ordinary unlock and power
 preemption gates stay intact while display protection is held. Native approval does
 not quiesce witnesses, retire Root protection or qualify ordinary admission.
+## Kept replacement comparison boundary
+
+Kept-adoption material is untrusted comparison input even when decoded or derived
+from retained history. The retained reader authenticates the complete original
+Keep/release and semantic graph/provenance ancestry; exact material rederivation
+rejects swapped request/dispatch/binding/generation/state, semantic digests,
+completion ancestry, source guard or protection invocation. Revert/expiry cannot
+become fulfilled kept intent. Complete generation-bound output identities are
+required independently of enumeration order; ambiguous or incomplete mappings
+refuse. Historical capabilities validate stored shape only.
+
+The new identity-only protection probe derives the real supervised invocation
+from fixed-service kernel credentials and immutable unit/image checks, comparing
+before/after under one original deadline. Exact boot/provider/capability/NativeApi
+authority, closed schema, sequence and original two-second freshness are required;
+future, expired and overflowing windows refuse. A caller UUID, PID, old signed
+record, matching geometry or successful identity observation cannot establish
+Root loss, current protection, a lease, native continuation or permission.
+
+Replacement admission still requires its own complete canonical managed effect,
+fresh protected review/approval, durable preparation/revalidation and actual new
+Root/native rollback and independently verified completion. Current S17/logind/
+KMS/source facts are joined only by Control. Actual reference retirement and
+bounded authenticated archival cleanup remain unfinished; no generic privileged
+cleanup or history-to-authority path is introduced. Public display mutations
+remain Unsupported.
