@@ -704,6 +704,14 @@ def load_contract(root: Path = ROOT) -> dict:
             "distribution_version": "24.04",
             "package_manager": "dpkg",
         },
+        "ubuntu_24_04_qemu_kvm": {
+            "architecture": "x86_64",
+            "virtualization": "kvm",
+            "acceleration": "kvm",
+            "distribution_id": "ubuntu",
+            "distribution_version": "24.04",
+            "package_manager": "dpkg",
+        },
         "arch_rolling_qemu_kvm": {
             "architecture": "x86_64",
             "virtualization": "kvm",
@@ -820,6 +828,12 @@ def load_contract(root: Path = ROOT) -> dict:
                 lane.get("guest_profile") in guest_profiles,
                 f"guest lane lacks a reviewed guest profile: {lane_id}",
             )
+            if lane_id == "v06-managed-lifecycle":
+                _require(
+                    lane.get("guest_profile") == "ubuntu_24_04_qemu_kvm"
+                    and lane["profile_version"] == 2,
+                    "v0.6 guest qualification must use the reviewed KVM profile v2",
+                )
         else:
             _require(
                 lane.get("guest_profile") is None,

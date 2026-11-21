@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, call, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -19,6 +19,93 @@ from tools.codex import doctor  # noqa: E402
 
 
 class CodexReadinessTests(unittest.TestCase):
+    def test_standalone_compositor_sdk_needs_no_rust_or_qml_editor(self) -> None:
+        from tools.hyprland_display_environment import CONTRACT, REQUIRED, load_contract
+
+        contract = load_contract(CONTRACT)
+        required = [
+            record
+            for record in contract["package"]
+            if record["name"] in REQUIRED | {"python"}
+        ]
+        installed = "\n".join(
+            record["name"] + " " + record["version"]
+            for record in [*required, contract["archived_package"]]
+        )
+        calls = []
+
+        def sdk_probe(argv, _env):
+            calls.append(argv)
+            if argv == ["pacman", "-Q"]:
+                return installed
+            if argv == ["c++", "-dumpfullversion"]:
+                return "16.2.1"
+            if argv == ["cmake", "--version"]:
+                return "cmake version 4.4.3"
+            if argv[:2] == ["pkg-config", "--exists"]:
+                return ""
+            raise AssertionError("unexpected standalone SDK probe")
+
+        with (
+            patch.object(
+                doctor.platform, "freedesktop_os_release", return_value={"ID": "arch"}
+            ),
+            patch.object(doctor, "probe", side_effect=sdk_probe),
+            patch.object(doctor.shutil, "which", return_value="/usr/bin/tool"),
+            patch.object(Path, "is_file", return_value=True),
+        ):
+            checks = doctor.inventory({"hyprland-build"})
+        self.assertTrue(checks)
+        self.assertTrue(all(check.ready for check in checks))
+        self.assertEqual({check.profile for check in checks}, {"hyprland-build"})
+        self.assertFalse(
+            any("Qt6" in str(argv) or argv[0] in {"cargo", "rustup"} for argv in calls)
+        )
+
+    def test_compositor_sdk_rejects_partial_versions_and_unsupported_hosts(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                doctor.platform, "freedesktop_os_release", return_value={"ID": "arch"}
+            ),
+            patch.object(doctor, "probe", return_value="glaze 8.4.0-1"),
+            patch.object(doctor.shutil, "which", return_value=None),
+        ):
+            checks = doctor.inventory({"hyprland-build"})
+        results = {check.name: check for check in checks}
+        self.assertFalse(results["sdk-package-glaze"].ready)
+        self.assertFalse(results["sdk-package-libglvnd"].ready)
+        self.assertFalse(results["pinned-cxx-compiler"].ready)
+        with (
+            patch.object(
+                doctor.platform, "freedesktop_os_release", return_value={"ID": "ubuntu"}
+            ),
+            patch.object(doctor, "probe", return_value=None) as probe,
+        ):
+            checks = doctor.inventory({"hyprland-build"})
+        self.assertFalse(
+            next(check for check in checks if check.name == "pinned-arch-host").ready
+        )
+        self.assertNotIn(
+            call(["pacman", "-Q"], ANY),
+            probe.call_args_list,
+        )
+
+    def test_core_readiness_never_probes_a_compositor(self) -> None:
+        with (
+            patch.object(
+                doctor,
+                "hyprland_build_checks",
+                side_effect=AssertionError("core cannot require a compositor SDK"),
+            ),
+            patch.object(doctor, "probe", return_value=None),
+            patch.object(doctor, "probe_status", return_value=False),
+            patch.object(doctor, "pinned_python_ready", return_value=False),
+        ):
+            checks = doctor.inventory({"core"})
+        self.assertEqual({check.profile for check in checks}, {"core"})
+
     def test_missing_tools_are_aggregated_and_do_not_install(self) -> None:
         calls = []
 

@@ -1,0 +1,2044 @@
+//! Terminal inspection, canonical planning and separately prepared one-use handoff.
+//! Reports and acknowledgements never become execution authority. Qualified
+//! native/Root finalization and independent completion remain separate requirements.
+use super::*;
+use crate::display_finalization_intent::FinalizationIntent;
+use crate::display_finalization_plan::FinalizationPlanningContext;
+use crate::display_native_release_reservation::NativeReleasePrepared;
+use crate::display_native_release_spend::NativeReleaseSpendPrepared;
+use crate::display_restoration_link::RestorationLink;
+use crate::display_restoration_plan::OriginalDisplayPlanningContext;
+use linura_core::{DisplayFinalizationMaterial, DisplayRestorationMaterial, SemanticReason};
+use linura_observation::{
+    DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY, DISPLAY_RECOVERY_PROVIDER, DisplayFinalizationPhase,
+    DisplayOriginalFinalizationFacts,
+};
+use linura_transaction::TransactionSnapshot;
+mod handoff;
+pub use handoff::{
+    AuthorizedOriginalDisplayCompletion, AuthorizedOriginalDisplayCurrentCommit,
+    AuthorizedOriginalDisplayFinalRetirement, AuthorizedOriginalDisplayNativePowerRetirement,
+    AuthorizedOriginalDisplayRootPowerRetirement, OriginalDisplayCompletionPort,
+    OriginalDisplayCompletionReceipt, OriginalDisplayCurrentCommit,
+    OriginalDisplayCurrentCommitPort, OriginalDisplayCurrentInspection,
+    OriginalDisplayCurrentVerification, OriginalDisplayFinalRetirementPort,
+    OriginalDisplayFinalRetirementVerification, OriginalDisplayNativeHandoffInspection,
+    OriginalDisplayNativeHandoffVerification, OriginalDisplayNativePowerInspection,
+    OriginalDisplayNativePowerRetirementPort, OriginalDisplayQualifiedCurrent,
+    OriginalDisplayReleasedCurrent, OriginalDisplayReleasedCurrentCompletion,
+    OriginalDisplayReleasedCurrentPort, OriginalDisplayRootPowerInspection,
+    OriginalDisplayRootPowerRetirementPort,
+};
+
+/// The caller identifies existing restoration history and supplies provenance.
+/// Original sources, current proof and terminal material come only from Control.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OriginalDisplayFinalizationRequest {
+    pub operation_id: String,
+    pub restoration_request: RequestId,
+    pub reason: SemanticReason,
+}
+
+/// A fresh protected terminal-purpose challenge. The complete material must
+/// recompute the managed digest; neither field alone is approval or a permit.
+pub struct OriginalDisplayFinalizationChallenge {
+    managed: ManagedApprovalChallenge,
+    material: String,
+}
+impl Debug for OriginalDisplayFinalizationChallenge {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("OriginalDisplayFinalizationChallenge")
+            .field("managed", &self.managed)
+            .field("material_bytes", &self.material.len())
+            .finish()
+    }
+}
+impl OriginalDisplayFinalizationChallenge {
+    #[must_use]
+    pub fn managed(&self) -> &ManagedApprovalChallenge {
+        &self.managed
+    }
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+}
+/// Trusted protected-interaction adapter, distinct from ordinary restoration,
+/// Apply/Keep/Revert, unlock and power. Implementations authenticate the actual
+/// current native purpose and administrator; they never acquire executor access.
+pub trait OriginalDisplayFinalizationAuthorizer: Debug + Send {
+    fn authorize_finalization(
+        &self,
+        challenge: &OriginalDisplayFinalizationChallenge,
+    ) -> Result<TrustedHumanApproval, String>;
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// Nonterminal retained correlation; not native completion or release authority.
+pub struct OriginalDisplayFinalizationReceipt {
+    pub request_id: RequestId,
+    pub transaction_id: TransactionId,
+    pub dispatch_digest: Option<String>,
+}
+/// A separately prepared one-use handoff. It cannot be constructed from the
+/// comparison receipt, a historical approval, or an arbitrary digest/material.
+pub struct AuthorizedOriginalDisplayFinalization {
+    authorization: AuthorizedEffect,
+    material: String,
+    dispatch_deadline_unix_ms: u64,
+}
+impl Debug for AuthorizedOriginalDisplayFinalization {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("AuthorizedOriginalDisplayFinalization")
+            .field("binding", self.authorization.binding())
+            .field("material_bytes", &self.material.len())
+            .field("dispatch_deadline_unix_ms", &self.dispatch_deadline_unix_ms)
+            .finish()
+    }
+}
+impl AuthorizedOriginalDisplayFinalization {
+    #[must_use]
+    pub fn into_executor_request(self) -> (AuthorizedEffect, String, u64) {
+        (
+            self.authorization,
+            self.material,
+            self.dispatch_deadline_unix_ms,
+        )
+    }
+}
+pub trait OriginalDisplayFinalizationPort: Debug + Send {
+    fn dispatch_finalization(
+        &mut self,
+        finalization: AuthorizedOriginalDisplayFinalization,
+    ) -> Result<ExecutionOutcome, String>;
+}
+
+/// Fresh restoration evidence joined to exact authenticated linked history.
+/// This report may expire immediately. It is not an approval, prepared request,
+/// finalization result, cleanup decision or native/Root release credential.
+#[derive(Debug)]
+pub struct OriginalDisplayFinalizationInspection {
+    material: String,
+    observation: ObservationEnvelope,
+    original: TransactionSnapshot,
+    restoration: TransactionSnapshot,
+}
+impl OriginalDisplayFinalizationInspection {
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+    #[must_use]
+    pub const fn observation(&self) -> &ObservationEnvelope {
+        &self.observation
+    }
+    #[must_use]
+    pub const fn original(&self) -> &TransactionSnapshot {
+        &self.original
+    }
+    #[must_use]
+    pub const fn restoration(&self) -> &TransactionSnapshot {
+        &self.restoration
+    }
+}
+
+/// One private Control-to-Root preparation, created only after durable
+/// authenticated terminal dispatch and fresh independent held-quiescence
+/// verification. This is not a release, new approval, or execution permit.
+pub struct AuthorizedOriginalDisplayRetirementPreparation {
+    material: String,
+    terminal: TransactionSnapshot,
+    dispatch_digest: String,
+    observation_digest: linura_transaction::ContentDigest,
+    expires_at_unix_ms: u64,
+}
+impl Debug for AuthorizedOriginalDisplayRetirementPreparation {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("AuthorizedOriginalDisplayRetirementPreparation")
+            .field("terminal_transaction", &self.terminal.transaction_id)
+            .field("expires_at_unix_ms", &self.expires_at_unix_ms)
+            .finish_non_exhaustive()
+    }
+}
+impl AuthorizedOriginalDisplayRetirementPreparation {
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+    #[must_use]
+    pub fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+    #[must_use]
+    pub fn dispatch_digest(&self) -> &str {
+        &self.dispatch_digest
+    }
+    #[must_use]
+    pub fn observation_digest(&self) -> &linura_transaction::ContentDigest {
+        &self.observation_digest
+    }
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
+}
+
+/// Control's narrow Root preparation adapter. Implementation must authenticate
+/// the exact Root peer and immutable native terminal reservation; comparison
+/// values are not authority to retire anything, including S17 protection.
+pub trait OriginalDisplayRetirementPreparationPort: Debug + Send {
+    fn prepare_retirement(
+        &mut self,
+        preparation: AuthorizedOriginalDisplayRetirementPreparation,
+    ) -> Result<(), String>;
+}
+
+/// Durable, non-cloneable permission to reserve a single original-Root
+/// BEFORE-EFFECT marker. Not a native release, terminal commit or fence permit.
+pub struct AuthorizedOriginalDisplayNativeReleaseReservation {
+    material: String,
+    terminal: TransactionSnapshot,
+    dispatch_digest: String,
+    control_observation: linura_transaction::ContentDigest,
+    expires_at_unix_ms: u64,
+}
+impl Debug for AuthorizedOriginalDisplayNativeReleaseReservation {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("AuthorizedOriginalDisplayNativeReleaseReservation")
+            .field("terminal_transaction", &self.terminal.transaction_id)
+            .field("expires_at_unix_ms", &self.expires_at_unix_ms)
+            .finish_non_exhaustive()
+    }
+}
+impl AuthorizedOriginalDisplayNativeReleaseReservation {
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+    #[must_use]
+    pub fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+    #[must_use]
+    pub fn dispatch_digest(&self) -> &str {
+        &self.dispatch_digest
+    }
+    #[must_use]
+    pub fn control_observation(&self) -> &linura_transaction::ContentDigest {
+        &self.control_observation
+    }
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
+}
+pub trait OriginalDisplayNativeReleaseReservationPort: Debug + Send {
+    fn reserve_native_release(
+        &mut self,
+        reservation: AuthorizedOriginalDisplayNativeReleaseReservation,
+    ) -> Result<(), String>;
+}
+
+/// A separately durably spent Control intent for the one-use ORIGINAL Root
+/// LNRS/LNRW channel. Its exact terminal ancestry was reloaded from Control
+/// before this object was minted. Permits only the one-use initial physical
+/// presentation handoff, with input/Root/power fences held. It is not a
+/// terminal completion and cannot be reused after an uncertain reply.
+pub struct AuthorizedOriginalDisplayNativeReleaseSpend {
+    material: String,
+    terminal: TransactionSnapshot,
+    dispatch_digest: String,
+    control_observation: linura_transaction::ContentDigest,
+    expires_at_unix_ms: u64,
+}
+impl Debug for AuthorizedOriginalDisplayNativeReleaseSpend {
+    fn fmt(&self, out: &mut Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("AuthorizedOriginalDisplayNativeReleaseSpend")
+            .field("terminal_transaction", &self.terminal.transaction_id)
+            .field("expires_at_unix_ms", &self.expires_at_unix_ms)
+            .finish_non_exhaustive()
+    }
+}
+impl AuthorizedOriginalDisplayNativeReleaseSpend {
+    #[must_use]
+    pub fn material(&self) -> &str {
+        &self.material
+    }
+    #[must_use]
+    pub fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+    #[must_use]
+    pub fn dispatch_digest(&self) -> &str {
+        &self.dispatch_digest
+    }
+    #[must_use]
+    pub fn control_observation(&self) -> &linura_transaction::ContentDigest {
+        &self.control_observation
+    }
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
+}
+/// Private typed effect port; only Control may mint this after durable
+/// before-effect handoff reservation. A successful response acknowledges only
+/// the attempt; independent physical proof and durable completion are separate.
+pub trait OriginalDisplayNativeReleaseSpendPort: Debug + Send {
+    fn spend_native_release(
+        &mut self,
+        attempt: AuthorizedOriginalDisplayNativeReleaseSpend,
+    ) -> Result<(), String>;
+}
+
+/// Read-only independent proof of held quiescence for one actual dispatched
+/// terminal transaction. It cannot retire witnesses, release fences or commit.
+#[derive(Debug)]
+pub struct OriginalDisplayQuiescenceInspection {
+    restoration: OriginalDisplayFinalizationInspection,
+    terminal: TransactionSnapshot,
+    context: TerminalInspectionContext,
+}
+impl OriginalDisplayQuiescenceInspection {
+    #[must_use]
+    pub const fn restoration(&self) -> &OriginalDisplayFinalizationInspection {
+        &self.restoration
+    }
+    #[must_use]
+    pub const fn terminal(&self) -> &TransactionSnapshot {
+        &self.terminal
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct TerminalInspectionContext {
+    request: PlanDesiredStateRequest,
+    intent: FinalizationIntent,
+    snapshot: TransactionSnapshot,
+    receipt: OriginalDisplayFinalizationReceipt,
+}
+impl TerminalInspectionContext {
+    fn matches(
+        &self,
+        state: &DisplayOriginalFinalizationFacts,
+        expected: DisplayFinalizationPhase,
+    ) -> bool {
+        let Some(terminal) = state.terminal() else {
+            return false;
+        };
+        state.phase() == expected
+            && terminal.material() == self.intent.material()
+            && terminal.transaction() == self.snapshot.transaction_id.as_str()
+            && effect_from_request(&self.request)
+                .is_ok_and(|effect| terminal.effect() == effect.digest().to_hex())
+            && Some(terminal.dispatch()) == self.receipt.dispatch_digest.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct LinkedHistory {
+    original: PlanDesiredStateRequest,
+    restoration: PlanDesiredStateRequest,
+    original_snapshot: TransactionSnapshot,
+    restoration_snapshot: TransactionSnapshot,
+    reserved: Record,
+    dispatched: Record,
+    link: RestorationLink,
+    source: OriginalDisplayPlanningContext,
+}
+fn invalid() -> ManagedLifecycleError {
+    ManagedLifecycleError::Authority(
+        "display finalization requires exact authenticated linked retirement and fresh proof"
+            .into(),
+    )
+}
+
+impl<S: TransactionStore> ManagedLifecycleControl<S> {
+    // Root reservation writes are continuations of the SAME reviewed managed
+    // finalization. Durable history and a matching interactive caller cannot
+    // reconstruct its live policy/risk/approval after Control restarts.
+    fn require_current_original_finalization_review(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        terminal: &TerminalInspectionContext,
+    ) -> Result<(), ManagedLifecycleError> {
+        let floor = self.registered_managed_risk_floor(&terminal.request)?;
+        let retained = self
+            .display_reviews
+            .get(&terminal.snapshot.transaction_id)
+            .ok_or_else(|| {
+                ManagedLifecycleError::ApprovalBoundary(
+                    "original terminal review unavailable; Root continuation remains fenced".into(),
+                )
+            })?;
+        let now = now_ms()?;
+        if retained.review.purpose()
+            != crate::durable_authority::DisplayReviewPurpose::OriginalFinalization
+            || retained.stage != DisplayReviewStage::Initial
+            || now < retained.created_unix_ms
+            || now >= retained.deadline_unix_ms
+        {
+            return Err(invalid());
+        }
+        self.validate_registered_managed_plan(retained.review.plan(), retained.review.risk())?;
+        self.authority.revalidate_display_review(
+            principal,
+            &terminal.request,
+            &retained.review,
+            floor,
+            &terminal.snapshot,
+        )?;
+        Ok(())
+    }
+
+    fn finalization_receipt(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<OriginalDisplayFinalizationReceipt, ManagedLifecycleError> {
+        self.finalization_receipt_context(principal, request)
+            .map(|(_, _, receipt)| receipt)
+    }
+
+    fn finalization_receipt_context(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<
+        (
+            FinalizationIntent,
+            TransactionSnapshot,
+            OriginalDisplayFinalizationReceipt,
+        ),
+        ManagedLifecycleError,
+    > {
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let transaction = TransactionId::for_namespace(&principal_id, &request.request_id);
+        let snapshot = self
+            .authority
+            .matching_request_snapshot(principal, request)?;
+        let intent = FinalizationIntent::load(self.display_journal()?, &principal_id, request)?;
+        intent.require_claim(self.display_journal()?, &principal_id, request)?;
+        if snapshot.principal != principal_id
+            || snapshot.request_id != request.request_id
+            || snapshot.transaction_id != transaction
+        {
+            return Err(invalid());
+        }
+        if !matches!(
+            snapshot.state,
+            TransactionState::Prepared | TransactionState::Indeterminate
+        ) {
+            return Err(ManagedLifecycleError::TerminalState(
+                "terminal display effect requires separate qualified completion verification"
+                    .into(),
+            ));
+        }
+        let digest = crate::durable_authority::digest_request(request)?;
+        let reserved = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            &digest,
+            Phase::Reserved,
+        )?;
+        let dispatched = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            &digest,
+            Phase::Dispatched,
+        )?;
+        if let Some(record) = &reserved {
+            record.validate_after(None)?;
+            if record.transaction_id != transaction {
+                return Err(invalid());
+            }
+        } else if snapshot.state == TransactionState::Indeterminate {
+            return Err(invalid());
+        }
+        if let Some(record) = &dispatched {
+            record.validate_after(reserved.as_ref())?;
+            if snapshot.state != TransactionState::Indeterminate
+                || record.transaction_id != transaction
+            {
+                return Err(invalid());
+            }
+        }
+        let receipt = OriginalDisplayFinalizationReceipt {
+            request_id: request.request_id.clone(),
+            transaction_id: transaction,
+            dispatch_digest: dispatched.and_then(|record| record.dispatch_digest),
+        };
+        // Compare one coherent, request-bound snapshot across the complete
+        // journal read instead of reloading unchecked partial snapshots.
+        if self
+            .authority
+            .matching_request_snapshot(principal, request)?
+            != snapshot
+        {
+            return Err(invalid());
+        }
+        Ok((intent, snapshot, receipt))
+    }
+
+    /// Fresh terminal-purpose authorization and separately prepared one-use
+    /// handoff. Existing operation identities are read-only after any prepare,
+    /// including failed persistence, native refusal and ambiguous/lost replies.
+    /// A reply does not verify completion, commit or authorize another handoff.
+    pub fn begin_original_display_finalization<P: OriginalDisplayFinalizationPort>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        input: OriginalDisplayFinalizationRequest,
+        authorizer: &dyn OriginalDisplayFinalizationAuthorizer,
+        port: &mut P,
+    ) -> Result<OriginalDisplayFinalizationReceipt, ManagedLifecycleError> {
+        validate_operation_id(&input.operation_id)?;
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal finalization requires the authenticated interactive human".into(),
+            ));
+        }
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let request_id = RequestId::new(format!(
+            "{DISPLAY_FINALIZATION_REQUEST_PREFIX}{}",
+            input.operation_id
+        ))
+        .map_err(|_| invalid())?;
+        let transaction = TransactionId::for_namespace(&principal_id, &request_id);
+        self.display_journal()?
+            .integrity_check()
+            .map_err(|_| invalid())?;
+        self.authority.integrity_check()?;
+        match self.authority.snapshot(&transaction) {
+            Ok(_) => {
+                let retained = self
+                    .display_journal()?
+                    .load(&principal_id, &request_id)
+                    .map_err(|_| invalid())?;
+                if retained.principal() != &principal_id || retained.request_id() != &request_id {
+                    return Err(invalid());
+                }
+                let request = crate::retained_request::decode(&retained)?;
+                validate_public_request(&request)?;
+                validate_request_identity(&request)?;
+                let intent =
+                    FinalizationIntent::load(self.display_journal()?, &principal_id, &request)?;
+                let material = DisplayFinalizationMaterial::decode(intent.material())
+                    .map_err(|_| invalid())?;
+                let history = self.finalization_history(&principal, &input.restoration_request)?;
+                let mut reason = input.reason.clone();
+                crate::display_restoration_plan::inherit_original_reason(
+                    &mut reason,
+                    &history.restoration.reason,
+                )
+                .map_err(ManagedLifecycleError::Contract)?;
+                if material.restoration_request() != &input.restoration_request
+                    || material.terminal_link() != history.link.digest().hex()
+                    || Some(material.restoration_dispatch())
+                        != history.dispatched.dispatch_digest.as_deref()
+                    || history
+                        .restoration
+                        .desired_state
+                        .get("restore_original")
+                        .map(String::as_str)
+                        != Some(material.restoration_text())
+                    || request.reason != reason
+                    || retained.digest() != &crate::durable_authority::digest_request(&request)?
+                {
+                    return Err(invalid());
+                }
+                return self.finalization_receipt(&principal, &request);
+            }
+            Err(DurableAuthorityError::Transaction(detail))
+                if detail == "durable transaction not found" => {}
+            Err(error) => return Err(error.into()),
+        }
+        let (history, request, source) =
+            self.original_finalization_request(&principal, &actor, &input)?;
+        let full_material = source.material.clone();
+        let candidate = {
+            let _context = self
+                .previews
+                .enter_original_display_finalization_context(source, &request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            let floor = self.registered_managed_risk_floor(&request)?;
+            self.authority.candidate_with_risk_floor(
+                &mut self.previews,
+                principal.clone(),
+                actor.clone(),
+                request.clone(),
+                floor,
+            )?
+        };
+        self.validate_registered_managed_candidate(&candidate)?;
+        let effect = effect_from_request(&request)?;
+        if effect
+            != linura_provider_sdk::display_finalization_effect(&full_material)
+                .map_err(|_| invalid())?
+            || effect_from_candidate(&candidate)? != effect
+        {
+            return Err(invalid());
+        }
+        if !matches!(
+            candidate.review().decision(),
+            PolicyDecision::RequireApproval {
+                class: ApprovalClass::Administrator,
+                ..
+            }
+        ) {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal finalization requires fresh protected administrator approval".into(),
+            ));
+        }
+        let challenge = OriginalDisplayFinalizationChallenge {
+            managed: ManagedApprovalChallenge::from_candidate(&candidate, &request)?,
+            material: full_material.clone(),
+        };
+        let approval = authorizer
+            .authorize_finalization(&challenge)
+            .map_err(ManagedLifecycleError::ApprovalBoundary)?;
+        if !approval.matches_challenge(&challenge.managed) {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal approval differs from the exact reviewed purpose and request".into(),
+            ));
+        }
+        let approver = PolicyAuthenticatedApprover::new(
+            approval.principal().clone(),
+            ActorKind::Human,
+            BTreeSet::from([ApprovalClass::Administrator]),
+        );
+        let (fresh_history, fresh_request, fresh_source) =
+            self.original_finalization_request(&principal, &actor, &input)?;
+        if fresh_history != history
+            || fresh_request != request
+            || fresh_source.material != full_material
+        {
+            return Err(ManagedLifecycleError::ApprovalBoundary("terminal history, current sources or presentation changed during protected interaction".into()));
+        }
+        let refreshed = {
+            let _context = self
+                .previews
+                .enter_original_display_finalization_context(fresh_source, &request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            self.refresh_candidate_after_approval(
+                &candidate,
+                principal.clone(),
+                actor,
+                request.clone(),
+                &effect,
+            )?
+        };
+        if self.finalization_history(&principal, &input.restoration_request)? != history {
+            return Err(invalid());
+        }
+        let expiry = now_unix_seconds()?
+            .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
+            .ok_or_else(invalid)?;
+        let evidence = self.authority.issue_approval(
+            ApprovalRequestId::new(format!(
+                "approval:v010:display-finalization:{}",
+                input.operation_id
+            ))
+            .map_err(|_| invalid())?,
+            &refreshed,
+            &approver,
+            expiry,
+        )?;
+        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
+        let intent = FinalizationIntent::capture(&request, &full_material)?;
+        {
+            let journal = self.request_journal.as_mut().ok_or_else(invalid)?;
+            journal.retain(&retained).map_err(|_| invalid())?;
+            intent.append(journal.as_mut(), principal_id.clone(), &request)?;
+            intent.claim(journal.as_mut(), principal_id.clone(), &request)?;
+        }
+        if self
+            .display_journal()?
+            .load(&principal_id, &request_id)
+            .map_err(|_| invalid())?
+            != retained
+            || FinalizationIntent::load(self.display_journal()?, &principal_id, &request)? != intent
+        {
+            return Err(invalid());
+        }
+        intent.require_claim(self.display_journal()?, &principal_id, &request)?;
+        let mut prepared = self
+            .authority
+            .prepare(refreshed, Some(evidence.id().clone()))?;
+        let retained_bytes =
+            crate::durable_authority::DisplayRetainedReview::estimated_bytes(&prepared);
+        self.check_display_review_capacity(retained_bytes)?;
+        let started = now_ms()?;
+        let deadline = started
+            .checked_add(DISPLAY_CONFIRMATION_WINDOW_MS)
+            .ok_or_else(invalid)?;
+        let reserved = Record::new(
+            retained.digest().clone(),
+            transaction.clone(),
+            Phase::Reserved,
+            deadline,
+            started,
+            None,
+            None,
+            None,
+        )?;
+        self.append_display_record(&reserved, principal_id.clone(), None)?;
+        if Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Reserved,
+        )?
+        .as_ref()
+            != Some(&reserved)
+        {
+            return Err(invalid());
+        }
+        if self.finalization_history(&principal, &input.restoration_request)? != history
+            || FinalizationIntent::load(self.display_journal()?, &principal_id, &request)? != intent
+        {
+            return Err(invalid());
+        }
+        intent.require_claim(self.display_journal()?, &principal_id, &request)?;
+        let permit = self.handoff_registered_managed(&principal, &mut prepared)?;
+        let authorization = authorized_effect(effect, permit)?;
+        let dispatch = authorization.binding().dispatch_digest.to_hex();
+        let dispatched = Record::new(
+            retained.digest().clone(),
+            transaction,
+            Phase::Dispatched,
+            deadline,
+            now_ms()?,
+            Some(dispatch.clone()),
+            Some(reserved.digest().clone()),
+            None,
+        )?;
+        self.append_display_record(&dispatched, principal_id.clone(), Some(&reserved))?;
+        if Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Dispatched,
+        )?
+        .as_ref()
+            != Some(&dispatched)
+        {
+            return Err(invalid());
+        }
+        intent.require_claim(self.display_journal()?, &principal_id, &request)?;
+        if FinalizationIntent::load(self.display_journal()?, &principal_id, &request)? != intent
+            || self.finalization_history(&principal, &input.restoration_request)? != history
+        {
+            return Err(invalid());
+        }
+        prepared
+            .display_checkpoint_observation()
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        self.display_reviews.insert(
+            dispatched.transaction_id.clone(),
+            RetainedDisplayReview {
+                stage: DisplayReviewStage::Initial,
+                review: crate::durable_authority::DisplayRetainedReview::from_spent(
+                    prepared,
+                    crate::durable_authority::DisplayReviewPurpose::OriginalFinalization,
+                )?,
+                created_unix_ms: started,
+                deadline_unix_ms: deadline,
+                retained_bytes,
+            },
+        );
+        if now_ms()? < deadline
+            && let Ok(outcome) = port.dispatch_finalization(AuthorizedOriginalDisplayFinalization {
+                authorization,
+                material: full_material,
+                dispatch_deadline_unix_ms: deadline,
+            })
+            && outcome.dispatch_digest.to_hex() != dispatch
+        {
+            return Err(ManagedLifecycleError::Contract(
+                "terminal executor substituted the dispatch digest".into(),
+            ));
+        }
+        self.finalization_receipt(&principal, &request)
+    }
+
+    /// Canonical non-executable review of a separate security-sensitive managed
+    /// terminal effect. This performs no approval, prepare, dispatch or release.
+    pub fn plan_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        input: OriginalDisplayFinalizationRequest,
+    ) -> Result<linura_planner::ReconciliationPlan, ManagedLifecycleError> {
+        let (history, request, source) =
+            self.original_finalization_request(&principal, &actor, &input)?;
+        let (plan, observation) = {
+            let _context = self
+                .previews
+                .enter_original_display_finalization_context(source, &request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+            self.previews
+                .authority_candidate(principal.clone(), actor, request)
+                .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?
+        };
+        self.validate_registered_managed_plan(&plan, RiskClass::SecuritySensitive)?;
+        if self.finalization_history(&principal, &input.restoration_request)? != history {
+            return Err(invalid());
+        }
+        observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        Ok(plan)
+    }
+
+    fn original_finalization_request(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        actor: &Actor,
+        input: &OriginalDisplayFinalizationRequest,
+    ) -> Result<
+        (
+            LinkedHistory,
+            PlanDesiredStateRequest,
+            FinalizationPlanningContext,
+        ),
+        ManagedLifecycleError,
+    > {
+        validate_operation_id(&input.operation_id)?;
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal finalization requires an authenticated interactive human".into(),
+            ));
+        }
+        let history = self.finalization_history(principal, &input.restoration_request)?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let request_id = RequestId::new(format!(
+            "{DISPLAY_FINALIZATION_REQUEST_PREFIX}{}",
+            input.operation_id
+        ))
+        .map_err(|_| invalid())?;
+        if FinalizationIntent::claimed_request(
+            self.display_journal()?,
+            &principal_id,
+            &input.restoration_request,
+        )?
+        .is_some_and(|owner| owner != request_id)
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "restoration already has a terminal attempt; qualified supersession is required"
+                    .into(),
+            ));
+        }
+        let inspection = self.inspect_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            &input.restoration_request,
+        )?;
+        if inspection.original != history.original_snapshot
+            || inspection.restoration != history.restoration_snapshot
+        {
+            return Err(invalid());
+        }
+        let material =
+            DisplayFinalizationMaterial::decode(&inspection.material).map_err(|_| invalid())?;
+        if material.terminal_link() != history.link.digest().hex()
+            || material.restoration_request() != &history.restoration.request_id
+            || Some(material.restoration_dispatch())
+                != history.dispatched.dispatch_digest.as_deref()
+            || history
+                .restoration
+                .desired_state
+                .get("restore_original")
+                .map(String::as_str)
+                != Some(material.restoration_text())
+        {
+            return Err(invalid());
+        }
+        let mut reason = input.reason.clone();
+        crate::display_restoration_plan::inherit_original_reason(
+            &mut reason,
+            &history.restoration.reason,
+        )
+        .map_err(ManagedLifecycleError::Contract)?;
+        let request = PlanDesiredStateRequest {
+            request_id: RequestId::new(format!(
+                "{DISPLAY_FINALIZATION_REQUEST_PREFIX}{}",
+                input.operation_id
+            ))
+            .map_err(|_| invalid())?,
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+            resource: material
+                .recovery_scope()
+                .map_err(|_| invalid())?
+                .resource_id()
+                .map_err(|_| invalid())?,
+            observation_capability: linura_core::CapabilityId::new(
+                DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY,
+            )
+            .map_err(|_| invalid())?,
+            desired_state: BTreeMap::from([(
+                "finalize_original".into(),
+                String::from_utf8(
+                    linura_provider_sdk::display_finalization_effect(&inspection.material)
+                        .map_err(|_| invalid())?
+                        .canonical_payload,
+                )
+                .map_err(|_| invalid())?,
+            )]),
+            reason,
+        };
+        validate_public_request(&request)?;
+        validate_request_identity(&request)?;
+        let source = FinalizationPlanningContext {
+            principal: principal.clone(),
+            original: history.source.clone(),
+            restoration: history.restoration.clone(),
+            snapshot: history.restoration_snapshot.clone(),
+            dispatched: history.dispatched.clone(),
+            link: history.link.digest().clone(),
+            material: inspection.material,
+        };
+        Ok((history, request, source))
+    }
+
+    fn finalization_history(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<LinkedHistory, ManagedLifecycleError> {
+        let checked = self.checked_display_history()?;
+        self.finalization_history_from_checked(principal, request_id, &checked)
+    }
+
+    // Reuse only within a synchronous history read, with no mutable provider,
+    // persistence write or external effect between the full store checks and
+    // these authenticated record/snapshot loads.
+    fn finalization_history_from_checked(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+        checked_history: &CheckedDisplayHistoryRead<'_>,
+    ) -> Result<LinkedHistory, ManagedLifecycleError> {
+        let suffix = request_id
+            .as_str()
+            .strip_prefix(DISPLAY_RESTORATION_REQUEST_PREFIX)
+            .ok_or_else(invalid)?;
+        validate_operation_id(suffix)?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let retained = self
+            .display_journal()?
+            .load(&principal_id, request_id)
+            .map_err(|_| invalid())?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(invalid());
+        }
+        let request = crate::retained_request::decode(&retained)?;
+        validate_public_request(&request)?;
+        validate_request_identity(&request)?;
+        self.authority.assert_request_matches(principal, &request)?;
+        if retained.digest() != &crate::durable_authority::digest_request(&request)? {
+            return Err(invalid());
+        }
+        let material = DisplayRestorationMaterial::decode(
+            request
+                .desired_state
+                .get("restore_original")
+                .ok_or_else(invalid)?,
+        )
+        .map_err(|_| invalid())?;
+        if principal.as_str() != format!("unix:uid:{}", material.replacement().lock().epoch().uid())
+        {
+            return Err(invalid());
+        }
+        effect_from_request(&request)?;
+        let transaction = TransactionId::for_namespace(&principal_id, request_id);
+        let committed = self.authority.snapshot(&transaction)?;
+        if committed.state != TransactionState::Committed
+            || committed.principal != principal_id
+            || committed.request_id != *request_id
+            || committed.transaction_id != transaction
+        {
+            return Err(invalid());
+        }
+        let reserved = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Reserved,
+        )?
+        .ok_or_else(invalid)?;
+        reserved.validate_after(None)?;
+        let dispatched = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            retained.digest(),
+            Phase::Dispatched,
+        )?
+        .ok_or_else(invalid)?;
+        dispatched.validate_after(Some(&reserved))?;
+        if reserved.transaction_id != transaction || dispatched.transaction_id != transaction {
+            return Err(invalid());
+        }
+        let original = checked_history.original_request(principal, material.original_request())?;
+        self.authority
+            .assert_request_matches(principal, &original)?;
+        let original_transaction =
+            TransactionId::for_namespace(&principal_id, &original.request_id);
+        let original_snapshot = self.authority.snapshot(&original_transaction)?;
+        let link = RestorationLink::load(
+            self.display_journal()?,
+            principal,
+            &original,
+            &request,
+            &committed,
+            dispatched.dispatch_digest.as_deref().ok_or_else(invalid)?,
+            now_ms()?,
+        )?
+        .ok_or_else(invalid)?;
+        // A link written before the original CAS is not terminal retirement.
+        // State name alone also misses generation/version/binding substitution.
+        link.require_retired(&original_snapshot, &committed)?;
+        let source = self.original_display_context_from_history(
+            principal,
+            original.clone(),
+            &original_snapshot,
+        )?;
+        Ok(LinkedHistory {
+            original,
+            restoration: request,
+            original_snapshot,
+            restoration_snapshot: committed,
+            reserved,
+            dispatched,
+            link,
+            source,
+        })
+    }
+
+    /// AuthoritativeQuery prerequisites only. It performs no durable state
+    /// transitions, approval, prepare, dispatch, reservation or cleanup. In
+    /// particular it cannot repair an absent link or retire the original CAS.
+    /// Fresh evidence must still be obtained during any later terminal managed
+    /// review/prepare/handoff; this report is never reusable authority.
+    pub fn inspect_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        restoration_request: &RequestId,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
+        let history = self.finalization_history(&principal, restoration_request)?;
+        self.inspect_finalization_state(principal, actor, restoration_request, history, None)
+    }
+
+    /// AuthoritativeQuery only. Authenticate the actual dispatched terminal
+    /// history before probing, then join fresh quiescence and restoration facts.
+    /// Neither an executor reply nor this expiring report is release authority.
+    pub fn inspect_quiesced_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_terminal_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::Quiesced,
+        )
+    }
+
+    /// A read-only post-Root-retirement inspection. It does not infer native
+    /// first-frame continuity from the Root marker and it cannot release any
+    /// retained input, power, startup or compositor protection.
+    pub fn inspect_root_retired_held_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_original_display_release_reservation_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::Retired,
+        )
+    }
+
+    /// Read-only lost-ack reconciliation after this original Root invocation
+    /// spent its one-use LNRN:1 before-effect native reservation. It is not an
+    /// ACK for native consumption, a physical completion or release authority.
+    pub fn inspect_native_release_reserved_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_original_display_release_reservation_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::NativeReleaseReserved,
+        )
+    }
+
+    /// Strict read-only reconciliation of the separately durable original
+    /// Root LNRX:1 spent-before-effect marker. A Root ACK, missing ACK, or this
+    /// historical phase is not a native framebuffer release, terminal Control
+    /// success, S17/input/power retirement, or ordinary startup admission.
+    /// Only the actual one-use Control decision plus the SAME live Root and
+    /// original restoration sources can satisfy this comparison.
+    pub fn inspect_native_release_spent_original_display_finalization(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        self.inspect_original_display_release_reservation_phase(
+            principal,
+            actor,
+            terminal_request,
+            DisplayFinalizationPhase::NativeReleaseSpent,
+        )
+    }
+
+    fn inspect_original_display_release_reservation_phase(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        if !matches!(
+            expected,
+            DisplayFinalizationPhase::Retired
+                | DisplayFinalizationPhase::NativeReleaseReserved
+                | DisplayFinalizationPhase::NativeReleaseSpent
+        ) {
+            return Err(invalid());
+        }
+        // Root's durable phase-3 marker is only one side of the two-phase
+        // protocol. Demand this *original* Control one-use reservation and
+        // its exact signed request/transaction/intent correlation before
+        // visiting providers. An expired historical observation is NOT renewed.
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let (terminal, before, native_decision, spend_decision, history) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let dispatch = terminal
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?;
+            let before =
+                crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )?;
+            let native_decision = if matches!(
+                expected,
+                DisplayFinalizationPhase::NativeReleaseReserved
+                    | DisplayFinalizationPhase::NativeReleaseSpent
+            ) {
+                Some(NativeReleasePrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    &before,
+                )?)
+            } else {
+                None
+            };
+            let spend_decision = if expected == DisplayFinalizationPhase::NativeReleaseSpent {
+                Some(NativeReleaseSpendPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    native_decision.as_ref().ok_or_else(invalid)?,
+                )?)
+            } else {
+                None
+            };
+            let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+                .map_err(|_| invalid())?;
+            let history = self.finalization_history_from_checked(
+                &principal,
+                material.restoration_request(),
+                &checked,
+            )?;
+            (terminal, before, native_decision, spend_decision, history)
+        };
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
+        let restoration = self.inspect_terminal_phase_with_history(
+            principal.clone(),
+            actor,
+            &terminal,
+            expected,
+            history,
+        )?;
+        // A lost reply is reconciled by fresh physical facts and the exact
+        // old immutable record, never another Root/native write or approval.
+        {
+            let checked = self.checked_display_history()?;
+            if self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                != terminal
+                || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )? != before
+                || (matches!(
+                    expected,
+                    DisplayFinalizationPhase::NativeReleaseReserved
+                        | DisplayFinalizationPhase::NativeReleaseSpent
+                ) && native_decision
+                    != Some(NativeReleasePrepared::load_spent(
+                        self.display_journal()?,
+                        &principal_id,
+                        &terminal.request,
+                        &terminal.snapshot,
+                        dispatch,
+                        terminal.intent.material(),
+                        &before,
+                    )?))
+                || (expected == DisplayFinalizationPhase::NativeReleaseSpent
+                    && spend_decision
+                        != Some(NativeReleaseSpendPrepared::load_spent(
+                            self.display_journal()?,
+                            &principal_id,
+                            &terminal.request,
+                            &terminal.snapshot,
+                            dispatch,
+                            terminal.intent.material(),
+                            native_decision.as_ref().ok_or_else(invalid)?,
+                        )?))
+            {
+                return Err(invalid());
+            }
+        }
+        Ok(OriginalDisplayQuiescenceInspection {
+            restoration,
+            terminal: terminal.snapshot.clone(),
+            context: terminal,
+        })
+    }
+
+    // These Root writes change durable authority markers while every physical
+    // fence remains held. This verifies that exact effect, not physical release.
+    // Native spend still joins every independent display source before dispatch
+    // and verifies the first ordinary frame independently afterward.
+    fn verify_original_root_reservation(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        terminal: &TerminalInspectionContext,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<(), ManagedLifecycleError> {
+        if !matches!(
+            expected,
+            DisplayFinalizationPhase::Retired | DisplayFinalizationPhase::NativeReleaseReserved
+        ) {
+            return Err(invalid());
+        }
+        let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+            .map_err(|_| invalid())?;
+        let history = {
+            let checked = self.checked_display_history()?;
+            if self.terminal_context_from_checked(
+                principal,
+                &terminal.request.request_id,
+                &checked,
+            )? != *terminal
+            {
+                return Err(invalid());
+            }
+            self.finalization_history_from_checked(
+                principal,
+                material.restoration_request(),
+                &checked,
+            )?
+        };
+        if material.terminal_link() != history.link.digest().hex()
+            || material.restoration_text() != history.restoration.desired_state["restore_original"]
+            || Some(material.restoration_dispatch())
+                != history.dispatched.dispatch_digest.as_deref()
+        {
+            return Err(invalid());
+        }
+        let scope = material.recovery_scope().map_err(|_| invalid())?;
+        let request = linura_protocol::ObservationRequest {
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY)
+                .map_err(|_| invalid())?,
+            resource: scope.resource_id().map_err(|_| invalid())?,
+        };
+        let mut before = None;
+        let mut observations = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let observation = self
+                .previews
+                .observe(&request)
+                .map_err(|_| invalid())?
+                .observation;
+            let current =
+                DisplayOriginalFinalizationFacts::from_envelope(&observation, &scope, now_ms()?)
+                    .map_err(|_| invalid())?;
+            if !terminal.matches(&current, expected)
+                || current.checkpoint() != material.restoration().original_checkpoint()
+                || current.restoration_transaction()
+                    != history.restoration_snapshot.transaction_id.as_str()
+                || current.restoration_effect()
+                    != effect_from_request(&history.restoration)?.digest().to_hex()
+                || Some(current.restoration_dispatch())
+                    != history.dispatched.dispatch_digest.as_deref()
+                || before.as_ref().is_some_and(|first| first != &current)
+            {
+                return Err(invalid());
+            }
+            before = Some(current);
+            observations.push(observation);
+        }
+        {
+            let checked = self.checked_display_history()?;
+            if self.finalization_history_from_checked(
+                principal,
+                material.restoration_request(),
+                &checked,
+            )? != history
+                || self.terminal_context_from_checked(
+                    principal,
+                    &terminal.request.request_id,
+                    &checked,
+                )? != *terminal
+            {
+                return Err(invalid());
+            }
+        }
+        for observation in observations {
+            observation
+                .require_current(now_ms()?)
+                .map_err(|_| invalid())?;
+        }
+        Ok(())
+    }
+
+    fn inspect_terminal_phase(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<OriginalDisplayQuiescenceInspection, ManagedLifecycleError> {
+        if !matches!(
+            expected,
+            DisplayFinalizationPhase::Quiesced
+                | DisplayFinalizationPhase::Retired
+                | DisplayFinalizationPhase::NativeReleaseReserved
+                | DisplayFinalizationPhase::NativeReleaseSpent
+        ) {
+            return Err(invalid());
+        }
+        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let restoration =
+            self.inspect_terminal_phase_from_context(principal, actor, &terminal, expected)?;
+        Ok(OriginalDisplayQuiescenceInspection {
+            restoration,
+            terminal: terminal.snapshot.clone(),
+            context: terminal,
+        })
+    }
+
+    fn inspect_terminal_phase_from_context(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal: &TerminalInspectionContext,
+        expected: DisplayFinalizationPhase,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
+        let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+            .map_err(|_| invalid())?;
+        let restoration_request = material.restoration_request().clone();
+        let history = self.finalization_history(&principal, &restoration_request)?;
+        self.inspect_terminal_phase_with_history(principal, actor, terminal, expected, history)
+    }
+
+    fn inspect_terminal_phase_with_history(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal: &TerminalInspectionContext,
+        expected: DisplayFinalizationPhase,
+        history: LinkedHistory,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
+        let material = DisplayFinalizationMaterial::decode(terminal.intent.material())
+            .map_err(|_| invalid())?;
+        let restoration_request = material.restoration_request().clone();
+        if material.terminal_link() != history.link.digest().hex()
+            || material.restoration_text() != history.restoration.desired_state["restore_original"]
+            || Some(material.restoration_dispatch())
+                != history.dispatched.dispatch_digest.as_deref()
+        {
+            return Err(invalid());
+        }
+        self.inspect_finalization_state(
+            principal,
+            actor,
+            &restoration_request,
+            history,
+            Some((terminal, expected)),
+        )
+    }
+
+    /// Journal a one-use Control retirement-preparation decision before asking
+    /// Root to reserve its independent immutable preparation. This method
+    /// NEVER commits terminal completion, retires original witnesses, or
+    /// releases native frame/input/power/startup fences. Ambiguous calls are
+    /// non-retryable, including after a caller or service restart.
+    pub fn prepare_original_display_terminal_retirement<
+        P: OriginalDisplayRetirementPreparationPort,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        port: &mut P,
+    ) -> Result<(), ManagedLifecycleError> {
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "terminal retirement preparation requires authenticated interactive ownership"
+                    .into(),
+            ));
+        }
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        crate::display_terminal_retirement::TerminalRetirementPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        let terminal = self.terminal_inspection_context(&principal, terminal_request)?;
+        let receipt_dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_ref()
+            .ok_or_else(invalid)?
+            .clone();
+        self.require_current_original_finalization_review(&principal, &terminal)?;
+        let complete = self.inspect_quiesced_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            terminal_request,
+        )?;
+        if complete.context != terminal {
+            return Err(invalid());
+        }
+        let observation = complete.restoration.observation();
+        let now = now_ms()?;
+        let record = crate::display_terminal_retirement::TerminalRetirementPrepared::capture(
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            &receipt_dispatch,
+            terminal.intent.material(),
+            observation,
+            now,
+        )?;
+        let prepared = AuthorizedOriginalDisplayRetirementPreparation {
+            material: terminal.intent.material().to_owned(),
+            terminal: terminal.snapshot.clone(),
+            dispatch_digest: receipt_dispatch,
+            observation_digest: record.observation().clone(),
+            expires_at_unix_ms: record.expiry(),
+        };
+        // A durable intent is reserved BEFORE an external Root write; a failed
+        // append/readback/validation cannot invoke the Root adapter.
+        crate::display_terminal_retirement::TerminalRetirementPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        record.append(
+            self.request_journal.as_deref_mut().ok_or_else(invalid)?,
+            principal_id.clone(),
+            terminal_request,
+        )?;
+        {
+            let checked = self.checked_display_history()?;
+            record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+            if now_ms()? >= record.expiry()
+                || self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                    != terminal
+            {
+                return Err(invalid());
+            }
+        }
+        observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        self.require_current_original_finalization_review(&principal, &terminal)?;
+        // The port receives a non-cloneable private correlation, not a renewed
+        // permit. Reconciliation may inspect only the already-spent history.
+        port.prepare_retirement(prepared).map_err(|_| {
+            ManagedLifecycleError::Indeterminate(
+                "terminal Root retirement preparation reply is uncertain; no retry".into(),
+            )
+        })?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry() {
+            return Err(invalid());
+        }
+        self.verify_original_root_reservation(
+            &principal,
+            &terminal,
+            DisplayFinalizationPhase::Retired,
+        )?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry() {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    /// Commit a distinct one-use Control decision before asking Root to spend
+    /// LNRN:1. This transition has NO compositor, input, power, witness or
+    /// ordinary-startup effect. Lost replies can only be independently inspected.
+    pub fn prepare_original_display_native_release<
+        P: OriginalDisplayNativeReleaseReservationPort,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        port: &mut P,
+    ) -> Result<(), ManagedLifecycleError> {
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "native release reservation requires authenticated interactive ownership".into(),
+            ));
+        }
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let (terminal, original) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let dispatch = terminal
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?;
+            let original =
+                crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )?;
+            NativeReleasePrepared::require_absent(
+                self.display_journal()?,
+                &principal_id,
+                terminal_request,
+            )?;
+            (terminal, original)
+        };
+        self.require_current_original_finalization_review(&principal, &terminal)?;
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
+        let held = self.inspect_root_retired_held_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            terminal_request,
+        )?;
+        if held.context != terminal {
+            return Err(invalid());
+        }
+        let now = now_ms()?;
+        let record = NativeReleasePrepared::capture(
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            dispatch,
+            terminal.intent.material(),
+            &original,
+            held.restoration.observation(),
+            now,
+        )?;
+        // Reserve in Control's independent durable journal BEFORE an external
+        // Root call. An absent/ambiguous reply never permits another call.
+        NativeReleasePrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        record.append(
+            self.request_journal.as_deref_mut().ok_or_else(invalid)?,
+            principal_id.clone(),
+            terminal_request,
+        )?;
+        {
+            let checked = self.checked_display_history()?;
+            record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+            if now_ms()? >= record.expiry()
+                || self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                    != terminal
+                || crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )? != original
+            {
+                return Err(invalid());
+            }
+        }
+        let authorized = AuthorizedOriginalDisplayNativeReleaseReservation {
+            material: terminal.intent.material().to_owned(),
+            terminal: terminal.snapshot.clone(),
+            dispatch_digest: dispatch.to_owned(),
+            control_observation: original.observation().clone(),
+            expires_at_unix_ms: record.expiry(),
+        };
+        self.require_current_original_finalization_review(&principal, &terminal)?;
+        port.reserve_native_release(authorized).map_err(|_| {
+            ManagedLifecycleError::Indeterminate(
+                "native release Root reservation reply is uncertain; no retry".into(),
+            )
+        })?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        self.verify_original_root_reservation(
+            &principal,
+            &terminal,
+            DisplayFinalizationPhase::NativeReleaseReserved,
+        )?;
+        record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+        if now_ms()? >= record.expiry() {
+            return Err(invalid());
+        }
+        Ok(()) // Reservation only; no presentation or final fence retirement.
+    }
+
+    /// Privately dispatch one Root/native spent-before-effect protocol only
+    /// after another immutable Control journal entry, distinct from the prior
+    /// LNRN reservation. The exact original terminal, independent sources,
+    /// Root identity and earlier Control reservation must remain unchanged.
+    /// Only the initial first-ordinary-frame handoff is permitted. Input, S17,
+    /// power and Root admission retirement require independent completion.
+    /// A successful return retains independent first-frame verification; the
+    /// signed terminal state remains Indeterminate. Missing ACK/frame proof
+    /// permits observation and durable verification only, never a second spend.
+    pub fn spend_original_display_native_release<P: OriginalDisplayNativeReleaseSpendPort>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        terminal_request: &RequestId,
+        port: &mut P,
+    ) -> Result<OriginalDisplayNativeHandoffVerification, ManagedLifecycleError> {
+        if actor.kind != ActorKind::Human || !actor.interactive {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "native Root release spend requires authenticated interactive ownership".into(),
+            ));
+        }
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let (terminal, original, reserved) = {
+            let checked = self.checked_display_history()?;
+            let terminal =
+                self.terminal_context_from_checked(&principal, terminal_request, &checked)?;
+            let dispatch = terminal
+                .receipt
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?;
+            let original =
+                crate::display_terminal_retirement::TerminalRetirementPrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                )?;
+            let reserved = NativeReleasePrepared::load_spent(
+                self.display_journal()?,
+                &principal_id,
+                &terminal.request,
+                &terminal.snapshot,
+                dispatch,
+                terminal.intent.material(),
+                &original,
+            )?;
+            NativeReleaseSpendPrepared::require_absent(
+                self.display_journal()?,
+                &principal_id,
+                terminal_request,
+            )?;
+            (terminal, original, reserved)
+        };
+        let dispatch = terminal
+            .receipt
+            .dispatch_digest
+            .as_deref()
+            .ok_or_else(invalid)?;
+        let held = self.inspect_native_release_reserved_original_display_finalization(
+            principal.clone(),
+            actor.clone(),
+            terminal_request,
+        )?;
+        if held.context != terminal {
+            return Err(invalid());
+        }
+        let now = now_ms()?;
+        // This purpose-specific phase continues the original full canonical
+        // finalization. LNRN/LNRX cannot reconstruct its review or approval.
+        // Remove the refusal material before durable spend; ambiguity and
+        // restart cannot recover a second grant-spend opportunity.
+        let mut review = self
+            .display_reviews
+            .remove(&terminal.snapshot.transaction_id)
+            .ok_or_else(|| {
+                ManagedLifecycleError::ApprovalBoundary(
+                    "original terminal review unavailable; native grant spend remains fenced"
+                        .into(),
+                )
+            })?;
+        let floor = self.registered_managed_risk_floor(&terminal.request)?;
+        if review.review.purpose()
+            != crate::durable_authority::DisplayReviewPurpose::OriginalFinalization
+            || review.stage != DisplayReviewStage::Initial
+            || now < review.created_unix_ms
+            || now >= review.deadline_unix_ms
+        {
+            return Err(invalid());
+        }
+        self.validate_registered_managed_plan(review.review.plan(), review.review.risk())?;
+        self.authority.revalidate_display_review(
+            &principal,
+            &terminal.request,
+            &review.review,
+            floor,
+            &terminal.snapshot,
+        )?;
+        let record = NativeReleaseSpendPrepared::capture(
+            &principal_id,
+            &terminal.request,
+            &terminal.snapshot,
+            dispatch,
+            terminal.intent.material(),
+            &reserved,
+            held.restoration.observation(),
+            now,
+        )?;
+        NativeReleaseSpendPrepared::require_absent(
+            self.display_journal()?,
+            &principal_id,
+            terminal_request,
+        )?;
+        record.append(
+            self.request_journal.as_deref_mut().ok_or_else(invalid)?,
+            principal_id.clone(),
+            terminal_request,
+        )?;
+        {
+            let checked = self.checked_display_history()?;
+            record.require_readback(self.display_journal()?, &principal_id, terminal_request)?;
+            if now_ms()? >= record.expiry()
+                || self.terminal_context_from_checked(&principal, terminal_request, &checked)?
+                    != terminal
+                || NativeReleasePrepared::load_spent(
+                    self.display_journal()?,
+                    &principal_id,
+                    &terminal.request,
+                    &terminal.snapshot,
+                    dispatch,
+                    terminal.intent.material(),
+                    &original,
+                )? != reserved
+            {
+                return Err(invalid());
+            }
+        }
+        // Root's LNRN material contains the Control retirement observation,
+        // NOT a newly sampled observation digest; using the new one here would
+        // silently substitute the original Root/terminal grant ancestry.
+        let attempt = AuthorizedOriginalDisplayNativeReleaseSpend {
+            material: terminal.intent.material().to_owned(),
+            terminal: terminal.snapshot.clone(),
+            dispatch_digest: dispatch.to_owned(),
+            control_observation: original.observation().clone(),
+            expires_at_unix_ms: record.expiry(),
+        };
+        // Storage/probes can consume the remaining window. Recheck the
+        // original signed binding, current policy/risk and nonrevoked approval
+        // immediately before the sole Root/native spend.
+        let dispatch_now = now_ms()?;
+        if dispatch_now < now
+            || dispatch_now >= review.deadline_unix_ms
+            || dispatch_now >= record.expiry()
+        {
+            return Err(invalid());
+        }
+        self.validate_registered_managed_plan(review.review.plan(), review.review.risk())?;
+        self.authority.revalidate_display_review(
+            &principal,
+            &terminal.request,
+            &review.review,
+            floor,
+            &terminal.snapshot,
+        )?;
+        port.spend_native_release(attempt).map_err(|_| {
+            ManagedLifecycleError::Indeterminate(
+                "native Root release grant spend outcome uncertain; no retry".into(),
+            )
+        })?;
+        // The physical attempt replaces opaque frames. The pre-effect
+        // restoration/safety-frame recipe cannot be reused as post-effect
+        // first-ordinary-frame evidence. Join the distinct fresh post-effect
+        // proof and retain immutable verification without committing terminal
+        // state or releasing another fence.
+        // The independent inspection reads/authenticates the exact spent bytes
+        // before providers and reloads all durable anchors afterward. Reuse
+        // that qualified readback, rather than consuming the original window
+        // with another identical pre-inspection storage scan.
+        let verified = self
+            .verify_native_handoff_with_spend(principal.clone(), terminal_request, Some(&record))
+            .map_err(|error| {
+                let reason = match error {
+                    ManagedLifecycleError::Verification(reason) => reason,
+                    _ => "terminal authority or durable ancestry unavailable".into(),
+                };
+                ManagedLifecycleError::Indeterminate(format!(
+                    "native handoff attempted; {reason}; observation only, no retry",
+                ))
+            })?;
+        // Move the ORIGINAL full review forward only after direct, durable
+        // independent proof. The read-only verification route never enters
+        // this branch. Reuse the existing bounded cache, with no extra entry
+        // or new clock; the initial-spend/preparation paths reject this stage.
+        review.stage = DisplayReviewStage::HandoffVerified {
+            spend: record.digest(),
+            verification: verified.record_digest().clone(),
+            expires_at_unix_ms: verified.valid_until_unix_ms(),
+        };
+        self.check_display_review_capacity(review.retained_bytes)?;
+        let checked = now_ms()?;
+        if checked < review.created_unix_ms || checked >= review.deadline_unix_ms {
+            return Err(invalid());
+        }
+        self.display_reviews
+            .insert(terminal.snapshot.transaction_id, review);
+        Ok(verified)
+    }
+
+    fn terminal_inspection_context(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
+        let checked = self.checked_display_history()?;
+        self.terminal_context_from_checked(principal, request_id, &checked)
+    }
+
+    fn terminal_context_from_checked(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+        checked: &CheckedDisplayHistoryRead<'_>,
+    ) -> Result<TerminalInspectionContext, ManagedLifecycleError> {
+        validate_operation_id(
+            request_id
+                .as_str()
+                .strip_prefix(DISPLAY_FINALIZATION_REQUEST_PREFIX)
+                .ok_or_else(invalid)?,
+        )?;
+        let principal_id = PrincipalId::new(principal.as_str()).map_err(|_| invalid())?;
+        let retained = checked
+            .journal
+            .load(&principal_id, request_id)
+            .map_err(|_| invalid())?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(invalid());
+        }
+        let request = crate::retained_request::decode(&retained)?;
+        validate_public_request(&request)?;
+        validate_request_identity(&request)?;
+        if retained.digest() != &crate::durable_authority::digest_request(&request)? {
+            return Err(invalid());
+        }
+        let (intent, snapshot, receipt) = self.finalization_receipt_context(principal, &request)?;
+        if snapshot.state != TransactionState::Indeterminate || receipt.dispatch_digest.is_none() {
+            return Err(invalid());
+        }
+        Ok(TerminalInspectionContext {
+            request,
+            intent,
+            snapshot,
+            receipt,
+        })
+    }
+
+    fn inspect_finalization_state(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        restoration_request: &RequestId,
+        history: LinkedHistory,
+        terminal: Option<(&TerminalInspectionContext, DisplayFinalizationPhase)>,
+    ) -> Result<OriginalDisplayFinalizationInspection, ManagedLifecycleError> {
+        let text = &history.restoration.desired_state["restore_original"];
+        let restoration = DisplayRestorationMaterial::decode(text).map_err(|_| invalid())?;
+        let scope = restoration.recovery_scope().map_err(|_| invalid())?;
+        let observation_request = linura_protocol::ObservationRequest {
+            provider: ProviderId::new(DISPLAY_RECOVERY_PROVIDER).map_err(|_| invalid())?,
+            capability: linura_core::CapabilityId::new(DISPLAY_ORIGINAL_FINALIZATION_CAPABILITY)
+                .map_err(|_| invalid())?,
+            resource: scope.resource_id().map_err(|_| invalid())?,
+        };
+        let mut mechanism = self
+            .previews
+            .observe(&observation_request)
+            .map_err(|_| invalid())?
+            .observation;
+        let state = DisplayOriginalFinalizationFacts::from_envelope(&mechanism, &scope, now_ms()?)
+            .map_err(|_| invalid())?;
+        if !terminal.map_or_else(
+            || state.phase() == DisplayFinalizationPhase::Protected && state.terminal().is_none(),
+            |(terminal, phase)| terminal.matches(&state, phase),
+        ) || state.checkpoint() != restoration.original_checkpoint()
+            || state.restoration_transaction()
+                != history.restoration_snapshot.transaction_id.as_str()
+            || state.restoration_effect()
+                != effect_from_request(&history.restoration)?.digest().to_hex()
+            || Some(state.restoration_dispatch()) != history.dispatched.dispatch_digest.as_deref()
+        {
+            return Err(invalid());
+        }
+        let proof = {
+            let _context = self
+                .previews
+                .enter_original_display_verification_context(
+                    history.source.clone(),
+                    &history.restoration,
+                    &history.restoration_snapshot,
+                    &history.dispatched,
+                )
+                .map_err(|_| invalid())?;
+            self.previews
+                .build_fresh_original_display_restoration_proof(
+                    &principal,
+                    actor,
+                    &history.restoration,
+                )
+                .map_err(|_| invalid())?
+        };
+        if proof.plan.status != linura_planner::PlanStatus::NoChange
+            || !proof.plan.changes.is_empty()
+            || proof.plan.execution_authorized()
+        {
+            return Err(invalid());
+        }
+        let presentation = proof.presentation.ok_or_else(invalid)?;
+        let material = DisplayFinalizationMaterial::encode(
+            restoration_request,
+            history
+                .dispatched
+                .dispatch_digest
+                .as_deref()
+                .ok_or_else(invalid)?,
+            history.link.digest().hex(),
+            presentation.source_guard(),
+            presentation.post_write_epoch(),
+            restoration.replacement().lock(),
+            text,
+        )
+        .map_err(|_| invalid())?;
+        if let Some((terminal, phase)) = terminal {
+            if material != terminal.intent.material()
+                || self.terminal_inspection_context(&principal, &terminal.request.request_id)?
+                    != *terminal
+            {
+                return Err(invalid());
+            }
+            // Quiescence can be lost while native/KMS facts are sampled. Read
+            // the same live Root state again, without renewing either expiry.
+            let after = self
+                .previews
+                .observe(&observation_request)
+                .map_err(|_| invalid())?
+                .observation;
+            let current =
+                DisplayOriginalFinalizationFacts::from_envelope(&after, &scope, now_ms()?)
+                    .map_err(|_| invalid())?;
+            if current != state || !terminal.matches(&current, phase) {
+                return Err(invalid());
+            }
+            crate::plan_preview::restrict_session_validity(&mut mechanism, &after, now_ms()?)
+                .map_err(|_| invalid())?;
+        }
+        // A read-only probe can race another Control connection. Re-read all
+        // immutable history and both exact snapshots after the provider join.
+        {
+            let checked = self.checked_display_history()?;
+            if self.finalization_history_from_checked(&principal, restoration_request, &checked)?
+                != history
+            {
+                return Err(invalid());
+            }
+            if let Some((terminal, _)) = terminal
+                && self.terminal_context_from_checked(
+                    &principal,
+                    &terminal.request.request_id,
+                    &checked,
+                )? != *terminal
+            {
+                return Err(invalid());
+            }
+        }
+        proof
+            .observation
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        crate::plan_preview::restrict_session_validity(
+            &mut mechanism,
+            &proof.observation,
+            now_ms()?,
+        )
+        .map_err(|_| invalid())?;
+        mechanism.attributes.insert(
+            "control.restoration_postcondition_digest".into(),
+            ObservedValue::Text(
+                crate::durable_authority::digest_observation(&proof.observation)?
+                    .as_str()
+                    .into(),
+            ),
+        );
+        mechanism
+            .require_current(now_ms()?)
+            .map_err(|_| invalid())?;
+        Ok(OriginalDisplayFinalizationInspection {
+            material,
+            observation: mechanism,
+            original: history.original_snapshot,
+            restoration: history.restoration_snapshot,
+        })
+    }
+}

@@ -233,11 +233,33 @@ per-instance configuration/explicit arguments and verify the canonical gate's
 expected output paths before relocating anything. Some image/qualification tools
 expect `target/release`; moving it blindly breaks those consumers.
 
+The canonical gate has an opt-in scoped-output selector:
+`LINURA_XTASK_CARGO_ENVIRONMENT=ENVIRONMENT` together with the existing guarded
+`LINURA_CARGO_TARGET`. For Clippy/workspace tests, xtask validates the destination
+through `development_storage.py` and passes an explicit `--target-dir`; rejection
+has no root/shared fallback. It removes the selector from child processes and
+does not export Cargo target overrides, so detached test workspaces retain their
+own outputs. The outer xtask bootstrap may use Cargo's command-local
+`--config build.target-dir=...` with that same checked path. Without this opt-in,
+the canonical command and its check inventory are unchanged. Scope `TMPDIR` to
+the matching checked temporary role when the tooling suite creates snapshots.
+
 For CMake, select a component-specific build directory with `cmake -B` and enable
 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` when editor analysis needs it. Keep outputs and
 compilation databases generated, not version-controlled. Absolute paths in a
 container's database refer to that container; opening it in a host editor does not
 make its headers and compiler available on the host.
+
+For S21-2, `contracts/s21-hyprland-build-environment.toml` defines the pinned
+Arch compositor SDK. `tools/hyprland_display_build.py` reuses the existing
+substrate builder and storage roles for verified base images, fresh disposable
+overlays, native source staging, logs and compiler outputs. The dedicated volume
+is storage; an SDK or operating system must still be explicitly provisioned.
+Generated SDK/source staging is neither a second registered Linura worktree nor
+qualification evidence. Keep the repository checkout on its existing source
+filesystem. Readiness, full security-owner CMake/CTest, exact-source compositor
+builds, Level A native execution and Level C/Q11 acceptance retain separate
+results and provenance. Build caches cannot substitute for fresh native evidence.
 
 ### Inspect a provisioned storage volume
 

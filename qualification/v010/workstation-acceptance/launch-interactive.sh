@@ -12,6 +12,8 @@ evidence_dir=""
 storage_root="${LINURA_STORAGE_ROOT:-/mnt/linura-data}"
 storage_id="${LINURA_STORAGE_ID:-}"
 run_id=""
+s21_candidate=""
+native_s21=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,6 +28,7 @@ while [[ $# -gt 0 ]]; do
         --storage-root) storage_root="$2"; shift 2 ;;
         --storage-id) storage_id="$2"; shift 2 ;;
         --run-id) run_id="$2"; shift 2 ;;
+        --s21-candidate) s21_candidate="$2"; native_s21=1; shift 2 ;;
         *) echo "unsupported argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -87,6 +90,14 @@ build_root="$work_root/source"
 mkdir -p "$build_root"
 git -C "$source_root" archive --format=tar.gz --output="$source_archive" "$source_sha"
 tar -xzf "$source_archive" -C "$build_root"
+
+if [[ "$native_s21" -eq 1 ]]; then
+    [[ -n "$s21_candidate" ]] || fail "--s21-candidate requires the exact-source candidate directory"
+    s21_candidate="$(realpath -e -- "$s21_candidate")"
+    python3 "$build_root/tools/hyprland_display_candidate.py" \
+        --candidate "$s21_candidate" --source-sha "$source_sha" \
+        || fail "S21 compositor candidate does not match the exact interactive source"
+fi
 
 doctor_args=(doctor --mode interactive --display "$display_backend")
 if [[ "$record" -eq 1 ]]; then
@@ -158,6 +169,7 @@ evidence_directory_matches || fail "interactive evidence directory changed while
 # current run, including when the new launch fails before guest provisioning.
 # Purge only run-owned artifacts after acquiring the directory-inode lock.
 rm -f -- "$evidence_dir/live-session.txt" \
+    "$evidence_dir/native-session-bootstrap.json" \
     "$evidence_dir/qemu.log" \
     "$evidence_dir/workstation-live.mkv" \
     "$evidence_dir/workstation-live.metadata.json" \
@@ -294,9 +306,11 @@ growpart:
   ignore_growroot_disabled: false
 resize_rootfs: true
 EOF
+guest_hostname="linura-live"
+[[ "$native_s21" -eq 0 ]] || guest_hostname="linura-v010-shell"
 cat > "$work_root/meta-data" <<EOF
 instance-id: linura-live-$source_sha
-local-hostname: linura-live
+local-hostname: $guest_hostname
 EOF
 cat > "$work_root/network-config" <<EOF
 version: 2
@@ -313,6 +327,7 @@ cloud-localds --network-config="$work_root/network-config"     "$seed_image" "$w
 
 launcher_args=(
     --mode interactive
+    --acceleration kvm
     --display "$display_backend"
     --image "$vm_image"
     --seed "$seed_image"
@@ -377,8 +392,42 @@ ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1     'sudo -n rm -rf /opt/
 installed_sha="$(ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 'sha256sum /usr/bin/linurad | awk "{print \$1}"')"
 [[ "$installed_sha" == "$linurad_sha256" ]] || fail "installed linurad differs from the exact-source local build"
 
+if [[ "$native_s21" -eq 1 ]]; then
+    # The same immutable candidate and exact-source product asset installer as
+    # Level A; no alternate owner, executor or reference-compositor fallback.
+    ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+        "sudo -n /usr/bin/env 'EXPECTED_SOURCE_SHA=$source_sha' /usr/bin/bash -s" <<'CANDIDATE'
+set -euo pipefail
+[[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ ! -e /opt/linura-s21-candidate && ! -L /opt/linura-s21-candidate ]]
+install -d -o root -g root -m 0700 /opt/linura-s21-candidate
+install -d -o root -g root -m 0755 /etc/linura-qualification
+printf '%s\n' "$EXPECTED_SOURCE_SHA" > /etc/linura-qualification/s21-source-sha
+chmod 0600 /etc/linura-qualification/s21-source-sha
+CANDIDATE
+    for name in Hyprland integration-build.h prepared-substrate.json staged-source.json candidate.json; do
+        ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+            "sudo -n install -o root -g root -m 0600 /dev/null '/opt/linura-s21-candidate/$name' && sudo -n tee '/opt/linura-s21-candidate/$name' >/dev/null" \
+            < "$s21_candidate/$name"
+    done
+    ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+        'test ! -e /tmp/linura-s17-binaries && test ! -L /tmp/linura-s17-binaries && sudo -n install -d -o root -g root -m 0700 /tmp/linura-s17-binaries'
+    for name in linurad linuractl linura-firstboot linura-update-guard linura-executor-systemd linura-executor-session linura-authorityd; do
+        binary="$build_root/target/$release_target/release/$name"
+        [[ -x "$binary" && ! -L "$binary" ]] || fail "exact-source native binary is missing: $name"
+        expected_binary_sha="$(sha256sum "$binary" | awk '{print $1}')"
+        ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+            "sudo -n install -o root -g root -m 0600 /dev/null '/tmp/linura-s17-binaries/$name' && sudo -n tee '/tmp/linura-s17-binaries/$name' >/dev/null" < "$binary"
+        guest_binary_sha="$(ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+            "sudo -n sha256sum /tmp/linura-s17-binaries/$name" | awk '{print $1}')"
+        [[ "$guest_binary_sha" == "$expected_binary_sha" ]] || fail "native binary changed during transfer: $name"
+    done
+    ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+        'sudo -n timeout 1100 python3 /opt/linura-source/qualification/v010/session-security/provision-native-session.py'
+fi
+
 set +e
-ssh -t "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1     "LINURA_RECORD_VISUAL=$record LINURA_SOURCE_SHA=$source_sha bash /opt/linura-source/qualification/v010/workstation-acceptance/run-live-session.sh /opt/linura-source /tmp/linura-workstation-live"
+ssh -t "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1     "LINURA_NATIVE_S21=$native_s21 LINURA_RECORD_VISUAL=$record LINURA_SOURCE_SHA=$source_sha bash /opt/linura-source/qualification/v010/workstation-acceptance/run-live-session.sh /opt/linura-source /tmp/linura-workstation-live"
 session_status=$?
 set -e
 
@@ -387,6 +436,9 @@ mkdir -m 0700 "$guest_evidence_stage"
 guest_evidence_required=0
 [[ "$session_status" -eq 0 ]] && guest_evidence_required=1
 stage_guest_evidence_file "live-session.txt" "$guest_evidence_required"
+if [[ "$native_s21" -eq 1 ]]; then
+    stage_guest_evidence_file "native-session-bootstrap.json" "$guest_evidence_required"
+fi
 if [[ "$record" -eq 1 ]]; then
     stage_guest_evidence_file "workstation-live.mkv" "$guest_evidence_required"
     stage_guest_evidence_file "workstation-live.metadata.json" "$guest_evidence_required"

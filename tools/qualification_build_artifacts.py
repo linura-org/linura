@@ -46,11 +46,17 @@ def _check_source(path: Path, descriptor: int, before: os.stat_result) -> None:
         raise ValueError(f"build or source input changed while binding: {path}")
 
 
-def _bind_file(path: Path, copy_to: Path | None = None) -> tuple[str, int]:
+def _bind_file(
+    path: Path, copy_to: Path | None = None, *, max_size: int | None = None
+) -> tuple[str, int]:
     source_fd = _open_source(path)
     target_fd = None
     try:
         before = os.fstat(source_fd)
+        if max_size is not None and (
+            type(max_size) is not int or max_size <= 0 or before.st_size > max_size
+        ):
+            raise ValueError("build input exceeds its binding budget")
         if copy_to is not None:
             target_fd = os.open(
                 copy_to,
@@ -59,9 +65,14 @@ def _bind_file(path: Path, copy_to: Path | None = None) -> tuple[str, int]:
             )
         digest = hashlib.sha256()
         size = 0
-        while block := os.read(source_fd, 1024 * 1024):
+        while block := os.read(
+            source_fd,
+            1024 * 1024 if max_size is None else min(1024 * 1024, max_size + 1 - size),
+        ):
             digest.update(block)
             size += len(block)
+            if max_size is not None and size > max_size:
+                raise ValueError("build input grew beyond its binding budget")
             if target_fd is not None:
                 view = memoryview(block)
                 while view:
@@ -96,12 +107,16 @@ def bind_artifacts(
     evidence_root: Path,
     inputs: dict[str, Path],
     generated: dict[str, str],
+    *,
+    max_sizes: dict[str, int] | None = None,
 ) -> dict[str, dict[str, str | int]]:
     """Record exact checked paths; retained binaries are bound by bundle name."""
     if not generated.keys() <= inputs.keys():
         raise ValueError("unrecognized generated artifact")
     if len(set(generated.values())) != len(generated):
         raise ValueError("reused generated artifact name")
+    if max_sizes is not None and not max_sizes.keys() <= inputs.keys():
+        raise ValueError("unrecognized build artifact budget")
     results = {}
     for name, path in inputs.items():
         if name in generated:
@@ -113,7 +128,9 @@ def bind_artifacts(
                 or ":" in filename
             ):
                 raise ValueError("unsafe retained build artifact filename")
-            digest, size = _bind_file(path, evidence_root / filename)
+            digest, size = _bind_file(
+                path, evidence_root / filename, max_size=(max_sizes or {}).get(name)
+            )
             recorded_path = f"retained:{filename}"
         else:
             recorded_path = path.relative_to(source_root).as_posix()
@@ -123,6 +140,6 @@ def bind_artifacts(
                 or not path.resolve().is_relative_to(source_root.resolve())
             ):
                 raise ValueError("invalid repository artifact path")
-            digest, size = _bind_file(path)
+            digest, size = _bind_file(path, max_size=(max_sizes or {}).get(name))
         results[name] = {"path": recorded_path, "sha256": digest, "size": size}
     return results

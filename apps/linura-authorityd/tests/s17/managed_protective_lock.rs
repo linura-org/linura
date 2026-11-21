@@ -165,6 +165,47 @@ fn open_protective_control(
     hooks: impl Into<ObserverHooks>,
     with_policy_store: bool,
 ) -> ManagedLifecycleControl<SqliteTransactionStore> {
+    // Preserve supplied timestamps for freshness/expiry negative fixtures.
+    open_protective_control_after_storage_ready(
+        database,
+        || (locks, sessions, entries),
+        hooks,
+        with_policy_store,
+    )
+}
+
+type NativeObservations = (
+    Vec<ObservationEnvelope>,
+    Vec<ObservationEnvelope>,
+    Vec<ObservationEnvelope>,
+);
+fn open_protective_control_after_storage_ready(
+    database: &Path,
+    observations: impl FnOnce() -> NativeObservations,
+    hooks: impl Into<ObserverHooks>,
+    with_policy_store: bool,
+) -> ManagedLifecycleControl<SqliteTransactionStore> {
+    let (signer, verifier) = authority_material();
+    let store = value(SqliteTransactionStore::open(
+        database,
+        verifier,
+        value(SqliteIntegrityKey::new(fixture_key(2))),
+    ));
+    let journal = value(
+        linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
+            database.with_extension("requests.sqlite3"),
+            value(SqliteIntegrityKey::new(fixture_key(3))),
+        ),
+    );
+    let settings = with_policy_store.then(|| {
+        value(ProtectiveLockSettingsControl::new(
+            Box::new(settings_store(database)),
+            policy_authority().0,
+        ))
+    });
+    // Positive fixtures sample after unrelated SQLite initialization, matching
+    // native observation order without extending validity or refreshing samples.
+    let (locks, sessions, entries) = observations();
     let mut coordinator = ObservationCoordinator::new();
     let mut hooks = hooks.into();
     for (samples, provider, capability, resource) in [
@@ -211,27 +252,14 @@ fn open_protective_control(
             renew_samples: hooks.renew_samples,
         })),
     );
-    let (signer, verifier) = authority_material();
     let control = value(ManagedLifecycleControl::new(
         PlanPreviewControl::new(coordinator),
-        value(SqliteTransactionStore::open(
-            database,
-            verifier,
-            value(SqliteIntegrityKey::new(fixture_key(2))),
-        )),
+        store,
         signer,
     ));
-    let control = value(control.with_request_journal(Box::new(value(
-        linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
-            database.with_extension("requests.sqlite3"),
-            value(SqliteIntegrityKey::new(fixture_key(3))),
-        ),
-    ))));
-    if with_policy_store {
-        control.with_protective_lock_settings(value(ProtectiveLockSettingsControl::new(
-            Box::new(settings_store(database)),
-            policy_authority().0,
-        )))
+    let control = value(control.with_request_journal(Box::new(journal)));
+    if let Some(settings) = settings {
+        control.with_protective_lock_settings(settings)
     } else {
         control
     }
@@ -393,8 +421,12 @@ fn revocation_during_prepare_and_handoff_cannot_use_the_retained_setting() {
 fn protective_request_cannot_select_automatic_policy_through_the_manual_route() {
     let db = TestDatabase::new();
     set_policy(db.path(), true);
-    let (locks, sessions, entries) = successful_observations();
-    let mut control = open_protective_control(db.path(), locks, sessions, entries, vec![], true);
+    let mut control = open_protective_control_after_storage_ready(
+        db.path(),
+        successful_observations,
+        vec![],
+        true,
+    );
     let calls = Arc::new(AtomicUsize::new(0));
     let mut executor = ScriptedExecutor::outcome(ExecutionDisposition::Dispatched, calls.clone());
     let mut verifier = ScriptedVerifier::new(

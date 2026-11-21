@@ -49,10 +49,15 @@ class NativeKeyboard final
     [[nodiscard]] bool bind(wl_seat *ownedSeat);
     [[nodiscard]] bool available() const noexcept;
     [[nodiscard]] bool focused() const;
+    [[nodiscard]] quint64 interactionGeneration() const noexcept;
     void forgetSurface(wl_surface *surface);
     void resetFocus();
     // Recheck only the bound compositor focus and coverage; never synthesize input.
-    void refreshProtectedFocus();
+    void refreshProtectedFocus(bool preservePreparedPrompt = false);
+    // Drop the live prompt/compose/click state without inventing a new enter
+    // or forgetting physically held keys. Coverage may settle on the same
+    // native focus, but an old response or held submit cannot migrate there.
+    void invalidateOutputConfiguration(bool preservePreparedPrompt = false);
     void paintPointer(wl_surface *surface, QImage &frame) const;
     // Private pre-lock confirmation only. No text is decoded or delivered while
     // this target is selected. A new unmodified Enter/Escape press is required;
@@ -60,6 +65,9 @@ class NativeKeyboard final
     using Confirmation = std::function<void(bool)>;
     [[nodiscard]] bool setConfirmationTarget(wl_surface *surface, Confirmation completion);
     void clearConfirmationTarget();
+    // One fresh native review action on current protected focus. Unlike S17's
+    // pre-lock target, this retains held-key state/focus across a page revision.
+    [[nodiscard]] bool setDisplayReviewTarget(Confirmation completion);
 
   private:
     class Impl;

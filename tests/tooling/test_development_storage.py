@@ -4,6 +4,8 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import re
+import tomllib
 import sys
 import subprocess
 import tempfile
@@ -243,9 +245,23 @@ class StoragePreparationTests(unittest.TestCase):
         workflow = (
             ROOT / ".github/workflows/v010-shell-runtime-qualification.yml"
         ).read_text(encoding="utf-8")
-        # Three prepared-image files in three cache actions, plus the official
-        # base image in its own stable prerequisite cache.
-        self.assertEqual(workflow.count("env.LINURA_VM_BASE_DIR"), 10)
+        # All prepared inputs remain in the stable prerequisite namespace.
+        # Compare exact paths as well as the number of references: a renamed,
+        # broadened or extra build-output cache must not satisfy a count alone.
+        contract = tomllib.loads(
+            (ROOT / "contracts/s21-hyprland-build-environment.toml").read_text()
+        )
+        expected = [
+            "arch-v010-shell.qcow2",
+            f"arch-{contract['base_image_sha256']}.qcow2",
+        ] + [
+            "arch-v010-shell-prepared.qcow2",
+            "arch-v010-shell-prepared.qcow2.sha256",
+            "arch-v010-shell-prepared.json",
+        ] * 3
+        selected = re.findall(r"\$\{\{ env\.LINURA_VM_BASE_DIR \}\}/([^\s]+)", workflow)
+        self.assertEqual(workflow.count("env.LINURA_VM_BASE_DIR"), len(expected))
+        self.assertCountEqual(selected, expected)
         self.assertIn("Stage restored prepared substrate into private run", workflow)
         self.assertIn(
             "Stage verified prepared substrate in stable prerequisite cache", workflow

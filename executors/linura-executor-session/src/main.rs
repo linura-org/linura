@@ -7,6 +7,9 @@ fn main() {
         (Some(argument), None) if argument == "--protect-before-sleep" => {
             linura_linux_session::protect_before_native_sleep()
         }
+        (Some(argument), None) if argument == "--display-protection" => {
+            linura_executor_session::serve_display_protection()
+        }
         _ => Err("unsupported fixed session-executor invocation".into()),
     };
     if let Err(error) = result {

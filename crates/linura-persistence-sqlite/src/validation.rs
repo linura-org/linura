@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use linura_transaction::{ContentDigest, TransactionState, TransactionStoreError, digest_bytes};
@@ -34,6 +35,7 @@ pub(crate) fn configure_connection(
     connection: &Connection,
     limits: StoreLimits,
 ) -> Result<(), TransactionStoreError> {
+    connection.set_prepared_statement_cache_capacity(crate::VALIDATION_STATEMENT_CACHE_CAPACITY);
     // Observe the current mode without requesting a persistent transition. For
     // an existing authority database this matters under real ENOSPC: reopening
     // must not need to rewrite journal configuration before the preallocated
@@ -91,8 +93,11 @@ fn validate_pre_configuration_identity(
     let user_version = pragma_i64(connection, "user_version")?;
     if application_id == 0 && user_version == 0 {
         let object_count: i64 = connection
-            .query_row(
+            .prepare_cached(
                 "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            )
+            .map_err(sqlite)?
+            .query_row(
                 [],
                 |row| row.get(0),
             )
@@ -126,8 +131,11 @@ pub(crate) fn initialize_or_validate_schema(
     let user_version = pragma_i64(connection, "user_version")?;
     if application_id == 0 && user_version == 0 {
         let object_count: i64 = connection
-            .query_row(
+            .prepare_cached(
                 "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            )
+            .map_err(sqlite)?
+            .query_row(
                 [],
                 |row| row.get(0),
             )
@@ -281,9 +289,12 @@ pub(crate) fn validate_schema_identity(
     }
     validate_store_identity(connection, authority_fingerprint, integrity_fingerprint)?;
     let (ledger_count, unexpected_entries): (i64, i64) = connection
-        .query_row(
+        .prepare_cached(
             "SELECT COUNT(*), COALESCE(SUM(CASE WHEN migration_id NOT IN (?1, ?2) THEN 1 ELSE 0 END), 0)
              FROM schema_migrations",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![MIGRATION_ID, MIGRATION_V2_ID],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -318,9 +329,12 @@ fn validate_v1_schema_identity(
     }
     validate_store_identity(connection, authority_fingerprint, integrity_fingerprint)?;
     let (ledger_count, unexpected_entries): (i64, i64) = connection
-        .query_row(
+        .prepare_cached(
             "SELECT COUNT(*), COALESCE(SUM(CASE WHEN migration_id <> ?1 THEN 1 ELSE 0 END), 0)
              FROM schema_migrations",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![MIGRATION_ID],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -345,13 +359,16 @@ fn validate_store_identity(
     integrity_fingerprint: &ContentDigest,
 ) -> Result<(), TransactionStoreError> {
     let identity = connection
-        .query_row(
+        .prepare_cached(
             "SELECT
                 length(CAST(verifier_fingerprint AS BLOB)),
                 CASE WHEN length(CAST(verifier_fingerprint AS BLOB)) = ?1 THEN verifier_fingerprint ELSE NULL END,
                 length(CAST(integrity_fingerprint AS BLOB)),
                 CASE WHEN length(CAST(integrity_fingerprint AS BLOB)) = ?1 THEN integrity_fingerprint ELSE NULL END
              FROM authority_store_identity WHERE singleton = 1",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![as_i64(CONTENT_DIGEST_TEXT_BYTES as u64)?],
             |row| {
                 Ok((
@@ -396,10 +413,13 @@ fn validate_migration_entry(
     expected_checksum: &ContentDigest,
 ) -> Result<(), TransactionStoreError> {
     let checksum = connection
-        .query_row(
+        .prepare_cached(
             "SELECT length(CAST(checksum AS BLOB)),
                     CASE WHEN length(CAST(checksum AS BLOB)) = ?2 THEN checksum ELSE NULL END
              FROM schema_migrations WHERE migration_id = ?1",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![migration_id, as_i64(CONTENT_DIGEST_TEXT_BYTES as u64)?],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
         )
@@ -422,7 +442,7 @@ fn validate_migration_entry(
 
 fn schema_fingerprint(connection: &Connection) -> Result<ContentDigest, TransactionStoreError> {
     let (object_count, aggregate_bytes): (i64, i64) = connection
-        .query_row(
+        .prepare_cached(
             "SELECT COUNT(*), COALESCE(SUM(
                  ?1
                  + length(CAST(type AS BLOB))
@@ -432,6 +452,9 @@ fn schema_fingerprint(connection: &Connection) -> Result<ContentDigest, Transact
              ), 0)
              FROM sqlite_schema
              WHERE name NOT LIKE 'sqlite_%'",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![
                 as_i64(CANONICAL_FIELDS_PER_SCHEMA_OBJECT * CANONICAL_LENGTH_PREFIX_BYTES)?
             ],
@@ -451,7 +474,7 @@ fn schema_fingerprint(connection: &Connection) -> Result<ContentDigest, Transact
     }
 
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT
                 length(CAST(type AS BLOB)), CASE WHEN length(CAST(type AS BLOB)) <= ?1 THEN type ELSE NULL END,
                 length(CAST(name AS BLOB)), CASE WHEN length(CAST(name AS BLOB)) <= ?2 THEN name ELSE NULL END,
@@ -532,16 +555,28 @@ fn schema_fingerprint(connection: &Connection) -> Result<ContentDigest, Transact
 }
 
 fn expected_v1_schema_fingerprint() -> Result<ContentDigest, TransactionStoreError> {
-    let reference = Connection::open_in_memory().map_err(sqlite)?;
-    reference.execute_batch(MIGRATION_V1).map_err(sqlite)?;
-    schema_fingerprint(&reference)
+    static EXPECTED: OnceLock<Result<ContentDigest, TransactionStoreError>> = OnceLock::new();
+    EXPECTED
+        .get_or_init(|| {
+            let reference = Connection::open_in_memory().map_err(sqlite)?;
+            reference.execute_batch(MIGRATION_V1).map_err(sqlite)?;
+            schema_fingerprint(&reference)
+        })
+        .clone()
 }
 
 fn expected_schema_fingerprint() -> Result<ContentDigest, TransactionStoreError> {
-    let reference = Connection::open_in_memory().map_err(sqlite)?;
-    reference.execute_batch(MIGRATION_V1).map_err(sqlite)?;
-    reference.execute_batch(MIGRATION_V2).map_err(sqlite)?;
-    schema_fingerprint(&reference)
+    // Cache a reference derived exclusively from immutable shipped migrations,
+    // never a live schema, migration ledger, identity or integrity result.
+    static EXPECTED: OnceLock<Result<ContentDigest, TransactionStoreError>> = OnceLock::new();
+    EXPECTED
+        .get_or_init(|| {
+            let reference = Connection::open_in_memory().map_err(sqlite)?;
+            reference.execute_batch(MIGRATION_V1).map_err(sqlite)?;
+            reference.execute_batch(MIGRATION_V2).map_err(sqlite)?;
+            schema_fingerprint(&reference)
+        })
+        .clone()
 }
 
 pub(crate) fn with_immediate_validation<T>(
@@ -573,11 +608,26 @@ pub(crate) fn validate_physical_reservations_locked(
     if connection.is_autocommit() {
         return Err(TransactionStoreError::StateConflict);
     }
-    let expected_bytes = reservation_bytes(connection)?;
     let ids = list_transaction_ids(connection)?;
+    let snapshots = ids.iter().map(|id| load_current(connection, key, id).map(|(_, _, snapshot)| snapshot));
+    validate_physical_reservations_for_current_locked(connection, snapshots, opener_released)
+}
+
+// Only used within the same write-serialized check that authenticated every
+// current snapshot. Never retain these rows after that check or across effects.
+pub(crate) fn validate_physical_reservations_for_current_locked(
+    connection: &Connection,
+    snapshots: impl IntoIterator<Item = Result<linura_transaction::TransactionSnapshot, TransactionStoreError>>,
+    opener_released: bool,
+) -> Result<(), TransactionStoreError> {
+    if connection.is_autocommit() {
+        return Err(TransactionStoreError::StateConflict);
+    }
+    let expected_bytes = reservation_bytes(connection)?;
     let mut expected_total = 0_u64;
-    for id in ids {
-        let (_, _, snapshot) = load_current(connection, key, &id)?;
+    for snapshot in snapshots {
+        let snapshot = snapshot?;
+        let id = &snapshot.transaction_id;
         let expected = u64::from(matches!(
             snapshot.state,
             TransactionState::Prepared
@@ -588,7 +638,7 @@ pub(crate) fn validate_physical_reservations_locked(
             .checked_add(expected)
             .ok_or(TransactionStoreError::CapacityExceeded)?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT slot, length(reserved) FROM audit_reservations
                  WHERE transaction_id = ?1 ORDER BY slot",
             )
@@ -619,7 +669,12 @@ pub(crate) fn validate_physical_reservations_locked(
         }
     }
     let actual_total: i64 = connection
-        .query_row("SELECT COUNT(*) FROM audit_reservations", [], |row| row.get(0))
+        .prepare_cached(
+            "SELECT COUNT(*) FROM audit_reservations",
+        )
+        .map_err(sqlite)?
+        .query_row(
+            [], |row| row.get(0))
         .map_err(sqlite)?;
     let actual_total = u64::try_from(actual_total).map_err(|_| {
         TransactionStoreError::Corruption("negative aggregate physical reservation count".into())
@@ -644,11 +699,13 @@ fn page_size(connection: &Connection) -> Result<u64, TransactionStoreError> {
 }
 
 fn migration_v1_checksum() -> ContentDigest {
-    digest_bytes("linura.sqlite.migration.v1", MIGRATION_V1.as_bytes())
+    static EXPECTED: OnceLock<ContentDigest> = OnceLock::new();
+    EXPECTED.get_or_init(|| digest_bytes("linura.sqlite.migration.v1", MIGRATION_V1.as_bytes())).clone()
 }
 
 fn migration_v2_checksum() -> ContentDigest {
-    digest_bytes("linura.sqlite.migration.v2", MIGRATION_V2.as_bytes())
+    static EXPECTED: OnceLock<ContentDigest> = OnceLock::new();
+    EXPECTED.get_or_init(|| digest_bytes("linura.sqlite.migration.v2", MIGRATION_V2.as_bytes())).clone()
 }
 
 fn append_canonical_field(
@@ -711,6 +768,33 @@ mod tests {
         let _ = fs::remove_file(&database);
         let _ = fs::remove_file(format!("{}-wal", database.display()));
         let _ = fs::remove_file(format!("{}-shm", database.display()));
+    }
+
+    #[test]
+    fn reference_reuse_never_adopts_live_schema_ledger_or_identity() {
+        let authority = digest_bytes("linura.test.authority-fingerprint.v1", b"authority");
+        let integrity = digest_bytes("linura.test.integrity-fingerprint.v1", b"integrity");
+        let mut good = Connection::open_in_memory()
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        initialize_or_validate_schema(&mut good, &authority, &integrity)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        for sql in [
+            "CREATE TABLE foreign_schema(value BLOB)",
+            "INSERT INTO schema_migrations(migration_id,checksum) SELECT 'foreign',checksum FROM schema_migrations LIMIT 1",
+            "PRAGMA application_id=1",
+        ] {
+            let mut bad = Connection::open_in_memory()
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            initialize_or_validate_schema(&mut bad, &authority, &integrity)
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            assert!(validate_schema_identity(&bad, &authority, &integrity).is_ok());
+            bad.execute_batch(sql).unwrap_or_else(|error| unreachable!("{error}"));
+            assert!(validate_schema_identity(&bad, &authority, &integrity).is_err());
+            assert!(validate_schema_identity(&good, &authority, &integrity).is_ok());
+        }
+        let foreign_authority = digest_bytes("linura.test.authority-fingerprint.v1", b"other");
+        assert!(validate_schema_identity(&good, &foreign_authority, &integrity).is_err());
+        assert!(validate_schema_identity(&good, &authority, &integrity).is_ok());
     }
 
     #[test]

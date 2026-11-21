@@ -17,6 +17,25 @@ from tools import check_validation_gates as gates  # noqa: E402
 
 
 class ValidationGateTests(unittest.TestCase):
+    def test_image_download_location_is_data_and_does_not_allow_execution_overrides(
+        self,
+    ):
+        workflow = (
+            "env:\n  BASE_IMAGE_DOWNLOAD_URL: https://fixture.invalid/pinned.img\n"
+            "jobs:\n  check:\n    runs-on: ubuntu-24.04\n"
+        )
+        self.assertTrue(
+            gates.workflow_execution_context_guarded(workflow, data_only=True)
+        )
+        for name in ("BASE_IMAGE_EXECUTABLE", "CURL_CA_BUNDLE", "LD_PRELOAD", "PATH"):
+            with self.subTest(name=name):
+                self.assertFalse(
+                    gates.workflow_execution_context_guarded(
+                        workflow.replace("BASE_IMAGE_DOWNLOAD_URL", name),
+                        data_only=True,
+                    )
+                )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -49,6 +68,41 @@ class ValidationGateTests(unittest.TestCase):
         source = file.read_text()
         self.assertIn(before, source)
         file.write_text(source.replace(before, after, 1))
+
+    def test_v06_concurrent_guest_run_and_retention_cannot_be_removed_or_serialized(
+        self,
+    ):
+        for relative in (
+            "tests/acceptance/v06/qualify-guest.sh",
+            "tests/acceptance/v06/qualify-host.sh",
+        ):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        self.assertEqual(gates.check(self.root), [])
+        guest = self.root / "tests/acceptance/v06/qualify-guest.sh"
+        original = guest.read_text()
+        command = (
+            "/usr/libexec/linura/v06-qualification-matrix --test-threads=2 "
+            "2>&1 | tee /tmp/v06-concurrent-matrix.log"
+        )
+        self.assertIn(command, original)
+        for replacement in (command.replace("=2", "=1"), "true", "echo skipped"):
+            with self.subTest(replacement=replacement):
+                guest.write_text(original.replace(command, replacement, 1))
+                self.assertIn(
+                    "tests/acceptance/v06/qualify-guest.sh: unreviewed shell execution",
+                    gates.check(self.root),
+                )
+        guest.write_text(original)
+        host = self.root / "tests/acceptance/v06/qualify-host.sh"
+        original = host.read_text()
+        self.assertIn(" v06-concurrent-matrix.log", original)
+        host.write_text(original.replace(" v06-concurrent-matrix.log", "", 1))
+        self.assertIn(
+            "tests/acceptance/v06/qualify-host.sh: unreviewed shell execution",
+            gates.check(self.root),
+        )
 
     def test_tooling_runner_cannot_be_weakened_without_review(self):
         self.assertEqual(gates.check(self.root), [])
@@ -406,6 +460,51 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(relative + ": unreviewed shell execution", gates.check(self.root))
         target.write_text("printf '%s\\n' changed\n", encoding="utf-8")
         self.assertIn(relative + ": unreviewed shell execution", gates.check(self.root))
+
+    def test_display_entry_installer_review_binds_fixed_paths_and_complete_body(self):
+        relative = "packaging/hyprland-display/install-secure-entry.sh"
+        target = self.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        original = (ROOT / relative).read_text(encoding="utf-8")
+        target.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        for changed in (
+            original.replace("image=/usr/bin/Hyprland", 'image="$1"', 1),
+            original.replace('"+$entry_gid"', '"$entry_gid"', 1),
+            original + "exit 0\n",
+        ):
+            with self.subTest(changed=changed):
+                target.write_text(changed, encoding="utf-8")
+                self.assertIn(
+                    relative + ": unreviewed shell execution", gates.check(self.root)
+                )
+
+    def test_native_session_review_binds_denial_commands_and_complete_body(self):
+        relative = "tests/acceptance/v06/qualify-native-session.sh"
+        target = self.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        original = (ROOT / relative).read_text(encoding="utf-8")
+        target.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        for changed in (
+            original.replace(
+                "RestoreOriginalDisplayLayout ststtssss",
+                "ApplyDisplayLayout ststtssss",
+                1,
+            ),
+            original.replace(
+                "native-session-original-restoration-root-denied",
+                "weakened-root-check",
+                1,
+            ),
+            original + "exit 0\n",
+        ):
+            with self.subTest(changed=changed != original):
+                self.assertNotEqual(changed, original)
+                target.write_text(changed, encoding="utf-8")
+                self.assertIn(
+                    relative + ": unreviewed shell execution", gates.check(self.root)
+                )
 
     def test_dynamic_shell_interpreters_require_review_for_every_input(self):
         commands = (
@@ -804,7 +903,7 @@ class ValidationGateTests(unittest.TestCase):
     def test_graphical_runtime_runner_exception_is_narrow_and_pinned(self):
         workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
         source = (ROOT / workflow).read_text()
-        self.assertEqual(source.count("runs-on: ubuntu-26.04"), 2)
+        self.assertEqual(source.count("runs-on: ubuntu-26.04"), 3)
         self.assertTrue(
             gates.toolchain_data_loads_guarded(
                 source, require_load=True, workflow_name=workflow
@@ -4440,7 +4539,7 @@ class ValidationGateTests(unittest.TestCase):
                 ".github/workflows/v010-shell-runtime-qualification.yml",
                 job,
             )
-            for job in ("substrate", "runtime")
+            for job in ("substrate", "runtime", "display-build")
         )
         for name, workflow, job in lanes:
             target = self.root / workflow
@@ -5593,16 +5692,119 @@ class ValidationGateTests(unittest.TestCase):
                     )
             target.write_text(original, encoding="utf-8")
 
+    def test_display_input_cache_cannot_accept_mutable_or_build_outputs(self):
+        original = ".github/workflows/v010-shell-runtime-qualification.yml"
+        content = (self.root / original).read_text()
+        changes = (
+            ("Cache pinned Arch display-build input", "Cache unreviewed image"),
+            ("linura-s21-arch-input-v1-", "mutable-arch-latest-"),
+            (
+                "/arch-d7cc7c86a21b32d6678c001464714f71f4ef7e0d7bbbfca65e99123ac5afc25b.qcow2",
+                "/s21-candidate/",
+            ),
+            (
+                "      - name: Cache pinned Arch display-build input",
+                "      - name: Cache pinned Arch display-build input\n        if: false",
+            ),
+        )
+        for old, new in changes:
+            with self.subTest(old=old):
+                path = self.root / original
+                self.assertIn(old, content)
+                path.write_text(content.replace(old, new, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any("cache must select only" in e for e in errors), errors
+                )
+        path.write_text(content)
+
+    def test_display_build_cannot_be_substituted_or_skipped(self):
+        path = self.root / ".github/workflows/v010-shell-runtime-qualification.yml"
+        original = path.read_text()
+        marker = (
+            "      - name: Build exact-source display integration with pinned Arch SDK"
+        )
+        for before, after in (
+            (marker, marker + "\n        if: false"),
+            (marker, marker + "\n        continue-on-error: true"),
+            (
+                "python3 tools/hyprland_display_build.py ci-build",
+                "true # build skipped",
+            ),
+            (
+                "--acceleration kvm --memory-mib 4096 --jobs 1",
+                "--acceleration tcg --memory-mib 4096 --jobs 1",
+            ),
+        ):
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "display build: pinned SDK/compositor build" in e
+                        or "required qualification step guard" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
+        path.write_text(original)
+
+    def test_native_compositor_handoff_cannot_use_another_attempt_or_skip_verification(
+        self,
+    ):
+        path = self.root / ".github/workflows/v010-shell-runtime-qualification.yml"
+        original = path.read_text()
+        for before, after in (
+            ("needs: [substrate, display-build]", "needs: substrate"),
+            (
+                "-attempt-${{ github.run_attempt }}-unqualified-candidate",
+                "-unqualified-candidate",
+            ),
+            ("          if-no-files-found: error", "          if-no-files-found: warn"),
+            (
+                "python3 tools/hyprland_display_candidate.py",
+                "true # candidate unchecked",
+            ),
+            ('--source-sha "$SOURCE_SHA"', "--source-sha stale"),
+            (
+                "      - name: Verify exact-source compositor candidate before runtime",
+                "      - name: Verify exact-source compositor candidate before runtime\n        if: false",
+            ),
+            (
+                "      - name: Download this workflow attempt's compositor candidate",
+                "      - name: Download this workflow attempt's compositor candidate\n        continue-on-error: true",
+            ),
+        ):
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "native runtime:" in error
+                        or "required qualification step guard" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+        path.write_text(original)
+
     def test_reusable_shell_runtime_jobs_require_exact_source(self):
         workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
         target = self.root / workflow
         original = target.read_text(encoding="utf-8")
         source_ref = "          ref: ${{ inputs.source_sha || github.sha }}\n"
         assert_line = '          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"\n'
-        self.assertEqual(original.count(source_ref), 2)
-        self.assertEqual(original.count(assert_line), 2)
-        for job in ("substrate", "runtime"):
+        self.assertEqual(original.count(source_ref), 3)
+        self.assertEqual(original.count(assert_line), 3)
+        for job in ("substrate", "runtime", "display-build"):
             prefix, body = original.split("  " + job + ":\n", 1)
+            contract_name = {
+                "substrate": "substrate",
+                "runtime": "runtime",
+                "display-build": "display build",
+            }[job]
             for scenario, before, after in (
                 ("changed ref", source_ref, "          ref: main\n"),
                 (
@@ -5614,10 +5816,10 @@ class ValidationGateTests(unittest.TestCase):
                 (
                     "conditional assertion",
                     "      - name: Assert exact source and "
-                    + ("substrate" if job == "substrate" else "runtime")
+                    + contract_name
                     + " contract\n",
                     "      - name: Assert exact source and "
-                    + ("substrate" if job == "substrate" else "runtime")
+                    + contract_name
                     + " contract\n        if: false\n",
                 ),
             ):

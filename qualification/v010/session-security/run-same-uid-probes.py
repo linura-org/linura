@@ -89,15 +89,28 @@ def set_scope(value: str) -> None:
 
 def validate_report(report: object) -> dict[str, object]:
     expected_checks = {
-        f"same-uid-{name}-open-denied" for name in ("mem", "environ", "auxv")
+        f"{prefix}{name}-open-denied"
+        for prefix in ("same-uid-", "compositor-same-uid-")
+        for name in ("mem", "environ", "auxv")
     }
     expected_checks.add("same-uid-ptrace-seize-denied")
+    expected_checks.add("compositor-same-uid-ptrace-seize-denied")
+    expected_checks.update(
+        {
+            "loader-canary-positive-control",
+            "compositor-loader-preload-refused",
+            "egl-vendor-override-positive-control",
+        }
+    )
     expected_fields = {
         "schema_version",
         "claim",
         "native_owner_pid",
         "native_owner_invocation",
         "owner_start_ticks",
+        "native_compositor_pid",
+        "native_compositor_invocation",
+        "compositor_start_ticks",
         "ptrace_scope",
         "checks",
         "s17_complete",
@@ -108,8 +121,19 @@ def validate_report(report: object) -> dict[str, object]:
         raise RuntimeError("native same-UID report is incomplete")
     checks = report["checks"]
     if (
+        type(report["native_compositor_pid"]) is not int
+        or not 1 < report["native_compositor_pid"] < 2**31
+        or report["native_compositor_pid"] == report["native_owner_pid"]
+        or not isinstance(report["native_compositor_invocation"], str)
+        or re.fullmatch(r"[0-9a-f]{32}", report["native_compositor_invocation"]) is None
+        or report["native_compositor_invocation"] == "0" * 32
+        or not isinstance(report["compositor_start_ticks"], str)
+        or re.fullmatch(r"[1-9][0-9]{0,19}", report["compositor_start_ticks"]) is None
+    ):
+        raise RuntimeError("native compositor same-UID report is incomplete")
+    if (
         type(report["schema_version"]) is not int
-        or report["schema_version"] != 1
+        or report["schema_version"] != 2
         or report["claim"] != "native-same-uid-process-access-cases-only"
         or type(report["native_owner_pid"]) is not int
         or not 1 < report["native_owner_pid"] < 2**31

@@ -41,6 +41,8 @@ stage install-exact-native-executor-and-privileged-boundary
 sudo -n install -o root -g root -m 0755 /tmp/linura-executor-session "$image"
 sudo -n install -o root -g root -m 0644 /tmp/linura-executor-session.service "$unit"
 sudo -n install -o root -g root -m 0644 /tmp/org.linura.Executor.Session1.conf /etc/dbus-1/system.d/org.linura.Executor.Session1.conf
+sudo -n install -o root -g root -m 0644 /tmp/org.linura.DisplayProtection1.conf /etc/dbus-1/system.d/org.linura.DisplayProtection1.conf
+sudo -n install -o root -g root -m 0644 /tmp/linura-display-protection.service /usr/lib/systemd/system/linura-display-protection.service
 sudo -n install -o root -g root -m 0644 /tmp/org.linura.executor.session.policy /usr/share/polkit-1/actions/org.linura.executor.session.policy
 sudo -n install -o root -g root -m 0644 /tmp/50-linura-executor-session.rules /etc/polkit-1/rules.d/50-linura-executor-session.rules
 sudo -n install -d -o root -g root -m 0755 /usr/lib/systemd/system/systemd-suspend.service.d /usr/lib/systemd/sleep.conf.d
@@ -48,7 +50,7 @@ sudo -n install -o root -g root -m 0644 /tmp/50-linura-protective-lock.conf "$sl
 sudo -n install -o root -g root -m 0644 /tmp/50-linura-qualified-sleep.conf "$sleep_conf"
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart polkit.service
-sudo -n dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig
+sudo -n dbus-send --system --print-reply --reply-timeout=5000 --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig
 
 stage active-native-session-executor
 sudo -n systemctl start "$service"
@@ -64,7 +66,66 @@ test "$(sudo -n systemctl show "$service" --value -p AmbientCapabilities)" = ""
 test "$(sudo -n systemctl show "$service" --value -p CapabilityBoundingSet)" = ""
 pkaction --action-id org.linura.executor.session.set-secure >/dev/null
 pkaction --action-id org.linura.executor.session.execute-transition >/dev/null
+pkaction --action-id org.linura.executor.session.apply-display-layout >/dev/null
+pkaction --action-id org.linura.executor.session.restore-original-display-layout >/dev/null
 echo "native-session-live-executor=qualified"
+
+stage independent-display-protection-admission
+protection=linura-display-protection.service
+protection_destination=org.linura.DisplayProtection1
+protection_path=/org/linura/DisplayProtection1
+sudo -n systemctl is-active --quiet "$protection"
+protection_epoch="$(sudo -n systemctl show "$protection" --value -p InvocationID)"
+[[ "$protection_epoch" =~ ^[0-9a-f]{32}$ ]]
+[[ "$protection_epoch" != 00000000000000000000000000000000 ]]
+protection_digest=1111111111111111111111111111111111111111111111111111111111111111
+for method in Begin Verify; do
+    expect_failure "native-display-protection-$method-ordinary-denied" \
+        busctl --system call "$protection_destination" "$protection_path" "$protection_destination" "$method" s "$protection_digest"
+    grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+    expect_failure "native-display-protection-$method-root-not-executor-denied" \
+        sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" "$method" s "$protection_digest"
+    grep -Eiq 'supervised executor|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+done
+expect_failure native-display-protection-reserve-root-not-executor-denied \
+    sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" Reserve ay 1 0
+grep -Eiq 'supervised executor|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# This guest has no qualified display owner/login. Valid bounded correlation
+# cannot make either an ordinary process or arbitrary root a startup authority.
+startup_lock="session:lock:$(cat /proc/sys/kernel/random/boot_id):$(id -u):c2:1:11111111-1111-4111-8111-111111111111:1"
+startup_request=("$startup_lock" "$$" seat0 22222222-2222-4222-8222-222222222222 "$protection_digest" "$protection_digest")
+expect_failure native-display-startup-unqualified-ordinary-denied \
+    busctl --system call "$protection_destination" "$protection_path" "$protection_destination" NativeStartup '(sussss)' "${startup_request[@]}"
+grep -Eiq 'supervised owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-display-startup-unqualified-root-denied \
+    sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" NativeStartup '(sussss)' "${startup_request[@]}"
+grep -Eiq 'supervised owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# A well-formed replacement scope does not let root or another process under
+# Control's service account read private original checkpoint material.
+recovery_scope="display:recovery:$protection_digest:$(cat /proc/sys/kernel/random/boot_id):$(id -u):c2:1:seat0:22222222-2222-4222-8222-222222222222:1"
+expect_failure native-display-original-ordinary-denied \
+    busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-display-original-root-not-control-denied \
+    sudo -n busctl --system call "$protection_destination" "$protection_path" "$protection_destination" ReadOriginal s "$recovery_scope"
+grep -Eiq 'supervised Control owner|access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+# Prove the account's member-specific transport route reaches the actual RPC
+# parser BEFORE interpreting a well-formed denial as supervised-PID admission.
+# Bus policy ignores argument bodies: a transport-denied account cannot produce
+# this fixed malformed-scope error. Keep both the route proof and typed denial.
+expect_failure native-display-original-same-account-malformed-scope \
+    sudo -n -u linura-authority dbus-send --system --print-reply --reply-timeout=5000 \
+    --dest="$protection_destination" "$protection_path" "${protection_destination}.ReadOriginal" string:invalid-original-scope
+grep -Fq 'org.freedesktop.DBus.Error.Failed: original display protection unavailable; no retry' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-display-original-same-account-not-control-denied \
+    sudo -n -u linura-authority dbus-send --system --print-reply --reply-timeout=5000 \
+    --dest="$protection_destination" "$protection_path" "${protection_destination}.ReadOriginal" "string:$recovery_scope"
+grep -Fq 'org.freedesktop.DBus.Error.AccessDenied:' <<<"$LAST_FAILURE_OUTPUT"
+# Separate service lifetime, not a claim that a real DRM witness was acquired.
+sudo -n systemctl restart "$service"
+sudo -n systemctl is-active --quiet "$service"
+test "$(sudo -n systemctl show "$protection" --value -p InvocationID)" = "$protection_epoch"
+echo "native-display-protection-caller-and-lifetime-boundary=qualified"
 
 stage direct-native-executor-denial
 digest=0000000000000000000000000000000000000000000000000000000000000000
@@ -85,6 +146,58 @@ expect_failure native-session-root-denied call_native_root
 grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 expect_failure native-session-polkit-ordinary-denied \
     pkcheck --action-id org.linura.executor.session.set-secure --process "$$"
+topology=display:topology:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42:seat0:11111111-1111-4111-8111-111111111111:3
+baseline="LNDL:1;$topology;1:2:enabled:1920:1080:60000:1000:0:0:0:-;"
+desired="LNDL:1;$topology;1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
+material="LNDI:1;$resource;$baseline$desired"
+call_display() {
+    busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtsssss \
+        "$material" 15000 "transaction:v06:display-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest" "$digest"
+}
+call_display_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtsssss \
+        "$material" 15000 "transaction:v06:display-root-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest" "$digest"
+}
+# These prove live bus-policy denial, before body/binding/native processing.
+# The Rust executor fixture separately supplies a valid binding to service denial.
+expect_failure native-session-display-ordinary-denied call_display
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-root-denied call_display_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-polkit-ordinary-denied \
+    pkcheck --action-id org.linura.executor.session.apply-display-layout --process "$$"
+call_original_restoration() {
+    busctl --system call "$destination" "$path" "$interface" RestoreOriginalDisplayLayout ststtssss \
+        "$material" 15000 "transaction:v06:original-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest"
+}
+call_original_restoration_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" RestoreOriginalDisplayLayout ststtssss \
+        "$material" 15000 "transaction:v06:original-root-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest"
+}
+# Bus admission precedes even decoding this deliberately wrong-purpose body.
+# A valid full LNRI binding is separately exercised by the Rust denial fixture.
+expect_failure native-session-original-restoration-ordinary-denied call_original_restoration
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-original-restoration-root-denied call_original_restoration_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-original-restoration-polkit-ordinary-denied \
+    pkcheck --action-id org.linura.executor.session.restore-original-display-layout --process "$$"
+call_display_decision() {
+    busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
+        "$material" "transaction:v06:display-decision" "$digest" 15000 "$digest" "$digest" true
+}
+call_display_decision_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
+        "$material" "transaction:v06:display-decision-root" "$digest" 15000 "$digest" "$digest" false
+}
+expect_failure native-session-display-decision-ordinary-denied call_display_decision
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-decision-root-denied call_display_decision_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 sudo -n systemctl is-active --quiet "$service"
 echo "native-session-direct-denial=qualified"
 

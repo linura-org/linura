@@ -30,6 +30,7 @@ int main(int argc, char **argv)
     auto &entry = presentation.protectedEntry();
     assert(entry.storageAvailable() && !entry.acceptsInput());
     assert(presentation.metaObject()->indexOfMethod("primaryRequestAvailable()") == -1);
+    assert(presentation.metaObject()->indexOfMethod("presentDisplayReview()") == -1);
     assert(entry.metaObject()->indexOfProperty("text") == -1);
     assert(entry.metaObject()->indexOfProperty("password") == -1);
 
@@ -123,11 +124,15 @@ int main(int argc, char **argv)
     for (auto state : std::array{
              NativePresentation::State::Locked, NativePresentation::State::ConfirmingLock,
              NativePresentation::State::Denied, NativePresentation::State::Unavailable,
-             NativePresentation::State::Recovering, NativePresentation::State::SleepNotVerified}) {
+             NativePresentation::State::Recovering, NativePresentation::State::SleepNotVerified,
+             NativePresentation::State::DisplayRecoveryRequired,
+             NativePresentation::State::PreparingDisplay,
+             NativePresentation::State::ApplyingDisplay}) {
         presentation.present(state);
         assert(presentation.primaryRequestAvailable() ==
                (state == NativePresentation::State::Locked ||
                 state == NativePresentation::State::Recovering ||
+                state == NativePresentation::State::DisplayRecoveryRequired ||
                 state == NativePresentation::State::SleepNotVerified));
         for (auto size : std::array{QSize(320, 240), QSize(1280, 720), QSize(1920, 1080)}) {
             QImage resized(size, QImage::Format_RGB32);
@@ -135,6 +140,33 @@ int main(int argc, char **argv)
             assert(presentation.paint(resized));
             assert(resized.constBits() == pixels && resized.size() == size);
         }
+    }
+    presentation.present(NativePresentation::State::DisplayRecoveryRequired);
+    assert(presentation.primaryRequestAvailable() && presentation.paint(frame));
+    const auto recovery = presentation.assistiveProjection(true);
+    assert(recovery.visible && !recovery.accepting);
+    assert(recovery.heading == QStringLiteral("Display recovery required"));
+    assert(recovery.description.contains(QStringLiteral("never replays")));
+    const auto recoveryPrimary = findTarget(frame.size(), NativePointerTarget::Action::Primary);
+    assert(presentation.pointerTarget(frame.size(), recoveryPrimary).action ==
+           NativePointerTarget::Action::Primary);
+    // Display progress is presentation-only, with no password field, generic
+    // unlock action, Cancel action, provider handle or implied success receipt.
+    QImage preparing;
+    for (const auto state : {NativePresentation::State::PreparingDisplay,
+                             NativePresentation::State::ApplyingDisplay}) {
+        presentation.present(state);
+        assert(!entry.acceptsInput() && !presentation.primaryRequestAvailable());
+        assert(presentation.paint(frame));
+        assert(preparing.isNull() || preparing != frame);
+        preparing = frame.copy();
+        const auto projection = presentation.assistiveProjection(true);
+        assert(projection.visible && !projection.accepting);
+        assert(projection.heading.contains(QStringLiteral("display")));
+        for (int y = 0; y < frame.height(); y += 10)
+            for (int x = 0; x < frame.width(); x += 10)
+                assert(presentation.pointerTarget(frame.size(), QPointF(x, y)).action ==
+                       NativePointerTarget::Action::None);
     }
     QImage invalid(640, 480, QImage::Format_ARGB32);
     assert(!presentation.paint(invalid));
@@ -165,6 +197,59 @@ int main(int argc, char **argv)
         }
         entry.cancelNativePrompt();
     }
+    const auto displayLock = NativeLockIdentity::parse(
+        QStringLiteral("session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-"
+                       "4222-8222-222222222222:1"));
+    assert(displayLock);
+    NativeDisplaySnapshot displaySnapshot;
+    displaySnapshot.generation = 3;
+    NativeDisplayHead displayHead;
+    displayHead.handle = 1;
+    displayHead.generation = 2;
+    displayHead.name = QStringLiteral("DP-1");
+    displayHead.modes = {{1920, 1080, 60000}, {1280, 720, 59940}};
+    displaySnapshot.heads.push_back(displayHead);
+    const auto displayTopology =
+        QStringLiteral("display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:"
+                       "33333333-3333-4333-8333-333333333333:3");
+    NativeApprovalScope displayReview{*displayLock,
+                                      QStringLiteral("unix:uid:1000"),
+                                      QStringLiteral("request:v010:display-layout:review"),
+                                      QStringLiteral("request:v010:display-layout:review"),
+                                      QStringLiteral("sha256:") + QString(64, QLatin1Char('1')),
+                                      QStringLiteral("sha256:") + QString(64, QLatin1Char('2')),
+                                      QStringLiteral("sha256:") + QString(64, QLatin1Char('3')),
+                                      ApprovalPurpose::ApplyDisplay};
+    displayReview.display = NativeDisplayApprovalBinding{
+        QStringLiteral("LNDI:1;") + displayLock->resource + QStringLiteral(";LNDL:1;") +
+            displayTopology + QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;") +
+            displayTopology + QStringLiteral(";1:2:enabled:1280:720:59940:1250:1:-100:20:-;"),
+        {},
+        1000,
+        QStringLiteral("Make text easier to read"),
+        1000};
+    const auto displayPages = nativeDisplayReviewPages(displayReview, displaySnapshot);
+    assert(displayPages && displayPages->size() == 4);
+    for (std::size_t page = 0; page < displayPages->size(); ++page) {
+        assert(presentation.presentDisplayReview(displayReview, displaySnapshot, page));
+        assert(presentation.paint(frame) && presentation.primaryRequestAvailable());
+        const auto metadata = presentation.assistiveProjection(true);
+        assert(metadata.heading.contains(displayPages->at(page).heading));
+        assert(metadata.description == displayPages->at(page).explanation);
+        assert(!metadata.accepting && !entry.acceptsInput());
+    }
+    assert(!presentation.presentDisplayReview(displayReview, displaySnapshot, 0, true));
+    assert(
+        !presentation.presentDisplayReview(displayReview, displaySnapshot, displayPages->size()));
+    assert(presentation.presentDisplayReview(displayReview, displaySnapshot,
+                                             displayPages->size() - 1, true));
+    assert(presentation.paint(frame) && !presentation.primaryRequestAvailable());
+    assert(entry.beginNativePrompt());
+    assert(presentation.paint(frame) && presentation.assistiveProjection(true).accepting);
+    entry.cancelNativePrompt();
+    presentation.present(NativePresentation::State::Locked);
+    assert(presentation.paint(frame));
+    assert(!presentation.assistiveProjection(true).heading.contains(QStringLiteral("display")));
     QImage tooSmall(160, 80, QImage::Format_RGB32);
     assert(!presentation.paint(tooSmall)); // No overlapping or clipped security prompt.
     assert(presentation.pointerTarget(tooSmall.size(), QPointF(80, 40)).action ==

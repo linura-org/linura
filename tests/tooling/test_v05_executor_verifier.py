@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import tomllib
 import unittest
 
@@ -8,6 +9,62 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class V05ExecutorVerifierBoundaryTests(unittest.TestCase):
+    def _parse_observation(self, text: str) -> subprocess.CompletedProcess[str]:
+        source = (ROOT / "tests/acceptance/v05/qualify-guest.sh").read_text()
+        parser = source.split("read_post_observation() {", 1)[1].split("\n}\n", 1)[0]
+        script = (
+            "set -eu\nPATH=/nonexistent\nread_post_observation() {"
+            + parser
+            + '\n}\nread_post_observation "$1"\n'
+            + 'printf "%s\\n" "$provider" "$resource" "$capability" "$authority" '
+            + '"$observed_at" "$valid_for" "$sequence" "$observed_id" '
+            + '"$load_state" "$active_state" "$post_ts"\n'
+        )
+        return subprocess.run(
+            ["/bin/bash", "-c", script, "v05-parser-test", text],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+
+    def test_native_sample_decoding_preserves_proof_without_external_processes(
+        self,
+    ) -> None:
+        fields = {
+            "provider": "systemd",
+            "resource": "systemd:unit:linura-v05-qualification-restart.service",
+            "capability": "systemd.unit.observe",
+            "authority": "native-api",
+            "observed_at_unix_ms": "1234",
+            "valid_for_ms": "2000",
+            "sequence": "7",
+            "attribute.id": "linura-v05-qualification-restart.service",
+            "attribute.load_state": "loaded",
+            "attribute.active_state": "active",
+            "attribute.active_enter_timestamp_monotonic": "9876",
+        }
+        payload = "\n".join(f"{key}={value}" for key, value in fields.items())
+        result = self._parse_observation(payload + "\nfreshness=current\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), list(fields.values()))
+        for key in fields:
+            with self.subTest(key=key):
+                missing = "\n".join(
+                    f"{name}={value}" for name, value in fields.items() if name != key
+                )
+                self.assertNotEqual(self._parse_observation(missing).returncode, 0)
+                self.assertNotEqual(
+                    self._parse_observation(
+                        payload + f"\n{key}=substituted"
+                    ).returncode,
+                    0,
+                )
+        literal = payload.replace("loaded", "$(unexpected-command)=literal")
+        result = self._parse_observation(literal)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("$(unexpected-command)=literal\n", result.stdout)
+
     def _manifest_dependencies(self, relative: str) -> set[str]:
         manifest = tomllib.loads((ROOT / relative).read_text(encoding="utf-8"))
         dependencies = manifest.get("dependencies", {})

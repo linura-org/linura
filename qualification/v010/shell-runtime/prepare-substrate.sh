@@ -56,10 +56,16 @@ if (
     or len(set(packages)) != len(packages)
 ):
     raise SystemExit("unsafe substrate package declaration")
-print("\t".join((urls[0], urls[1], str(disk), " ".join(packages))))
+verifier = contract.get("build_dependency_verifier", "-")
+if verifier != "-" and (
+    verifier != "tools/hyprland_display_environment.py"
+    or contract.get("id") != "qualification/s21-hyprland-build-substrate"
+):
+    raise SystemExit("unsupported substrate build dependency verifier")
+print("\t".join((urls[0], urls[1], str(disk), " ".join(packages), verifier)))
 PY
 )" || fail "substrate contract rejected before data loading"
-IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES <<<"$contract_values"
+IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES BUILD_DEPENDENCY_VERIFIER <<<"$contract_values"
 : "${BASE_IMAGE_URL_CONTRACT:?}" "${ARCH_ARCHIVE_URL_CONTRACT:?}" "${QUALIFICATION_DISK_GIB_CONTRACT:?}" "${RUNTIME_PACKAGES:?}"
 
 : "${BASE_IMAGE_URL:?}"
@@ -68,6 +74,14 @@ IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATIO
 
 [[ "$BASE_IMAGE_URL" == "$BASE_IMAGE_URL_CONTRACT" ]] || fail "base image URL drifted from substrate contract"
 [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "base image digest is malformed"
+python3 -I -S - "$contract_path" "$BASE_IMAGE_SHA256" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+contract = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if "base_image_sha256" in contract and contract["base_image_sha256"] != sys.argv[2]:
+    raise SystemExit("base image digest differs from the pinned build contract")
+PY
 printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
 [[ "$QUALIFICATION_DISK_GIB_CONTRACT" =~ ^[0-9]+$ ]] || fail "substrate disk size is invalid"
 
@@ -203,6 +217,11 @@ ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'timeout 240 cloud-init status -
 ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
     "printf '%s\n' 'Server = $ARCH_ARCHIVE_URL_CONTRACT' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
 
+if [[ "$BUILD_DEPENDENCY_VERIFIER" != - ]]; then
+    python3 "$BUILD_DEPENDENCY_VERIFIER" --contract "$contract_path" \
+        --ssh-key "$ssh_key" --phase repositories
+fi
+
 install_succeeded=0
 for attempt in 1 2 3; do
     echo "prepared substrate package install attempt $attempt/3"
@@ -218,6 +237,11 @@ for attempt in 1 2 3; do
     fi
 done
 [[ "$install_succeeded" -eq 1 ]] || fail "prepared substrate package installation failed after 3 bounded attempts"
+
+if [[ "$BUILD_DEPENDENCY_VERIFIER" != - ]]; then
+    python3 "$BUILD_DEPENDENCY_VERIFIER" --contract "$contract_path" \
+        --ssh-key "$ssh_key" --phase dependencies
+fi
 
 ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
     'pacman -Q' | LC_ALL=C sort >"$package_manifest"
@@ -305,6 +329,11 @@ evidence = {
     "qualification_evidence": False,
     "release_support_promotion": False,
 }
+if verifier := contract.get("build_dependency_verifier"):
+    import hashlib
+    evidence["build_dependency_verifier_sha256"] = hashlib.sha256(
+        pathlib.Path(verifier).read_bytes()
+    ).hexdigest()
 output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 

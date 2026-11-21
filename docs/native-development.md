@@ -16,7 +16,7 @@ and trust the checkout before running its preparation commands. See
 
 [native-profiles.toml](../tools/codex/native-profiles.toml) maps the existing
 [doctor](../tools/codex/doctor.py) profiles to native packages. Dependencies expand
-automatically; every selection includes `core`.
+automatically for host preparation; every host selection includes `core`.
 
 | Profile | Prepared dependencies | Host boundary |
 | --- | --- | --- |
@@ -27,6 +27,25 @@ automatically; every selection includes `core`.
 | `vm` | Core, QEMU/TCG utilities, SSH client and cloud-image tools | Does not grant KVM, reserve storage or create qualified VM evidence |
 | `image` | Shell and ArchISO's canonical releng profile | Native Arch only; Ubuntu refuses before effects |
 | `visual` | Core, ImageMagick and FFmpeg tools | Does not qualify a display, input device, GPU or recording |
+| `hyprland-build` | Standalone source-pinned Arch compositor SDK inventory, including compiler, GLES3/EGL, Glaze and native library versions | Prepared by the S21 disposable-substrate driver; requires neither Rust nor the QML editor inside the SDK |
+
+`shell` already supplies the native security-owner prerequisites. Its probes
+include CTest, consistent Qt Core/DBus/Gui/Qml/Quick/QuickControls2, Wayland,
+xkbcommon, GLib and Polkit; a second package profile would duplicate that
+selection. Full security-owner CMake compilation and CTest remain required
+separate checks, including native authentication enabled. Editor imports are a
+separate selection, and SDK readiness is never a component-test pass.
+
+The standalone `hyprland-build` doctor profile inventories the exact SDK described
+by `contracts/s21-hyprland-build-environment.toml`. Generic `native.py` host
+preparation refuses this selection before effects and directs it to
+`python3 tools/hyprland_display_build.py prepare --run UNIQUE_RUN`. This reuses
+the existing pinned Arch substrate builder and guarded storage, verifies signed
+packages and GLES3 discovery, and preserves the Ubuntu host. It never replaces
+the pinned SDK with current host packages or downgrades a maintained Arch host.
+Run `doctor.py --profile hyprland-build` inside that prepared SDK. Selecting this
+profile alone does not execute Rust or QML-editor checks. Default `core`,
+`shell`, `editor` and host `native.py --all` selections retain their prior scope.
 
 The starting host must already have Python >= 3.11 with `tomllib`, Git, Bash, its
 working native package manager, authenticated repositories and administrator
@@ -81,9 +100,11 @@ sudo -v
 python3 tools/codex/native.py prepare --profile editor --profile bindings --profile vm --profile visual
 ```
 
-`--all` includes the Arch-only image profile and therefore refuses on Ubuntu.
+Host `native.py --all` includes the Arch-only image profile and therefore refuses on Ubuntu.
 Select the profiles needed for the task. On a maintained Arch builder,
-`python3 tools/codex/native.py prepare --all` prepares the entire inventory.
+`python3 tools/codex/native.py prepare --all` prepares the host inventory. The
+standalone compositor SDK has its pinned substrate driver; `doctor.py --all`
+also inventories it and cannot establish SDK readiness on an ordinary host.
 
 Ubuntu preparation normally uses existing APT metadata. If metadata is absent or
 outdated, explicitly request `prepare --refresh` with the desired profiles. This
@@ -163,6 +184,25 @@ fresh private tool generation. It preserves shared packages and historical
 generations. Inspect failed generations and references before any manual retirement.
 
 ## Evidence boundaries
+
+The three build-readiness contexts are general Rust/Qt development, native
+security-owner C++ compilation, and source-pinned compositor integration. They
+reuse the existing profiles and build tools; they do not create five independent
+development environments or a new acceptance hierarchy. A build contract, an
+installed SDK, successful linking and native execution are distinct claims.
+
+The S21 compositor integration is linked into the exact pinned Hyprland source,
+rather than dynamically loaded through a plugin ABI. Compatibility verification
+must compile its actual private headers, link the whole compositor and observe
+the expected integration identity/protocol in the running compositor. A generic
+mechanism build or version string alone cannot prove integration loading.
+
+Reuse Level A/B/C from `contracts/v010-workstation-acceptance.toml`: S21-2 must
+extend Level A for real display mutation, independently observed restoration and
+S17 output-lock coverage before merge. Level B stays the same optional
+interactive view of that substrate. Level C/Q11 remains separately maintained
+physical acceptance, with later S21-7/release cases. No readiness profile can
+promote any of these evidence levels.
 
 Stateful package-manager fixtures exercise Ubuntu and Arch selection, denial,
 staleness, partial failure, ownership, cache integrity and interruption paths.

@@ -4,29 +4,16 @@
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "rust-analyzer.check.command": "clippy",
-  "rust-analyzer.check.extraArgs": [
-    "--all-features",
-    "--locked"
-  ],
+  "rust-analyzer.check.extraArgs": ["--all-features", "--locked"],
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      88,
-      100,
-      120
-    ]
+    "editor.rulers": [88, 100, 120]
   },
-  "ruff.path": [
-    "${userHome}/.local/bin/ruff"
-  ],
+  "ruff.path": ["${userHome}/.local/bin/ruff"],
   "python.defaultInterpreterPath": "${userHome}/.local/linura-tools/python312/bin/python3",
   "terminal.integrated.env.linux": {
     "PATH": "${userHome}/.local/linura-tools/python312/bin:${env:PATH}"
@@ -34,10 +21,7 @@
   "python.analysis.typeCheckingMode": "basic",
   "python.analysis.diagnosticMode": "workspace",
   "python.analysis.autoImportCompletions": true,
-  "python.analysis.extraPaths": [
-    "./tools",
-    "./bindings/python/src"
-  ],
+  "python.analysis.extraPaths": ["./tools", "./bindings/python/src"],
   "qt-qml.qmlls.enabled": false,
   "qt-qml.doNotAskForQmllsDownload": true,
   "cSpell.words": [
@@ -86,112 +70,70 @@
   "[c]": {
     "editor.defaultFormatter": "xaver.clang-format",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[cpp]": {
     "editor.defaultFormatter": "xaver.clang-format",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[javascript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[lua]": {
     "editor.defaultFormatter": "JohnnyMorganz.stylua",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[qml]": {
     "editor.defaultFormatter": "theqtcompany.qt-qml",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[shellscript]": {
     "editor.defaultFormatter": "foxundermoon.shell-format",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[javascriptreact]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[typescript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[typescriptreact]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[json]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[jsonc]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "[yaml]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
-    "editor.rulers": [
-      100,
-      120,
-      140
-    ]
+    "editor.rulers": [100, 120, 140]
   },
   "C_Cpp.clang_format_style": "file",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "prettier.requireConfig": true,
-  "shellformat.flag": "-i 4 -ci"
+  "shellformat.flag": "-i 4 -ci",
+  "cmake.sourceDirectory": "${workspaceFolder}/apps/linura-hyprland-display",
+  "cmake.configureSettings": {
+    "CMAKE_EXPORT_COMPILE_COMMANDS": true
+  }
 }

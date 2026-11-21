@@ -27,6 +27,9 @@ use linura_control::{
     ManagedMutationReceipt, PlanPreviewControl, TrustedHumanApproval, managed_request_id,
 };
 
+#[path = "s21/managed_display.rs"]
+mod s21_managed_display;
+
 const RESOURCE: &str = "systemd:unit:linura-managed-qualification.service";
 #[path = "s17/managed_lock.rs"]
 mod s17_managed_lock;
@@ -36,8 +39,12 @@ mod s17_managed_power;
 mod s17_managed_protective_lock;
 static NEXT_DB: AtomicU64 = AtomicU64::new(1);
 
+#[track_caller]
 fn value<T, E: Debug>(result: Result<T, E>) -> T {
-    result.unwrap_or_else(|error| unreachable!("{error:?}"))
+    match result {
+        Ok(value) => value,
+        Err(error) => unreachable!("{error:?}"),
+    }
 }
 
 fn fixture_key(index: usize) -> Vec<u8> {

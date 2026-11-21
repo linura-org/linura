@@ -41,11 +41,12 @@ class SubstrateContractLoadingTests(unittest.TestCase):
         lines = result.stdout.splitlines()
         self.assertEqual(len(lines), 1)
         fields = lines[0].split("\t")
-        self.assertEqual(len(fields), 4)
+        self.assertEqual(len(fields), 5)
         self.assertTrue(fields[0].startswith("https://"))
         self.assertIn("$repo/os/$arch", fields[1])
         self.assertEqual(fields[2], "16")
         self.assertIn("base-devel", fields[3].split())
+        self.assertEqual(fields[4], "-")
 
     def test_invalid_inputs_emit_no_shell_data(self) -> None:
         original = CONTRACT.read_text(encoding="utf-8")

@@ -15,7 +15,8 @@ def fail(message: str) -> None:
 def digest(path: pathlib.Path) -> str:
     if not path.is_file() or path.is_symlink():
         fail(f"missing or untrusted file: {path}")
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 if len(sys.argv) != 5:
@@ -39,6 +40,13 @@ if manifest.get("contract_sha256") != digest(contract_path):
     fail("prepared substrate contract digest mismatch")
 if manifest.get("builder_sha256") != digest(builder_path):
     fail("prepared substrate builder digest mismatch")
+if verifier := contract.get("build_dependency_verifier"):
+    if verifier != "tools/hyprland_display_environment.py":
+        fail("unsupported build dependency verifier")
+    if manifest.get("build_dependency_verifier_sha256") != digest(
+        pathlib.Path(verifier)
+    ):
+        fail("prepared compositor SDK verifier digest mismatch")
 image_sha256 = digest(image_path)
 if manifest.get("prepared_image_sha256") != image_sha256:
     fail("prepared substrate image digest mismatch")
@@ -51,6 +59,11 @@ if not isinstance(base_image, dict) or base_image.get("url") != contract.get(
 base_image_sha256 = base_image.get("sha256")
 if not isinstance(base_image_sha256, str) or len(base_image_sha256) != 64:
     fail("prepared substrate base-image digest is missing or malformed")
+if (
+    "base_image_sha256" in contract
+    and base_image_sha256 != contract["base_image_sha256"]
+):
+    fail("prepared substrate base-image digest differs from the pinned contract")
 archive = manifest.get("arch_archive")
 if not isinstance(archive, dict):
     fail("prepared substrate archive identity is missing")
@@ -74,6 +87,11 @@ for record in package_versions:
             f"invalid or duplicate prepared substrate package-version record: {record!r}"
         )
     names.add(name)
+if contract.get("build_dependency_verifier"):
+    installed = dict(record.split(" ", 1) for record in package_versions)
+    for record in [*contract["package"], contract["archived_package"]]:
+        if installed.get(record["name"]) != record["version"]:
+            fail("prepared compositor SDK package version mismatch: " + record["name"])
 
 for key, expected in (
     ("sanitized", True),

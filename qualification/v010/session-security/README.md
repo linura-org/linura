@@ -20,6 +20,23 @@ Architecture and security requirements are defined by [ADR 0042](../../../docs/a
 
 ## Recorded Level A native evidence
 
+The authentication runner now also requires a read-only S21 display admission
+predicate case. The guest explicitly builds the probe against the same
+`native_owner_admission.cpp` and `owner_identity.cpp` used by the pinned compositor,
+using the guest's native libsystemd. The disposable guest installs the probe
+without file capabilities and executes it as the ordinary session account in a
+separate process/session. It must admit the actual immutable root-supervised
+owner, reject its own same-UID process and unsupported root/PID identities, then
+match independently re-read owner PID, invocation and process-start evidence.
+Unknown/missing checks, substituted identities and completion/support promotion
+claims reject the report. The workflow retains source and probe-binary digests.
+
+This case is implemented but requires a fresh executed native run for evidence.
+It qualifies only the admission predicate on that source/image; actual private
+Wayland binding, authorized display effects, first-frame protection and recovery
+remain separate required S21-2 cases. Component fixtures and the SDK's missing-bus
+denial check do not establish the positive supervised-owner result.
+
 On 2026-10-24 UTC, the [v0.10 exact-source native run](https://github.com/linura-org/linura/actions/runs/40141305916) completed successfully against
 implementation commit `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`. The
 workflow executed real native session bootstrap, same-UID denial, PAM/Polkit
@@ -68,6 +85,26 @@ the observed post-logout watcher failure.
 
 `check-native-session.py` checks automatic first-login owner activation, native
 identity, installed capability and post-drop process state. It independently
+checks the compositor's kernel secure-exec vector, complete UID/GID restoration,
+empty capabilities and unchanged no-new-privileges behavior. The same-UID report
+uses schema 2 and requires both owner and compositor memory/environment/auxiliary
+vector/ptrace denial with guest Yama restrictions removed and restored afterward.
+A guest-only loader canary must first load into `/usr/bin/true`, then fail to
+load into the exact installed compositor using the same absolute `LD_PRELOAD`
+value. A missing/broken positive control or a failed compositor invocation is
+never accepted as secure-loader evidence. The canary is not a product asset.
+A separate ordinary unprivileged executable invokes real libEGL vendor discovery
+with a fixed JSON override and must load the same canary. The actual compositor
+fixture receives that override before exec. Bootstrap requires its exact installed
+fixture, current service MainPID/invocation, an available invocation journal and
+absence of the constructor marker, rechecking service identity afterward. This
+is an EGL environment-path check, not proof for every graphics/plugin loader.
+The bounded preinit environment allowlist and permanent legacy `env`/`envd`
+refusal prevent reintroducing those selectors after temporary group removal.
+The fixed product package helper establishes secure entry after candidate-byte
+verification; qualification does not invent another privilege configuration.
+These added cases remain unqualified until a new exact-head native execution.
+The checker independently
 revalidates the pinned Polkit 127 systemd service fragment, absence of drop-ins,
 current invocation/PID, exact running argv and local daemon UID after automatic
 owner startup and before accepting the bootstrap report. The production owner's

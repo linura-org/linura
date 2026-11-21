@@ -255,6 +255,72 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "authority-restart",
                 "state-reobserved",
             ],
+            "s21-display-keep": [
+                "two-physical-outputs-identified",
+                "fresh-managed-plan-and-approval",
+                "new-layout-submitted-to-pinned-compositor",
+                "every-output-kms-and-first-frame-independently-verified",
+                "protected-keep-confirmed-before-deadline",
+                "kept-intent-graph-and-provenance-committed",
+                "released-current-independently-verified",
+            ],
+            "s21-display-revert": [
+                "two-physical-outputs-identified",
+                "fresh-managed-plan-and-approval",
+                "changed-layout-independently-observed",
+                "protected-explicit-revert-requested",
+                "every-baseline-output-independently-restored",
+                "unconfirmed-intent-not-committed",
+                "released-current-independently-verified",
+            ],
+            "s21-display-expiry": [
+                "two-physical-outputs-identified",
+                "changed-layout-independently-observed",
+                "boottime-confirmation-deadline-expired",
+                "no-keep-or-late-confirmation-accepted",
+                "every-baseline-output-independently-restored",
+                "unconfirmed-intent-not-committed",
+                "recovery-remains-blocked-until-independent-completion",
+            ],
+            "s21-display-hotplug": [
+                "two-physical-outputs-identified",
+                "physical-disconnect-and-reconnect-executed",
+                "pending-and-retained-output-generations-invalidated",
+                "new-output-covered-before-sensitive-content",
+                "missing-output-never-counted-as-restored",
+                "stale-topology-and-output-identity-refused",
+                "fresh-recovery-postconditions-independently-verified",
+            ],
+            "s21-display-lock-power": [
+                "two-physical-outputs-identified",
+                "lock-transition-during-display-mutation-executed",
+                "all-active-outputs-covered-before-lock-acceptance",
+                "stale-owner-session-and-input-refused",
+                "pending-display-inhibits-suspend-before-kernel",
+                "physical-power-transition-executed",
+                "resume-requires-fresh-native-evidence",
+                "no-approval-or-effect-replay",
+            ],
+            "s21-display-compositor-replacement": [
+                "two-physical-outputs-identified",
+                "compositor-and-root-loss-boundaries-injected",
+                "lost-ack-never-replayed",
+                "new-invocation-inventory-independently-observed",
+                "kept-intent-preserves-semantic-provenance",
+                "new-plan-approval-prepare-and-protection-required",
+                "historical-records-never-reconstruct-live-authority",
+                "replacement-postconditions-independently-verified",
+            ],
+            "s21-display-retirement": [
+                "two-physical-outputs-identified",
+                "complete-shared-reference-closure-verified",
+                "active-shared-and-ambiguous-owners-refuse-retirement",
+                "new-live-lifetime-independently-completed-before-detachment",
+                "complete-authenticated-ancestry-archived-before-unlink",
+                "crash-and-storage-fault-boundaries-injected",
+                "bounded-cleanup-preserves-spent-state-and-provenance",
+                "interrupted-cleanup-cannot-replay-or-recreate-authority",
+            ],
         }
         source = {
             "commit_sha": source_commit_sha,
@@ -280,7 +346,14 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "height": 180,
                     "refresh_millihz": 60000,
                     "scale": 1.0,
-                }
+                },
+                {
+                    "connector": "HDMI-A-1",
+                    "width": 640,
+                    "height": 360,
+                    "refresh_millihz": 60000,
+                    "scale": 1.0,
+                },
             ],
         }
 
@@ -369,6 +442,13 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "provider-runtime-identities": "physical-provider-observation",
             "session-audio-transient-effect": "physical-session-audio-effect",
             "restart-recovery": "physical-restart-observation",
+            "s21-display-keep": "physical-managed-display-effect",
+            "s21-display-revert": "physical-managed-display-effect",
+            "s21-display-expiry": "physical-managed-display-effect",
+            "s21-display-hotplug": "physical-managed-display-effect",
+            "s21-display-lock-power": "physical-managed-display-effect",
+            "s21-display-compositor-replacement": "physical-managed-display-effect",
+            "s21-display-retirement": "physical-managed-display-effect",
         }
         for name, observations in case_observations.items():
             mechanism = mechanisms[name]
@@ -1800,6 +1880,55 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self._write_interactive_workstation_evidence(root)
             result = self._run(root)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_q11_requires_every_s21_case_and_two_identified_physical_outputs(
+        self,
+    ) -> None:
+        for removed in (
+            "s21-display-keep",
+            "s21-display-revert",
+            "s21-display-expiry",
+            "s21-display-hotplug",
+            "s21-display-lock-power",
+            "s21-display-compositor-replacement",
+            "s21-display-retirement",
+            None,
+        ):
+            with (
+                self.subTest(removed=removed),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                manifest = self._write_interactive_workstation_evidence(root)
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                if removed is None:
+                    payload["hardware"]["displays"] = payload["hardware"]["displays"][
+                        :1
+                    ]
+                    expected = "requires 2..16 identified displays for S21"
+                else:
+                    payload["cases"] = [
+                        case for case in payload["cases"] if case["name"] != removed
+                    ]
+                    expected = "exactly the required Q11 cases"
+                manifest.write_text(
+                    json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+                )
+                contract = root / "contracts/v010-workstation-qualification.toml"
+                text = contract.read_text(encoding="utf-8")
+                old_digest = tomllib.loads(text)["interactive_workstation"][
+                    "evidence_manifest_sha256"
+                ]
+                contract.write_text(
+                    text.replace(
+                        old_digest, hashlib.sha256(manifest.read_bytes()).hexdigest(), 1
+                    ),
+                    encoding="utf-8",
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
 
     def test_interactive_workstation_rejects_enrolled_fixture_substitution(
         self,
