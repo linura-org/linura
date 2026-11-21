@@ -73,6 +73,11 @@ def load_contract(path: Path) -> dict:
         or data.get("build_type") != "Debug"
         or data.get("fetchcontent_fully_disconnected") is not True
         or not DIGEST.fullmatch(data.get("base_image_sha256", ""))
+        or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", data.get("arch_archive_snapshot", ""))
+        or data.get("arch_archive_url")
+        != "https://umea.archive.pkgbuild.com/repos/"
+        + data.get("arch_archive_snapshot", "").replace("-", "/")
+        + "/$repo/os/$arch"
     ):
         raise ValueError("unsupported compositor build environment")
     records = data.get("package", [])
@@ -106,7 +111,7 @@ def load_contract(path: Path) -> dict:
         archive.get("name") != "glaze"
         or archive.get("version") != "7.2.0-1"
         or archive.get("url")
-        != "https://archive.archlinux.org/packages/g/glaze/glaze-7.2.0-1-any.pkg.tar.zst"
+        != "https://umea.archive.pkgbuild.com/packages/g/glaze/glaze-7.2.0-1-any.pkg.tar.zst"
         or not DIGEST.fullmatch(archive.get("sha256", ""))
         or archive.get("signature_required") is not True
     ):
@@ -115,8 +120,45 @@ def load_contract(path: Path) -> dict:
 
 
 def repository_script(data: dict) -> str:
-    lines = ["set -euo pipefail", "sudo -n pacman -Syy --noconfirm"]
+    # Acquire only the reviewed immutable repository bytes. libalpm's short
+    # connection timeout was aborting this preflight before the package
+    # install's existing bounded retry. No package may be installed until both
+    # databases match their full pins and their published copies are read back.
+    # The unchanged outer guest timeout bounds all transfer attempts together.
+    lines = [
+        "set -euo pipefail",
+        "umask 077",
+        "repository_work=$(mktemp -d /tmp/linura-s21-repositories.XXXXXXXX)",
+        "trap 'rm -rf -- \"$repository_work\"' EXIT",
+        'cd "$repository_work"',
+    ]
     for name, digest in sorted(data["repository_sha256"].items()):
+        url = (
+            data["arch_archive_url"]
+            .replace("$repo", name)
+            .replace("$arch", data["architecture"])
+        )
+        lines.extend(
+            [
+                "curl --fail --location --proto '=https' --proto-redir '=https' "
+                "--connect-timeout 15 --max-time 60 --retry 2 --retry-all-errors "
+                "--retry-max-time 100 --max-filesize 67108864 --output "
+                + shlex.quote(name + ".db")
+                + " "
+                + shlex.quote(url + "/" + name + ".db"),
+                "printf '%s\\n' "
+                + shlex.quote(digest + "  " + name + ".db")
+                + " | sha256sum --check --strict",
+            ]
+        )
+    lines.append("sudo -n install -d -m 0755 -- /var/lib/pacman/sync")
+    for name, digest in sorted(data["repository_sha256"].items()):
+        lines.append(
+            "sudo -n install -m 0644 -- "
+            + shlex.quote(name + ".db")
+            + " "
+            + shlex.quote("/var/lib/pacman/sync/" + name + ".db")
+        )
         lines.append(
             f"printf '%s\\n' {shlex.quote(digest + '  /var/lib/pacman/sync/' + name + '.db')} | sha256sum --check --strict"
         )
@@ -154,10 +196,12 @@ def dependency_script(data: dict) -> str:
         # This removes only this script's fresh disposable-guest scratch.
         "trap 'rm -rf -- \"$sdk_work\"' EXIT",
         'cd "$sdk_work"',
-        "curl --fail --location --max-time 120 --output glaze.pkg.tar.zst "
-        + shlex.quote(archive["url"]),
-        "curl --fail --location --max-time 120 --output glaze.pkg.tar.zst.sig "
-        + shlex.quote(archive["url"] + ".sig"),
+        "curl --fail --location --proto '=https' --proto-redir '=https' "
+        "--connect-timeout 15 --max-time 120 --max-filesize 67108864 "
+        "--output glaze.pkg.tar.zst " + shlex.quote(archive["url"]),
+        "curl --fail --location --proto '=https' --proto-redir '=https' "
+        "--connect-timeout 15 --max-time 120 --max-filesize 1048576 "
+        "--output glaze.pkg.tar.zst.sig " + shlex.quote(archive["url"] + ".sig"),
         "printf '%s\\n' "
         + shlex.quote(archive["sha256"] + "  glaze.pkg.tar.zst")
         + " | sha256sum --check --strict",

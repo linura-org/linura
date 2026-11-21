@@ -26,6 +26,9 @@ struct Machine {
     original_intent_sync_fault: Option<bool>,
     original_intent_synced_at: Option<u64>,
     original_intent_layout_samples: Vec<u64>,
+    recovery_intent_sync_fault: Option<(&'static str, bool)>,
+    recovery_intent_synced_at: Option<u64>,
+    recovery_intent_layout_samples: Vec<u64>,
     ordinary_intent_sync_fault: Option<bool>,
     ordinary_intent_sync_material: bool,
     ordinary_intent_synced_at: Option<u64>,
@@ -520,6 +523,15 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if sample.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+            && (machine.recovery_intent_sync_fault.is_some()
+                || machine.recovery_intent_synced_at.is_some())
+        {
+            machine
+                .recovery_intent_layout_samples
+                .push(sample.observed_at_unix_ms);
+        }
         if sample.provider.as_str() == linura_observation::DISPLAY_PROVIDER
             && capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
             && (machine.original_intent_sync_fault.is_some()
@@ -1242,6 +1254,25 @@ impl ApprovedRequestJournal for FailingJournal {
             return Err(TransactionStoreError::CapacityExceeded);
         }
         self.inner.retain(record)?;
+        let recovery_sync = {
+            let mut machine = self.machine.lock().unwrap_or_else(|_| unreachable!());
+            match machine.recovery_intent_sync_fault {
+                Some((prefix, _)) if record.request_id().as_str().starts_with(prefix) => {
+                    machine.recovery_intent_sync_fault.take()
+                }
+                _ => None,
+            }
+        };
+        if let Some((_, drift)) = recovery_sync {
+            // Real SQLite retention has completed; only its return is delayed.
+            // Never hold the observation mutex or extend its proof timestamps.
+            std::thread::sleep(std::time::Duration::from_millis(2050));
+            let mut machine = self.machine.lock().unwrap_or_else(|_| unreachable!());
+            machine.recovery_intent_synced_at = Some(now_unix_ms());
+            if drift {
+                machine.native_base_drift = true;
+            }
+        }
         if record
             .request_id()
             .as_str()

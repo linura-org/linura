@@ -601,11 +601,22 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 "terminal approval differs from the exact reviewed purpose and request".into(),
             ));
         }
+        let approved_at_unix_seconds = now_unix_seconds()?;
         let approver = PolicyAuthenticatedApprover::new(
             approval.principal().clone(),
             ActorKind::Human,
             BTreeSet::from([ApprovalClass::Administrator]),
         );
+        // Persist the reviewed request and full material before the unchanged
+        // fresh verification chain. These records claim no owner and confer
+        // no authority; drift/expiry must still refuse before the claim below.
+        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
+        let intent = FinalizationIntent::capture(&request, &full_material)?;
+        {
+            let journal = self.request_journal.as_mut().ok_or_else(invalid)?;
+            journal.retain(&retained).map_err(|_| invalid())?;
+            intent.append(journal.as_mut(), principal_id.clone(), &request)?;
+        }
         let (fresh_history, fresh_request, fresh_source) =
             self.original_finalization_request(&principal, &actor, &input)?;
         if fresh_history != history
@@ -630,9 +641,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if self.finalization_history(&principal, &input.restoration_request)? != history {
             return Err(invalid());
         }
-        let expiry = now_unix_seconds()?
-            .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
-            .ok_or_else(invalid)?;
+        let expiry = display_approval_expiry(approved_at_unix_seconds, now_unix_seconds()?)?;
         let evidence = self.authority.issue_approval(
             ApprovalRequestId::new(format!(
                 "approval:v010:display-finalization:{}",
@@ -643,12 +652,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             &approver,
             expiry,
         )?;
-        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
-        let intent = FinalizationIntent::capture(&request, &full_material)?;
         {
             let journal = self.request_journal.as_mut().ok_or_else(invalid)?;
-            journal.retain(&retained).map_err(|_| invalid())?;
-            intent.append(journal.as_mut(), principal_id.clone(), &request)?;
             intent.claim(journal.as_mut(), principal_id.clone(), &request)?;
         }
         if self

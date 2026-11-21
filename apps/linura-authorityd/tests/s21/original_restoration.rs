@@ -654,6 +654,7 @@ impl OriginalDisplayFinalizationPort for TerminalPort {
 // Called by the existing one-use/restart qualification case. Fresh independent
 // databases avoid reviving the earlier matrix's permanently lost Root witness.
 fn terminal_finalization_is_separately_authorized_prepared_and_never_replayed() {
+    recovery_sync_keeps_fresh_review_and_refuses_drift(true);
     for (outcome, approval_fault, fail_at, history_fault) in [
         (0, 0, 0, 0),
         (1, 0, 0, 0),
@@ -1065,6 +1066,7 @@ impl ManagedApprovalAuthorizer for DriftApproval {
 }
 #[test]
 fn restoration_denial_or_drift_during_interaction_never_prepares_an_effect() {
+    recovery_sync_keeps_fresh_review_and_refuses_drift(false);
     for case in [0, 1, 2] {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));
@@ -1091,6 +1093,156 @@ fn restoration_denial_or_drift_during_interaction_never_prepares_an_effect() {
                 .restoration_calls,
             0
         );
+    }
+}
+// Real durable SQLite writes and Control, simulated native/approval mechanisms.
+// This is an ordering regression, not qualified compositor performance evidence.
+fn recovery_sync_keeps_fresh_review_and_refuses_drift(finalization: bool) {
+    for drift in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let (original, mut input) = prepare_original(&database, &machine);
+        let previews = replacement_previews(&machine, &original, &input);
+        let mut control = open_with_previews(database.path(), &machine, 0, previews);
+        let mut terminal = if finalization {
+            let receipt = value(control.begin_original_display_restoration(
+                principal(),
+                actor(true),
+                input.clone(),
+                &approval(),
+                &mut Executor(machine.clone()),
+            ));
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .restoration_native_verified = true;
+            value(control.retire_original_display_restoration(
+                principal(),
+                actor(true),
+                &receipt.request_id,
+            ));
+            Some(finalization_input(&receipt.request_id))
+        } else {
+            None
+        };
+        let before = snapshot(&database, &original_transaction_id(&original));
+        {
+            let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+            m.recovery_intent_sync_fault = Some((
+                if finalization {
+                    "request:v010:display-finalization-material:"
+                } else {
+                    "request:v010:display-restoration:"
+                },
+                drift,
+            ));
+        }
+        let result = if let Some(terminal) = terminal.as_ref() {
+            control
+                .begin_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    terminal.clone(),
+                    &TerminalApproval(machine.clone(), 0),
+                    &mut TerminalPort(machine.clone()),
+                )
+                .map(|_| ())
+        } else {
+            control
+                .begin_original_display_restoration(
+                    principal(),
+                    actor(true),
+                    input.clone(),
+                    &approval(),
+                    &mut Executor(machine.clone()),
+                )
+                .map(|_| ())
+        };
+        if drift {
+            assert!(result.is_err());
+        } else {
+            value(result);
+        }
+        assert_eq!(
+            snapshot(&database, &original_transaction_id(&original)),
+            before
+        );
+        {
+            let m = machine.lock().unwrap_or_else(|_| unreachable!());
+            let synced = m
+                .recovery_intent_synced_at
+                .unwrap_or_else(|| unreachable!());
+            let first = m
+                .recovery_intent_layout_samples
+                .first()
+                .unwrap_or_else(|| unreachable!());
+            assert!(synced.checked_sub(*first).is_some_and(|span| span >= 2000));
+            assert!(
+                m.recovery_intent_layout_samples
+                    .last()
+                    .is_some_and(|at| *at >= synced)
+            );
+            if finalization {
+                assert_eq!(m.restoration_calls, 1);
+                assert_eq!(m.finalization_calls, usize::from(!drift));
+                if drift {
+                    assert!(m.finalization_binding.is_none());
+                    assert!(!m.journal_keys.iter().any(|(_, key)| {
+                        key.as_str()
+                            .starts_with("request:v010:display-finalization-owner:")
+                    }));
+                }
+            } else {
+                assert_eq!(m.restoration_calls, usize::from(!drift));
+                assert_eq!(m.finalization_calls, 0);
+                if drift {
+                    assert!(m.restoration_binding.is_none());
+                }
+            }
+            assert_eq!(m.applies, 1);
+            assert_eq!(m.decisions, 0);
+        }
+        if drift {
+            // A refused proposal must not reserve the old owner. A different
+            // fresh human request can review the corrected simulated state.
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!())
+                .native_base_drift = false;
+            if let Some(terminal) = terminal.as_mut() {
+                terminal.operation_id.push_str("-fresh");
+                value(control.begin_original_display_finalization(
+                    principal(),
+                    actor(true),
+                    terminal.clone(),
+                    &TerminalApproval(machine.clone(), 0),
+                    &mut TerminalPort(machine.clone()),
+                ));
+                assert_eq!(
+                    machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!())
+                        .finalization_calls,
+                    1
+                );
+            } else {
+                input.operation_id.push_str("-fresh");
+                value(control.begin_original_display_restoration(
+                    principal(),
+                    actor(true),
+                    input.clone(),
+                    &approval(),
+                    &mut Executor(machine.clone()),
+                ));
+                assert_eq!(
+                    machine
+                        .lock()
+                        .unwrap_or_else(|_| unreachable!())
+                        .restoration_calls,
+                    1
+                );
+            }
+        }
     }
 }
 #[test]

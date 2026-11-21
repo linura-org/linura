@@ -539,10 +539,10 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
             text = builder.read_text(encoding="utf-8")
-            marker = "pacman -Syu"
+            marker = "pacman_sync=-Syu"
             self.assertIn(marker, text)
             builder.write_text(
-                text.replace(marker, "pacman -S", 1),
+                text.replace(marker, "pacman_sync=-S", 1),
                 encoding="utf-8",
             )
             result = self._run(root)
@@ -551,6 +551,31 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                 "prepared substrate builder missing fail-closed invariant",
                 result.stderr,
             )
+
+    def test_sdk_requires_pinned_repository_preflight_and_no_second_refresh(
+        self,
+    ) -> None:
+        for old, new in (
+            (
+                '--ssh-key "$ssh_key" --phase repositories',
+                '--ssh-key "$ssh_key" --phase dependencies',
+            ),
+            ("pacman_sync=-Su\n", "pacman_sync=-Syu\n"),
+            ("pacman $pacman_sync --noconfirm", "pacman -Syu --noconfirm"),
+        ):
+            with self.subTest(old=old), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+                text = builder.read_text(encoding="utf-8")
+                self.assertIn(old, text)
+                builder.write_text(text.replace(old, new, 1), encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "prepared substrate builder missing fail-closed invariant",
+                    result.stderr,
+                )
 
     def test_prepared_substrate_package_targets_require_option_terminator(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

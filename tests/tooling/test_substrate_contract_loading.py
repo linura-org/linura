@@ -57,8 +57,8 @@ class SubstrateContractLoadingTests(unittest.TestCase):
             ('"base-devel",', '"base-devel",\n  "base-devel",'),
             ('"base-devel",', '["malformed"],'),
             (
-                "https://archive.archlinux.org/repos/",
-                "https://archive.archlinux.org;evil/repos/",
+                "https://umea.archive.pkgbuild.com/repos/",
+                "https://umea.archive.pkgbuild.com;evil/repos/",
             ),
             (
                 "https://geo.mirror.pkgbuild.com/images/",
@@ -161,15 +161,23 @@ install_succeeded=0
 """
         loaded = self.run_loader(CONTRACT)
         self.assertEqual(loaded.returncode, 0, loaded.stderr)
-        for packages in (
-            loaded.stdout.split("\t")[3].strip(),
-            "base-devel --disable-sandbox --ignore",
+        for sync, packages in (
+            (sync, packages)
+            for sync in ("-Syu", "-Su")
+            for packages in (
+                loaded.stdout.split("\t")[3].strip(),
+                "base-devel --disable-sandbox --ignore",
+            )
         ):
-            with self.subTest(packages=packages):
+            with self.subTest(sync=sync, packages=packages):
                 result = subprocess.run(
                     ["bash", "--noprofile", "--norc", "-s"],
                     input=harness + install,
-                    env={"PATH": os.defpath, "RUNTIME_PACKAGES": packages},
+                    env={
+                        "PATH": os.defpath,
+                        "RUNTIME_PACKAGES": packages,
+                        "pacman_sync": sync,
+                    },
                     capture_output=True,
                     text=True,
                     check=False,
@@ -184,7 +192,7 @@ install_succeeded=0
                 self.assertEqual(
                     arguments,
                     [
-                        "-Syu",
+                        sync,
                         "--noconfirm",
                         "--needed",
                         "--disable-download-timeout",

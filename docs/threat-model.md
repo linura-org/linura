@@ -1511,6 +1511,14 @@ preemption gates stay intact while display protection is held. Native approval d
 not quiesce witnesses, retire Root protection or qualify ordinary admission.
 ## Kept replacement comparison boundary
 
+Original restoration and terminal finalization retain reviewed proposal data
+before refreshing their independent evidence. Their administrator approval
+expires relative to its original response, including time spent in storage or
+verification. Proposal retention cannot claim terminal ownership; drift or
+expired approval refuses before that claim, preparation or dispatch. Durable
+readback, the unchanged independent probes and one-use handoff remain required.
+Slow storage never widens an observation window or recreates authorization.
+
 Kept-adoption material is untrusted comparison input even when decoded or derived
 from retained history. The retained reader authenticates the complete original
 Keep/release and semantic graph/provenance ancestry; exact material rederivation

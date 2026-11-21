@@ -11,7 +11,9 @@ base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-L
 base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
 base_image_sha256 = "d7cc7c86a21b32d6678c001464714f71f4ef7e0d7bbbfca65e99123ac5afc25b"
 arch_archive_snapshot = "2026-09-16"
-arch_archive_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+# Arch-operated archive mirror; exact snapshot/database/package pins below are
+# unchanged. See archlinux/infrastructure docs/servers.md, Archive Mirrors.
+arch_archive_url = "https://umea.archive.pkgbuild.com/repos/2026/09/16/$repo/os/$arch"
 architecture = "x86_64"
 vm_disk_size_gib = 24
 build_type = "Debug"
@@ -75,7 +77,7 @@ sha256 = "e817f4be82f7b2dfe924426b3e70291ea34f8fdec27bf6641e863f45eb784c36"
 [archived_package]
 name = "glaze"
 version = "7.2.0-1"
-url = "https://archive.archlinux.org/packages/g/glaze/glaze-7.2.0-1-any.pkg.tar.zst"
+url = "https://umea.archive.pkgbuild.com/packages/g/glaze/glaze-7.2.0-1-any.pkg.tar.zst"
 sha256 = "55e29acd6490de8d4b365c120b42c16714facc6d8f8bca93d6936552c3967ba4"
 signature_required = true
 

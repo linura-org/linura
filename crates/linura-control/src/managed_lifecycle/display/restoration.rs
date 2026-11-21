@@ -367,6 +367,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                     "original restoration requires fresh protected Recovery approval".into(),
                 )
             })?;
+        let approved_at_unix_seconds = now_unix_seconds()?;
+        // Retain only the reviewed structured proposal before refreshing the
+        // independent facts. Journal synchronization cannot consume their
+        // two-second window or renew the original administrator approval.
+        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
+        self.request_journal
+            .as_mut()
+            .ok_or_else(|| {
+                ManagedLifecycleError::Authority("restoration journal is unavailable".into())
+            })?
+            .retain(&retained)
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         // Approval cannot refresh historical evidence or bless a changed mapping.
         // Reload history and every authoritative replacement fact after interaction.
         let (source, fresh_request) = self.original_display_request(&principal, &actor, &input)?;
@@ -388,11 +400,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &effect,
             )?
         };
-        let expiry = now_unix_seconds()?
-            .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
-            .ok_or_else(|| {
-                ManagedLifecycleError::Contract("restoration approval clock overflow".into())
-            })?;
+        let expiry = display_approval_expiry(approved_at_unix_seconds, now_unix_seconds()?)?;
         let evidence = self.authority.issue_approval(
             ApprovalRequestId::new(format!(
                 "approval:v010:display-restoration:{}",
@@ -403,14 +411,6 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             &approver,
             expiry,
         )?;
-        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
-        self.request_journal
-            .as_mut()
-            .ok_or_else(|| {
-                ManagedLifecycleError::Authority("restoration journal is unavailable".into())
-            })?
-            .retain(&retained)
-            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         // Require the authenticated immutable request to be readable before CAS.
         if self
             .display_journal()?

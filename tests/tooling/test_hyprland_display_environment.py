@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -40,10 +42,26 @@ class HyprlandDisplayEnvironmentTests(unittest.TestCase):
             ('name = "gcc"', 'name = "gcc;injected"'),
             ('version = "7.2.0-1"', 'version = "8.4.0-1"'),
             (
-                "https://archive.archlinux.org/packages/g/glaze/",
+                "https://umea.archive.pkgbuild.com/packages/g/glaze/",
                 "http://untrusted.invalid/",
             ),
             ('build_type = "Debug"', 'build_type = "Release"'),
+            (
+                "https://umea.archive.pkgbuild.com/repos/",
+                "http://umea.archive.pkgbuild.com/repos/",
+            ),
+            (
+                "https://umea.archive.pkgbuild.com/repos/",
+                "https://umea.archive.pkgbuild.com.evil.invalid/repos/",
+            ),
+            (
+                "https://umea.archive.pkgbuild.com/repos/2026/09/16/",
+                "https://umea.archive.pkgbuild.com/repos/last/",
+            ),
+            (
+                'arch_archive_snapshot = "2026-09-16"',
+                'arch_archive_snapshot = "2026-09-17"',
+            ),
         ]
         with tempfile.TemporaryDirectory() as directory:
             contract = Path(directory) / "build.toml"
@@ -89,11 +107,106 @@ class HyprlandDisplayEnvironmentTests(unittest.TestCase):
         ):
             self.assertIn(check, dependencies)
         repositories = environment.repository_script(data)
+        self.assertNotIn("pacman -Syy", repositories)
+        for option in (
+            "--proto '=https'",
+            "--proto-redir '=https'",
+            "--connect-timeout 15",
+            "--max-time 60",
+            "--retry 2",
+            "--retry-max-time 100",
+            "--max-filesize 67108864",
+        ):
+            self.assertIn(option, repositories)
         for digest in data["repository_sha256"].values():
             self.assertIn(digest, repositories)
         verification = shlex.split(repositories.split("python3 -c ", 1)[1])[0]
         self.assertIn("entry.get('SHA256SUM')", verification)
         compile(verification, "<guest repository verification>", "exec")
+
+    def test_repository_transfer_verifies_both_inputs_and_published_readback(
+        self,
+    ) -> None:
+        # Execute the generated acquisition prefix, with fixed disposable-guest
+        # commands redirected into a private fixture. No network, sudo or host
+        # package state is touched. These bytes are not qualification evidence.
+        data = environment.load_contract(environment.CONTRACT)
+        for fault in ("none", "transfer", "corrupt-core", "corrupt-extra", "readback"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                for name in ("core", "extra"):
+                    (root / (name + ".input")).write_bytes(
+                        (name + "-fixture-database").encode()
+                    )
+                fixture = copy.deepcopy(data)
+                fixture["repository_sha256"] = {
+                    name: hashlib.sha256(
+                        (root / (name + ".input")).read_bytes()
+                    ).hexdigest()
+                    for name in ("core", "extra")
+                }
+                helper = """#!/usr/bin/python3
+import hashlib,os,pathlib,shutil,sys
+root=pathlib.Path(os.environ['REPOSITORY_FIXTURE'])
+args=sys.argv[1:];kind=pathlib.Path(sys.argv[0]).name
+fault=os.environ['REPOSITORY_FAULT']
+if kind=='curl':
+    name=pathlib.Path(args[-1]).name.removesuffix('.db')
+    assert name in ('core','extra') and args[-1].startswith('https://umea.archive.pkgbuild.com/repos/')
+    if fault=='transfer':sys.exit(28)
+    target=pathlib.Path(args[args.index('--output')+1])
+    target.write_bytes((root/(name+'.input')).read_bytes()+(b'corrupt' if fault=='corrupt-'+name else b''))
+elif kind=='sudo':
+    assert args[:2]==['-n','install'] and args[-1].startswith('/var/lib/pacman/sync')
+    target=root/'published'
+    if '-d' in args:target.mkdir()
+    else:
+        with (root/'installed').open('a') as log:log.write(args[-1]+'\\n')
+        shutil.copyfile(args[-2],target/pathlib.Path(args[-1]).name)
+        if fault=='readback':(target/pathlib.Path(args[-1]).name).write_bytes(b'corrupt')
+elif kind=='sha256sum':
+    expected,path=sys.stdin.read().strip().split('  ',1)
+    actual=root/'published'/pathlib.Path(path).name if path.startswith('/var/lib/pacman/sync/') else pathlib.Path(path)
+    sys.exit(0 if hashlib.sha256(actual.read_bytes()).hexdigest()==expected else 1)
+else:raise AssertionError('unexpected fixture command')
+"""
+                for name in ("curl", "sudo", "sha256sum"):
+                    path = bin_dir / name
+                    path.write_text(helper)
+                    path.chmod(0o700)
+                script = environment.repository_script(fixture).split("python3 -c ", 1)[
+                    0
+                ]
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    cwd=root,
+                    env={
+                        **os.environ,
+                        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+                        "REPOSITORY_FIXTURE": str(root),
+                        "REPOSITORY_FAULT": fault,
+                    },
+                    capture_output=True,
+                    timeout=10,
+                )
+                self.assertEqual(
+                    result.returncode == 0, fault == "none", result.stderr.decode()
+                )
+                if fault in ("transfer", "corrupt-core", "corrupt-extra"):
+                    self.assertFalse(
+                        (root / "installed").exists(),
+                        "unverified database was published",
+                    )
+                if fault == "none":
+                    self.assertEqual(
+                        (root / "installed").read_text().splitlines(),
+                        [
+                            "/var/lib/pacman/sync/core.db",
+                            "/var/lib/pacman/sync/extra.db",
+                        ],
+                    )
 
     def test_helper_dispatches_only_to_disposable_guest_with_deadlines(self) -> None:
         with (

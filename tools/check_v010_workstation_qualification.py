@@ -801,7 +801,7 @@ PNG_UNSUPPORTED_COLOR_CHUNKS = {
 }
 VISUAL_MAX_BASELINES = 128
 ARCHIVE_RE = re.compile(
-    r"^https://archive\.archlinux\.org/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
+    r"^https://umea\.archive\.pkgbuild\.com/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
 )
 
 
@@ -4439,7 +4439,7 @@ def validate(
             parsed_url = urlparse(repository_url)
             if (
                 parsed_url.scheme != "https"
-                or parsed_url.netloc != "archive.archlinux.org"
+                or parsed_url.netloc != "umea.archive.pkgbuild.com"
             ):
                 failures.append(
                     "substrate.repository_url must use the official Arch Linux Archive over HTTPS"

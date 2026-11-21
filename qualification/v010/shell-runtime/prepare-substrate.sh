@@ -220,13 +220,20 @@ ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
 if [[ "$BUILD_DEPENDENCY_VERIFIER" != - ]]; then
     python3 "$BUILD_DEPENDENCY_VERIFIER" --contract "$contract_path" \
         --ssh-key "$ssh_key" --phase repositories
+    # The S21 verifier has acquired, hash-checked and read back both pinned
+    # databases. Refreshing again would add network work and replace those
+    # already verified dependency-resolution inputs. Native package signature
+    # checks and the complete post-install SDK verification remain unchanged.
+    pacman_sync=-Su
+else
+    pacman_sync=-Syu
 fi
 
 install_succeeded=0
 for attempt in 1 2 3; do
     echo "prepared substrate package install attempt $attempt/3"
     if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
-        "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman -Syu --noconfirm --needed --disable-download-timeout -- $RUNTIME_PACKAGES"; then
+        "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman $pacman_sync --noconfirm --needed --disable-download-timeout -- $RUNTIME_PACKAGES"; then
         install_succeeded=1
         break
     fi

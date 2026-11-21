@@ -3430,8 +3430,8 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             self._rewrite_contract(
                 root,
-                'repository_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"',
-                'repository_url = "https://archive.archlinux.org/repos/last/$repo/os/$arch"',
+                'repository_url = "https://umea.archive.pkgbuild.com/repos/2026/09/16/$repo/os/$arch"',
+                'repository_url = "https://umea.archive.pkgbuild.com/repos/last/$repo/os/$arch"',
             )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
