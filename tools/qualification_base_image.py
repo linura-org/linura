@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed acquisition of Linura's one digest-pinned Ubuntu qualification image.
+"""Digest-verified image caching and the pinned Ubuntu qualification CLI.
 
 This is a transport/cache helper, not a qualification or authorization oracle.
 A cache hit is never evidence of passing a guest test.

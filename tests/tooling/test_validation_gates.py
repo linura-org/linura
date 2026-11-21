@@ -5692,6 +5692,32 @@ class ValidationGateTests(unittest.TestCase):
                     )
             target.write_text(original, encoding="utf-8")
 
+    def test_display_input_cache_cannot_accept_mutable_or_build_outputs(self):
+        original = ".github/workflows/v010-shell-runtime-qualification.yml"
+        content = (self.root / original).read_text()
+        changes = (
+            ("Cache pinned Arch display-build input", "Cache unreviewed image"),
+            ("linura-s21-arch-input-v1-", "mutable-arch-latest-"),
+            (
+                "/arch-d7cc7c86a21b32d6678c001464714f71f4ef7e0d7bbbfca65e99123ac5afc25b.qcow2",
+                "/s21-candidate/",
+            ),
+            (
+                "      - name: Cache pinned Arch display-build input",
+                "      - name: Cache pinned Arch display-build input\n        if: false",
+            ),
+        )
+        for old, new in changes:
+            with self.subTest(old=old):
+                path = self.root / original
+                self.assertIn(old, content)
+                path.write_text(content.replace(old, new, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any("cache must select only" in e for e in errors), errors
+                )
+        path.write_text(content)
+
     def test_display_build_cannot_be_substituted_or_skipped(self):
         path = self.root / ".github/workflows/v010-shell-runtime-qualification.yml"
         original = path.read_text()

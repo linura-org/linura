@@ -164,6 +164,98 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                     self.assertEqual(reserve.call_count, 0 if failure == "root" else 1)
                     prepare.assert_not_called()
 
+    def test_pinned_base_cache_is_rehashed_and_staged_into_distinct_guest_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base, guest = root / "base", root / "guest"
+            base.mkdir()
+            guest.mkdir()
+            payload = b"reviewed upstream image fixture"
+            digest = hashlib.sha256(payload).hexdigest()
+            contract = {
+                "base_image_sha256": digest,
+                "base_image_url": "https://example.invalid/pinned",
+            }
+            cached = base / f"arch-{digest}.qcow2"
+            paths = {
+                "prerequisite": {"vm-base": str(base)},
+                "generated": {"vm-base": str(root / "invalid-cache-role")},
+            }
+            with (
+                patch.object(
+                    build.storage,
+                    "arguments",
+                    return_value=argparse.Namespace(storage_root=root),
+                ),
+                patch.object(build.storage, "private_tree") as guard,
+                patch.object(build.image_cache.subprocess, "run") as transfer,
+            ):
+
+                def deliver(command, *, check):
+                    guard.assert_called_with(root, base)
+                    self.assertFalse(check)
+                    self.assertEqual(command[-1], contract["base_image_url"])
+                    self.assertEqual(
+                        command[command.index("--max-filesize") + 1],
+                        str(build.image_cache.MAX_IMAGE_BYTES),
+                    )
+                    self.assertNotIn("--continue-at", command)
+                    Path(command[command.index("--output") + 1]).write_bytes(payload)
+                    return subprocess.CompletedProcess(command, 0)
+
+                transfer.side_effect = deliver
+                self.assertEqual(
+                    build.acquire_base_image(
+                        paths, "first", contract, guest / "first.qcow2"
+                    ),
+                    "verified-https-download",
+                )
+                self.assertEqual(
+                    build.acquire_base_image(
+                        paths, "second", contract, guest / "second.qcow2"
+                    ),
+                    "verified-cache",
+                )
+                transfer.assert_called_once()
+                for path in (cached, guest / "first.qcow2", guest / "second.qcow2"):
+                    self.assertEqual(path.read_bytes(), payload)
+                    self.assertEqual(path.stat().st_nlink, 1)
+                self.assertNotEqual(
+                    cached.stat().st_ino, (guest / "first.qcow2").stat().st_ino
+                )
+                cached.write_bytes(b"changed immutable input")
+                with self.assertRaisesRegex(
+                    build.image_cache.ImageError, "SHA-256 mismatch"
+                ):
+                    build.acquire_base_image(
+                        paths, "third", contract, guest / "third.qcow2"
+                    )
+                transfer.assert_called_once()
+                self.assertFalse((guest / "third.qcow2").exists())
+
+    def test_base_cache_never_bypasses_storage_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {"prerequisite": {"vm-base": str(root)}}
+            with (
+                patch.object(
+                    build.storage,
+                    "arguments",
+                    return_value=argparse.Namespace(storage_root=root),
+                ),
+                patch.object(
+                    build.storage,
+                    "private_tree",
+                    side_effect=ValueError("storage refused"),
+                ),
+                patch.object(build.image_cache, "acquire") as acquire,
+            ):
+                with self.assertRaisesRegex(ValueError, "storage refused"):
+                    build.acquire_base_image(
+                        paths, "bad-root", {}, root / "guest.qcow2"
+                    )
+                acquire.assert_not_called()
+
     def sdk_archive(self, root: Path, name: str, target: str | None = None) -> Path:
         archive = root / "sdk.tar"
         with tarfile.open(archive, "w") as stream:

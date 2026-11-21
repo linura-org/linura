@@ -238,6 +238,13 @@ jobs:
           test "$(stat -c '%u:%g:%a:%F' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"
           [[ -r /dev/kvm && -w /dev/kvm ]]
 
+      # Cache only authenticated upstream bytes; never SDK/build/test results.
+      - name: Cache pinned Arch display-build input
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LINURA_VM_BASE_DIR }}/arch-d7cc7c86a21b32d6678c001464714f71f4ef7e0d7bbbfca65e99123ac5afc25b.qcow2
+          key: linura-s21-arch-input-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/s21-hyprland-build-environment.toml') }}
+
       - name: Build exact-source display integration with pinned Arch SDK
         run: |
           set -euo pipefail

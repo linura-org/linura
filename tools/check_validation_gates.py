@@ -140,6 +140,8 @@ SPECIALIZED = {
             "contracts/s21-hyprland-build-environment.toml",
             "tools/hyprland_display_environment.py",
             "tools/hyprland_display_build.py",
+            "tools/qualification_base_image.py",
+            "tests/tooling/test_qualification_base_image.py",
             "tools/hyprland_display_candidate.py",
             "tools/qualification_build_artifacts.py",
             "tools/codex/native-profiles.toml",
@@ -3679,6 +3681,36 @@ def check(root: Path = ROOT) -> list[str]:
             '  --candidate "$LINURA_WORK_DIR/s21-candidate" --source-sha "$SOURCE_SHA"',
         ),
         "v0.10 native runtime: compositor candidate verification cannot be skipped or substituted",
+    )
+    image_cache_step = workflow_step(
+        display_build, 4, "name", "Cache pinned Arch display-build input"
+    )
+    try:
+        arch_input_digest = tomllib.loads(
+            read("contracts/s21-hyprland-build-environment.toml")
+        ).get("base_image_sha256")
+    except tomllib.TOMLDecodeError:
+        arch_input_digest = None
+    valid_arch_input = (
+        isinstance(arch_input_digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", arch_input_digest) is not None
+    )
+    if not isinstance(arch_input_digest, str):
+        arch_input_digest = "invalid"
+    expected_image_cache = (
+        "      - name: Cache pinned Arch display-build input\n"
+        "        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n"
+        "        with:\n"
+        "          path: ${{ env.LINURA_VM_BASE_DIR }}/arch-"
+        + arch_input_digest
+        + ".qcow2\n"
+        "          key: linura-s21-arch-input-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/s21-hyprland-build-environment.toml') }}"
+    )
+    require(
+        valid_arch_input
+        and step_is_unconditional(image_cache_step, 4)
+        and (image_cache_step or "").strip() == expected_image_cache.strip(),
+        "v0.10 display build: cache must select only the pinned upstream image input",
     )
     build_step = workflow_step(
         display_build,

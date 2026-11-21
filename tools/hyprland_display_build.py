@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 from tools import development_storage as storage  # noqa: E402
 from tools import hyprland_display_source as source  # noqa: E402
 from tools import hyprland_display_candidate as candidate  # noqa: E402
+from tools import qualification_base_image as image_cache  # noqa: E402
 from tools.hyprland_display_environment import CONTRACT, load_contract  # noqa: E402
 
 ENVIRONMENT = "arch-hyprland-runtime"
@@ -96,6 +97,19 @@ def reserve_run(run_id: str, development: bool) -> tuple[dict, str, bool]:
     return paths, sha, dirty
 
 
+def acquire_base_image(paths: dict, run_id: str, contract: dict, image: Path) -> str:
+    # This cache is only a digest-pinned upstream input. SDK preparation,
+    # exact-source compilation and all native acceptance still run afresh.
+    base = Path(paths["prerequisite"]["vm-base"])
+    storage.private_tree(Path(storage.arguments(run_id).storage_root), base)
+    return image_cache.acquire(
+        base / f"arch-{contract['base_image_sha256']}.qcow2",
+        image,
+        contract["base_image_sha256"],
+        contract["base_image_url"],
+    )
+
+
 def prepare_environment(run_id: str, development: bool) -> int:
     contract = load_contract(CONTRACT)
     paths, sha, dirty = reserve_run(run_id, development)
@@ -111,36 +125,7 @@ def prepare_environment(run_id: str, development: bool) -> int:
     )
     image = vm / "arch-base.qcow2"
     os.umask(0o077)
-    run(
-        [
-            "curl",
-            "--fail",
-            "--location",
-            "--proto",
-            "=https",
-            "--proto-redir",
-            "=https",
-            "--tlsv1.2",
-            "--max-time",
-            "900",
-            "--retry",
-            "2",
-            "--max-filesize",
-            "2147483648",
-            "--output",
-            str(image),
-            contract["base_image_url"],
-        ],
-        timeout=2800,
-    )
-    with image.open("rb") as stream:
-        if (
-            hashlib.file_digest(stream, "sha256").hexdigest()
-            != contract["base_image_sha256"]
-        ):
-            raise ValueError(
-                "downloaded Arch base image differs from the pinned contract"
-            )
+    acquisition = acquire_base_image(paths, run_id, contract, image)
     inputs = [
         CONTRACT,
         ROOT / contract["builder"],
@@ -199,6 +184,7 @@ def prepare_environment(run_id: str, development: bool) -> int:
                 "dirty": dirty,
                 "development": development,
                 "qualification_evidence": False,
+                "base_image_acquisition": acquisition,
                 "prepared_image": str(prepared),
                 "prepared_manifest": str(manifest),
             },
@@ -605,7 +591,8 @@ def ci_build(args: argparse.Namespace) -> int:
     """Require a fresh exact-source SDK/compositor build in the existing VM lane.
 
     Diagnostics are ordinary build results, never native execution evidence.
-    Only sanitized prerequisites may be reused by a future cache integration.
+    Only digest-verified upstream image bytes are reused; SDKs and
+    source-specific candidates are rebuilt, never accepted from this cache.
     """
     if not args.diagnostics or args.development:
         raise ValueError("ci-build requires checked diagnostics and clean exact source")
