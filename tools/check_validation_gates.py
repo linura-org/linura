@@ -1286,7 +1286,7 @@ REVIEWED_SHELL_EXECUTION = {
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
     "qualification/v010/workstation-acceptance/launch-interactive.sh": "9a19a79b9e3f7b8b68d6a2e98d4895c45be7d13ad0feaa5cd4470c0f6d8afbba",
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
-    "qualification/v010/workstation-acceptance/run-live-session.sh": "705848b86eb947c5458fab10b39c94f218019ae21fb518a0c21560e06da0d7a2",
+    "qualification/v010/workstation-acceptance/run-live-session.sh": "cb9c1087b7fb712613f0baeade871dfa8781d428b43e74f22285df200e3a16e4",
     "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
     "tests/acceptance/v06/qualify-guest.sh": "4a2140d8f6a8b36a96857c1c22ccc328a897981f871a29f41ce45de3a7958f60",
     "tests/acceptance/v06/qualify-host.sh": "4cce1f98860da21fe9536318a99fb10d32b87d7b2d2724ec63a6109862fa3d97",

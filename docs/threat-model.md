@@ -909,6 +909,18 @@ admission, commits terminal history or establishes Level A/B/C acceptance.
   restoration and S17 lock coverage required in S21-2 and physical Q11 separately
   maintained. No build profile, self-reported phase or old-head result promotes
   readiness to runtime acceptance or release support.
+- Same-invocation successor completion binds the actual predecessor grant's
+  ownership identity, a non-copyable one-use successor object and the exact new
+  transaction/effect/dispatch/deadline correlation. Only its own freshly admitted
+  Root completion grant can replace that pending callback. Retired predecessors,
+  old tokens, another ownership control block, lost/throwing callbacks and
+  another startup fence cannot reopen initial or recovery admission. Ordinary
+  predecessors retain their actual ordinary Root anchor; restoration
+  predecessors additionally require their original recovery callback. This
+  constant-space native comparison state authenticates no peer or effect by
+  itself and cannot reconstruct a grant from historical files. Repeated-cycle
+  component checks do not establish real compositor acceptance, replacement
+  adoption or permission to retire shared references.
 - The native runtime consumes a compositor build candidate only from the same
   exact-source workflow attempt. Its closed file inventory, streamed size/hash
   checks and source/recipe/contract/SDK bindings are checked again inside the

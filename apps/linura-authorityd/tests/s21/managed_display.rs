@@ -26,6 +26,11 @@ struct Machine {
     original_intent_sync_fault: Option<bool>,
     original_intent_synced_at: Option<u64>,
     original_intent_layout_samples: Vec<u64>,
+    ordinary_intent_sync_fault: Option<bool>,
+    ordinary_intent_sync_material: bool,
+    ordinary_intent_synced_at: Option<u64>,
+    ordinary_intent_root_reads_at_sync: u64,
+    ordinary_intent_layout_samples: Vec<u64>,
     journal_keys: std::collections::BTreeSet<(PrincipalId, RequestId)>,
     desired: bool,
     state: Option<&'static str>,
@@ -199,6 +204,7 @@ fn display_request(operation: &str) -> PlanDesiredStateRequest {
 #[test]
 fn replacement_review_reloads_authenticated_history_without_replaying_an_apply() {
     original_intent_sync_precedes_the_existing_post_approval_fresh_review();
+    ordinary_release::ordinary_intent_sync_precedes_fresh_release_review();
     ordinary_release::ordinary_release_dispatch_is_separately_approved_durable_and_never_replayed();
     ordinary_release::original_source_and_terminal_inspection_are_read_only_across_restart();
     ordinary_release::early_automatic_restoration_is_not_expiry_release_authority();
@@ -521,6 +527,15 @@ impl Observer for LiveFixtureObserver {
         {
             machine
                 .original_intent_layout_samples
+                .push(sample.observed_at_unix_ms);
+        }
+        if sample.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+            && capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+            && (machine.ordinary_intent_sync_fault.is_some()
+                || machine.ordinary_intent_synced_at.is_some())
+        {
+            machine
+                .ordinary_intent_layout_samples
                 .push(sample.observed_at_unix_ms);
         }
         if successor {
@@ -1227,6 +1242,39 @@ impl ApprovedRequestJournal for FailingJournal {
             return Err(TransactionStoreError::CapacityExceeded);
         }
         self.inner.retain(record)?;
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-ordinary-release:")
+            || record
+                .request_id()
+                .as_str()
+                .starts_with("request:v010:display-ordinary-release-material:")
+        {
+            let fault = {
+                let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+                let material = record
+                    .request_id()
+                    .as_str()
+                    .starts_with("request:v010:display-ordinary-release-material:");
+                if m.ordinary_intent_sync_material == material {
+                    m.ordinary_intent_sync_fault.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(drift) = fault {
+                // Delay only the return from the real durable structured
+                // intent write, without holding the independent native fixture.
+                std::thread::sleep(std::time::Duration::from_millis(2050));
+                let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+                m.ordinary_intent_synced_at = Some(now_unix_ms());
+                m.ordinary_intent_root_reads_at_sync = m.ordinary_root_reads;
+                if drift {
+                    m.native_base_drift = true;
+                }
+            }
+        }
         if record
             .request_id()
             .as_str()

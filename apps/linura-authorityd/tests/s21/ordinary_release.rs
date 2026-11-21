@@ -1218,6 +1218,140 @@ impl linura_control::OrdinaryDisplayReleasePort for ReleasePort {
     }
 }
 
+// Real Control/SQLite persistence ordering. Native labels and protected
+// approval are simulated component boundaries, not compositor qualification.
+pub(super) fn ordinary_intent_sync_precedes_fresh_release_review() {
+    for action in [
+        DisplayContinuationAction::Confirm,
+        DisplayContinuationAction::Revert,
+    ] {
+        for material_write in [false, true] {
+            for drift in [false, true] {
+                let database = TestDatabase::new();
+                let machine = Arc::new(Mutex::new(Machine::default()));
+                let original = display_request("ordinary-sync-original");
+                let mut attempt = Port(machine.clone());
+                let mut verifier = Verifier(machine.clone());
+                {
+                    let mut control = open_with_previews(
+                        database.path(),
+                        &machine,
+                        0,
+                        previews_inner(&machine, true),
+                    );
+                    value(control.begin_display_layout(
+                        principal(),
+                        actor(true),
+                        original.clone(),
+                        &approval(),
+                        &mut attempt,
+                        &mut verifier,
+                    ));
+                    value(control.decide_display_layout(
+                        principal(),
+                        actor(true),
+                        &original.request_id,
+                        action,
+                        &Decision::approve(&machine),
+                        &mut attempt,
+                        &mut verifier,
+                    ));
+                }
+                {
+                    let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                    m.ordinary_intent_sync_fault = Some(drift);
+                    m.ordinary_intent_sync_material = material_write;
+                }
+                let mut control = open_with_previews(
+                    database.path(),
+                    &machine,
+                    0,
+                    previews_inner(&machine, true),
+                );
+                let input = linura_control::OrdinaryDisplayReleaseRequest {
+                    operation_id: "ordinary-after-intent-sync".into(),
+                    original_request: original.request_id.clone(),
+                    reason: original.reason.clone(),
+                };
+                let mut release = ReleasePort(machine.clone(), 0);
+                let result = control.begin_ordinary_display_release(
+                    principal(),
+                    actor(true),
+                    input.clone(),
+                    &ReleaseApproval(machine.clone(), 0),
+                    &mut attempt,
+                    &mut verifier,
+                    &mut release,
+                );
+                if drift {
+                    assert!(
+                        result.is_err(),
+                        "drift during release-intent retention was accepted"
+                    );
+                    let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
+                    assert!(m.ordinary_intent_synced_at.is_some());
+                    assert!(m.ordinary_root_reads > m.ordinary_intent_root_reads_at_sync);
+                    assert_eq!(m.ordinary_release_approvals, 1);
+                    assert_eq!(m.ordinary_release_calls, 0);
+                    assert!(
+                        !m.journal_keys.iter().any(|(_, request)| request
+                            .as_str()
+                            .starts_with("request:v010:display-ordinary-release-owner:")),
+                        "refused fresh review claimed its original"
+                    );
+                    m.native_base_drift = false;
+                    drop(m);
+                    // A different freshly approved request can still own the
+                    // original. The rejected operation retained comparison only.
+                    let mut next = input;
+                    next.operation_id = "ordinary-after-refused-sync".into();
+                    value(control.begin_ordinary_display_release(
+                        principal(),
+                        actor(true),
+                        next,
+                        &ReleaseApproval(machine.clone(), 0),
+                        &mut attempt,
+                        &mut verifier,
+                        &mut release,
+                    ));
+                } else {
+                    value(result);
+                    let m = machine.lock().unwrap_or_else(|_| unreachable!());
+                    let synced = m
+                        .ordinary_intent_synced_at
+                        .unwrap_or_else(|| unreachable!());
+                    // Each existing review has an input sample and an
+                    // independent before/after planning pair. Ordinary release
+                    // therefore has six samples, unlike Apply's two reviews.
+                    let [input, before, after, fresh_input, fresh_before, fresh_after] =
+                        m.ordinary_intent_layout_samples.as_slice()
+                    else {
+                        unreachable!(
+                            "ordinary release must retain all six layout samples; got {}",
+                            m.ordinary_intent_layout_samples.len()
+                        )
+                    };
+                    for reviewed in [input, before, after] {
+                        assert!(synced.saturating_sub(*reviewed) >= 2000);
+                    }
+                    for refreshed in [fresh_input, fresh_before, fresh_after] {
+                        assert!(*refreshed >= synced);
+                    }
+                    assert_eq!(
+                        m.ordinary_root_reads - m.ordinary_intent_root_reads_at_sync,
+                        4
+                    );
+                    assert_eq!(m.ordinary_release_approvals, 1);
+                }
+                let m = machine.lock().unwrap_or_else(|_| unreachable!());
+                assert_eq!(m.ordinary_release_calls, 1);
+                assert_eq!(m.applies, 1);
+                assert_eq!(m.decisions, 1);
+            }
+        }
+    }
+}
+
 pub(super) fn ordinary_release_dispatch_is_separately_approved_durable_and_never_replayed() {
     for action in [
         DisplayContinuationAction::Confirm,
@@ -1320,7 +1454,8 @@ pub(super) fn ordinary_release_dispatch_is_separately_approved_durable_and_never
                 assert_eq!(m.ordinary_release_approvals, 1);
                 assert_eq!(
                     m.ordinary_release_calls,
-                    usize::from(case == 0 || (11..=12).contains(&case))
+                    usize::from(case == 0 || (11..=12).contains(&case)),
+                    "{action:?} case {case}: {result:?}"
                 );
                 assert_eq!(m.applies, 1);
                 assert_eq!(m.decisions, 1);

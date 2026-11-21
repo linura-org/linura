@@ -21,6 +21,7 @@ function(linura_display_integration_identity source_dir output_dir)
         native_inhibitor_fd.h
         native_owner_admission.cpp native_owner_admission.h owner_identity.cpp
         native_output_identity.h recovery_witness.h recovery_rule.h recovery_lineage.h startup_fence.h
+        current_lifetime_chain.h
         native_kernel_scanout.h
         native_output_commit_history.h
         ordinary_release_intent.h ordinary_release_grant.h

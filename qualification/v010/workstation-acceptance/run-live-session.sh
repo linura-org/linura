@@ -95,17 +95,17 @@ if [[ "$native_s21" == "1" ]]; then
     # This is the same genuine logind/S17 bootstrap as Level A. Its report
     # explicitly claims bootstrap only, never S21 mutation or B acceptance.
     sudo -n python3 /opt/linura-source/qualification/v010/session-security/check-native-session.py \
-        > "$evidence_root/native-session-bootstrap.json"
+        >"$evidence_root/native-session-bootstrap.json"
     native_pid="$(sudo -n systemctl show --property=MainPID --value linura-s17-session.service)"
     native_invocation="$(sudo -n systemctl show --property=InvocationID --value linura-s17-session.service)"
-    [[ "$native_pid" =~ ^[1-9][0-9]{0,9}$ && "$native_invocation" =~ ^[0-9a-f]{32}$ ]] \
-        || fail "native compositor service identity unavailable"
+    [[ "$native_pid" =~ ^[1-9][0-9]{0,9}$ && "$native_invocation" =~ ^[0-9a-f]{32}$ ]] ||
+        fail "native compositor service identity unavailable"
     # The native compositor deliberately denies same-UID /proc inspection.
     # Only the disposable fixture's root read observes its executing inode;
     # never relax its nondumpability or native peer-admission guards.
     native_exec_identity="$(sudo -n /usr/bin/stat -Lc '%d:%i' "/proc/$native_pid/exe")"
-    [[ "$native_exec_identity" == "$(stat -Lc '%d:%i' /usr/bin/Hyprland)" ]] \
-        || fail "native compositor executable identity changed"
+    [[ "$native_exec_identity" == "$(stat -Lc '%d:%i' /usr/bin/Hyprland)" ]] ||
+        fail "native compositor executable identity changed"
 else
     systemd-run --user --unit=linura-hyprland-live.service --collect --quiet --service-type=exec /usr/bin/Hyprland --config /tmp/linura-hyprland-live.conf
 fi

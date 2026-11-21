@@ -5,8 +5,145 @@
 
 using namespace Linura::HyprlandDisplay;
 
+namespace {
+CurrentLifetimeChain::Token token()
+{
+    return std::make_shared<unsigned char>(0);
+}
+
+void repeatedCurrentLifetimes()
+{
+    // This is comparison-state coverage, not an authenticated Root grant or
+    // compositor qualification. Every production call remains private to a
+    // real grant in StartupFence, with kernel peer and full protocol checks.
+    CurrentLifetimeChain chain;
+    assert(!chain.attempted() && !chain.available());
+    auto owner = token();
+    bool obsoleteScene = true;
+    assert(chain.admitInitial(owner, [&] { return obsoleteScene; }));
+    assert(!chain.admitInitial(token(), [] { return true; }));
+    for (unsigned cycle = 0; cycle < 8; ++cycle) {
+        const auto foreign = token();
+        assert(!chain.markRetired(foreign, [] { return true; }));
+        assert(!chain.transfer(owner, token(), [] { return true; }));
+        assert(!chain.retired());
+        assert(chain.markRetired(owner, [] { return true; }));
+        assert(chain.retired());
+        assert(!chain.markRetired(owner, [] { return true; }));
+        const auto next = token();
+        const auto transfer = token();
+        assert(!chain.transfer(foreign, transfer, [] { return true; }));
+        // An equal pointer with another ownership identity is not this grant.
+        const CurrentLifetimeChain::Token alias(owner.get(), [](void *) {});
+        assert(!chain.transfer(alias, transfer, [] { return true; }));
+        obsoleteScene = false; // The actual predecessor scene was moved.
+        assert(chain.transfer(owner, transfer, [] { return true; }));
+        assert(chain.available() && !chain.retired());
+        assert(!chain.transfer(owner, token(), [] { return true; }));
+        assert(!chain.admitInitial(next, [] { return true; }));
+        assert(!chain.admitSuccessor(foreign, next, [] { return true; }));
+        const CurrentLifetimeChain::Token aliasTransfer(transfer.get(), [](void *) {});
+        assert(!chain.admitSuccessor(aliasTransfer, next, [] { return true; }));
+        assert(chain.admitSuccessor(transfer, next, [] { return true; }));
+        assert(!chain.admitSuccessor(transfer, token(), [] { return true; }));
+        assert(!chain.markRetired(owner, [] { return true; }));
+        owner = next; // Old comparison objects are not the new lifetime.
+        assert(chain.available());
+    }
+    owner.reset();
+    assert(!chain.available());
+    assert(!chain.admitInitial(token(), [] { return true; }));
+}
+
+void lostCurrentLifetimesStayLost()
+{
+    for (unsigned fault = 0; fault < 11; ++fault) {
+        CurrentLifetimeChain chain;
+        auto owner = token();
+        auto transfer = token();
+        auto next = token();
+        bool alive = true;
+        bool retiredAlive = true;
+        assert(chain.admitInitial(owner, [] { return true; }));
+        assert(chain.markRetired(owner, [&] { return retiredAlive; }));
+        if (fault == 0) {
+            assert(!chain.transfer(owner, {}, [] { return true; }));
+        } else if (fault == 1) {
+            assert(!chain.transfer(owner, transfer, [] { return false; }));
+        } else if (fault == 2) {
+            assert(!chain.transfer(owner, transfer, []() -> bool { throw 1; }));
+        } else if (fault < 6) {
+            assert(chain.transfer(owner, transfer, [&] { return alive; }));
+            if (fault == 3)
+                transfer.reset();
+            else if (fault == 4)
+                owner.reset();
+            else
+                alive = false;
+            assert(!chain.available());
+        } else if (fault == 6) {
+            retiredAlive = false;
+            assert(!chain.transfer(owner, transfer, [] { return true; }));
+        } else {
+            assert(chain.transfer(owner, transfer, [] { return true; }));
+            if (fault == 7)
+                assert(!chain.admitSuccessor(transfer, owner, [] { return true; }));
+            else if (fault == 8)
+                assert(!chain.admitSuccessor(transfer, next, [] { return false; }));
+            else if (fault == 9)
+                assert(!chain.admitSuccessor(transfer, next, []() -> bool { throw 1; }));
+            else
+                assert(!chain.admitSuccessor(transfer, transfer, [] { return true; }));
+        }
+        alive = true;
+        retiredAlive = true;
+        assert(!chain.available());
+        assert(!chain.admitSuccessor(transfer, next, [] { return true; }));
+        assert(!chain.admitInitial(next, [] { return true; }));
+    }
+    CurrentLifetimeChain initial;
+    assert(!initial.admitInitial({}, [] { return true; }));
+    assert(!initial.admitInitial(token(), [] { return true; }));
+    for (const bool throws : {false, true}) {
+        CurrentLifetimeChain failed;
+        const auto owner = token();
+        assert(!failed.admitInitial(owner, [&]() -> bool {
+            if (throws)
+                throw 1;
+            return false;
+        }));
+        assert(!failed.admitInitial(owner, [] { return true; }));
+    }
+    CurrentLifetimeChain retired;
+    const auto owner = token();
+    bool retiredAlive = true;
+    assert(retired.admitInitial(owner, [] { return true; }));
+    assert(retired.markRetired(owner, [&] { return retiredAlive; }));
+    retiredAlive = false;
+    assert(!retired.retired());
+    retiredAlive = true;
+    assert(!retired.available());
+    for (const bool throws : {false, true}) {
+        CurrentLifetimeChain chain;
+        const auto owner = token();
+        bool alive = true;
+        assert(chain.admitInitial(owner, [&] {
+            if (throws && !alive)
+                throw 1;
+            return alive;
+        }));
+        alive = false;
+        assert(!chain.available());
+        alive = true;
+        assert(!chain.available());
+    }
+}
+} // namespace
+
 int main()
 {
+    repeatedCurrentLifetimes();
+    lostCurrentLifetimesStayLost();
     StartupFence absent;
     assert(!absent.guardAlive() && !absent.ordinaryAllowed());
     assert(!absent.authenticatesGrantPeer(-1) && !absent.recoveryAvailable());

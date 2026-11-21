@@ -86,10 +86,15 @@ class OriginalCompletionGrant final
 
       private:
         friend class OriginalCompletionGrant;
-        SuccessorCurrent(std::string digest, std::function<bool()> check)
-            : digest_(std::move(digest)), check_(std::move(check))
+        SuccessorCurrent(std::string digest, Correlation bound, StartupFence &fence,
+                         CurrentLifetimeChain::Token token, std::function<bool()> check)
+            : digest_(std::move(digest)), bound_(std::move(bound)), fence_(fence),
+              token_(std::move(token)), check_(std::move(check))
         {}
         const std::string digest_;
+        const Correlation bound_;
+        StartupFence &fence_;
+        const CurrentLifetimeChain::Token token_;
         std::function<bool()> check_;
     };
     // Unforgeable, non-copyable lifetime. It is created only after the separate
@@ -185,6 +190,7 @@ class OriginalCompletionGrant final
         if (!digest || *digest != expectedDigest || !bound)
             return {};
         result->digest_ = *digest;
+        result->bound_ = restoration;
         result->expires_ = *bound;
         const auto finished = result->clock();
         if (!finished || finished->unixMs >= bound->unixMs || finished->bootMs >= bound->bootMs)
@@ -241,7 +247,7 @@ class OriginalCompletionGrant final
             return {};
         retirementDigest_ = std::string(digest);
         std::weak_ptr<Liveness> weak = liveness_;
-        if (!fence_.markCurrentRetired([weak, digest = retirementDigest_] {
+        if (!fence_.markCurrentRetired(liveness_, [weak, digest = retirementDigest_] {
                 const auto scope = weak.lock();
                 return scope && scope->owner && scope->owner->retirementDigest_ == digest &&
                        scope->owner->live();
@@ -264,10 +270,15 @@ class OriginalCompletionGrant final
         return poll(&event, 1, 0) == 0 && event.revents == 0 ? true : fail();
     }
     [[nodiscard]] std::unique_ptr<SuccessorCurrent>
-    transferSuccessor(std::string_view digest, std::function<bool()> scopeAlive)
+    transferSuccessor(std::string_view digest, const Correlation &bound,
+                      std::function<bool()> scopeAlive)
     {
         if (successorAttempted_ || !retirementAttempted_ || retirementDigest_.empty() ||
-            !OriginalGrantCodec::digest(digest) || !scopeAlive || !scopeAlive() || !live()) {
+            !OriginalGrantCodec::digest(digest) || bound.transaction.empty() ||
+            bound.transaction.size() > 256 || bound.transaction == bound_.transaction ||
+            !OriginalGrantCodec::digest(bound.effectDigest) ||
+            !OriginalGrantCodec::digest(bound.dispatchDigest) || !bound.deadlineUnixMs ||
+            !scopeAlive || !scopeAlive() || !live()) {
             fail();
             return {};
         }
@@ -288,12 +299,13 @@ class OriginalCompletionGrant final
             retained->owner->invalidate();
             return false;
         };
-        if (!fence_.transferCurrent(alive)) {
+        const auto token = std::make_shared<unsigned char>(0);
+        if (!fence_.transferCurrent(liveness_, token, alive)) {
             fail();
             return {};
         }
-        return std::unique_ptr<SuccessorCurrent>(
-            new SuccessorCurrent(successorDigest_, [weak, digest = successorDigest_] {
+        return std::unique_ptr<SuccessorCurrent>(new SuccessorCurrent(
+            successorDigest_, bound, fence_, token, [weak, digest = successorDigest_] {
                 const auto retained = weak.lock();
                 return retained && retained->owner && retained->owner->successorDigest_ == digest &&
                        retained->owner->live();
@@ -311,7 +323,8 @@ class OriginalCompletionGrant final
     // Called only at the actual compositor-thread handoff, after independent
     // first-frame comparison and input quarantine. It cannot admit a future
     // compositor or replace the continuously retained original Root endpoint.
-    [[nodiscard]] bool admitCurrent(std::function<bool()> scopeAlive)
+    [[nodiscard]] bool admitCurrent(std::function<bool()> scopeAlive,
+                                    const SuccessorCurrent *successor = nullptr)
     {
         if (currentAttempted_ || !scopeAlive || !scopeAlive() || !handoffWindowCurrent() ||
             !verify() || !handoffWindowCurrent())
@@ -331,8 +344,16 @@ class OriginalCompletionGrant final
             retained->owner->invalidate();
             return false;
         };
-        return (ordinary_ ? fence_.admitOrdinaryCurrent(std::move(alive))
-                          : fence_.admitCurrent(std::move(alive)))
+        if (successor) {
+            return ordinary_ && &successor->fence_ == &fence_ && successor->bound_ == bound_ &&
+                           successor->live() &&
+                           fence_.admitSuccessorCurrent(successor->token_, liveness_,
+                                                        std::move(alive))
+                       ? true
+                       : fail();
+        }
+        return (ordinary_ ? fence_.admitOrdinaryCurrent(liveness_, std::move(alive))
+                          : fence_.admitCurrent(liveness_, std::move(alive)))
                    ? true
                    : fail();
     }
@@ -452,6 +473,7 @@ class OriginalCompletionGrant final
     StartupFence &fence_;
     OwnedNativeFd descriptor_;
     const bool ordinary_;
+    Correlation bound_;
     std::string digest_, committedDigest_, retirementDigest_, successorDigest_;
     std::shared_ptr<Liveness> liveness_;
     ClockSample last_{}, expires_{};

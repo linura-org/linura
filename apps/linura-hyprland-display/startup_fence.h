@@ -1,5 +1,7 @@
 #pragma once
 
+#include "current_lifetime_chain.h"
+
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -62,13 +64,13 @@ class StartupFence final
     }
     [[nodiscard]] bool recoveryAvailable() const noexcept
     {
-        return !ordinary_ && !currentAttempted_ && guardAlive();
+        return !ordinary_ && !current_.attempted() && guardAlive();
     }
     // Admission of this SAME invocation only, under the live transferred Root
     // lifetime. Root's separate global barrier for future startups stays held.
     [[nodiscard]] bool currentAvailable() const noexcept
     {
-        return currentAttempted_ && guardAlive() && currentAlive_ && currentAlive_();
+        return current_.attempted() && guardAlive() && current_.available();
     }
     // Private kernel-peer comparison only, never restoration permission. The
     // caller must separately consume the exact fresh protected Recovery scope,
@@ -82,7 +84,7 @@ class StartupFence final
     // purpose. This does not admit original restoration or grant an effect.
     [[nodiscard]] bool authenticatesOrdinaryGrantPeer(int descriptor) const noexcept
     {
-        return (ordinary_ || currentAttempted_) && authenticatesPeer(descriptor);
+        return (ordinary_ || current_.attempted()) && authenticatesPeer(descriptor);
     }
 
   private:
@@ -122,12 +124,10 @@ class StartupFence final
             return 3U;
         if (ordinary_)
             return 1U;
-        if (currentAttempted_) {
+        if (current_.attempted()) {
             if (!currentAvailable())
                 return 3U;
-            if (retiredAlive_)
-                return retiredAlive_() ? 5U : 3U;
-            return 4U;
+            return current_.hasRetirement() ? (current_.retired() ? 5U : 3U) : 4U;
         }
         return 2U;
     }
@@ -144,57 +144,51 @@ class StartupFence final
     friend class OriginalCompletionGrant;
     // A read-only phase selected only by the actual authenticated final Root
     // spend. Signed Committed and a current lifetime alone remain phase four.
-    [[nodiscard]] bool markCurrentRetired(std::function<bool()> alive)
+    [[nodiscard]] bool markCurrentRetired(const CurrentLifetimeChain::Token &owner,
+                                          std::function<bool()> alive)
     {
-        if (retiredAlive_ || !currentAvailable() || !alive || !alive())
-            return false;
-        retiredAlive_ = std::move(alive);
-        return true;
+        return guardAlive() && current_.markRetired(owner, std::move(alive));
     }
     // Only the authenticated, non-cloneable completion grant can publish a
     // current lifetime. Unknown loss never falls back into recovery admission.
-    [[nodiscard]] bool admitCurrent(std::function<bool()> alive)
+    [[nodiscard]] bool admitCurrent(const CurrentLifetimeChain::Token &owner,
+                                    std::function<bool()> alive)
     {
-        if (ordinary_ || currentAttempted_ || !guardAlive())
-            return false;
-        currentAttempted_ = true;
-        if (!alive || !alive())
-            return false;
-        currentAlive_ = std::move(alive);
-        return currentAvailable();
+        return !ordinary_ && guardAlive() && current_.admitInitial(owner, std::move(alive));
     }
     // Same original invocation only. The authenticated ordinary completion
     // constructor consumes the initial admission before publishing current;
     // failure cannot fall back into ordinary startup or recovery admission.
-    [[nodiscard]] bool admitOrdinaryCurrent(std::function<bool()> alive)
+    [[nodiscard]] bool admitOrdinaryCurrent(const CurrentLifetimeChain::Token &owner,
+                                            std::function<bool()> alive)
     {
-        if (!ordinary_ || currentAttempted_ || !guardAlive())
+        if (!ordinary_ || current_.attempted() || !guardAlive())
             return false;
         ordinary_ = false;
-        return admitCurrent(std::move(alive));
+        return admitCurrent(owner, std::move(alive));
     }
     // Only the genuine original completion grant may replace this invocation's
     // current callback, after its separately authenticated successor spend. The
     // original startup descriptor and global exclusion are never reopened.
-    [[nodiscard]] bool transferCurrent(std::function<bool()> alive)
+    [[nodiscard]] bool transferCurrent(const CurrentLifetimeChain::Token &owner,
+                                       const CurrentLifetimeChain::Token &successor,
+                                       std::function<bool()> alive)
     {
-        if (ordinary_ || !currentAttempted_ || successorAttempted_ || !guardAlive())
-            return false;
-        successorAttempted_ = true;
-        if (!alive || !alive()) {
-            lost_ = true;
-            return false;
-        }
-        currentAlive_ = std::move(alive);
-        retiredAlive_ = {}; // The successor is protected/pending, not released.
-        return currentAvailable();
+        return !ordinary_ && guardAlive() && current_.transfer(owner, successor, std::move(alive));
+    }
+    // A distinct completion grant may replace the pending successor callback
+    // only with its exact non-copyable transferred token. Initial admission
+    // stays consumed; neither a second grant nor an old token reopens it.
+    [[nodiscard]] bool admitSuccessorCurrent(const CurrentLifetimeChain::Token &successor,
+                                             const CurrentLifetimeChain::Token &owner,
+                                             std::function<bool()> alive)
+    {
+        return !ordinary_ && guardAlive() &&
+               current_.admitSuccessor(successor, owner, std::move(alive));
     }
     int descriptor_ = -1;
     bool attempted_ = false, ordinary_ = false;
-    bool currentAttempted_ = false;
-    bool successorAttempted_ = false;
-    std::function<bool()> currentAlive_;
-    std::function<bool()> retiredAlive_;
+    CurrentLifetimeChain current_;
     mutable bool lost_ = false;
 };
 

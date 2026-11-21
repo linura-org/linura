@@ -253,11 +253,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         if !approval.matches_challenge(challenge.managed()) {
             return Err(invalid_original());
         }
+        let approved_at_unix_seconds = now_unix_seconds()?;
         let approver = PolicyAuthenticatedApprover::new(
             approval.principal().clone(),
             ActorKind::Human,
             BTreeSet::from([ApprovalClass::Administrator]),
         );
+        // These are the human-reviewed structured request and complete intent,
+        // not an ownership claim or execution credential. Sync them before the
+        // existing fresh native/Root review, preserving its original evidence
+        // window. Drift or expired approval must still refuse without claiming
+        // the original; all exact readback and before-effect checks stay below.
+        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
+        let intent = OrdinaryReleaseIntent::capture(&request, &material)?;
+        {
+            let journal = self.request_journal.as_mut().ok_or_else(invalid_original)?;
+            journal.retain(&retained).map_err(|_| invalid_original())?;
+            intent.append(journal.as_mut(), principal_id.clone(), &request)?;
+        }
         let (fresh, fresh_request, fresh_source) = self.ordinary_display_release_input(
             principal.clone(),
             actor.clone(),
@@ -286,9 +299,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             )?
         };
         self.require_ordinary_release_history(&principal, &fresh)?;
-        let expiry = now_unix_seconds()?
-            .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
-            .ok_or_else(invalid_original)?;
+        let expiry = display_approval_expiry(approved_at_unix_seconds, now_unix_seconds()?)?;
         let evidence = self.authority.issue_approval(
             ApprovalRequestId::new(format!(
                 "approval:v010:display-ordinary-release:{}",
@@ -299,12 +310,10 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             &approver,
             expiry,
         )?;
-        let retained = crate::retained_request::encode(principal_id.clone(), &request)?;
-        let intent = OrdinaryReleaseIntent::capture(&request, &material)?;
         {
             let journal = self.request_journal.as_mut().ok_or_else(invalid_original)?;
-            journal.retain(&retained).map_err(|_| invalid_original())?;
-            intent.append(journal.as_mut(), principal_id.clone(), &request)?;
+            // Claim only after fresh semantic review and the original approval
+            // lifetime check. Refused drift cannot consume this original owner.
             intent.claim(journal.as_mut(), principal_id.clone(), &request)?;
         }
         if self

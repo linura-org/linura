@@ -250,6 +250,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     std::unique_ptr<OriginalCompletionGrant::SuccessorCurrent> successorCurrent;
     std::shared_ptr<NativeData> predecessor;
     bool successorAttempted = false, successorPreparing = false;
+    bool successorOriginalRequired = true;
     bool finalRetirementAttempted = false;
     bool currentCommitAttempted = false;
     std::string nativeReleaseParent;
@@ -444,7 +445,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         const auto facts = backend ? backend->snapshot() : std::nullopt;
         const auto clock = compositorClock();
         const bool valid = mutation && !closed && !ownerLost && !mutationFault && successorRoot &&
-                           successorRoot->live() && originalAlive && originalAlive() &&
+                           successorRoot->live() &&
+                           (!successorOriginalRequired || (originalAlive && originalAlive())) &&
                            (successorPreparing || (successorCurrent && successorCurrent->live())) &&
                            facts && clock && devicesCurrent() && mutationScope(*facts) &&
                            ((writing && ownedModesetInProgress()) || *facts == stableInventory) &&
@@ -851,6 +853,10 @@ class PinnedScene final : public ProtectedScene
         data->predecessor = previous; // Retain both sides through every ambiguous path.
         data->successorRoot = std::move(previous->completionGrant);
         data->originalAlive = std::move(previous->originalAlive);
+        // Ordinary completion has its own actual original-spend anchor in
+        // successorRoot. A restoration additionally retains its original
+        // recovery callback; an ordinary source never had that callback.
+        data->successorOriginalRequired = !previous->ordinaryRelease;
         mutationFence = data; // New opaque protection exists before the sole Root spend.
         const auto refuse = [&]() -> std::shared_ptr<MutationProtection> {
             data->successorPreparing = false;
@@ -860,7 +866,7 @@ class PinnedScene final : public ProtectedScene
             return {};
         };
         std::weak_ptr<NativeData> successor = data;
-        auto current = data->successorRoot->transferSuccessor(*digest, [successor] {
+        auto current = data->successorRoot->transferSuccessor(*digest, bound, [successor] {
             const auto live = successor.lock();
             return live && live->successorScopeAlive();
         });
@@ -1423,10 +1429,12 @@ class PinnedScene final : public ProtectedScene
         // typing remains quarantined until a fresh native Escape/drain edge.
         inputRetirement.close(false, heldInput());
         std::weak_ptr<NativeData> retained = data;
-        if (!data->completionGrant->admitCurrent([retained] {
-                const auto live = retained.lock();
-                return live && live->refreshCurrent();
-            }))
+        if (!data->completionGrant->admitCurrent(
+                [retained] {
+                    const auto live = retained.lock();
+                    return live && live->refreshCurrent();
+                },
+                data->successorCurrent.get()))
             return refuse();
         if (activeNative != data.get() || active.lock() != data)
             return refuse();

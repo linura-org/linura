@@ -1138,3 +1138,55 @@ the exact signed semantic lineage. Restart or missing acknowledgments permit
 metadata reconciliation only; the record provides no effect, successor, handle
 retirement or deletion authority. Replacement-invocation adoption and qualified
 reference-aware retirement/cleanup remain separate required source work.
+
+
+## Same-invocation native completion ownership
+
+A native successor's new ordinary completion replaces the callback installed by
+its actual one-use predecessor transfer; it does not repeat initial startup
+admission. The fence retains the original supervised Root socket throughout.
+The actual non-copyable predecessor grant supplies a fresh opaque transfer token,
+bound to that same fence and the complete new Apply correlation. The independently
+admitted new ordinary completion grant must match both before replacing the
+pending callback. Each grant can transfer once; a later completed grant owns
+its own next transfer. No global Boolean may either reopen ordinary startup or
+prevent every later independently authorized cycle.
+
+The constant-space native comparison chain checks exact ownership control blocks
+and keeps only weak owner/token references plus its current protected callback.
+Initial admission remains consumed. Missing owners, expired tokens, false or
+throwing callbacks and ambiguous transition failures remain permanently fenced.
+A stale predecessor or token cannot claim another current lifetime. Root peer
+credentials, full preparation/receipt comparisons and original wall/BOOTTIME
+windows are still required outside this comparison mechanism.
+
+An ordinary predecessor has its own actual Root original-spend/completion anchor;
+it never had an original-restoration callback. A restoration predecessor must
+also retain that original recovery callback. This distinction comes from the
+actual native predecessor, not client input or a persisted success flag.
+
+Component tests exercise repeated lifetimes, exact ownership, one-use transitions
+and permanent loss. They do not qualify actual compositor execution. This
+correction does not implement replacement-invocation adoption, authorized
+shared-reference retirement or bounded artifact cleanup. Those source obligations
+and the complete real Level A matrix remain open. Deferred Level B/C execution
+follows ADR 0049 and supplies no implicit pass or support promotion.
+
+
+### Ordinary release review and durable comparison records
+
+The approved structured request and complete release material are synchronized
+before the existing fresh post-approval source review. They remain immutable
+comparison history and grant no ownership, prepare or execution authority.
+The per-original owner claim still follows successful semantic revalidation
+and the original approval expiry check. The write order remains structured
+request, complete material, owner claim, reserved phase and dispatched phase;
+all five publication faults and exact readback checks remain required.
+
+Capture the approval time at the actual authorized response, before either
+comparison write. Issuance after revalidation uses that original expiry; slow
+storage, clock rollback or a newly sampled source cannot renew it. Native
+source changes during persistence refuse without claiming the original.
+This ordering removes avoidable synchronization from the independent-evidence
+window without widening that window, repeating probes or serializing the
+required concurrent gate.
