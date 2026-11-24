@@ -18,6 +18,43 @@ pub const MANAGED_SYSTEMD_CHANGE_KEY: &str = "active_state";
 pub(crate) const MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID: &str =
     "operation-registry.managed-systemd-active-state.risk-floor";
 
+/// Fixed S21-4 *candidate* bindings. ADR 0047 requires all four operations
+/// to have independently qualified original-user execution and verification.
+/// They must NEVER be returned by the active trusted runtime registry until
+/// that full boundary is implemented and accepted.
+pub const STORAGE_PROVIDER: &str = "udisks2";
+pub const STORAGE_OBSERVATION_CAPABILITY: &str = "storage.removable.observe";
+pub(crate) const STORAGE_CANDIDATE_ROUTES: [(&str, &str, &str, &str, RiskClass); 4] = [
+    (
+        "operation:storage.filesystem.mount",
+        "storage:filesystem:mount:",
+        "mounted",
+        "true",
+        RiskClass::SecuritySensitive,
+    ),
+    (
+        "operation:storage.filesystem.unmount",
+        "storage:filesystem:unmount:",
+        "mounted",
+        "false",
+        RiskClass::Destructive,
+    ),
+    (
+        "operation:storage.drive.eject",
+        "storage:drive:eject:",
+        "ejected",
+        "true",
+        RiskClass::Destructive,
+    ),
+    (
+        "operation:storage.drive.power-off",
+        "storage:drive:power-off:",
+        "powered_off",
+        "true",
+        RiskClass::Destructive,
+    ),
+];
+
 pub const TRANSIENT_AUDIO_VOLUME_OPERATION_ID: &str = "operation:audio.output.set-session-volume";
 pub const MANAGED_SESSION_LOCK_OPERATION_ID: &str = "operation:session.lock.set-secure";
 pub const MANAGED_SESSION_LOCK_PROVIDER: &str = "session-locker";
@@ -145,7 +182,33 @@ pub(crate) fn trusted_builtin_operation_registry()
             )?),
         )?)?;
     }
+    // Construct/check fixed S21-4 semantics without exposing storage through
+    // any live Control operation lookup, plan, executor or privileged surface.
+    // Enabling these descriptors requires the independently reviewed and
+    // qualified Authority1 subject, native executor and verifier (ADR 0047).
+    let _inactive_storage_candidates = storage_candidate_descriptors()?;
     Ok(registry)
+}
+
+/// Validates S21-4 operation schema, **not** runtime readiness or permission.
+/// Intentionally private and excluded from the active trusted registry.
+fn storage_candidate_descriptors() -> Result<Vec<OperationDescriptor>, TrustedOperationRegistryError>
+{
+    let mut descriptors = Vec::with_capacity(STORAGE_CANDIDATE_ROUTES.len());
+    for (operation, prefix, change_key, _, risk) in STORAGE_CANDIDATE_ROUTES {
+        descriptors.push(OperationDescriptor::try_new(
+            OperationId::new(operation)?,
+            OperationClass::ManagedExternalEffect,
+            Some(risk),
+            Some(OperationEffectBinding::try_new(
+                ProviderId::new(STORAGE_PROVIDER)?,
+                CapabilityId::new(STORAGE_OBSERVATION_CAPABILITY)?,
+                prefix,
+                vec![change_key.into()],
+            )?),
+        )?);
+    }
+    Ok(descriptors)
 }
 
 fn managed_session_lock_descriptor() -> Result<OperationDescriptor, TrustedOperationRegistryError> {
@@ -199,6 +262,67 @@ fn transient_audio_volume_descriptor() -> Result<OperationDescriptor, TrustedOpe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inactive_storage_routes_have_distinct_fixed_risks_and_cannot_execute() {
+        let registry =
+            trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
+        let proposals =
+            storage_candidate_descriptors().unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(registry.len(), 7);
+        assert_eq!(proposals.len(), 4);
+        for (index, (operation, prefix, key, _desired, risk)) in
+            STORAGE_CANDIDATE_ROUTES.into_iter().enumerate()
+        {
+            let descriptor = &proposals[index];
+            assert_eq!(descriptor.id().as_str(), operation);
+            assert_eq!(descriptor.class(), OperationClass::ManagedExternalEffect);
+            assert_eq!(descriptor.risk_floor(), Some(risk));
+            assert!(
+                registry
+                    .descriptor(
+                        &OperationId::new(operation)
+                            .unwrap_or_else(|error| unreachable!("{error}"))
+                    )
+                    .is_none(),
+                "an unqualified storage operation must not be registered"
+            );
+            let binding = descriptor
+                .effect_binding()
+                .unwrap_or_else(|| unreachable!("candidate missing an effect binding"));
+            assert_eq!(binding.provider().as_str(), STORAGE_PROVIDER);
+            assert_eq!(
+                binding.observation_capability().as_str(),
+                STORAGE_OBSERVATION_CAPABILITY
+            );
+            assert_eq!(binding.resource_prefix(), prefix);
+            assert_eq!(
+                binding
+                    .change_keys()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                vec![key]
+            );
+            assert!(binding.matches_resource(&format!("{prefix}exact-fixture")));
+            for (other, other_prefix, _, _, _) in STORAGE_CANDIDATE_ROUTES {
+                assert_eq!(
+                    binding.matches_resource(&format!("{other_prefix}exact-fixture")),
+                    operation == other,
+                    "cross-action resource must never match"
+                );
+            }
+            assert!(!binding.matches_resource("session:lock:exact-fixture"));
+            assert!(!binding.matches_resource("systemd:unit:linura-managed-a.service"));
+        }
+        assert_eq!(
+            proposals[0].risk_floor(),
+            Some(RiskClass::SecuritySensitive)
+        );
+        for descriptor in &proposals[1..] {
+            assert_eq!(descriptor.risk_floor(), Some(RiskClass::Destructive));
+        }
+    }
 
     #[test]
     fn session_lock_registration_is_managed_and_has_one_exact_security_sensitive_effect_shape() {
