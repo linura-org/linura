@@ -76,8 +76,12 @@ SessionController::SessionController(QObject *parent)
 {
     loadTracking();
     nativeSleepStatus_ = tr("Sleep protection is not verified. Checking read-only diagnostics…");
+    nativeIdleStatus_ = tr("Native logind idle hint unavailable. No activity is inferred.");
+    idlePreferenceStatus_ = tr("Idle advisory preference is unavailable.");
     auto *timer = new QTimer(this);
     timer->setInterval(5000);
+    // The native diagnostics and the own-user preference share Authority1's
+    // fail-fast handler. Sequence our own reads; never add a server-side queue.
     connect(timer, &QTimer::timeout, this, &SessionController::refreshNativeSleepStatus);
     timer->start();
     QTimer::singleShot(0, this, &SessionController::refreshNativeSleepStatus);
@@ -85,7 +89,8 @@ SessionController::SessionController(QObject *parent)
 
 void SessionController::refreshNativeSleepStatus()
 {
-    if (nativeSleepQueryPending_)
+    if (nativeSleepQueryPending_ || nativeIdleQueryPending_ || idlePreferenceQueryPending_ ||
+        idlePreferenceBusy_)
         return;
     nativeSleepQueryPending_ = true;
     call(
@@ -123,6 +128,149 @@ void SessionController::refreshNativeSleepStatus()
                 nativeSleepStatus_ = text;
                 emit nativeSleepStatusChanged();
             }
+            // The native handler uses try_lock(): begin the next advisory
+            // read only after the sleep reply completed. Never auto-dispatch.
+            refreshNativeIdleStatus();
+        },
+        2000);
+}
+
+void SessionController::refreshIdleAdvisoryPreference()
+{
+    if (idlePreferenceBusy_ || idlePreferenceQueryPending_)
+        return;
+    if (nativeSleepQueryPending_ || nativeIdleQueryPending_) {
+        // Coalesce explicit refreshes behind the already-running read-only
+        // diagnostic chain. No managed action or preference write is queued.
+        idlePreferenceRefreshRequested_ = true;
+        return;
+    }
+    idlePreferenceRefreshRequested_ = false;
+    idlePreferenceQueryPending_ = true;
+    call(
+        QStringLiteral("GetOwnIdleAdvisoryPreference"), {},
+        [this](const QDBusMessage &reply) {
+            idlePreferenceQueryPending_ = false;
+            bool valid = false;
+            quint32 seconds = 0;
+            quint64 revision = 0;
+            if (reply.type() == QDBusMessage::ReplyMessage &&
+                reply.signature() == QStringLiteral("(ut)") && reply.arguments().size() == 1 &&
+                reply.arguments().front().canConvert<QDBusArgument>()) {
+                const auto wire = reply.arguments().front().value<QDBusArgument>();
+                wire.beginStructure();
+                wire >> seconds >> revision;
+                valid = wire.atEnd();
+                wire.endStructure();
+                valid = valid && seconds >= 60 && seconds <= 3600 && seconds % 60 == 0;
+            }
+            idlePreferenceReady_ = valid;
+            idleAdvisorySeconds_ = valid ? int(seconds) : 0;
+            idlePreferenceRevision_ = valid ? revision : 0;
+            if (valid) {
+                const auto label = tr("Idle notification threshold: %1 minutes. Advisory only.");
+                idlePreferenceStatus_ = label.arg(seconds / 60);
+            } else {
+                idlePreferenceStatus_ = tr("Idle advisory preference unavailable. No inactivity "
+                                           "state is assumed.");
+            }
+            emit idlePreferenceChanged();
+        },
+        2000);
+}
+
+void SessionController::setIdleAdvisorySeconds(int seconds)
+{
+    if (idlePreferenceBusy_ || idlePreferenceQueryPending_ || !idlePreferenceReady_ ||
+        seconds < 60 || seconds > 3600 || seconds % 60 != 0)
+        return;
+    if (seconds == idleAdvisorySeconds_)
+        return;
+    if (nativeSleepQueryPending_ || nativeIdleQueryPending_) {
+        idlePreferenceStatus_ = tr("Diagnostics in progress; no advisory setting saved. Retry.");
+        emit idlePreferenceChanged();
+        return;
+    }
+    idlePreferenceBusy_ = true;
+    idlePreferenceStatus_ = tr("Saving advisory preference; no lock or power request.");
+    emit idlePreferenceChanged();
+    const quint64 expectedRevision = idlePreferenceRevision_;
+    call(
+        QStringLiteral("SetOwnIdleAdvisoryPreference"), {quint32(seconds), expectedRevision},
+        [this, seconds, expectedRevision](const QDBusMessage &reply) {
+            idlePreferenceBusy_ = false;
+            // Never claim a new setting was committed solely from a response.
+            // A revision conflict or lost reply requires an explicit fresh read;
+            // no configuration write is retried automatically.
+            bool valid = false;
+            quint32 observedSeconds = 0;
+            quint64 observedRevision = 0;
+            if (reply.type() == QDBusMessage::ReplyMessage &&
+                reply.signature() == QStringLiteral("(ut)") && reply.arguments().size() == 1 &&
+                reply.arguments().front().canConvert<QDBusArgument>()) {
+                const auto wire = reply.arguments().front().value<QDBusArgument>();
+                wire.beginStructure();
+                wire >> observedSeconds >> observedRevision;
+                valid = wire.atEnd();
+                wire.endStructure();
+                valid = valid && observedSeconds == quint32(seconds) &&
+                        observedRevision == expectedRevision + 1;
+            }
+            idlePreferenceReady_ = false;
+            idleAdvisorySeconds_ = 0;
+            idlePreferenceStatus_ = valid
+                                        ? tr("Advisory preference acknowledged; refresh to verify.")
+                                        : tr("Preference result uncertain or rejected. Refresh "
+                                             "before attempting another change.");
+            emit idlePreferenceChanged();
+            // An authoritative post-write read only. Never replay the write.
+            if (valid)
+                refreshIdleAdvisoryPreference();
+        },
+        5000);
+}
+
+void SessionController::refreshNativeIdleStatus()
+{
+    if (nativeIdleQueryPending_ || nativeSleepQueryPending_ || idlePreferenceQueryPending_ ||
+        idlePreferenceBusy_)
+        return;
+    nativeIdleQueryPending_ = true;
+    call(
+        QStringLiteral("GetOwnNativeIdleStatus"), {},
+        [this](const QDBusMessage &reply) {
+            nativeIdleQueryPending_ = false;
+            QString text = tr("Native logind idle hint unavailable. No activity is inferred.");
+            if (reply.type() == QDBusMessage::ReplyMessage &&
+                reply.signature() == QStringLiteral("(ssbt)") && reply.arguments().size() == 1 &&
+                reply.arguments().front().canConvert<QDBusArgument>()) {
+                const auto wire = reply.arguments().front().value<QDBusArgument>();
+                QString epoch, seat;
+                bool idle = false;
+                quint64 since = 0;
+                wire.beginStructure();
+                wire >> epoch >> seat >> idle >> since;
+                const bool end = wire.atEnd();
+                wire.endStructure();
+                if (end && Linura::ShellClient::validNativeIdleStatus(epoch, seat, idle, since)) {
+                    if (idle) {
+                        text = tr("Logind reported an idle hint for this login at the last check. "
+                                  "This is not proof of secure lock or permission to suspend.");
+                    } else {
+                        text = tr("Logind did not report an idle hint at the last check. "
+                                  "This does not prove user activity or power protection.");
+                    }
+                }
+            }
+            if (nativeIdleStatus_ != text) {
+                nativeIdleStatus_ = text;
+                emit nativeIdleStatusChanged();
+            }
+            // Deliver at most one pending own-user preference read, including
+            // the initial startup read. Never replay a write or queue behind
+            // any managed operation.
+            if (idlePreferenceRefreshRequested_)
+                refreshIdleAdvisoryPreference();
         },
         2000);
 }

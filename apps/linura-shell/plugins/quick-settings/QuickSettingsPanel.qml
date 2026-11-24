@@ -13,6 +13,7 @@ PanelWindow {
 
     required property var controller
     required property var sessionController
+    property string idleAdvisory: qsTr("Compositor idle observation unavailable.")
     property int topInset: 0
     readonly property int availableOverlayHeight: root.targetScreen
         ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
@@ -330,6 +331,7 @@ PanelWindow {
             Session.SessionControls {
                 Layout.fillWidth: true
                 controller: root.sessionController
+                idleAdvisory: root.idleAdvisory
                 onFocusEntered: item => root.ensureVisible(item)
             }
 

@@ -20,6 +20,12 @@ class SessionController : public QObject
     Q_PROPERTY(QString requestId READ requestId NOTIFY changed)
     Q_PROPERTY(
         QString nativeSleepStatusText READ nativeSleepStatusText NOTIFY nativeSleepStatusChanged)
+    Q_PROPERTY(
+        QString nativeIdleStatusText READ nativeIdleStatusText NOTIFY nativeIdleStatusChanged)
+    Q_PROPERTY(int idleAdvisorySeconds READ idleAdvisorySeconds NOTIFY idlePreferenceChanged)
+    Q_PROPERTY(bool idlePreferenceReady READ idlePreferenceReady NOTIFY idlePreferenceChanged)
+    Q_PROPERTY(bool idlePreferenceBusy READ idlePreferenceBusy NOTIFY idlePreferenceChanged)
+    Q_PROPERTY(QString idlePreferenceStatus READ idlePreferenceStatus NOTIFY idlePreferenceChanged)
 
   public:
     enum Action {
@@ -50,8 +56,31 @@ class SessionController : public QObject
     {
         return nativeSleepStatus_;
     }
+    [[nodiscard]] QString nativeIdleStatusText() const
+    {
+        return nativeIdleStatus_;
+    }
+    [[nodiscard]] int idleAdvisorySeconds() const
+    {
+        return idleAdvisorySeconds_;
+    }
+    [[nodiscard]] bool idlePreferenceReady() const
+    {
+        return idlePreferenceReady_;
+    }
+    [[nodiscard]] bool idlePreferenceBusy() const
+    {
+        return idlePreferenceBusy_;
+    }
+    [[nodiscard]] QString idlePreferenceStatus() const
+    {
+        return idlePreferenceStatus_;
+    }
+    Q_INVOKABLE void refreshIdleAdvisoryPreference();
+    Q_INVOKABLE void setIdleAdvisorySeconds(int seconds);
     // Read-only, bounded and coalesced. Never locks, enrolls, retries or sleeps.
     Q_INVOKABLE void refreshNativeSleepStatus();
+    Q_INVOKABLE void refreshNativeIdleStatus();
     Q_INVOKABLE void request(Action action);
     Q_INVOKABLE void recover();
     // Explicitly forget CLIENT tracking, never cancel a transaction or lift a
@@ -61,6 +90,8 @@ class SessionController : public QObject
   signals:
     void changed();
     void nativeSleepStatusChanged();
+    void nativeIdleStatusChanged();
+    void idlePreferenceChanged();
 
   private:
 #ifdef LINURA_SESSION_TRACKING_TESTS
@@ -86,7 +117,18 @@ class SessionController : public QObject
     QString operation_;
     QString status_;
     QString nativeSleepStatus_;
+    QString nativeIdleStatus_;
     bool nativeSleepQueryPending_ = false;
+    bool nativeIdleQueryPending_ = false;
+    int idleAdvisorySeconds_ = 0;
+    quint64 idlePreferenceRevision_ = 0;
+    bool idlePreferenceReady_ = false;
+    bool idlePreferenceBusy_ = false;
+    bool idlePreferenceQueryPending_ = false;
+    // Initial own-user read follows sleep and idle diagnostics; explicit
+    // overlapping refreshes coalesce to one read, never to a queued write.
+    bool idlePreferenceRefreshRequested_ = true;
+    QString idlePreferenceStatus_;
     RequestKind kind_ = LockRequest;
     QString protectiveResource_;
     bool protectiveEnabled_ = false;

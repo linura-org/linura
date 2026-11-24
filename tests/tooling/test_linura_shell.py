@@ -192,6 +192,18 @@ class LinuraShellContractTests(unittest.TestCase):
                 "org.linura.Authority1.GetProtectiveLockSettingRequestStatus",
             ),
             (
+                "session",
+                "org.linura.Authority1.GetOwnNativeIdleStatus",
+            ),
+            (
+                "session",
+                "org.linura.Authority1.GetOwnIdleAdvisoryPreference",
+            ),
+            (
+                "session",
+                "org.linura.Authority1.SetOwnIdleAdvisoryPreference",
+            ),
+            (
                 "power",
                 "org.linura.Authority1.GetOwnSessionTransition",
             ),
@@ -318,9 +330,13 @@ class LinuraShellContractTests(unittest.TestCase):
             ),
             (
                 "bridge/session_controller.cpp",
-                "if (nativeSleepQueryPending_)",
-                "if (false)",
-                "S17 sleep diagnostics safety contract missing: if (nativeSleepQueryPending_)",
+                "if (nativeSleepQueryPending_ || nativeIdleQueryPending_ || "
+                "idlePreferenceQueryPending_ ||",
+                "if (false || nativeIdleQueryPending_ || "
+                "idlePreferenceQueryPending_ ||",
+                "S17 sleep diagnostics safety contract missing: "
+                "if (nativeSleepQueryPending_ || nativeIdleQueryPending_ || "
+                "idlePreferenceQueryPending_ ||",
             ),
             (
                 "bridge/session_controller.cpp",

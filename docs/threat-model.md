@@ -771,6 +771,35 @@ a partial write or lost reply may be misrepresented as verified completion.
 - See proposed [ADR 0045](adr/0045-s21-workstation-device-authority.md) and
   [S21 security qualification](qualification/v0.10.0-s21-security.md).
 
+### S21-5 compositor idle hints and unattended power authority
+
+An idle-notify signal is untrusted presentation context: an unavailable
+`ext-idle-notify-v1` protocol, compositor restart, stale input report or
+inhibitor transition could otherwise be mistaken for a fresh native security
+decision. The first-party shell may display a bounded, inhibitor-aware
+compositor inactivity advisory but it must never turn that hint into privileged
+authority, actual active-session identity or verified lock/sleep state.
+
+- Durable idle preferences are independent, integrity-checked local user settings,
+  never reusable approval grants. Only an authenticated current owner session may
+  update a bounded threshold through revision CAS; corruption or rollback of a
+  response cannot request a power effect.
+- Native logind `IdleHint` is typed, monotonic, and bound to fresh own-session
+  observation before it is exposed. A false/absent hint is not proof of recent
+  input; root/foreign-seat, stale epoch, owner replacement, invalid timestamp or
+  incompatible native session facts cannot be treated as authorized.
+- Missing idle notifications are *not* proof of active input or functioning
+  idle protection; the UI must say the threshold has not been reported.
+- Opening or closing Quick Settings only enables/disables read-only observation,
+  not any delayed or background power callback.
+- Automatic secure lock, suspend, output disable and brightness changes are
+  unsupported until separately classified, native-owner-bound, policy-reviewed,
+  qualified and reconciled through the existing S17/S21 Control lifecycles.
+- Unattended logout, reboot and shutdown remain unsupported; an idle monitor
+  cannot enter a native confirmation, waive inhibitors or replay a pending effect.
+- S17 lock/output coverage, logind permissions, `block-weak` denial and
+  immutable request/recovery state remain the authoritative boundaries.
+
 ## Deferred threats
 
 Fleet/remote orchestration and hosted/shared Library services receive dedicated threat-model extensions before any network control plane or trusted shared catalog is enabled.

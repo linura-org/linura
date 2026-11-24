@@ -23,6 +23,8 @@ struct SessionReceipt
 [[nodiscard]] bool validSessionReceipt(const SessionReceipt &receipt, const QString &request,
                                        const QString &resource, bool transition);
 [[nodiscard]] bool validNativeSleepGateStatus(const QString &epoch, const QString &state);
+[[nodiscard]] bool validNativeIdleStatus(const QString &epoch, const QString &seat, bool idle,
+                                         quint64 changedMonotonicUs);
 
 // Retained owner-consent history only; never current protection or an effect.
 struct ProtectiveLockSettingReceipt

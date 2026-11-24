@@ -4,6 +4,20 @@
     <annotation name="org.linura.ContractId" value="dbus.org.linura.Authority1"/>
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Durable, authenticated own-user advisory-only setting with CAS.
+         The preference cannot authorize power or security effects. -->
+    <method name="GetOwnIdleAdvisoryPreference">
+      <arg name="preference" type="(ut)" direction="out"/>
+    </method>
+    <method name="SetOwnIdleAdvisoryPreference">
+      <arg name="seconds" type="u" direction="in"/>
+      <arg name="expected_revision" type="t" direction="in"/>
+      <arg name="preference" type="(ut)" direction="out"/>
+    </method>
+    <!-- Native own-session IdleHint, advisory only; no lock or power authority. -->
+    <method name="GetOwnNativeIdleStatus">
+      <arg name="status" type="(ssbt)" direction="out"/>
+    </method>
     <!-- Read-only process-retained diagnostic, scoped to a freshly observed own
          login. No current protection or successful sleep assertion. No inputs. -->
     <method name="GetOwnNativeSleepGateStatus">
