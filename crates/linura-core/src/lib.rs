@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+mod backlight_resource;
+pub use backlight_resource::{
+    BACKLIGHT_RESOURCE_PREFIX, BacklightDeviceGeneration, BacklightResourceError,
+    BacklightResourceId,
+};
+
 mod session_epoch;
 pub use session_epoch::{
     BootId, SecurityOwnerInvocationId, SessionEpoch, SessionEpochError, SessionLockId,

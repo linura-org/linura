@@ -216,6 +216,32 @@ pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassificatio
         }
         .classify(plan);
     }
+    if plan.provider.as_str() == crate::backlight_contract::PROVIDER {
+        if linura_core::BacklightResourceId::from_resource(&plan.resource).is_err() {
+            return RiskClassification::Unclassified {
+                revision: "risk-policy:v0.10:backlight:1",
+                reason:
+                    "backlight requires an exact non-root session and physical device generation"
+                        .into(),
+            };
+        }
+        // Classify the proposed contract conservatively without registering it.
+        // Risk review, including approval, cannot create native execution
+        // authority or qualify the hardware. The live operation registry and
+        // sealed managed effect factory still reject this unsupported route.
+        return RiskPolicy {
+            revision: "risk-policy:v0.10:backlight:1",
+            rules: vec![RiskRule {
+                id: "display.backlight.native-value.security-sensitive",
+                provider: crate::backlight_contract::PROVIDER,
+                capability: crate::backlight_contract::OBSERVATION,
+                resource_prefix: crate::backlight_contract::RESOURCE_PREFIX,
+                change_keys: &[crate::backlight_contract::NATIVE_CHANGE_KEY],
+                risk: RiskClass::SecuritySensitive,
+            }],
+        }
+        .classify(plan);
+    }
     if plan.provider.as_str() == "session-locker" {
         return RiskPolicy {
             revision: SESSION_LOCK_RISK_POLICY_REVISION,

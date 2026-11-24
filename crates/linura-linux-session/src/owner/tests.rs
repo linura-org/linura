@@ -1015,3 +1015,52 @@ fn process_start_parser_handles_parentheses_but_rejects_wrong_or_unknown_generat
     assert!(parse_process_start(51, &stat.replace("1234", "invalid")).is_err());
     assert!(parse_process_start(51, &stat.replace("1234", "18446744073709551616")).is_err());
 }
+
+#[test]
+fn protected_backlight_worker_ipc_proof_rejects_replay_identity_and_clock_substitution() {
+    let expected = lock();
+    let owner = identity();
+    let boot = value(BootId::new("abcd1234-1234-4567-89ab-0123456789ab"));
+    let resource = value(expected.resource_id());
+    let valid = |resource: &str, sampled: u64, now: u64| {
+        validate_backlight_owner_sample(&owner, &boot, &expected, resource, sampled, now)
+    };
+    assert_eq!(valid(resource.as_str(), 100, 100), Ok(()));
+    assert_eq!(valid(resource.as_str(), 100, 2_099), Ok(()));
+    assert!(valid(resource.as_str(), 100, 2_100).is_err());
+    assert!(valid(resource.as_str(), 0, 100).is_err());
+    assert!(valid(resource.as_str(), 200, 100).is_err());
+    assert!(valid("session:lock:unsupported", 100, 100).is_err());
+
+    let replacement = value(SessionLockId::new(
+        expected.epoch().clone(),
+        expected.security_owner_invocation().clone(),
+        expected.generation() + 1,
+    ));
+    assert!(valid(value(replacement.resource_id()).as_str(), 100, 100).is_err());
+    let another_boot = value(BootId::new("abcd1234-1234-4567-89ab-0123456789ac"));
+    assert!(
+        validate_backlight_owner_sample(
+            &owner,
+            &another_boot,
+            &expected,
+            resource.as_str(),
+            100,
+            100
+        )
+        .is_err()
+    );
+    let mut another_owner = owner;
+    another_owner.uid = 1001;
+    assert!(
+        validate_backlight_owner_sample(
+            &another_owner,
+            &boot,
+            &expected,
+            resource.as_str(),
+            100,
+            100
+        )
+        .is_err()
+    );
+}

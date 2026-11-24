@@ -284,6 +284,22 @@ impl NativeSessionChannel {
     }
 }
 
+/// A canonical root-peer-verified system-bus connection for a *separate*
+/// original-user native mechanism at a trusted composition root. This is
+/// transport identity only, never a Control permission, grant, or registration.
+///
+/// The actual kernel real/effective UID must be the requested non-root owner.
+/// The caller still must attest exact logind session, immutable worker image,
+/// supervised invocation and the durable one-use protected handoff.
+pub fn connect_original_user_system_bus(expected_uid: u32) -> Result<Connection, String> {
+    let real = rustix::process::getuid().as_raw();
+    let effective = rustix::process::geteuid().as_raw();
+    if expected_uid == 0 || real != expected_uid || effective != expected_uid {
+        return Err("original user bus requires an exact non-root kernel identity".into());
+    }
+    connect_native_bus(None)
+}
+
 pub(crate) fn connect_native_bus(role: Option<NativeSessionRole>) -> Result<Connection, String> {
     async_io::block_on(future::race(
         async {

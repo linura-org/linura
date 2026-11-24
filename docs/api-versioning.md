@@ -101,6 +101,18 @@ native protection assertion. The method is not a generic configuration/apply
 surface, does not activate automatic locking, and remains Experimental pending
 completion of S17's managed protective route and native qualification.
 
+The Experimental `GetOwnNativeBacklightCandidate` method is a read-only
+own-session diagnostic with no request arguments and one `(ssuuu)` reply:
+session resource, native device name, maximum, requested and actual native
+brightness. Its transport retains the original unique sender and PID separately
+from provenance, with the authenticated bus GUID. A bus restart cannot reuse
+that sender on a different bus generation. The native probe requires broker-provided live `ProcessFD`,
+matching UID/PID and the exact active local Wayland session epoch; unsupported
+broker/kernel evidence fails closed. The acquisition, native reads and final
+identity checks share one original suspend-inclusive two-second deadline.
+This reply has no timestamp, approval, protected worker proof or executable
+brightness permission. No wire compatibility shim or production write is added.
+
 ### Executor.Systemd1
 
 `org.linura.Executor.Systemd1` is Experimental but is a privileged internal/executor contract, not the public policy authority surface. Its stability entry permits coherent pre-1.0 evolution, subject to privilege/security review and live-introspection/checked-XML consistency.
@@ -232,3 +244,22 @@ A live method not represented in canonical XML, or XML that does not match live 
 - canonical ABI: `interfaces/dbus/org.linura.Session1.xml`.
 
 The first method, `SetAudioOutputVolume`, accepts only a caller request identity, an exact numeric PipeWire output-node ID, an integer percentage in the bounded 0–100 range and a bounded semantic reason. The transport authenticates the session-bus sender and requires the sender's Unix UID to equal the UID owning the service connection. It delegates to `linura_control::TransientEffectControl`; Session1 owns no risk downgrade, policy decision, executor permit or verification shortcut. The default-output alias remains discovery-only so a moving default cannot become mutation authority. The concrete provider adapter binds the numeric resource to pre-effect `object.serial` and `node.name` evidence, and WirePlumber resolves and mutates that exact object in one helper event-loop callback before Control independently re-observes the postcondition.
+
+### Proposed physical backlight resource
+
+The Experimental, unregistered S21-3 backlight contract uses one exact resource
+shape: `backlight:physical:<boot-uuid>:<uid>:<session>:<created-monotonic-us>:<device-generation-uuid>`.
+`BacklightResourceId` validates the existing canonical `SessionEpoch`, a valid
+non-root UID and a nonzero canonical generation UUID. Earlier development
+examples with an arbitrary suffix were never qualified executable resources and
+receive no compatibility alias. A syntactically valid UUID does not attest a
+physical device; the future trusted inventory must independently establish
+non-reused lineage and bind seat, provider invocation, qualification revision
+and native bounds in canonical observation/plan evidence.
+
+The proposed fixed effect data contains only the exact resource and native value.
+Risk review, administrator approval and a descriptor grant no dispatch authority:
+the live registry and sealed managed route remain disabled. Backlight durable
+recovery permits only observe-only resolution; approval-based reprepare is
+rejected without resetting the consumed attempt. No existing persisted format,
+registered operation, public D-Bus shape or Stable contract changes.

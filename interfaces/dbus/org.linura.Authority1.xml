@@ -6,6 +6,13 @@
     <annotation name="org.linura.Stability" value="experimental"/>
     <!-- Read-only process-retained diagnostic, scoped to a freshly observed own
          login. No current protection or successful sleep assertion. No inputs. -->
+    <!-- Read-only own-session *candidate*: exact authenticated caller, active
+         logind generation, sole native physical-looking backlight. Does not
+         prove hardware/seat lineage, safe minimum, approval or success of any
+         mutation. Any absent/ambiguous state yields a method failure. -->
+    <method name="GetOwnNativeBacklightCandidate">
+      <arg name="candidate" type="(ssuuu)" direction="out"/>
+    </method>
     <method name="GetOwnNativeSleepGateStatus">
       <arg name="status" type="(ss)" direction="out"/>
     </method>

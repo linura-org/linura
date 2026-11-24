@@ -2,6 +2,8 @@
 //! evidence of a secure compositor lock. Screen coverage is a separate fact from
 //! the security-owning locker and must be verified by Control before mutation.
 
+pub(crate) mod backlight_subject;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
@@ -44,6 +46,43 @@ const MAX_INHIBITORS: usize = 32;
 // arrays or property maps, independently of the row/field limits below. zbus's
 // separate transport frame bound still applies before this adapter receives it.
 const MAX_NATIVE_REPLY_BODY_BYTES: usize = 64 * 1024;
+
+/// A read-only logind scope sample. It does not authorize a backlight
+/// mutation or establish the seat relationship of a particular kernel device.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeBacklightSession {
+    pub boot_id: String,
+    pub logind_owner: String,
+    pub session_id: String,
+    pub created_monotonic_us: u64,
+    pub seat_id: String,
+    pub uid: u32,
+    pub observed_at_unix_ms: u64,
+}
+
+fn require_backlight_sender_credentials(
+    actual_uid: u32,
+    expected_uid: u32,
+    actual_pid: u32,
+) -> Result<(), ProviderError> {
+    if expected_uid == 0 || actual_uid != expected_uid || actual_pid == 0 {
+        return Err(ProviderError::Unsupported(
+            "native backlight bus subject does not belong to original graphical user".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_backlight_sender_path(actual: &str, expected: &str) -> Result<(), ProviderError> {
+    const PREFIX: &str = "/org/freedesktop/login1/session/";
+    if actual.is_empty() || actual.len() > 256 || !actual.starts_with(PREFIX) || actual != expected
+    {
+        return Err(ProviderError::InvalidState(
+            "native backlight D-Bus sender is outside the exact login session".into(),
+        ));
+    }
+    Ok(())
+}
 
 pub struct LogindSessionObserver {
     connection: Connection,
@@ -96,6 +135,111 @@ impl LogindSessionObserver {
             connection,
             sequence: AtomicU64::new(0),
         })
+    }
+
+    /// Read the exact session's bounded native scope from the already
+    /// authenticated root-owned logind owner. Nothing here licenses mutation:
+    /// Control must separately bind an authenticated caller, original session
+    /// epoch, seat-local physical device, qualified minimum and approval.
+    pub fn observe_backlight_session(
+        &self,
+        expected_id: &str,
+        expected_uid: u32,
+    ) -> Result<NativeBacklightSession, ProviderError> {
+        if expected_id.is_empty()
+            || expected_id.len() > 64
+            || !expected_id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        {
+            return Err(ProviderError::Unsupported(
+                "requested backlight session identifier is invalid".into(),
+            ));
+        }
+        let observed_at_unix_ms = now_unix_ms()?;
+        let boot = current_boot()?;
+        let owner = self.trusted_owner()?;
+        let path: OwnedObjectPath = self
+            .manager(&owner)?
+            .call("GetSession", &(expected_id,))
+            .map_err(bus_error)?;
+        if path.as_str().len() > 256
+            || !path
+                .as_str()
+                .starts_with("/org/freedesktop/login1/session/")
+        {
+            return Err(ProviderError::InvalidState(
+                "native backlight session handle is unsupported".into(),
+            ));
+        }
+        require_probe_deadline(observed_at_unix_ms)?;
+        let session = self.snapshot(&owner, path.as_str(), boot.clone())?;
+        require_backlight_session_scope(&session, expected_id, expected_uid)?;
+        self.require_same_owner(&owner)?;
+        require_same_boot(&boot, &current_boot()?)?;
+        require_probe_deadline(observed_at_unix_ms)?;
+        Ok(NativeBacklightSession {
+            boot_id: boot.as_str().into(),
+            logind_owner: owner,
+            session_id: expected_id.into(),
+            created_monotonic_us: session.epoch.created_monotonic_us(),
+            seat_id: session.seat,
+            uid: expected_uid,
+            observed_at_unix_ms,
+        })
+    }
+
+    /// Verify that this very system-bus connection is a non-root process in
+    /// the original active graphical login session. A root authority daemon
+    /// must NOT call SetBrightness as a substitute for this user subject.
+    ///
+    /// This is read-only subject evidence, not a durable Control permit or a
+    /// hardware-qualified brightness grant. It deliberately rejects user
+    /// services outside their actual logind session and other same-UID seats.
+    pub fn observe_user_backlight_subject(
+        &self,
+        expected_id: &str,
+        expected_uid: u32,
+    ) -> Result<NativeBacklightSession, ProviderError> {
+        if expected_uid == 0 {
+            return Err(ProviderError::Unsupported(
+                "a root system-bus subject cannot represent a graphical user".into(),
+            ));
+        }
+        let started = now_unix_ms()?;
+        let owner = self.trusted_owner()?;
+        let own_name = self.connection.unique_name().ok_or_else(|| {
+            ProviderError::Unavailable("native backlight sender has no bus identity".into())
+        })?;
+        let bus = self.bus()?;
+        let actual_uid: u32 = bus
+            .call("GetConnectionUnixUser", &(own_name.as_str(),))
+            .map_err(bus_error)?;
+        let actual_pid: u32 = bus
+            .call("GetConnectionUnixProcessID", &(own_name.as_str(),))
+            .map_err(bus_error)?;
+        require_probe_deadline(started)?;
+        require_backlight_sender_credentials(actual_uid, expected_uid, actual_pid)?;
+        let manager = self.manager(&owner)?;
+        let sender_path: OwnedObjectPath = manager
+            .call("GetSessionByPID", &(actual_pid,))
+            .map_err(bus_error)?;
+        let expected_path: OwnedObjectPath = manager
+            .call("GetSession", &(expected_id,))
+            .map_err(bus_error)?;
+        require_backlight_sender_path(sender_path.as_str(), expected_path.as_str())?;
+        self.require_same_owner(&owner)?;
+        require_probe_deadline(started)?;
+        let observed = self.observe_backlight_session(expected_id, expected_uid)?;
+        self.require_same_owner(&owner)?;
+        // The subject PID can never be inferred merely from a matching UID.
+        // Re-check after the native session sample to catch session turnover.
+        let confirmed_path: OwnedObjectPath = self
+            .manager(&owner)?
+            .call("GetSessionByPID", &(actual_pid,))
+            .map_err(bus_error)?;
+        require_backlight_sender_path(confirmed_path.as_str(), expected_path.as_str())?;
+        self.require_same_owner(&owner)?;
+        require_probe_deadline(started)?;
+        Ok(observed)
     }
 
     fn bus(&self) -> Result<Proxy<'_>, ProviderError> {
@@ -1051,6 +1195,29 @@ fn parse_boot_bytes(bytes: &[u8]) -> Result<BootId, ProviderError> {
     BootId::new(text).map_err(invalid_epoch)
 }
 
+fn require_backlight_session_scope(
+    session: &SessionSnapshot,
+    expected_id: &str,
+    expected_uid: u32,
+) -> Result<(), ProviderError> {
+    if expected_uid == 0
+        || session.epoch.uid() != expected_uid
+        || session.epoch.session_id() != expected_id
+        || !session.active
+        || session.remote
+        || session.state != "active"
+        || session.session_type != "wayland"
+        || session.session_class != "user"
+        || session.seat.is_empty()
+        || session.leader == 0
+    {
+        return Err(ProviderError::Unsupported(
+            "backlight session is not the exact active local Wayland user session".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_owner(owner: &str, uid: u32) -> Result<(), ProviderError> {
     if uid != 0 || zbus::names::UniqueName::try_from(owner).is_err() {
         return Err(ProviderError::InvalidState(
@@ -1662,6 +1829,38 @@ mod tests {
     }
 
     #[test]
+    fn backlight_scope_rejects_stale_foreign_remote_and_inactive_sessions() {
+        let sample = || {
+            id(SessionSnapshot::from_properties(
+                &native_properties(),
+                id(BootId::new(BOOT)),
+            ))
+        };
+        assert!(require_backlight_session_scope(&sample(), "2", 1000).is_ok());
+        let mut changed = sample();
+        changed.active = false;
+        assert!(require_backlight_session_scope(&changed, "2", 1000).is_err());
+        changed = sample();
+        changed.remote = true;
+        assert!(require_backlight_session_scope(&changed, "2", 1000).is_err());
+        changed = sample();
+        changed.state = "closing".into();
+        assert!(require_backlight_session_scope(&changed, "2", 1000).is_err());
+        changed = sample();
+        changed.seat.clear();
+        assert!(require_backlight_session_scope(&changed, "2", 1000).is_err());
+        changed = sample();
+        changed.session_type = "tty".into();
+        assert!(require_backlight_session_scope(&changed, "2", 1000).is_err());
+        changed = sample();
+        changed.session_class = "greeter".into();
+        assert!(require_backlight_session_scope(&changed, "2", 1000).is_err());
+        assert!(require_backlight_session_scope(&sample(), "2", 0).is_err());
+        assert!(require_backlight_session_scope(&sample(), "2", 1001).is_err());
+        assert!(require_backlight_session_scope(&sample(), "3", 1000).is_err());
+    }
+
+    #[test]
     fn native_snapshot_decodes_typed_identity_without_transport_leakage() {
         let snapshot = id(SessionSnapshot::from_properties(
             &native_properties(),
@@ -1713,6 +1912,35 @@ mod tests {
                 "{key}"
             );
         }
+    }
+
+    #[test]
+    fn backlight_original_user_bus_subject_rejects_root_other_uid_and_missing_pid() {
+        assert!(require_backlight_sender_credentials(1000, 1000, 42).is_ok());
+        for (actual_uid, expected_uid, pid) in [
+            (0, 1000, 42),
+            (1001, 1000, 42),
+            (1000, 0, 42),
+            (1000, 1000, 0),
+        ] {
+            assert!(require_backlight_sender_credentials(actual_uid, expected_uid, pid).is_err());
+        }
+    }
+
+    #[test]
+    fn backlight_sender_must_be_exact_native_session_not_only_matching_uid() {
+        let exact = "/org/freedesktop/login1/session/_32";
+        assert!(require_backlight_sender_path(exact, exact).is_ok());
+        for wrong in [
+            "",
+            "/org/freedesktop/login1",
+            "/org/freedesktop/login1/user/_1000",
+            "/org/freedesktop/login1/session/_33",
+            "/tmp/untrusted-session",
+        ] {
+            assert!(require_backlight_sender_path(wrong, exact).is_err());
+        }
+        assert!(require_backlight_sender_path(&"x".repeat(257), exact).is_err());
     }
 
     #[test]

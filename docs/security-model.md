@@ -417,3 +417,48 @@ v0.6 makes no remote/fleet, supported-distribution or supported-hardware securit
 The v0.6 claim requires both deterministic fault/recovery tests and a disposable real-system qualification using systemd, system D-Bus, Polkit and SQLite/WAL. Required negative evidence includes ordinary/direct-executor denial, wrong namespace/state rejection, request substitution rejection, stale/failed verification, executor loss/ambiguity, crash/restart without blind replay and conflict blocking.
 
 Trusted Release Proof must rerun the exact-source v0.6 qualification before sealed release build/promotion. A green unit suite alone is insufficient security evidence for the managed effect.
+
+## S21-3 original backlight caller observation
+
+The read-only Authority1 backlight candidate query retains the original unique
+system-bus sender, authenticated bus GUID and PID independently of Actor. Its native adapter requires
+broker-provided `UnixUserID`, `ProcessID` and Linux `ProcessFD`, pins the latter
+across independent kernel reads, verifies native fdinfo/liveness and rechecks
+credentials and exact `GetSessionByPID`/SessionEpoch before returning. Root,
+foreign or same-UID out-of-session processes, expired/recycled identities and
+missing native evidence fail closed. Connection, RPC and kernel sampling share
+one suspend-inclusive two-second budget, with bounded replies and original
+acquisition time. These adapter details do not enter Control's domain contracts.
+
+The query proves no qualified panel/seat generation, visibility minimum, trusted
+worker invocation, isolation or durable dispatch. Brightness remains an
+unregistered, disabled ManagedExternalEffect candidate. The separately
+supervised root executor must not invoke logind on the user's behalf; proposed
+[ADR 0046](adr/0046-authenticated-user-session-execution.md) specifies the remaining
+original-user execution and physical qualification boundaries.
+
+
+The proposed canonical backlight resource now binds an exact original-user
+session epoch and a nonzero device-generation UUID. Its syntax, fixed effect
+codec and conservative security-sensitive risk classification do not attest
+physical lineage or enable dispatch. Durable candidates and recovery require
+the matching authenticated non-root principal, independently of Actor. The
+canonical durable boundary rejects all backlight recovery modes capable of
+reprepare, including fresh approval; only observe-only resolution is permitted.
+Domain tests use a recording transaction-store port and do not claim native
+execution, SQLite crash qualification or physical evidence. The accepted
+S21-2 display contracts/integration and all ADR 0046 activation gates remain
+prerequisites for completing the executable route.
+
+The inactive original-user backlight mechanism now bounds all fixed native
+caller-owned calls by one original suspend-inclusive BOOTTIME/wall deadline
+and a 500 ms per-call cap, rather than inheriting the session authentication channel's
+sixty-second interaction timeout. Native subject discovery receives only the
+remaining budget, capped at its existing two seconds. Expired work is rejected
+before polling; late/malformed replies and unexpected descriptors fail closed.
+After a mutation attempt, every reply failure remains indeterminate, never a
+reason to redispatch. This provides no protected-worker invocation or permit
+issuer. Qualified dispatch admission still requires accepted S21-2 topology,
+output protection and display/recovery fencing from #259, plus separate physical
+backlight qualification; the read-only per-UID system supervisor cannot supply
+those facts or stand in for the actual original-login caller.

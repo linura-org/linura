@@ -723,6 +723,20 @@ std::optional<NativeObservedLockState> NativeRuntime::observe(const QDBusMessage
                                    impl_->backend->secureCoverage());
 }
 
+std::optional<NativeLockIdentity> NativeRuntime::observeBacklightOwner(const QDBusMessage &received)
+{
+    // Existing security-owner is a protected per-UID SYSTEM supervisor:
+    // AT_SECURE, non-dumpable, root-owned immutable image and fresh graphical
+    // login evidence are required. It is NOT proven a logind member of that
+    // login. A distinct original-session worker is required for SetBrightness.
+    // Only the attested Authority1 sender can request this read-only proof.
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    return identity();
+}
+
 bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
                                             const NativeTransitionIdentity &target)
 {
