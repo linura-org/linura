@@ -9,6 +9,9 @@
 //! keeps physically allocated same-filesystem headroom for terminal recovery
 //! when SQLite/WAL reaches real ENOSPC.
 
+// Only compiled statements are retained; result rows and checks stay fresh.
+const VALIDATION_STATEMENT_CACHE_CAPACITY: usize = 64;
+
 #[rustfmt::skip]
 mod filesystem_reserve;
 #[rustfmt::skip]

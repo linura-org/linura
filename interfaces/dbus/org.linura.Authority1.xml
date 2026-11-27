@@ -4,6 +4,26 @@
     <annotation name="org.linura.ContractId" value="dbus.org.linura.Authority1"/>
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Typed display intent only. Unsupported native compositions fail before
+         preparation; no receipt or request ID is an execution credential. -->
+    <method name="BeginDisplayLayout">
+      <arg name="operation_id" type="s" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
+    <method name="GetDisplayLayoutStatus">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
+    <method name="ConfirmDisplayLayout">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
+    <method name="RevertDisplayLayout">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
     <!-- Read-only process-retained diagnostic, scoped to a freshly observed own
          login. No current protection or successful sleep assertion. No inputs. -->
     <method name="GetOwnNativeSleepGateStatus">
@@ -29,6 +49,13 @@
     </method>
     <method name="GetOwnSessionLock">
       <arg name="resource" type="s" direction="out"/>
+    </method>
+    <!-- AuthoritativeQuery: current own-login display report, never effect or
+         coverage/approval authority. No caller-selected principal or target.
+         Each output row is handle, generation, can_disable, exact mode tuples,
+         powered. Original acquisition time/validity are retained. -->
+    <method name="GetOwnDisplaySnapshot">
+      <arg name="snapshot" type="(sstta(ttba(uuu)b))" direction="out"/>
     </method>
     <!-- Historical durable status, not current lock coverage or replay permission. -->
     <method name="GetSessionLockRequestStatus">

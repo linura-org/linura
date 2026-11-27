@@ -130,6 +130,107 @@ Q11_CASE_SPECS: tuple[dict[str, Any], ...] = (
             "state-reobserved",
         ],
     },
+    {
+        "id": "s21-display-keep",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "fresh-managed-plan-and-approval",
+            "new-layout-submitted-to-pinned-compositor",
+            "every-output-kms-and-first-frame-independently-verified",
+            "protected-keep-confirmed-before-deadline",
+            "kept-intent-graph-and-provenance-committed",
+            "released-current-independently-verified",
+        ],
+    },
+    {
+        "id": "s21-display-revert",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "fresh-managed-plan-and-approval",
+            "changed-layout-independently-observed",
+            "protected-explicit-revert-requested",
+            "every-baseline-output-independently-restored",
+            "unconfirmed-intent-not-committed",
+            "released-current-independently-verified",
+        ],
+    },
+    {
+        "id": "s21-display-expiry",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "changed-layout-independently-observed",
+            "boottime-confirmation-deadline-expired",
+            "no-keep-or-late-confirmation-accepted",
+            "every-baseline-output-independently-restored",
+            "unconfirmed-intent-not-committed",
+            "recovery-remains-blocked-until-independent-completion",
+        ],
+    },
+    {
+        "id": "s21-display-hotplug",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "physical-disconnect-and-reconnect-executed",
+            "pending-and-retained-output-generations-invalidated",
+            "new-output-covered-before-sensitive-content",
+            "missing-output-never-counted-as-restored",
+            "stale-topology-and-output-identity-refused",
+            "fresh-recovery-postconditions-independently-verified",
+        ],
+    },
+    {
+        "id": "s21-display-lock-power",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "lock-transition-during-display-mutation-executed",
+            "all-active-outputs-covered-before-lock-acceptance",
+            "stale-owner-session-and-input-refused",
+            "pending-display-inhibits-suspend-before-kernel",
+            "physical-power-transition-executed",
+            "resume-requires-fresh-native-evidence",
+            "no-approval-or-effect-replay",
+        ],
+    },
+    {
+        "id": "s21-display-compositor-replacement",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "compositor-and-root-loss-boundaries-injected",
+            "lost-ack-never-replayed",
+            "new-invocation-inventory-independently-observed",
+            "kept-intent-preserves-semantic-provenance",
+            "new-plan-approval-prepare-and-protection-required",
+            "historical-records-never-reconstruct-live-authority",
+            "replacement-postconditions-independently-verified",
+        ],
+    },
+    {
+        "id": "s21-display-retirement",
+        "mechanism": "physical-managed-display-effect",
+        "prerequisite_slice": "S21",
+        "required_observations": [
+            "two-physical-outputs-identified",
+            "complete-shared-reference-closure-verified",
+            "active-shared-and-ambiguous-owners-refuse-retirement",
+            "new-live-lifetime-independently-completed-before-detachment",
+            "complete-authenticated-ancestry-archived-before-unlink",
+            "crash-and-storage-fault-boundaries-injected",
+            "bounded-cleanup-preserves-spent-state-and-provenance",
+            "interrupted-cleanup-cannot-replay-or-recreate-authority",
+        ],
+    },
 )
 
 
@@ -717,6 +818,25 @@ def _which(command: str) -> bool:
     return shutil.which(command) is not None
 
 
+def _kvm_available() -> bool:
+    """Probe this account's actual KVM access; QEMU must still initialize it."""
+    try:
+        import fcntl
+
+        fd = os.open(
+            "/dev/kvm", os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        )
+    except (ImportError, OSError):
+        return False
+    try:
+        # KVM_GET_API_VERSION is read-only. An openable path alone is not KVM.
+        return stat.S_ISCHR(os.fstat(fd).st_mode) and fcntl.ioctl(fd, 0xAE00) == 12
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 def doctor(
     mode: str,
     display: str,
@@ -754,6 +874,8 @@ def doctor(
         for command in commands:
             if not _which(command):
                 missing.append(command)
+        if mode == "interactive" and not _kvm_available():
+            missing.append("usable /dev/kvm (read/write access and KVM API version 12)")
     if mode == "interactive" and display == "gtk":
         if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
             missing.append(

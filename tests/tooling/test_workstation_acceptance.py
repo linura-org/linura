@@ -115,6 +115,46 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 source_sha="b" * 40,
             )
 
+    def test_s21_physical_case_set_cannot_be_replaced_by_generic_display_capture(
+        self,
+    ) -> None:
+        required = {
+            "s21-display-keep",
+            "s21-display-revert",
+            "s21-display-expiry",
+            "s21-display-hotplug",
+            "s21-display-lock-power",
+            "s21-display-compositor-replacement",
+            "s21-display-retirement",
+        }
+        cases = {item["id"]: item for item in self.contract["level_c_case"]}
+        self.assertTrue(required.issubset(cases))
+        for case_id in sorted(required):
+            with self.subTest(case=case_id):
+                case = cases[case_id]
+                self.assertEqual(case["mechanism"], "physical-managed-display-effect")
+                self.assertEqual(case["prerequisite_slice"], "S21")
+                self.assertIn(
+                    "two-physical-outputs-identified", case["required_observations"]
+                )
+                with self.assertRaisesRegex(
+                    workstation_acceptance.AcceptanceError,
+                    "prerequisite S21 is planned, not complete",
+                ):
+                    workstation_acceptance.hardware_case_request(
+                        self.contract,
+                        case_id=case_id,
+                        run_id="q11-s21-test",
+                        fixture_id="physical-workstation",
+                        source_sha="b" * 40,
+                    )
+        for case_id in sorted(required):
+            reduced = copy.deepcopy(self.contract)
+            reduced["level_c_case"] = [
+                case for case in reduced["level_c_case"] if case["id"] != case_id
+            ]
+            self.assertTrue(workstation_acceptance.validate_contract(reduced))
+
     def test_level_c_full_run_refuses_before_partial_execution(self) -> None:
         with self.assertRaisesRegex(
             workstation_acceptance.AcceptanceError,
@@ -177,6 +217,101 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 "ffprobe",
                 workstation_acceptance.doctor("interactive", "vnc", record=True),
             )
+
+    def test_interactive_doctor_requires_usable_kvm_without_tcg_fallback(self) -> None:
+        with mock.patch.object(workstation_acceptance, "_which", return_value=True):
+            for usable in (False, True):
+                with (
+                    self.subTest(usable=usable),
+                    mock.patch.object(
+                        workstation_acceptance, "_kvm_available", return_value=usable
+                    ) as probe,
+                ):
+                    missing = workstation_acceptance.doctor("interactive", "vnc")
+                    self.assertEqual(
+                        missing,
+                        []
+                        if usable
+                        else [
+                            "usable /dev/kvm (read/write access and KVM API version 12)"
+                        ],
+                    )
+                    probe.assert_called_once_with()
+            with mock.patch.object(workstation_acceptance, "_kvm_available") as probe:
+                self.assertEqual(workstation_acceptance.doctor("automated", "none"), [])
+                probe.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "KVM is a Linux host prerequisite")
+    def test_kvm_probe_rejects_denial_nondevice_and_wrong_api_and_closes_fd(
+        self,
+    ) -> None:
+        import stat
+
+        with mock.patch.object(
+            workstation_acceptance.os, "open", side_effect=PermissionError
+        ):
+            self.assertFalse(workstation_acceptance._kvm_available())
+        for mode, api, usable in (
+            (stat.S_IFREG, 12, False),
+            (stat.S_IFCHR, 11, False),
+            (stat.S_IFCHR, OSError("KVM ioctl unavailable"), False),
+            (stat.S_IFCHR, 12, True),
+        ):
+            with (
+                self.subTest(mode=mode, api=api),
+                mock.patch.object(
+                    workstation_acceptance.os, "open", return_value=42
+                ) as opened,
+                mock.patch.object(
+                    workstation_acceptance.os,
+                    "fstat",
+                    return_value=mock.Mock(st_mode=mode),
+                ),
+                mock.patch("fcntl.ioctl") as ioctl,
+                mock.patch.object(workstation_acceptance.os, "close") as closed,
+            ):
+                if isinstance(api, OSError):
+                    ioctl.side_effect = api
+                else:
+                    ioctl.return_value = api
+                self.assertEqual(workstation_acceptance._kvm_available(), usable)
+                opened.assert_called_once_with(
+                    "/dev/kvm", os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+                )
+                closed.assert_called_once_with(42)
+
+    def test_level_b_launcher_explicitly_requires_kvm(self) -> None:
+        launcher = (
+            ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+        ).read_text(encoding="utf-8")
+        start = launcher.index("launcher_args=(")
+        end = launcher.index('\nif [[ "$display_backend"', start)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "set -euo pipefail\n"
+                + launcher[start:end]
+                + '\nprintf "%s\\n" "${launcher_args[@]}"',
+            ],
+            env={
+                **os.environ,
+                "display_backend": "vnc",
+                "vm_image": "/guest/image",
+                "seed_image": "/guest/seed",
+                "nic_mac": "52:54:00:12:34:56",
+                "ssh_port": "2224",
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        arguments = result.stdout.splitlines()
+        self.assertEqual(arguments[arguments.index("--acceleration") + 1], "kvm")
+        self.assertEqual(arguments[arguments.index("--memory") + 1], "6144")
+        self.assertEqual(arguments[arguments.index("--cpus") + 1], "4")
+        self.assertNotIn("tcg", arguments)
 
     def test_automated_doctor_requires_mandatory_recording_verifier(self) -> None:
         available = {
@@ -1514,13 +1649,16 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             "SECONDS - recording_start_seconds >= recording_duration_budget", live
         )
         fragment = live[live.rindex("while true; do") :]
+        start = live.index("compositor_current() {")
+        compositor = live[start : live.index("\n}\n", start) + 3]
         script = (
             "set -euo pipefail\n"
             "systemctl() { return 0; }\n"
+            "native_s21=0\n"
             "recording_started=1\n"
             "recording_start_seconds=0\n"
             "recording_duration_budget=1\n"
-            "SECONDS=2\n" + fragment
+            "SECONDS=2\n" + compositor + fragment
         )
         result = subprocess.run(
             ["bash", "-c", script],
@@ -1719,6 +1857,245 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 json.loads(metadata.read_text(encoding="utf-8"))["sha256"],
                 result["sha256"],
             )
+
+
+class S21InteractiveRuntimeTests(unittest.TestCase):
+    """Runtime binding checks; no interactive/native acceptance is claimed."""
+
+    def test_native_mode_refuses_caller_selected_root_source_before_privileged_work(
+        self,
+    ):
+        import os
+
+        live = (
+            ROOT / "qualification/v010/workstation-acceptance/run-live-session.sh"
+        ).read_text()
+        prefix = live.split("recording_path=", 1)[0]
+        for mode, source, succeeds in [
+            ("1", "/tmp/caller-source", False),
+            ("invalid", "/opt/linura-source", False),
+            ("1", "/opt/linura-source", True),
+            ("0", "/tmp/caller-source", True),
+        ]:
+            environment = {
+                **os.environ,
+                "LINURA_NATIVE_S21": mode,
+                "LINURA_SOURCE_SHA": "a" * 40,
+            }
+            result = subprocess.run(
+                ["bash", "-c", prefix, "s21-native-source", source],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            self.assertEqual(
+                result.returncode == 0, succeeds, (mode, source, result.stderr)
+            )
+
+    def test_candidate_is_verified_before_release_build_and_copied_to_root_only(self):
+        launcher = (
+            ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+        ).read_text()
+        self.assertIn('--s21-candidate) s21_candidate="$2"; native_s21=1;', launcher)
+        self.assertLess(
+            launcher.index('"$build_root/tools/hyprland_display_candidate.py"'),
+            launcher.index('cargo +"$RUST_VERSION" build'),
+        )
+        self.assertIn(
+            '--candidate "$s21_candidate" --source-sha "$source_sha"', launcher
+        )
+        self.assertIn('guest_hostname="linura-v010-shell"', launcher)
+        self.assertIn(
+            "install -d -o root -g root -m 0700 /tmp/linura-s17-binaries", launcher
+        )
+        self.assertNotIn("chown -R root:root /tmp/linura-s17-binaries", launcher)
+        self.assertIn("sudo -n sha256sum /tmp/linura-s17-binaries/$name", launcher)
+        self.assertIn('[[ "$guest_binary_sha" == "$expected_binary_sha" ]]', launcher)
+        self.assertIn(
+            "timeout 1100 python3 /opt/linura-source/qualification/v010/session-security/provision-native-session.py",
+            launcher,
+        )
+        self.assertIn(
+            'stage_guest_evidence_file "native-session-bootstrap.json" "$guest_evidence_required"',
+            launcher,
+        )
+        # The same exact-source asset graph as A, including both effectors.
+        import ast
+
+        tree = ast.parse((ROOT / "tools/image.py").read_text())
+        binaries = next(
+            ast.literal_eval(node.value)
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "BINARIES"
+                for target in node.targets
+            )
+        )
+        loop = launcher.split("for name in linurad ", 1)[1].split("; do", 1)[0].split()
+        self.assertEqual({"linurad", *loop}, set(binaries))
+
+    def test_native_compositor_monitor_refuses_pid_invocation_or_executable_drift(self):
+        live = (
+            ROOT / "qualification/v010/workstation-acceptance/run-live-session.sh"
+        ).read_text()
+        start = live.index("compositor_current() {")
+        function = live[start : live.index("\n}\n", start) + 3]
+        for fault in (
+            "none",
+            "pid",
+            "invocation",
+            "executable",
+            "inactive",
+            "unreadable",
+        ):
+            script = (
+                """set -euo pipefail
+native_s21=1
+native_pid=42
+native_invocation=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+native_exec_identity=1:2
+fault="$1"
+sudo() {
+    case "$*" in
+        *is-active*) [[ "$fault" != inactive ]] ;;
+        *MainPID*) if [[ "$fault" == pid ]]; then echo 43; else echo 42; fi ;;
+        *InvocationID*) if [[ "$fault" == invocation ]]; then echo bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; else echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; fi ;;
+        "-n /usr/bin/stat -Lc %d:%i /proc/42/exe")
+            [[ "$fault" != unreadable ]] || return 126
+            if [[ "$fault" == executable ]]; then echo 1:3; else echo 1:2; fi ;;
+        *) return 2 ;;
+    esac
+}
+# The actual secure compositor denies this unprivileged same-UID read.
+stat() { return 126; }
+"""
+                + function
+                + "\ncompositor_current\n"
+            )
+            result = subprocess.run(
+                ["bash", "-c", script, "s21-runtime-monitor", fault],
+                capture_output=True,
+                timeout=5,
+            )
+            self.assertEqual(result.returncode == 0, fault == "none", fault)
+
+    def test_secure_compositor_proc_identity_needs_privileged_fixture_inspection(self):
+        import os
+        import select
+        import sys
+
+        if sys.platform != "linux" or os.geteuid() == 0:
+            self.skipTest("requires unprivileged Linux process inspection")
+        # A real same-UID process first has a readable executable, then keeps
+        # the same PID/image while enabling the compositor's actual guard.
+        code = """import ctypes, sys
+print("readable", flush=True)
+sys.stdin.readline()
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.prctl(4, 0, 0, 0, 0) != 0:
+    raise SystemExit(3)
+print("protected", flush=True)
+sys.stdin.readline()
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", code],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            self.assertIsNotNone(process.stdout)
+            self.assertIsNotNone(process.stdin)
+            assert process.stdout is not None and process.stdin is not None
+            self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+            self.assertEqual(process.stdout.readline(), "readable\n")
+            before = os.stat(f"/proc/{process.pid}/exe")
+            self.assertGreater(before.st_ino, 0)
+            process.stdin.write("harden\n")
+            process.stdin.flush()
+            self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+            self.assertEqual(process.stdout.readline(), "protected\n")
+            with self.assertRaises(PermissionError):
+                os.stat(f"/proc/{process.pid}/exe")
+            process.communicate(input="finish\n", timeout=5)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+        live = (
+            ROOT / "qualification/v010/workstation-acceptance/run-live-session.sh"
+        ).read_text()
+        self.assertIn('native_exec_identity="$(sudo -n /usr/bin/stat -Lc', live)
+
+    def test_native_socket_binding_uses_real_kernel_peer_credentials(self):
+        from contextlib import ExitStack
+        import os
+        import socket
+        import sys
+        import threading
+
+        if sys.platform != "linux":
+            self.skipTest("Linux SO_PEERCRED binding")
+        live = (
+            ROOT / "qualification/v010/workstation-acceptance/run-live-session.sh"
+        ).read_text()
+        anchor = live.index('python3 - "$native_pid"')
+        code = live[anchor:].split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        for wrong_pid in (False, True):
+            # Only two tiny socket fixtures live here. The guarded build TMPDIR
+            # can exceed sockaddr_un's path limit; no build/image output moves.
+            with (
+                tempfile.TemporaryDirectory(
+                    prefix="s21-peers-", dir="/tmp"
+                ) as directory,
+                ExitStack() as stack,
+            ):
+                servers = []
+                for index in range(2):
+                    server = stack.enter_context(
+                        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    )
+                    server.bind(str(Path(directory) / str(index)))
+                    server.listen(1)
+                    server.settimeout(4)
+                    servers.append(server)
+
+                def accept():
+                    for server in servers:
+                        try:
+                            connection, _ = server.accept()
+                            connection.close()
+                        except TimeoutError:
+                            pass
+
+                worker = threading.Thread(target=accept)
+                worker.start()
+                try:
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-c",
+                            code,
+                            str(os.getpid() + int(wrong_pid)),
+                            str(Path(directory) / "0"),
+                            str(Path(directory) / "1"),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    self.assertEqual(
+                        result.returncode == 0, not wrong_pid, result.stderr
+                    )
+                finally:
+                    worker.join(timeout=5)
+                    for server in servers:
+                        server.close()
+                    self.assertFalse(worker.is_alive())
 
 
 if __name__ == "__main__":

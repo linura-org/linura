@@ -24,6 +24,10 @@ Environment=LIBSEAT_BACKEND=logind
 Environment=AQ_TRACE=1
 Environment=AQ_NO_KMS_REQUIREMENT=1
 Environment=LIBGL_ALWAYS_SOFTWARE=1
+# Qualification-only adversarial input: the actual compositor must remove this
+# before driver initialization. The canary has a separate working positive control.
+Environment=__EGL_VENDOR_LIBRARY_FILENAMES=/usr/lib/linura/qualification/linura-s21-egl-vendor.json
+Environment=__EGL_VENDOR_LIBRARY_DIRS=/usr/lib/linura/qualification
 Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
 Environment=QT_QUICK_BACKEND=software
 ExecStart=/usr/bin/Hyprland --config /etc/linura-qualification/s17-hyprland.conf

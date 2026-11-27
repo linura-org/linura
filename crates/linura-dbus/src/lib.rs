@@ -4,6 +4,7 @@ mod authority;
 mod sleep_gate;
 pub use sleep_gate::{NativeSleepGateHandler, register_native_sleep_gate};
 mod authority_client;
+mod authority_display;
 mod planning;
 mod session;
 

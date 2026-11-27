@@ -9,6 +9,7 @@
 #include <QPolygonF>
 #include <cmath>
 #include <optional>
+#include <limits>
 #include <time.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
@@ -99,6 +100,8 @@ class NativeKeyboard::Impl final
     wl_surface *focus = nullptr;
     wl_surface *confirmationSurface = nullptr;
     Confirmation confirmation;
+    wl_surface *displayReviewSurface = nullptr;
+    Confirmation displayReview;
     xkb_context *context = nullptr;
     xkb_keymap *map = nullptr;
     xkb_state *state = nullptr;
@@ -106,6 +109,14 @@ class NativeKeyboard::Impl final
     xkb_compose_state *compose = nullptr;
     std::array<bool, MaximumKeys> pressed{};
     bool bound = false;
+    quint64 generation = 1;
+    uint32_t capabilityFlags = 0;
+    void invalidateInteraction()
+    {
+        if (generation == std::numeric_limits<quint64>::max())
+            failClosed();
+        ++generation;
+    }
 
     Impl(SecretEntry &input, SurfaceGuard surfaceGuard, CoverageGuard coverageGuard,
          UnlockRequest request, PrimaryRequestAvailable primaryRequest, PointerHitTest target,
@@ -157,6 +168,8 @@ class NativeKeyboard::Impl final
     }
     void loseFocus()
     {
+        auto retired = std::move(displayReview);
+        displayReviewSurface = nullptr;
         pointerPress.reset();
         focus = nullptr;
         pressed.fill(false);
@@ -166,6 +179,8 @@ class NativeKeyboard::Impl final
             checkThread();
             entry->setNativeKeyboardFocus(false);
         }
+        if (retired)
+            retired(false);
     }
     bool eligible() const
     {
@@ -293,7 +308,12 @@ class NativeKeyboard::Impl final
                 time - self.pointerPressedAt > 1000 || *pressed != self.currentPointerTarget())
                 return;
             const bool primary = pressed->action == NativePointerTarget::Action::Primary;
-            if (self.pointerFocus == self.confirmationSurface && self.confirmation) {
+            if (self.displayReview && self.protectedFocus() && self.guard &&
+                self.guard(self.pointerFocus)) {
+                auto completion = std::move(self.displayReview);
+                self.displayReviewSurface = nullptr;
+                completion(primary);
+            } else if (self.pointerFocus == self.confirmationSurface && self.confirmation) {
                 auto completion = std::move(self.confirmation);
                 self.confirmationSurface = nullptr;
                 self.loseFocus();
@@ -301,6 +321,9 @@ class NativeKeyboard::Impl final
             } else if (self.entry->acceptsInput() && self.protectedFocus()) {
                 self.entry->nativeKey(primary ? Qt::Key_Return : Qt::Key_Escape, Qt::NoModifier,
                                       {});
+            } else if (self.entry->prepared_ && self.protectedFocus()) {
+                if (!primary)
+                    self.entry->cancelFromInteraction();
             } else if (primary && !self.entry->acceptsInput() && self.coverage && self.coverage() &&
                        self.unlockRequest && self.primaryAvailable && self.primaryAvailable())
                 self.unlockRequest();
@@ -319,6 +342,10 @@ class NativeKeyboard::Impl final
             self.checkThread();
             if (native != self.seat || (flags & ~uint32_t(7)) != 0)
                 failClosed();
+            if (flags != self.capabilityFlags) {
+                self.invalidateInteraction();
+                self.capabilityFlags = flags;
+            }
             if ((flags & WL_SEAT_CAPABILITY_POINTER) && !self.pointer && self.hitTest) {
                 self.pointer = wl_seat_get_pointer(native);
                 // The seat is bound to v5. Later distribution-header listener
@@ -371,6 +398,7 @@ class NativeKeyboard::Impl final
                 std::find(source.begin(), source.end() - 1, '\0') != source.end() - 1)
                 failClosed();
             // Layout replacement cannot migrate a live secret conversation.
+            self.invalidateInteraction();
             self.cancelConfirmation();
             self.clearMap();
             self.map =
@@ -394,6 +422,7 @@ class NativeKeyboard::Impl final
                 keys->size % sizeof(uint32_t) != 0 || keys->size > MaximumKeys * sizeof(uint32_t) ||
                 (keys->size != 0 && !keys->data) || !self.guard || !self.guard(surface))
                 failClosed();
+            self.invalidateInteraction();
             self.focus = surface;
             // Keys held before focus never synthesize text/confirmation. A new
             // press edge is required; compositor repeat and duplicate presses
@@ -414,6 +443,11 @@ class NativeKeyboard::Impl final
             self.checkThread();
             if (native != self.keyboard || (self.focus && surface != self.focus))
                 failClosed();
+            // A completed pre-lock confirmation already retired its own
+            // surface/focus locally. Its delayed native leave is not a new
+            // input lifetime. A live focus departure always invalidates proof.
+            if (self.focus)
+                self.invalidateInteraction();
             self.cancelConfirmation();
         });
     }
@@ -459,6 +493,21 @@ class NativeKeyboard::Impl final
             }
             const auto nativeCode = code + 8;
             const auto symbol = xkb_state_key_get_one_sym(self.state, nativeCode);
+            if (self.focus == self.displayReviewSurface && self.displayReview) {
+                for (const char *modifier :
+                     {XKB_MOD_NAME_SHIFT, XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT, XKB_MOD_NAME_LOGO,
+                      "Mod5", "LevelThree"})
+                    if (xkb_state_mod_name_is_active(self.state, modifier,
+                                                     XKB_STATE_MODS_EFFECTIVE) > 0)
+                        return;
+                if (symbol == XKB_KEY_Return || symbol == XKB_KEY_KP_Enter ||
+                    symbol == XKB_KEY_Escape) {
+                    auto completion = std::move(self.displayReview);
+                    self.displayReviewSurface = nullptr;
+                    completion(symbol != XKB_KEY_Escape);
+                }
+                return; // No review-page input enters the response buffer.
+            }
             if (self.focus == self.confirmationSurface && self.confirmation) {
                 // Confirmation input never calls the protected text path, even
                 // if a stale native prompt is accidentally still open.
@@ -483,6 +532,11 @@ class NativeKeyboard::Impl final
             // before delivering a fresh press, never from the old enter flag.
             self.entry->setNativeKeyboardFocus(self.protectedFocus());
             if (!self.entry->acceptsInput()) {
+                if (self.entry->prepared_) {
+                    if (symbol == XKB_KEY_Escape)
+                        self.entry->cancelFromInteraction();
+                    return; // A prepared field cannot become a primary action.
+                }
                 // A native press requests typed intent through Control. It is
                 // not PAM success, approval, prepared dispatch or an unlock.
                 if ((symbol == XKB_KEY_Return || symbol == XKB_KEY_KP_Enter) &&
@@ -619,10 +673,50 @@ bool NativeKeyboard::focused() const
     impl_->checkThread();
     return impl_->protectedFocus();
 }
-void NativeKeyboard::refreshProtectedFocus()
+quint64 NativeKeyboard::interactionGeneration() const noexcept
+{
+    return impl_->generation;
+}
+void NativeKeyboard::refreshProtectedFocus(bool preservePreparedPrompt)
 {
     impl_->checkThread();
-    impl_->entry->setNativeKeyboardFocus(impl_->protectedFocus());
+    const bool focused = impl_->protectedFocus();
+    if (!focused && preservePreparedPrompt)
+        impl_->entry->suspendForExpectedPresentation();
+    else
+        impl_->entry->setNativeKeyboardFocus(focused);
+}
+void NativeKeyboard::invalidateOutputConfiguration(bool preservePreparedPrompt)
+{
+    impl_->checkThread();
+    auto retired = std::move(impl_->displayReview);
+    impl_->displayReviewSurface = nullptr;
+    impl_->pointerPress.reset();
+    if (impl_->compose)
+        xkb_compose_state_reset(impl_->compose);
+    if (preservePreparedPrompt)
+        impl_->entry->suspendForExpectedPresentation();
+    else
+        impl_->entry->setNativeKeyboardFocus(false);
+    if (impl_->confirmation) {
+        // Keep held-key suppression even when cancelling a pre-lock dialog.
+        const auto held = impl_->pressed;
+        impl_->cancelConfirmation();
+        impl_->pressed = held;
+    }
+    if (retired)
+        retired(false);
+}
+
+bool NativeKeyboard::setDisplayReviewTarget(Confirmation completion)
+{
+    impl_->checkThread();
+    if (!completion || impl_->displayReview || impl_->confirmation || !impl_->protectedFocus() ||
+        impl_->entry->acceptsInput() || impl_->entry->prepared_)
+        return false;
+    impl_->displayReviewSurface = impl_->focus;
+    impl_->displayReview = std::move(completion);
+    return true;
 }
 void NativeKeyboard::forgetSurface(wl_surface *surface)
 {

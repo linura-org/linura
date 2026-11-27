@@ -167,7 +167,20 @@ class ToolingTests(unittest.TestCase):
         ):
             with self.subTest(workflow=name):
                 text = (ROOT / f".github/workflows/{name}.yml").read_text()
-                self.assertIn(f"BASE_IMAGE_DOWNLOAD_URL: {mirror}", text)
+                upstream = (
+                    "https://cloud-images.ubuntu.com/releases/noble/release-20260725/"
+                    "ubuntu-24.04-server-cloudimg-amd64.img"
+                )
+                for key, expected in (
+                    ("BASE_IMAGE_URL", upstream),
+                    ("BASE_IMAGE_DOWNLOAD_URL", mirror),
+                    ("BASE_IMAGE_SHA256", digest),
+                ):
+                    self.assertEqual(
+                        re.findall(rf"^  {key}: (\S+)$", text, re.MULTILINE),
+                        [expected],
+                    )
+                self.assertIn(f'test "$BASE_IMAGE_DOWNLOAD_URL" = "{mirror}"', text)
                 self.assertIn(f"BASE_IMAGE_SHA256: {digest}", text)
                 self.assertIn("uses: ./.github/actions/verified-ubuntu-image", text)
                 self.assertIn("sha256: ${{ env.BASE_IMAGE_SHA256 }}", text)
@@ -360,6 +373,62 @@ class ToolingTests(unittest.TestCase):
             '"requested_acceleration": os.environ["VM_ACCELERATION"]', workflow
         )
         self.assertIn("VM-ACCEPTANCE-EVIDENCE.sha256", workflow)
+
+    def test_v06_qualification_uses_verified_kvm_and_retains_all_faults(self) -> None:
+        workflow = (ROOT / ".github/workflows/v06-managed-lifecycle-vm.yml").read_text(
+            encoding="utf-8"
+        )
+        guest = (ROOT / "tests/acceptance/v06/qualify-guest.sh").read_text(
+            encoding="utf-8"
+        )
+        cases = (
+            ROOT / "apps/linura-authorityd/tests/s21/ordinary_release.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("  VM_ACCELERATION: kvm\n", workflow)
+        self.assertNotIn("  VM_ACCELERATION: tcg\n", workflow)
+        self.assertNotIn("  VM_ACCELERATION: auto\n", workflow)
+        self.assertIn("name: Verify usable KVM before expensive builds", workflow)
+        self.assertIn('test "$VM_ACCELERATION" = kvm', workflow)
+        self.assertIn("os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW", workflow)
+        self.assertIn("fcntl.ioctl(fd, 0xAE00, 0)", workflow)
+        self.assertIn("if version != 12:", workflow)
+        self.assertIn("sudo chmod 0600 /dev/kvm", workflow)
+        self.assertIn('--accel "$VM_ACCELERATION"', workflow)
+        self.assertLess(
+            workflow.index("name: Verify usable KVM before expensive builds"),
+            workflow.index("name: Run deterministic v0.6 fault matrix on exact source"),
+        )
+        self.assertLess(
+            workflow.index("name: Verify usable KVM before expensive builds"),
+            workflow.index(
+                "name: Acquire reviewed Ubuntu image before expensive builds"
+            ),
+        )
+        self.assertIn(
+            '"virtualization": {"acceleration": os.environ["VM_ACCELERATION"]}',
+            workflow,
+        )
+        for command in (
+            "--test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log",
+            "--test-threads=2 2>&1 | tee /tmp/v06-concurrent-matrix.log",
+            "--test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_",
+        ):
+            self.assertIn(command, guest)
+        self.assertIn("test result: ok. 78 passed; 0 failed;", guest)
+        self.assertIn("test result: ok. 11 passed; 0 failed;", guest)
+        self.assertNotIn("s21-ordinary-handoff-case-start", cases)
+        self.assertNotIn("s21-ordinary-handoff-case-passed", cases)
+        self.assertNotIn("s21-ordinary-handoff-stage=", cases)
+        self.assertIn("require_live_contract() {", guest)
+        self.assertIn('GetNameOwner s "$service"', guest)
+        self.assertIn('if [[ "$observed" != "$owner" ]]; then', guest)
+        self.assertIn("busctl --system --timeout=3s introspect", guest)
+        self.assertIn("D-Bus contract never became responsive", guest)
+        self.assertIn(
+            'require_live_contract "$authority_dest" "$authority_path"', guest
+        )
+        self.assertIn("ConvergeSystemdActiveState linura-authorityd.service", guest)
+        self.assertIn("SetManagedActiveState linura-executor-systemd.service", guest)
 
     def test_trusted_release_proof_requires_all_mandatory_qualification(self) -> None:
         workflow = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(

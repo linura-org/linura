@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use linura_core::{PrincipalId, RequestId};
@@ -95,8 +96,11 @@ pub(crate) fn initialize_or_validate_schema(
     let user_version = pragma_i64(connection, "user_version")?;
     if application_id == 0 && user_version == 0 {
         let object_count: i64 = connection
-            .query_row(
+            .prepare_cached(
                 "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            )
+            .map_err(sqlite)?
+            .query_row(
                 [],
                 |row| row.get(0),
             )
@@ -212,13 +216,16 @@ pub(crate) fn validate_schema_identity(
     }
 
     let identity = connection
-        .query_row(
+        .prepare_cached(
             "SELECT
                 length(CAST(verifier_fingerprint AS BLOB)),
                 CASE WHEN length(CAST(verifier_fingerprint AS BLOB)) = ?1 THEN verifier_fingerprint ELSE NULL END,
                 length(CAST(integrity_fingerprint AS BLOB)),
                 CASE WHEN length(CAST(integrity_fingerprint AS BLOB)) = ?1 THEN integrity_fingerprint ELSE NULL END
              FROM authority_store_identity WHERE singleton = 1",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![as_i64(CONTENT_DIGEST_TEXT_BYTES as u64)?],
             |row| {
                 Ok((
@@ -252,10 +259,13 @@ pub(crate) fn validate_schema_identity(
     }
 
     let checksum = connection
-        .query_row(
+        .prepare_cached(
             "SELECT length(CAST(checksum AS BLOB)),
                     CASE WHEN length(CAST(checksum AS BLOB)) = ?2 THEN checksum ELSE NULL END
              FROM schema_migrations WHERE migration_id = ?1",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![MIGRATION_ID, as_i64(CONTENT_DIGEST_TEXT_BYTES as u64)?],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
         )
@@ -281,7 +291,7 @@ pub(crate) fn validate_schema_identity(
 
 fn schema_fingerprint(connection: &Connection) -> Result<ContentDigest, TransactionStoreError> {
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT
                 length(CAST(type AS BLOB)), CASE WHEN length(CAST(type AS BLOB)) <= ?1 THEN type ELSE NULL END,
                 length(CAST(name AS BLOB)), CASE WHEN length(CAST(name AS BLOB)) <= ?2 THEN name ELSE NULL END,
@@ -330,9 +340,15 @@ fn schema_fingerprint(connection: &Connection) -> Result<ContentDigest, Transact
 }
 
 fn expected_schema_fingerprint() -> Result<ContentDigest, TransactionStoreError> {
-    let reference = Connection::open_in_memory().map_err(sqlite)?;
-    reference.execute_batch(MIGRATION_V1).map_err(sqlite)?;
-    schema_fingerprint(&reference)
+    // This is the immutable legacy reference, not cached validation of a store.
+    static EXPECTED: OnceLock<Result<ContentDigest, TransactionStoreError>> = OnceLock::new();
+    EXPECTED
+        .get_or_init(|| {
+            let reference = Connection::open_in_memory().map_err(sqlite)?;
+            reference.execute_batch(MIGRATION_V1).map_err(sqlite)?;
+            schema_fingerprint(&reference)
+        })
+        .clone()
 }
 
 pub(crate) fn validate_aggregate_capacity(
@@ -366,14 +382,22 @@ pub(crate) fn validate_logical_audit_reserve(
     limits: StoreLimits,
 ) -> Result<(), TransactionStoreError> {
     let audit_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))
+        .prepare_cached(
+            "SELECT COUNT(*) FROM audit_events",
+        )
+        .map_err(sqlite)?
+        .query_row(
+            [], |row| row.get(0))
         .map_err(sqlite)?;
     let nonterminal_count: i64 = connection
-        .query_row(
+        .prepare_cached(
             "SELECT COUNT(*) FROM transactions t
              JOIN generations g ON g.transaction_id=t.transaction_id
               AND g.generation=t.current_generation
              WHERE g.state IN ('prepared','indeterminate','verified')",
+        )
+        .map_err(sqlite)?
+        .query_row(
             [],
             |row| row.get(0),
         )
@@ -513,7 +537,7 @@ pub(crate) fn load_transaction(
     transaction_id: &TransactionId,
 ) -> Result<StoredTransaction, TransactionStoreError> {
     let raw = connection
-        .query_row(
+        .prepare_cached(
             "SELECT
                 length(CAST(transaction_id AS BLOB)), CASE WHEN length(CAST(transaction_id AS BLOB)) BETWEEN 1 AND ?2 THEN transaction_id ELSE NULL END,
                 length(CAST(principal AS BLOB)), CASE WHEN length(CAST(principal AS BLOB)) BETWEEN 1 AND ?3 THEN principal ELSE NULL END,
@@ -521,6 +545,9 @@ pub(crate) fn load_transaction(
                 current_generation, state_version,
                 length(integrity_tag), CASE WHEN length(integrity_tag) = ?5 THEN integrity_tag ELSE NULL END
              FROM transactions WHERE transaction_id = ?1",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![
                 transaction_id.as_str(),
                 MAX_TRANSACTION_ID_BYTES as i64,
@@ -575,7 +602,7 @@ pub(crate) fn load_generation(
     generation: u64,
 ) -> Result<StoredGeneration, TransactionStoreError> {
     let raw = connection
-        .query_row(
+        .prepare_cached(
             "SELECT
                 length(CAST(transaction_id AS BLOB)), CASE WHEN length(CAST(transaction_id AS BLOB)) BETWEEN 1 AND ?3 THEN transaction_id ELSE NULL END,
                 generation,
@@ -593,6 +620,9 @@ pub(crate) fn load_generation(
                 CASE WHEN provenance_digest IS NULL OR length(CAST(provenance_digest AS BLOB)) = ?5 THEN provenance_digest ELSE NULL END,
                 length(integrity_tag), CASE WHEN length(integrity_tag) = ?7 THEN integrity_tag ELSE NULL END
              FROM generations WHERE transaction_id = ?1 AND generation = ?2",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![
                 transaction_id.as_str(), as_i64(generation)?,
                 MAX_TRANSACTION_ID_BYTES as i64, MAX_STATE_TEXT_BYTES as i64,
@@ -693,7 +723,7 @@ fn bounded_audit_query(
             length(integrity_tag), CASE WHEN length(integrity_tag) = ?5 THEN integrity_tag ELSE NULL END
          FROM audit_events {suffix}"
     );
-    let mut statement = connection.prepare(&query).map_err(sqlite)?;
+    let mut statement = connection.prepare_cached(&query).map_err(sqlite)?;
     let rows = statement
         .query_map(
             params![
@@ -834,9 +864,15 @@ pub(crate) fn validate_generation_history(
     connection: &Connection,
     key: &SqliteIntegrityKey,
     transaction_id: &TransactionId,
-    current_generation: u64,
+    current: &StoredGeneration,
     limits: StoreLimits,
 ) -> Result<(), TransactionStoreError> {
+    if connection.is_autocommit() || current.transaction_id != transaction_id.as_str() {
+        return Err(TransactionStoreError::StateConflict);
+    }
+    // The caller authenticated this row in the same BEGIN IMMEDIATE scope.
+    // Historical generations are still individually loaded and authenticated.
+    let current_generation = current.generation;
     if current_generation >= MAX_TRANSACTION_GENERATIONS {
         return Err(TransactionStoreError::Corruption(
             "current generation exceeds domain bound".into(),
@@ -849,8 +885,11 @@ pub(crate) fn validate_generation_history(
         return Err(TransactionStoreError::CapacityExceeded);
     }
     let persisted_rows: i64 = connection
-        .query_row(
+        .prepare_cached(
             "SELECT COUNT(*) FROM generations WHERE transaction_id = ?1",
+        )
+        .map_err(sqlite)?
+        .query_row(
             params![transaction_id.as_str()],
             |row| row.get(0),
         )
@@ -866,7 +905,11 @@ pub(crate) fn validate_generation_history(
 
     let mut expected = 0_u64;
     while expected <= current_generation {
-        let record = match load_generation(connection, key, transaction_id, expected) {
+        let historical;
+        let record = if expected == current_generation {
+            current
+        } else {
+            historical = match load_generation(connection, key, transaction_id, expected) {
             Ok(record) => record,
             Err(TransactionStoreError::NotFound) => {
                 return Err(TransactionStoreError::Corruption(
@@ -874,6 +917,8 @@ pub(crate) fn validate_generation_history(
                 ));
             }
             Err(error) => return Err(error),
+            };
+            &historical
         };
         let state = TransactionState::parse(&record.state)
             .map_err(|error| TransactionStoreError::Corruption(error.to_string()))?;
@@ -899,7 +944,10 @@ pub(crate) fn validate_generation_history(
             record.graph_digest.as_deref(),
             record.provenance_digest.as_deref(),
         ];
-        if matches!(state, TransactionState::Verified | TransactionState::Committed) {
+        let compensated = state == TransactionState::RecoveryBlocked
+            && load_last_audit_event(connection, key, transaction_id)?.is_some_and(|tail|
+                tail.generation == expected && tail.event_kind == "verified-compensated-v1");
+        if matches!(state, TransactionState::Verified | TransactionState::Committed) || compensated {
             if commit_material.iter().any(|value| value.is_none()) {
                 return Err(TransactionStoreError::Corruption(
                     "verified/committed generation is missing durable commit material".into(),
@@ -930,18 +978,38 @@ pub(crate) fn validate_audit_chain(
     connection: &Connection,
     key: &SqliteIntegrityKey,
     transaction_id: &TransactionId,
-    current_generation: u64,
-    state_version: u64,
+    generation: &StoredGeneration,
+    snapshot: &TransactionSnapshot,
     limits: StoreLimits,
 ) -> Result<(), TransactionStoreError> {
+    if connection.is_autocommit()
+        || generation.transaction_id != transaction_id.as_str()
+        || snapshot.transaction_id != *transaction_id
+        || generation.generation != snapshot.current_generation
+    {
+        return Err(TransactionStoreError::StateConflict);
+    }
+    let current_generation = snapshot.current_generation;
+    let state_version = snapshot.state_version;
     let events = load_all_audit_events(connection, key, transaction_id)?;
     let mut expected_sequence = 0_u64;
     let mut previous = ContentDigest::zero();
-    let mut last = None;
+    let mut last: Option<(u64, u64, String, ContentDigest)> = None;
     for event in events {
         if event.event_sequence != expected_sequence {
             return Err(TransactionStoreError::Corruption(
                 "audit sequence is not contiguous".into(),
+            ));
+        }
+        if event.event_kind == "verified-compensated-v1"
+            && !last.as_ref().is_some_and(|(generation, version, kind, _)| {
+                *generation == event.generation
+                    && version.checked_add(1) == Some(event.state_version)
+                    && kind == "recovery-verified"
+            })
+        {
+            return Err(TransactionStoreError::Corruption(
+                "verified compensation does not follow exact verified history".into(),
             ));
         }
         let payload = ContentDigest::new(event.payload_digest.clone())
@@ -986,22 +1054,21 @@ pub(crate) fn validate_audit_chain(
             "transaction pointer/version disagrees with authenticated audit tail".into(),
         ));
     }
-    let (_, generation, snapshot) = load_current(connection, key, transaction_id)?;
     if state_for_event_kind(&last_kind)? != snapshot.state {
         return Err(TransactionStoreError::Corruption(
             "current transaction state disagrees with authenticated audit tail".into(),
         ));
     }
     if snapshot.state == TransactionState::Committed {
-        let desired = ContentDigest::new(generation.desired_state_digest.ok_or_else(|| {
+        let desired = ContentDigest::new(generation.desired_state_digest.clone().ok_or_else(|| {
             TransactionStoreError::Corruption("committed desired-state digest missing".into())
         })?)
         .map_err(|error| TransactionStoreError::Corruption(error.to_string()))?;
-        let graph = ContentDigest::new(generation.graph_digest.ok_or_else(|| {
+        let graph = ContentDigest::new(generation.graph_digest.clone().ok_or_else(|| {
             TransactionStoreError::Corruption("committed graph digest missing".into())
         })?)
         .map_err(|error| TransactionStoreError::Corruption(error.to_string()))?;
-        let provenance = ContentDigest::new(generation.provenance_digest.ok_or_else(|| {
+        let provenance = ContentDigest::new(generation.provenance_digest.clone().ok_or_else(|| {
             TransactionStoreError::Corruption("committed provenance digest missing".into())
         })?)
         .map_err(|error| TransactionStoreError::Corruption(error.to_string()))?;
@@ -1026,7 +1093,7 @@ pub(crate) fn list_transaction_ids(
     connection: &Connection,
 ) -> Result<Vec<TransactionId>, TransactionStoreError> {
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT length(CAST(transaction_id AS BLOB)),
                     CASE WHEN length(CAST(transaction_id AS BLOB)) BETWEEN 1 AND ?1 THEN transaction_id ELSE NULL END
              FROM transactions ORDER BY transaction_id",
@@ -1076,7 +1143,7 @@ pub(crate) fn validate_physical_reservations(
             .checked_add(expected)
             .ok_or(TransactionStoreError::CapacityExceeded)?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT slot, length(reserved) FROM audit_reservations
                  WHERE transaction_id = ?1 ORDER BY slot",
             )
@@ -1107,7 +1174,12 @@ pub(crate) fn validate_physical_reservations(
         }
     }
     let actual_total: i64 = connection
-        .query_row("SELECT COUNT(*) FROM audit_reservations", [], |row| row.get(0))
+        .prepare_cached(
+            "SELECT COUNT(*) FROM audit_reservations",
+        )
+        .map_err(sqlite)?
+        .query_row(
+            [], |row| row.get(0))
         .map_err(sqlite)?;
     if u64::try_from(actual_total).ok() != Some(expected_total) {
         return Err(TransactionStoreError::Corruption(
@@ -1152,7 +1224,7 @@ pub(crate) fn state_for_event_kind(
         "recovery-verified" => Ok(TransactionState::Verified),
         "committed" => Ok(TransactionState::Committed),
         "aborted-prepared" | "recovery-retired-no-effect" => Ok(TransactionState::Aborted),
-        "recovery-blocked" => Ok(TransactionState::RecoveryBlocked),
+        "recovery-blocked" | "verified-compensated-v1" => Ok(TransactionState::RecoveryBlocked),
         _ => Err(TransactionStoreError::Corruption(format!(
             "unknown audit event kind {kind:?}"
         ))),
@@ -1160,7 +1232,8 @@ pub(crate) fn state_for_event_kind(
 }
 
 pub(crate) fn migration_checksum() -> ContentDigest {
-    digest_bytes("linura.sqlite.migration.v1", MIGRATION_V1.as_bytes())
+    static EXPECTED: OnceLock<ContentDigest> = OnceLock::new();
+    EXPECTED.get_or_init(|| digest_bytes("linura.sqlite.migration.v1", MIGRATION_V1.as_bytes())).clone()
 }
 
 pub(crate) fn pragma_i64(
@@ -1239,14 +1312,22 @@ pub(crate) fn check_logical_audit_reserve(
     nonterminal_delta: i64,
 ) -> Result<(), TransactionStoreError> {
     let audit_count: i64 = transaction
-        .query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))
+        .prepare_cached(
+            "SELECT COUNT(*) FROM audit_events",
+        )
+        .map_err(sqlite)?
+        .query_row(
+            [], |row| row.get(0))
         .map_err(sqlite)?;
     let nonterminal_count: i64 = transaction
-        .query_row(
+        .prepare_cached(
             "SELECT COUNT(*) FROM transactions t
              JOIN generations g ON g.transaction_id=t.transaction_id
               AND g.generation=t.current_generation
              WHERE g.state IN ('prepared','indeterminate','verified')",
+        )
+        .map_err(sqlite)?
+        .query_row(
             [],
             |row| row.get(0),
         )

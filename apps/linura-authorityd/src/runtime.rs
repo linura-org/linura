@@ -18,7 +18,7 @@ use linura_dbus::{
 use linura_executor_systemd::{ManagedActiveState, ManagedUnitName};
 use linura_linux_observation::{LogindSessionObserver, SystemdObserver};
 use linura_linux_session::{
-    NativeLockObserver, NativePowerPermissionObserver, NativeSessionChannel,
+    NativeDisplayObserver, NativeLockObserver, NativePowerPermissionObserver, NativeSessionChannel,
     NativeSleepEntryObserver,
 };
 use linura_observation_control::ObservationCoordinator;
@@ -105,6 +105,9 @@ impl ManagedRuntime {
             .register_observer(Box::new(NativeLockObserver::new(channel.clone())?))
             .map_err(|error| error.to_string())?;
         coordinator
+            .register_observer(Box::new(NativeDisplayObserver::new(channel.clone())?))
+            .map_err(|error| error.to_string())?;
+        coordinator
             .register_observer(Box::new(NativePowerPermissionObserver::new(
                 channel.clone(),
             )?))
@@ -135,6 +138,7 @@ impl ManagedRuntime {
                 verifier: FreshSystemdVerifier::connect()?,
                 session_executor: SessionExecutorClient {
                     channel: channel.clone(),
+                    display_sequence: 0,
                 },
                 session_verifier: FreshSessionVerifier {
                     channel: channel.clone(),
@@ -421,6 +425,51 @@ impl Authority1Handler for ManagedRuntime {
         let uid = own_uid(&context.principal)?;
         let observation = self.session_channel.observe_current_lock(uid, 1)?;
         Ok(observation.resource.as_str().into())
+    }
+
+    fn own_display_snapshot(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<linura_protocol::DisplaySnapshot, String> {
+        let uid = own_uid(&context.principal)?;
+        // Independent logind and native owner facts are combined inward by
+        // Control. No policy/approval/executor or durable mutation is involved.
+        linura_control::DisplayLayoutSafetyReview::query_own_display_snapshot(
+            &context.principal,
+            || self.session_channel.observe_current_display(uid, 1),
+            |epoch| {
+                self.session_verifier
+                    .transitions
+                    .observe_authoritative(
+                        &epoch.resource_id().map_err(|e| e.to_string())?,
+                        &CapabilityId::new("session.epoch.observe").map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    fn display_layout_status(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, String> {
+        let _uid = own_uid(&context.principal)?;
+        // Exact retained owner/request/history is checked inward. This path
+        // independently observes and reconciles bookkeeping; it cannot apply,
+        // confirm or restore a layout, including after adapter/Control restart.
+        self.control
+            .lock()
+            .map_err(|_| "managed Control state is poisoned")?
+            .display_layout_status(
+                context.principal,
+                context.actor,
+                &request_id,
+                &mut self.session_executor,
+                &mut self.session_verifier,
+            )
+            .map_err(|e| e.to_string())
     }
 
     fn converge_session_lock(

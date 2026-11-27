@@ -3,11 +3,14 @@
 #include "session_bootstrap.h"
 
 #include <QByteArrayView>
+#include <QByteArray>
 #include <QString>
 
 #include <optional>
 
 namespace Linura::SecurityOwner {
+struct NativeDisplayLayout;
+struct NativeDisplaySnapshot;
 
 // Adapter-local postcondition, not a portable observation envelope, policy
 // approval, or authority. The production adapter emits canonical evidence only
@@ -40,5 +43,11 @@ decodeNativeHyprlandLock(QByteArrayView reply);
 [[nodiscard]] std::optional<NativeCompositorLockState>
 observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBinding &binding,
                           NativeCompositorProbeFailure *failure = nullptr);
+
+// Fixed read-only native monitor metadata, on a freshly connected stream whose
+// peer must equal the actual owned Wayland compositor. At most 256 KiB and the
+// same 500 ms total deadline. Typed decoding belongs to the Rust adapter.
+[[nodiscard]] std::optional<QByteArray>
+observeNativeHyprlandOutputs(const QString &nativeSocketPath, const NativeSessionBinding &binding);
 
 } // namespace Linura::SecurityOwner

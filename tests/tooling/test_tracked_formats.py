@@ -47,6 +47,16 @@ class TrackedFormatsTests(unittest.TestCase):
             "unclassified",
         )
 
+    def test_native_identity_test_is_classified_without_allowing_unknown_cmake(self):
+        path = Path("apps/linura-hyprland-display/tests/integration_identity.cmake")
+        self.assertEqual(formats.classify(path, (ROOT / path).read_bytes()), "build")
+        self.assertEqual(
+            formats.classify(
+                Path("unreviewed/test.cmake"), b"message(FATAL_ERROR x)\n"
+            ),
+            "unclassified",
+        )
+
     def test_reviewed_development_container_inputs_are_explicit_not_globally_allowed(
         self,
     ) -> None:
@@ -65,6 +75,32 @@ class TrackedFormatsTests(unittest.TestCase):
             "tools/other/ubuntu-snapshot.list",
         ):
             self.assertEqual(formats.classify(Path(name), b"data\n"), "unclassified")
+
+    def test_canonical_recovery_vector_is_explicit_text_not_a_fixture_exemption(self):
+        for name in ("original-baseline.txt", "original-finalization.txt"):
+            path = Path("crates/linura-core/src/display_recovery/fixtures") / name
+            with self.subTest(name=name):
+                content = (ROOT / path).read_bytes()
+                self.assertEqual(formats.classify(path, content), "text")
+                self.assertEqual(formats.format_errors(path, content, "text"), [])
+                for neighbor in (
+                    path.with_name("unchecked.txt"),
+                    Path("crates/other/fixtures") / name,
+                ):
+                    self.assertEqual(
+                        formats.classify(neighbor, b"LNRI:1;\n"), "unclassified"
+                    )
+
+    def test_reviewed_v06_matrix_inventory_is_explicit_text(self) -> None:
+        path = Path("tests/acceptance/v06/fault-matrix.txt")
+        content = (ROOT / path).read_bytes()
+        self.assertEqual(formats.classify(path, content), "text")
+        self.assertEqual(formats.format_errors(path, content, "text"), [])
+        for neighbor in (
+            path.with_name("unchecked.txt"),
+            Path("tests/acceptance/unreviewed/fault-matrix.txt"),
+        ):
+            self.assertEqual(formats.classify(neighbor, b"unchecked\n"), "unclassified")
 
     def test_unknown_extension_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -245,6 +281,35 @@ class TrackedFormatsTests(unittest.TestCase):
                     formats.classify(Path(path), (ROOT / path).read_bytes()),
                     "text",
                 )
+
+    def test_display_entry_sysusers_contract_is_exact_and_memberless(self):
+        path = Path("packaging/sysusers.d/linura-display-entry.conf")
+        content = (ROOT / path).read_bytes()
+        self.assertEqual(formats.classify(path, content), "sysusers-display-entry")
+        self.assertEqual(
+            formats.format_errors(path, content, "sysusers-display-entry"), []
+        )
+        for invalid in (
+            b"g linura-display-entry 0 -\n",
+            b"u linura-display-entry - -\n",
+            b"g other - -\n",
+            b"g linura-display-entry - - user\n",
+            b"g linura-display-entry - -\ng other - -\n",
+            b"",
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertTrue(
+                    formats.format_errors(path, invalid, "sysusers-display-entry")
+                )
+        self.assertEqual(
+            formats.classify(Path("packaging/sysusers.d/unreviewed.conf"), content),
+            "unclassified",
+        )
+        self.assertTrue(
+            formats.format_errors(
+                Path("packaging/sysusers.d/linura-authority.conf"), content, "sysusers"
+            )
+        )
 
     def test_s17_inputs_are_narrowly_classified(self) -> None:
         expected = {

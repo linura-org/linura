@@ -52,6 +52,7 @@ scp "${ssh_common[@]}" -P "$ssh_port" \
     packaging/dbus-1/system.d/org.linura.Authority1.conf \
     packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf \
     packaging/dbus-1/system.d/org.linura.Executor.Session1.conf \
+    packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf \
     packaging/polkit-1/actions/org.linura.authority.policy \
     packaging/polkit-1/actions/org.linura.executor.systemd.policy \
     packaging/polkit-1/actions/org.linura.executor.session.policy \
@@ -60,6 +61,7 @@ scp "${ssh_common[@]}" -P "$ssh_port" \
     packaging/systemd/system/linura-authorityd.service \
     packaging/systemd/system/linura-executor-systemd.service \
     packaging/systemd/system/linura-executor-session.service \
+    packaging/systemd/system/linura-display-protection.service \
     packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf \
     packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf \
     tests/acceptance/v06/49-linura-v06-qualification.rules \
@@ -78,7 +80,7 @@ guest_rc=${PIPESTATUS[0]}
 set -e
 
 matrix_evidence_rc=0
-for matrix_log in v06-matrix.log v06-legacy-matrix.log v06-native-session.log; do
+for matrix_log in v06-matrix.log v06-legacy-matrix.log v06-concurrent-matrix.log v06-native-session.log; do
     if ! scp "${ssh_common[@]}" -P "$ssh_port" \
         "linura@127.0.0.1:/tmp/$matrix_log" "$ARTIFACT_DIR/$matrix_log" >/dev/null 2>&1; then
         printf 'missing retained guest matrix evidence: %s\n' "$matrix_log" >&2

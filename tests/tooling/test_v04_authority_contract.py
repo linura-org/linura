@@ -69,9 +69,13 @@ class V04AuthorityContractTests(unittest.TestCase):
         self.assertIn("CREATE TRIGGER transactions_no_delete", schema)
         self.assertIn("integrity_tag", schema)
 
-    def test_integrity_key_uses_non_elidable_atomic_scrubbing(self) -> None:
+    def test_integrity_key_uses_non_elidable_scrubbing(self) -> None:
         text = SQLITE_INTEGRITY.read_text(encoding="utf-8")
-        self.assertIn("AtomicU8::from_mut(byte).store(0, Ordering::SeqCst)", text)
+        self.assertIn("use zeroize::Zeroize;", text)
+        scrub = text[text.index("fn scrub_secret(") : text.index("fn hmac_sha256")]
+        self.assertIn("bytes.zeroize();", scrub)
+        for buffer in ["self.bytes", "self.pads[0]", "self.pads[1]", "expected"]:
+            self.assertIn(f"scrub_secret(&mut {buffer});", text)
         self.assertIn("validate_integrity_key_bytes(&mut bytes)?", text)
         self.assertNotIn("self.bytes.fill(0)", text)
 

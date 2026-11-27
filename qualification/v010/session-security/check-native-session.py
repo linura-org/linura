@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import stat
+import struct
 import subprocess
 import time
 
@@ -92,6 +93,112 @@ def properties(*args: str) -> dict[str, str]:
             raise RuntimeError("native qualification properties are malformed")
         values[key] = value
     return values
+
+
+def validate_native_compositor_entry(
+    status: dict[str, str],
+    auxiliary: bytes,
+    uid: int,
+    gid: int,
+    group_drop_policy: bytes,
+) -> None:
+    if group_drop_policy not in {b"0\n", b"2\n"}:
+        raise RuntimeError(
+            "native compositor group-drop kernel policy is unsafe or unknown"
+        )
+    if (
+        status.get("Uid", "").split() != [str(uid)] * 4
+        or status.get("Gid", "").split() != [str(gid)] * 4
+        or status.get("TracerPid") != "0"
+        or status.get("NoNewPrivs") != "0"
+        or any(
+            status.get(name) != "0000000000000000"
+            for name in ("CapInh", "CapPrm", "CapEff", "CapAmb")
+        )
+    ):
+        raise RuntimeError(
+            "native compositor retained credentials or changed application privilege semantics"
+        )
+    if not auxiliary or len(auxiliary) > 1024 or len(auxiliary) % 16:
+        raise RuntimeError("native compositor secure execution vector is unavailable")
+    pairs = list(struct.iter_unpack("<QQ", auxiliary))
+    if (
+        len({key for key, _ in pairs}) != len(pairs)
+        or pairs[-1] != (0, 0)
+        or any(key == 0 for key, _ in pairs[:-1])
+        or (23, 1) not in pairs
+    ):
+        raise RuntimeError("native compositor did not enter the secure loader")
+
+
+def inspect_native_compositor_entry(pid: int, uid: int) -> dict[str, bool]:
+    status = properties_from_proc(Path(f"/proc/{pid}/status"))
+    with Path(f"/proc/{pid}/auxv").open("rb") as source:
+        auxiliary = source.read(1025)
+    gid = int(command("/usr/bin/id", "-g", "linura"))
+    with Path("/proc/sys/fs/suid_dumpable").open("rb") as source:
+        group_drop_policy = source.read(3)
+    validate_native_compositor_entry(status, auxiliary, uid, gid, group_drop_policy)
+    return {
+        "kernel_secure_exec": True,
+        "safe_group_drop_policy": True,
+        "login_group_restored": True,
+        "capabilities_dropped": True,
+        "application_privilege_semantics_preserved": True,
+    }
+
+
+def validate_display_discovery(
+    text: str, lock: str, topology_prefix: str, now_ms: int
+) -> None:
+    """Check the actual typed client report, never assert effect/coverage proof."""
+    if len(text.encode("utf-8")) > 65536:
+        raise RuntimeError("native display discovery exceeds its report bound")
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        key, delimiter, value = line.partition("=")
+        if not delimiter or key in fields:
+            raise RuntimeError("native display discovery is malformed or duplicated")
+        fields[key] = value
+    base = {
+        "lock_resource",
+        "layout",
+        "observed_at_unix_ms",
+        "valid_for_ms",
+        "execution_authority",
+    }
+    if (
+        fields.get("lock_resource") != lock
+        or fields.get("execution_authority") != "none"
+        or not fields.get("layout", "").startswith(topology_prefix)
+    ):
+        raise RuntimeError("native display discovery does not bind the real login")
+    for key in ("observed_at_unix_ms", "valid_for_ms"):
+        if re.fullmatch(r"[1-9][0-9]{0,18}", fields.get(key, "")) is None:
+            raise RuntimeError(
+                "native display discovery original freshness is malformed"
+            )
+    sampled = int(fields["observed_at_unix_ms"])
+    validity = int(fields["valid_for_ms"])
+    if not 0 <= now_ms - sampled < validity <= 2000:
+        raise RuntimeError("native display discovery is stale or future")
+    count, remainder = divmod(len(fields) - len(base), 5)
+    if remainder or not 1 <= count <= 16:
+        raise RuntimeError("native display discovery inventory is incomplete")
+    expected = base | {
+        f"output.{index}.{key}"
+        for index in range(count)
+        for key in ("handle", "generation", "can_disable", "powered", "modes")
+    }
+    if set(fields) != expected:
+        raise RuntimeError("native display discovery inventory is incomplete")
+    for index in range(count):
+        if (
+            not fields[f"output.{index}.modes"]
+            or fields[f"output.{index}.can_disable"] not in {"true", "false"}
+            or fields[f"output.{index}.powered"] not in {"true", "false"}
+        ):
+            raise RuntimeError("native display discovery capabilities are missing")
 
 
 def validate_session(facts: dict[str, str], uid: int, leader: int) -> None:
@@ -348,6 +455,8 @@ def inspect() -> dict[str, object]:
         "/usr/bin/Hyprland"
     ):
         raise RuntimeError("the real compositor is not the service's executing leader")
+    native_display_candidate = provision.inspect_display_candidate(leader)
+    native_secure_entry = inspect_native_compositor_entry(leader, uid)
     deadline = time.monotonic() + 20
     facts: dict[str, str] | None = None
     while time.monotonic() < deadline:
@@ -440,11 +549,27 @@ def inspect() -> dict[str, object]:
     # A cold boot has no provisioning-time daemon; attest its fresh supervised
     # identity after that normal activation, before accepting any bootstrap.
     native_polkit = inspect_native_polkit()
+    # Execute the real public no-model discovery client against the exact built
+    # compositor. This is a read-only bootstrap assertion, not S21 execution,
+    # restoration, hotplug, physical visibility or secure-coverage acceptance.
+    discovery = command(
+        "runuser", "-u", "linura", "--", "/usr/bin/linuractl", "own-display-snapshot"
+    )
+    validate_display_discovery(
+        discovery,
+        lock.removeprefix("resource="),
+        f"LNDL:1;display:topology:{boot}:{uid}:{facts['Id']}:{facts['TimestampMonotonic']}:{facts['Seat']}:",
+        time.time_ns() // 1_000_000,
+    )
+    native_loader_refusal = inspect_native_egl_override_refusal(leader)
     return {
         "schema_version": 1,
         "claim": "native-session-bootstrap-only",
         "session": facts,
         "compositor_pid": leader,
+        "native_display_compositor_build": native_display_candidate,
+        "native_compositor_secure_entry": native_secure_entry,
+        "native_compositor_loader_refusal": native_loader_refusal,
         "native_owner_pid": owner_pid,
         "native_polkit_supervision": native_polkit,
         "lock_resource": lock.removeprefix("resource="),
@@ -455,6 +580,73 @@ def inspect() -> dict[str, object]:
         "native_authentication_qualified": False,
         "s17_complete": False,
         "release_support_promotion": False,
+    }
+
+
+def inspect_native_egl_override_refusal(leader: int) -> dict[str, object]:
+    unit = "/etc/systemd/system/linura-s17-session.service"
+    fixture = ROOT / "fixtures/linura-s17-session.service"
+    if bounded_asset(Path(unit)) != bounded_asset(fixture):
+        raise RuntimeError("native compositor loader fixture differs from exact source")
+    expected = b"Environment=__EGL_VENDOR_LIBRARY_FILENAMES=/usr/lib/linura/qualification/linura-s21-egl-vendor.json\n"
+    if expected not in bounded_asset(fixture):
+        raise RuntimeError("native compositor loader attack input is absent")
+
+    def service():
+        values = properties(
+            "/usr/bin/systemctl",
+            "show",
+            "linura-s17-session.service",
+            "--property=MainPID,InvocationID,ActiveState,SubState",
+            "--no-pager",
+        )
+        if (
+            set(values) != {"MainPID", "InvocationID", "ActiveState", "SubState"}
+            or values["MainPID"] != str(leader)
+            or values["ActiveState"] != "active"
+            or values["SubState"] != "running"
+            or re.fullmatch(r"[0-9a-f]{32}", values["InvocationID"]) is None
+            or values["InvocationID"] == "0" * 32
+        ):
+            raise RuntimeError(
+                "native compositor loader service identity is unavailable"
+            )
+        return values
+
+    before = service()
+    journal = [
+        "/usr/bin/journalctl",
+        "--no-pager",
+        "--quiet",
+        "--output=cat",
+        "-n",
+        "1",
+        "_SYSTEMD_INVOCATION_ID=" + before["InvocationID"],
+    ]
+    # Require an actual journal for this invocation before interpreting absence
+    # of the fixed constructor marker. Never retain arbitrary native log text.
+    if not command(*journal):
+        raise RuntimeError("native compositor loader journal is unavailable")
+    result = subprocess.run(
+        journal + ["--grep=^linura-loader-canary:loaded$"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=5,
+    )
+    if (
+        result.returncode not in {0, 1}
+        or result.stdout
+        or result.stderr
+        or service() != before
+    ):
+        raise RuntimeError(
+            "native compositor loaded the EGL canary or lost journal continuity"
+        )
+    return {
+        "egl_vendor_override_refused": True,
+        "compositor_invocation": before["InvocationID"],
     }
 
 

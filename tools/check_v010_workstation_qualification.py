@@ -413,6 +413,72 @@ EXPECTED_Q11_CASE_OBSERVATIONS = {
         "restart-reobservation-verified",
     ],
     "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
+    "s21-display-keep": [
+        "two-physical-outputs-identified",
+        "fresh-managed-plan-and-approval",
+        "new-layout-submitted-to-pinned-compositor",
+        "every-output-kms-and-first-frame-independently-verified",
+        "protected-keep-confirmed-before-deadline",
+        "kept-intent-graph-and-provenance-committed",
+        "released-current-independently-verified",
+    ],
+    "s21-display-revert": [
+        "two-physical-outputs-identified",
+        "fresh-managed-plan-and-approval",
+        "changed-layout-independently-observed",
+        "protected-explicit-revert-requested",
+        "every-baseline-output-independently-restored",
+        "unconfirmed-intent-not-committed",
+        "released-current-independently-verified",
+    ],
+    "s21-display-expiry": [
+        "two-physical-outputs-identified",
+        "changed-layout-independently-observed",
+        "boottime-confirmation-deadline-expired",
+        "no-keep-or-late-confirmation-accepted",
+        "every-baseline-output-independently-restored",
+        "unconfirmed-intent-not-committed",
+        "recovery-remains-blocked-until-independent-completion",
+    ],
+    "s21-display-hotplug": [
+        "two-physical-outputs-identified",
+        "physical-disconnect-and-reconnect-executed",
+        "pending-and-retained-output-generations-invalidated",
+        "new-output-covered-before-sensitive-content",
+        "missing-output-never-counted-as-restored",
+        "stale-topology-and-output-identity-refused",
+        "fresh-recovery-postconditions-independently-verified",
+    ],
+    "s21-display-lock-power": [
+        "two-physical-outputs-identified",
+        "lock-transition-during-display-mutation-executed",
+        "all-active-outputs-covered-before-lock-acceptance",
+        "stale-owner-session-and-input-refused",
+        "pending-display-inhibits-suspend-before-kernel",
+        "physical-power-transition-executed",
+        "resume-requires-fresh-native-evidence",
+        "no-approval-or-effect-replay",
+    ],
+    "s21-display-compositor-replacement": [
+        "two-physical-outputs-identified",
+        "compositor-and-root-loss-boundaries-injected",
+        "lost-ack-never-replayed",
+        "new-invocation-inventory-independently-observed",
+        "kept-intent-preserves-semantic-provenance",
+        "new-plan-approval-prepare-and-protection-required",
+        "historical-records-never-reconstruct-live-authority",
+        "replacement-postconditions-independently-verified",
+    ],
+    "s21-display-retirement": [
+        "two-physical-outputs-identified",
+        "complete-shared-reference-closure-verified",
+        "active-shared-and-ambiguous-owners-refuse-retirement",
+        "new-live-lifetime-independently-completed-before-detachment",
+        "complete-authenticated-ancestry-archived-before-unlink",
+        "crash-and-storage-fault-boundaries-injected",
+        "bounded-cleanup-preserves-spent-state-and-provenance",
+        "interrupted-cleanup-cannot-replay-or-recreate-authority",
+    ],
 }
 EXPECTED_INTERACTIVE_WORKSTATION = {
     "evidence_manifest": "qualification/v010/interactive-workstation-evidence.json",
@@ -448,6 +514,13 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
         "provider-runtime-identities",
         "session-audio-transient-effect",
         "restart-recovery",
+        "s21-display-keep",
+        "s21-display-revert",
+        "s21-display-expiry",
+        "s21-display-hotplug",
+        "s21-display-lock-power",
+        "s21-display-compositor-replacement",
+        "s21-display-retirement",
     ],
 }
 EXPECTED_Q11_EXECUTION_MECHANISMS = {
@@ -460,6 +533,13 @@ EXPECTED_Q11_EXECUTION_MECHANISMS = {
     "provider-runtime-identities": "physical-provider-observation",
     "session-audio-transient-effect": "physical-session-audio-effect",
     "restart-recovery": "physical-restart-observation",
+    "s21-display-keep": "physical-managed-display-effect",
+    "s21-display-revert": "physical-managed-display-effect",
+    "s21-display-expiry": "physical-managed-display-effect",
+    "s21-display-hotplug": "physical-managed-display-effect",
+    "s21-display-lock-power": "physical-managed-display-effect",
+    "s21-display-compositor-replacement": "physical-managed-display-effect",
+    "s21-display-retirement": "physical-managed-display-effect",
 }
 EXPECTED_Q11_AUDIO_OPERATION_ID = "operation:audio.output.set-session-volume"
 EXPECTED_Q11_AUDIO_TRANSPORT = "org.linura.Session1"
@@ -721,7 +801,7 @@ PNG_UNSUPPORTED_COLOR_CHUNKS = {
 }
 VISUAL_MAX_BASELINES = 128
 ARCHIVE_RE = re.compile(
-    r"^https://archive\.archlinux\.org/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
+    r"^https://umea\.archive\.pkgbuild\.com/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
 )
 
 
@@ -2131,9 +2211,9 @@ def _validate_interactive_workstation_evidence(
                 "interactive workstation GPU identity must include vendor/device/driver/version"
             )
         displays = hardware.get("displays")
-        if not isinstance(displays, list) or not displays or len(displays) > 16:
+        if not isinstance(displays, list) or len(displays) < 2 or len(displays) > 16:
             failures.append(
-                "interactive workstation evidence requires 1..16 identified displays"
+                "interactive workstation evidence requires 2..16 identified displays for S21"
             )
         else:
             for index, display in enumerate(displays):
@@ -4359,7 +4439,7 @@ def validate(
             parsed_url = urlparse(repository_url)
             if (
                 parsed_url.scheme != "https"
-                or parsed_url.netloc != "archive.archlinux.org"
+                or parsed_url.netloc != "umea.archive.pkgbuild.com"
             ):
                 failures.append(
                     "substrate.repository_url must use the official Arch Linux Archive over HTTPS"

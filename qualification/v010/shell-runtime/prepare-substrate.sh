@@ -56,10 +56,23 @@ if (
     or len(set(packages)) != len(packages)
 ):
     raise SystemExit("unsafe substrate package declaration")
-print("\t".join((urls[0], urls[1], str(disk), " ".join(packages))))
+verifier = contract.get("build_dependency_verifier", "-")
+if verifier != "-" and (
+    verifier != "tools/hyprland_display_environment.py"
+    or contract.get("id") != "qualification/s21-hyprland-build-substrate"
+):
+    raise SystemExit("unsupported substrate build dependency verifier")
+input_verifier = contract.get("archive_input_verifier")
+input_contract = contract.get("archive_input_contract")
+if (
+    input_verifier != "tools/arch_qualification_package_inputs.py"
+    or input_contract != "contracts/s21-hyprland-build-environment.toml"
+):
+    raise SystemExit("unsupported pinned archive input source")
+print("\t".join((urls[0], urls[1], str(disk), " ".join(packages), verifier, input_verifier, input_contract)))
 PY
 )" || fail "substrate contract rejected before data loading"
-IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES <<<"$contract_values"
+IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES BUILD_DEPENDENCY_VERIFIER ARCHIVE_INPUT_VERIFIER ARCHIVE_INPUT_CONTRACT <<<"$contract_values"
 : "${BASE_IMAGE_URL_CONTRACT:?}" "${ARCH_ARCHIVE_URL_CONTRACT:?}" "${QUALIFICATION_DISK_GIB_CONTRACT:?}" "${RUNTIME_PACKAGES:?}"
 
 : "${BASE_IMAGE_URL:?}"
@@ -68,6 +81,14 @@ IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATIO
 
 [[ "$BASE_IMAGE_URL" == "$BASE_IMAGE_URL_CONTRACT" ]] || fail "base image URL drifted from substrate contract"
 [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "base image digest is malformed"
+python3 -I -S - "$contract_path" "$BASE_IMAGE_SHA256" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+contract = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if "base_image_sha256" in contract and contract["base_image_sha256"] != sys.argv[2]:
+    raise SystemExit("base image digest differs from the pinned build contract")
+PY
 printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
 [[ "$QUALIFICATION_DISK_GIB_CONTRACT" =~ ^[0-9]+$ ]] || fail "substrate disk size is invalid"
 
@@ -150,8 +171,19 @@ EOF
 cloud-localds --network-config="$network_config" "$seed_image" "$user_data" "$meta_data"
 
 vm_pid=""
+package_cache_pid=""
+package_cache_tunnel_pid=""
 cleanup() {
     set +e
+    if [[ -n "$package_cache_tunnel_pid" ]]; then
+        kill "$package_cache_tunnel_pid" 2>/dev/null || true
+        wait "$package_cache_tunnel_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$package_cache_pid" ]]; then
+        kill -- "-$package_cache_pid" 2>/dev/null || true
+        kill "$package_cache_pid" 2>/dev/null || true
+        wait "$package_cache_pid" 2>/dev/null || true
+    fi
     if [[ -n "$vm_pid" ]] && kill -0 "$vm_pid" 2>/dev/null; then
         kill "$vm_pid" 2>/dev/null || true
         wait "$vm_pid" 2>/dev/null || true
@@ -164,6 +196,7 @@ bash qualification/v010/shell-runtime/start-vm.sh \
     --persistent \
     --mode automated \
     --display none \
+    --acceleration "${VM_ACCELERATION:-tcg}" \
     --image "$guest_image" \
     --seed "$seed_image" \
     --memory 6144 \
@@ -203,11 +236,67 @@ ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'timeout 240 cloud-init status -
 ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
     "printf '%s\n' 'Server = $ARCH_ARCHIVE_URL_CONTRACT' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
 
+if [[ "$BUILD_DEPENDENCY_VERIFIER" != - ]]; then
+    python3 "$BUILD_DEPENDENCY_VERIFIER" --contract "$contract_path" \
+        --ssh-key "$ssh_key" --phase repositories
+    # The S21 verifier has acquired, hash-checked and read back both pinned
+    # databases. Refreshing again would add network work and replace those
+    # already verified dependency-resolution inputs. Native package signature
+    # checks and the complete post-install SDK verification remain unchanged.
+    pacman_sync=-Su
+else
+    pacman_sync=-Syu
+fi
+
+python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
+    --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase acquire
+
+# libalpm keeps dependency resolution and native verification. The temporary
+# cache serves only complete hash-pinned packages selected by those same pinned
+# databases, fetching their official per-package URLs instead of dated redirects.
+python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
+    --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase serve \
+    >"$work_root/package-cache.log" 2>&1 &
+package_cache_pid="$!"
+cache_ready_deadline=$((SECONDS + 30))
+while [[ ! -f "$work_root/archive-package-inputs/cache-port" ]] && ((SECONDS < cache_ready_deadline)); do
+    if ! kill -0 "$package_cache_pid" 2>/dev/null; then
+        tail -n 20 -- "$work_root/package-cache.log" >&2
+        fail "pinned package cache exited before readiness"
+    fi
+    sleep 1
+done
+[[ -f "$work_root/archive-package-inputs/cache-port" ]] || fail "pinned package cache readiness exceeded"
+read -r package_cache_port <"$work_root/archive-package-inputs/cache-port"
+[[ "$package_cache_port" =~ ^[1-9][0-9]{0,4}$ ]] && ((package_cache_port >= 1024 && package_cache_port <= 65535)) || fail "invalid pinned package cache port"
+ssh -F /dev/null "${ssh_common[@]}" -o ExitOnForwardFailure=yes -p 2223 \
+    -N -R "127.0.0.1:2290:127.0.0.1:$package_cache_port" linura@127.0.0.1 \
+    >"$work_root/package-cache-tunnel.log" 2>&1 &
+package_cache_tunnel_pid="$!"
+cache_ready=0
+cache_ready_deadline=$((SECONDS + 30))
+while ((SECONDS < cache_ready_deadline)); do
+    kill -0 "$package_cache_pid" 2>/dev/null && kill -0 "$package_cache_tunnel_pid" 2>/dev/null || fail "pinned package cache transport exited"
+    if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+        'test "$(curl --fail --silent --max-time 3 http://127.0.0.1:2290/health)" = ready'; then
+        cache_ready=1
+        break
+    fi
+    sleep 1
+done
+[[ "$cache_ready" -eq 1 ]] || fail "pinned package cache transport readiness exceeded"
+ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+    "printf '%s\\n' 'CacheServer = http://127.0.0.1:2290' 'Server = $ARCH_ARCHIVE_URL_CONTRACT' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
+
 install_succeeded=0
 for attempt in 1 2 3; do
+    # Rehash host inputs, verify their guest copies/signatures and read back the
+    # package cache before EVERY attempt, including after cache fault cleanup.
+    python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
+        --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase stage
     echo "prepared substrate package install attempt $attempt/3"
     if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
-        "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman -Syu --noconfirm --needed --disable-download-timeout -- $RUNTIME_PACKAGES"; then
+        "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman $pacman_sync --noconfirm --needed --disable-download-timeout -- $RUNTIME_PACKAGES"; then
         install_succeeded=1
         break
     fi
@@ -218,6 +307,23 @@ for attempt in 1 2 3; do
     fi
 done
 [[ "$install_succeeded" -eq 1 ]] || fail "prepared substrate package installation failed after 3 bounded attempts"
+
+# No cache transport configuration enters the sanitized prepared image.
+ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+    "printf '%s\\n' 'Server = $ARCH_ARCHIVE_URL_CONTRACT' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
+ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+    "test \"\$(cat /etc/pacman.d/mirrorlist)\" = 'Server = $ARCH_ARCHIVE_URL_CONTRACT'"
+kill "$package_cache_tunnel_pid"
+wait "$package_cache_tunnel_pid" || true
+package_cache_tunnel_pid=""
+kill -- "-$package_cache_pid"
+wait "$package_cache_pid" || true
+package_cache_pid=""
+
+if [[ "$BUILD_DEPENDENCY_VERIFIER" != - ]]; then
+    python3 "$BUILD_DEPENDENCY_VERIFIER" --contract "$contract_path" \
+        --ssh-key "$ssh_key" --phase dependencies
+fi
 
 ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
     'pacman -Q' | LC_ALL=C sort >"$package_manifest"
@@ -268,6 +374,7 @@ builder_sha256="$(sha256sum qualification/v010/shell-runtime/prepare-substrate.s
 } >"$builder_evidence"
 
 python3 - "$output_manifest" "$contract_path" "$package_manifest" "$prepared_sha256" "$contract_sha256" "$builder_sha256" <<'PY'
+import hashlib
 import json
 import os
 import pathlib
@@ -305,6 +412,15 @@ evidence = {
     "qualification_evidence": False,
     "release_support_promotion": False,
 }
+if verifier := contract.get("build_dependency_verifier"):
+    evidence["build_dependency_verifier_sha256"] = hashlib.sha256(
+        pathlib.Path(verifier).read_bytes()
+    ).hexdigest()
+for name in ("archive_input_verifier", "archive_input_contract"):
+    evidence[name + "_sha256"] = hashlib.sha256(pathlib.Path(contract[name]).read_bytes()).hexdigest()
+evidence["archive_input_environment_sha256"] = hashlib.sha256(
+    pathlib.Path("tools/hyprland_display_environment.py").read_bytes()
+).hexdigest()
 output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 

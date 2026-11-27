@@ -203,8 +203,8 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             ),
             (
                 ".github/workflows/v010-shell-runtime-qualification.yml",
-                "[[ -c /dev/kvm ]]",
-                "true # unverified accelerator",
+                '[[ "$VM_ACCELERATION" == kvm ]]\n          [[ -c /dev/kvm ]]',
+                '[[ "$VM_ACCELERATION" == kvm ]]\n          true # unverified accelerator',
                 "[[ -c /dev/kvm ]]",
             ),
             (
@@ -234,6 +234,42 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                     result = self._run(root)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(expected, result.stderr)
+
+    def test_substrate_builder_requires_its_own_private_kvm_readiness(self):
+        relative = ".github/workflows/v010-shell-runtime-qualification.yml"
+        source = (ROOT / relative).read_text()
+        start = source.index("      - name: Verify substrate builder KVM access")
+        end = source.index(
+            "      - name: Restore official Arch base-image cache", start
+        )
+        step = source[start:end]
+        for marker in (
+            "if: steps.prepared-substrate.outputs.cache-hit != 'true'",
+            '[[ "$VM_ACCELERATION" == kvm ]]',
+            "[[ -c /dev/kvm ]]",
+            'sudo chown "$(id -u):$(id -g)" /dev/kvm',
+            "sudo chmod 0600 /dev/kvm",
+            'test "$(stat -c \'%u:%g:%a:%F\' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"',
+            "[[ -r /dev/kvm && -w /dev/kvm ]]",
+            step,
+        ):
+            with (
+                self.subTest(marker=marker),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                self._copy_fixture(root)
+                (root / relative).write_text(
+                    source[:start]
+                    + step.replace(marker, "true # unverified readiness", 1)
+                    + source[end:]
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "substrate builder requires verified private KVM access",
+                    result.stderr,
+                )
 
     def test_required_qualification_scripts_retain_executable_modes(self) -> None:
         # The shell runtime calls the recorder directly; losing the Git execute
@@ -322,7 +358,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = workflow.read_text(encoding="utf-8")
-            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}"
+            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py') }}"
             self.assertGreaterEqual(text.count(marker), 2)
             workflow.write_text(
                 text.replace(marker, "key: linura-v010-prepared-v1-unbound", 1),
@@ -338,7 +374,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = workflow.read_text(encoding="utf-8")
-            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}"
+            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py') }}"
             index = text.rfind(marker)
             self.assertGreaterEqual(index, 0)
             workflow.write_text(
@@ -350,6 +386,43 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("prepared runtime cache key must bind", result.stderr)
+
+    def test_each_prepared_cache_identity_requires_both_archive_input_sources(
+        self,
+    ) -> None:
+        for input_path in (
+            "tools/arch_qualification_package_inputs.py",
+            "contracts/s21-hyprland-build-environment.toml",
+            "tools/hyprland_display_environment.py",
+        ):
+            for cache_index in (0, 1):
+                with self.subTest(input_path=input_path, cache_index=cache_index):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        root = Path(temp_dir)
+                        self._copy_fixture(root)
+                        workflow = (
+                            root
+                            / ".github/workflows/v010-shell-runtime-qualification.yml"
+                        )
+                        text = workflow.read_text(encoding="utf-8")
+                        lines = text.splitlines(keepends=True)
+                        cache_lines = [
+                            i
+                            for i, line in enumerate(lines)
+                            if "key: linura-v010-prepared-v1-" in line
+                        ]
+                        self.assertEqual(len(cache_lines), 2)
+                        index = cache_lines[cache_index]
+                        self.assertIn(", '" + input_path + "'", lines[index])
+                        lines[index] = lines[index].replace(
+                            ", '" + input_path + "'", "", 1
+                        )
+                        workflow.write_text("".join(lines), encoding="utf-8")
+                        result = self._run(root)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(
+                            "prepared runtime cache key must bind", result.stderr
+                        )
 
     def test_builder_cached_base_image_must_still_be_digest_verified(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -539,10 +612,10 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
             text = builder.read_text(encoding="utf-8")
-            marker = "pacman -Syu"
+            marker = "pacman_sync=-Syu"
             self.assertIn(marker, text)
             builder.write_text(
-                text.replace(marker, "pacman -S", 1),
+                text.replace(marker, "pacman_sync=-S", 1),
                 encoding="utf-8",
             )
             result = self._run(root)
@@ -551,6 +624,31 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                 "prepared substrate builder missing fail-closed invariant",
                 result.stderr,
             )
+
+    def test_sdk_requires_pinned_repository_preflight_and_no_second_refresh(
+        self,
+    ) -> None:
+        for old, new in (
+            (
+                '--ssh-key "$ssh_key" --phase repositories',
+                '--ssh-key "$ssh_key" --phase dependencies',
+            ),
+            ("pacman_sync=-Su\n", "pacman_sync=-Syu\n"),
+            ("pacman $pacman_sync --noconfirm", "pacman -Syu --noconfirm"),
+        ):
+            with self.subTest(old=old), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+                text = builder.read_text(encoding="utf-8")
+                self.assertIn(old, text)
+                builder.write_text(text.replace(old, new, 1), encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "prepared substrate builder missing fail-closed invariant",
+                    result.stderr,
+                )
 
     def test_prepared_substrate_package_targets_require_option_terminator(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2016,9 +2114,14 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             path = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = path.read_text(encoding="utf-8")
-            marker = "-attempt-${{ github.run_attempt }}"
+            marker = "artifact-name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}"
             self.assertIn(marker, text)
-            path.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            path.write_text(
+                text.replace(
+                    marker, marker.replace("-attempt-${{ github.run_attempt }}", ""), 1
+                ),
+                encoding="utf-8",
+            )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("native tray evidence gate", result.stderr)

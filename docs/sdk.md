@@ -6,6 +6,38 @@ authorize an unlock, repeat a power action or assert current native coverage.
 
 `linura-sdk` is the public, non-privileged Rust façade for Linura clients and integrations.
 
+`LocalAuthorityClient::own_display_snapshot()` and `linuractl own-display-snapshot`
+query the authenticated caller's current native topology, lock-owner generation,
+complete layout, exact advertised mode tuples, disable capabilities and power
+facts. The Experimental `DisplaySnapshot` report preserves the original native
+acquisition time and earliest contributing expiry, at most two seconds. Control
+combines one bounded native owner probe and an independent active/local logind
+probe without caching, retries or partial results. No UID, session, output target
+or principal is supplied by the client. Wrong-owner, stale, replaced-session,
+unsupported or inconsistent evidence fails the query. A report can show all
+outputs powered off; it does not prove visibility, protected lock coverage or
+safe mutation. It cannot authorize execution; every effect re-observes in Control.
+
+The Experimental display mutation client provides `DisplayLayoutRequest`,
+`DisplayLayoutReceipt` and `DisplayLayoutState` through `LocalAuthorityClient`.
+`begin_display_layout`, `display_layout_status`, `confirm_display_layout` and
+`revert_display_layout` use the same Authority1 contract. The CLI test-client
+commands are `begin-display-layout <operation-id> <canonical-intent> <reason>` and
+`display-layout-status|confirm-display-layout|revert-display-layout <request-id>`.
+They require the local authority and no model. There is no automatic effect
+retry, executor handle, approval assertion or client-selected principal.
+The begin material is a bounded complete `LNDI:1` intent, not a command string.
+Receipts report the explicit lifecycle state and original deadline; they never
+report a pending attempt as completion or history as current native layout.
+Production `display_layout_status` observes only exact retained requests owned
+by the authenticated caller. Its original dispatch scope comes from validated
+durable history, including after adapter restart; it cannot apply or continue a
+layout. An unknown request is an error, never an invitation to recreate it.
+The current production authority composition refuses these display mutations
+until its complete prepared native admission and recovery ports are connected
+and qualified. These client/transport contracts alone are not usable production
+display management or completion of S21-2. Full display UI remains S21-6.
+
 ## Purpose
 
 Applications should not need to depend directly on internal authority, provider or executor crates merely to understand Linura's system model. The SDK therefore re-exports the stable client-facing concepts required to inspect and request Linura state:

@@ -194,7 +194,7 @@ kind = "file"
 [[profile]]
 id = "v06-managed-lifecycle"
 lane_id = "v06-managed-lifecycle"
-verifier_adapter = "v06-managed-lifecycle-semantic-v1"
+verifier_adapter = "v06-managed-lifecycle-semantic-v2"
 test_ids = ["qualification/v0.6/managed-lifecycle/result-v1"]
 contract_ids = ["qualification/v0.6/managed-lifecycle/v1"]
 verification_class = "deterministic-machine"
@@ -220,6 +220,10 @@ kind = "file"
 [[profile.artifact]]
 role = "legacy_fault_matrix_transcript"
 filename = "v06-legacy-matrix.log"
+kind = "file"
+[[profile.artifact]]
+role = "concurrent_fault_matrix_transcript"
+filename = "v06-concurrent-matrix.log"
 kind = "file"
 [[profile.artifact]]
 role = "native_session_boundary_transcript"

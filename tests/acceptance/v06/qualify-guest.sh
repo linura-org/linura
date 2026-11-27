@@ -78,6 +78,68 @@ expect_failure() {
     printf '%s-output=%q\n' "$label" "$output"
 }
 
+# Type=dbus owns the bus name before its object server necessarily exposes
+# the complete interface. Verify the real method surface, not just name
+# ownership or systemctl active. A replaced owner, unsupported interface or
+# unhealthy unit is a hard failure; only transient startup non-responsiveness
+# can be re-observed. This never turns a timeout into acceptance.
+require_live_contract() {
+    local service="$1" path="$2" interface="$3" method="$4" unit="$5"
+    local owner observed reply attempt
+    owner="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus GetNameOwner s "$service")"
+    [[ -n "$owner" ]] || {
+        echo "missing initial D-Bus owner: $service" >&2
+        return 1
+    }
+    for attempt in {1..8}; do
+        if ! sudo -n systemctl is-active --quiet "$unit"; then
+            printf 'D-Bus service stopped before contract readiness: %s\n' "$unit" >&2
+            return 1
+        fi
+        observed="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus GetNameOwner s "$service")" || return 1
+        if [[ "$observed" != "$owner" ]]; then
+            printf 'D-Bus owner changed during contract readiness: %s\n' "$service" >&2
+            return 1
+        fi
+        if reply="$(busctl --system --timeout=3s introspect \
+            "$service" "$path" "$interface" 2>&1)"; then
+            if ! grep -Fq "$method" <<<"$reply"; then
+                printf 'D-Bus interface lacks required method: %s.%s\n' \
+                    "$interface" "$method" >&2
+                return 1
+            fi
+            observed="$(busctl --system call org.freedesktop.DBus /org/freedesktop/DBus \
+                org.freedesktop.DBus GetNameOwner s "$service")" || return 1
+            if [[ "$observed" != "$owner" ]]; then
+                printf 'D-Bus owner changed after contract proof: %s\n' "$service" >&2
+                return 1
+            fi
+            printf 'live-contract-ready service=%s owner=%s attempt=%s\n' \
+                "$service" "$owner" "$attempt" >&2
+            printf '%s\n' "$reply"
+            return 0
+        fi
+        case "$reply" in
+            *"Connection timed out"* | *"Unknown object"* | *"UnknownObject"*)
+                printf 'D-Bus contract not yet responsive service=%s attempt=%s: %s\n' \
+                    "$service" "$attempt" "$reply" >&2
+                ;;
+            *)
+                printf 'D-Bus contract failed unexpectedly service=%s: %s\n' \
+                    "$service" "$reply" >&2
+                return 1
+                ;;
+        esac
+        if [[ "$attempt" -lt 8 ]]; then
+            sleep 0.2
+        fi
+    done
+    printf 'D-Bus contract never became responsive: %s\n' "$service" >&2
+    return 1
+}
+
 stage install-assets
 if ! id -u linura-authority >/dev/null 2>&1; then
     sudo -n useradd --system --no-create-home --home-dir /var/lib/linura-authority --shell /usr/sbin/nologin linura-authority
@@ -106,7 +168,7 @@ sudo -n truncate -s 0 "$dispatch_log"
 stage activate-system-integration
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart polkit.service
-sudo -n dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig
+sudo -n dbus-send --system --print-reply --reply-timeout=5000 --type=method_call --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig
 sudo -n systemctl stop "$unit" "$notsatisfied_unit" || true
 sudo -n systemctl start linura-executor-systemd.service
 sudo -n systemctl start linura-authorityd.service
@@ -115,8 +177,10 @@ sudo -n systemctl is-active --quiet linura-authorityd.service
 test -x /usr/bin/pkcheck
 
 stage live-contract-introspection
-authority_intro="$(busctl --system introspect "$authority_dest" "$authority_path" "$authority_iface")"
-executor_intro="$(busctl --system introspect "$executor_dest" "$executor_path" "$executor_iface")"
+authority_intro="$(require_live_contract "$authority_dest" "$authority_path" \
+    "$authority_iface" ConvergeSystemdActiveState linura-authorityd.service)"
+executor_intro="$(require_live_contract "$executor_dest" "$executor_path" \
+    "$executor_iface" SetManagedActiveState linura-executor-systemd.service)"
 grep -F 'ConvergeSystemdActiveState' <<<"$authority_intro"
 grep -F 'SetManagedActiveState' <<<"$executor_intro"
 echo "live-contracts=present"
@@ -254,9 +318,18 @@ printf 'sqlite-integrity=%s\n' "$integrity"
 sudo -n sqlite3 /var/lib/linura-authority/authority.sqlite3 '.tables'
 
 stage deterministic-fault-matrix-inside-disposable-guest
+# Retain all 49 inherited cases plus twenty-eight S21 controller/SQLite cases.
+# Their simulated native labels do not qualify actual display execution.
 /usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log
-grep -F 'test result: ok. 49 passed; 0 failed; 0 ignored;' /tmp/v06-matrix.log
-/usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture --skip s17_managed_ 2>&1 | tee /tmp/v06-legacy-matrix.log
+grep -F 'test result: ok. 78 passed; 0 failed; 0 ignored;' /tmp/v06-matrix.log
+# Independently require concurrency under the same qualified VM resources and
+# strict evidence windows. Capture per-test output so successful test diagnostics
+# cannot interleave with libtest's complete case-result lines.
+stage concurrent-fault-matrix-inside-disposable-guest
+/usr/libexec/linura/v06-qualification-matrix --test-threads=2 2>&1 | tee /tmp/v06-concurrent-matrix.log
+grep -F 'test result: ok. 78 passed; 0 failed; 0 ignored;' /tmp/v06-concurrent-matrix.log
+# Independently retain the original eleven cases, excluding later domain suites.
+/usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_ 2>&1 | tee /tmp/v06-legacy-matrix.log
 grep -F 'test result: ok. 11 passed; 0 failed; 0 ignored;' /tmp/v06-legacy-matrix.log
 
 echo "real-authority1-success=qualified"
@@ -265,4 +338,5 @@ echo "real-direct-executor-denial=qualified"
 echo "real-idempotency=qualified"
 echo "real-verification-not-satisfied-explicit-recovery=qualified"
 echo "real-crash-restart-explicit-no-effect-recovery=qualified"
-echo "deterministic-fault-matrix=49/49"
+echo "deterministic-fault-matrix=78/78"
+echo "deterministic-concurrent-fault-matrix=78/78"

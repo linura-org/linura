@@ -17,6 +17,8 @@ constexpr std::string_view timeoutDiagnostic(NativeDeadline::Stage stage) noexce
         return "native-owner-timeout stage=runtime-initialization\n";
     case Stage::ApprovalArm:
         return "native-owner-timeout stage=approval-arm\n";
+    case Stage::DisplayDispatch:
+        return "native-owner-timeout stage=display-dispatch\n";
     case Stage::SleepEntry:
         return "native-owner-timeout stage=sleep-entry\n";
     case Stage::SleepRecovery:

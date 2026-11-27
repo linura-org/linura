@@ -21,7 +21,7 @@ runtime_disk_mode = "verified-private-disposable-persistent-copy"
 base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
 base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
 arch_archive_snapshot = "2026-09-16"
-arch_archive_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+arch_archive_url = "https://umea.archive.pkgbuild.com/repos/2026/09/16/$repo/os/$arch"
 runtime_root = "qualification/v010/shell-runtime"
 
 required_components = [

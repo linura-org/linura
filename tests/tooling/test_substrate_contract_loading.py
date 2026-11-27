@@ -21,6 +21,49 @@ def parser_source() -> str:
 
 
 class SubstrateContractLoadingTests(unittest.TestCase):
+    def test_substrate_launch_preserves_selected_acceleration_without_changing_resources(
+        self,
+    ):
+        script = BUILDER.read_text(encoding="utf-8")
+        launch = "bash qualification/v010/shell-runtime/start-vm.sh \\\n"
+        block = launch + script.split(launch, 1)[1].split('vm_pid="$!"', 1)[0]
+        for selected in (None, "kvm", "tcg"):
+            with (
+                self.subTest(selected=selected),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                arguments = root / "arguments"
+                env = {
+                    "PATH": os.defpath,
+                    "LAUNCH_ARGUMENTS": str(arguments),
+                    "vm_log": str(root / "vm.log"),
+                    "guest_image": str(root / "guest"),
+                    "seed_image": str(root / "seed"),
+                    "QUALIFICATION_NIC_MAC": "52:54:00:21:02:59",
+                }
+                if selected is not None:
+                    env["VM_ACCELERATION"] = selected
+                result = subprocess.run(
+                    ["/bin/bash", "--noprofile", "--norc", "-s"],
+                    input='set -euo pipefail\nbash() { printf "%s\\n" "$@" > "$LAUNCH_ARGUMENTS"; }\n'
+                    + block
+                    + "wait $!\n",
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = arguments.read_text().splitlines()
+                self.assertEqual(args.count("--acceleration"), 1)
+                self.assertEqual(
+                    args[args.index("--acceleration") + 1], selected or "tcg"
+                )
+                self.assertEqual(args[args.index("--memory") + 1], "6144")
+                self.assertEqual(args[args.index("--cpus") + 1], "4")
+                self.assertEqual(args[args.index("--display") + 1], "none")
+
     def run_loader(self, path: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, "-I", "-S", "-", str(path)],
@@ -41,11 +84,14 @@ class SubstrateContractLoadingTests(unittest.TestCase):
         lines = result.stdout.splitlines()
         self.assertEqual(len(lines), 1)
         fields = lines[0].split("\t")
-        self.assertEqual(len(fields), 4)
+        self.assertEqual(len(fields), 7)
         self.assertTrue(fields[0].startswith("https://"))
         self.assertIn("$repo/os/$arch", fields[1])
         self.assertEqual(fields[2], "16")
         self.assertIn("base-devel", fields[3].split())
+        self.assertEqual(fields[4], "-")
+        self.assertEqual(fields[5], "tools/arch_qualification_package_inputs.py")
+        self.assertEqual(fields[6], "contracts/s21-hyprland-build-environment.toml")
 
     def test_invalid_inputs_emit_no_shell_data(self) -> None:
         original = CONTRACT.read_text(encoding="utf-8")
@@ -56,8 +102,8 @@ class SubstrateContractLoadingTests(unittest.TestCase):
             ('"base-devel",', '"base-devel",\n  "base-devel",'),
             ('"base-devel",', '["malformed"],'),
             (
-                "https://archive.archlinux.org/repos/",
-                "https://archive.archlinux.org;evil/repos/",
+                "https://umea.archive.pkgbuild.com/repos/",
+                "https://umea.archive.pkgbuild.com;evil/repos/",
             ),
             (
                 "https://geo.mirror.pkgbuild.com/images/",
@@ -66,6 +112,14 @@ class SubstrateContractLoadingTests(unittest.TestCase):
             (
                 "arch_archive_url = ",
                 'arch_archive_url = "duplicated"\narch_archive_url = ',
+            ),
+            (
+                'archive_input_verifier = "tools/arch_qualification_package_inputs.py"',
+                'archive_input_verifier = "tools/untrusted.py"',
+            ),
+            (
+                'archive_input_contract = "contracts/s21-hyprland-build-environment.toml"',
+                'archive_input_contract = "../../untrusted.toml"',
             ),
             ("vm_disk_size_gib = 16", "vm_disk_size_gib = 0"),
         )
@@ -155,20 +209,38 @@ sudo() {
 pacman() { printf 'PACMAN_ARG:%s\n' "$@"; }
 export -f timeout sudo pacman
 ssh() { bash --noprofile --norc -c "${!#}"; }
+# This fixture exercises pacman's actual shell argument boundary. Staging is
+# independently exercised by the archive-input tests; it remains mandatory in
+# the extracted production loop and accepts only this fixed helper invocation.
+python3() {
+    [[ "$1" == tools/arch_qualification_package_inputs.py && "${!#}" == stage ]]
+}
+ARCHIVE_INPUT_VERIFIER=tools/arch_qualification_package_inputs.py
+ARCHIVE_INPUT_CONTRACT=contracts/s21-hyprland-build-environment.toml
+ssh_key=/private/fixture-key
+work_root=/private/fixture-work
 ssh_common=()
 install_succeeded=0
 """
         loaded = self.run_loader(CONTRACT)
         self.assertEqual(loaded.returncode, 0, loaded.stderr)
-        for packages in (
-            loaded.stdout.split("\t")[3].strip(),
-            "base-devel --disable-sandbox --ignore",
+        for sync, packages in (
+            (sync, packages)
+            for sync in ("-Syu", "-Su")
+            for packages in (
+                loaded.stdout.split("\t")[3].strip(),
+                "base-devel --disable-sandbox --ignore",
+            )
         ):
-            with self.subTest(packages=packages):
+            with self.subTest(sync=sync, packages=packages):
                 result = subprocess.run(
                     ["bash", "--noprofile", "--norc", "-s"],
                     input=harness + install,
-                    env={"PATH": os.defpath, "RUNTIME_PACKAGES": packages},
+                    env={
+                        "PATH": os.defpath,
+                        "RUNTIME_PACKAGES": packages,
+                        "pacman_sync": sync,
+                    },
                     capture_output=True,
                     text=True,
                     check=False,
@@ -183,7 +255,7 @@ install_succeeded=0
                 self.assertEqual(
                     arguments,
                     [
-                        "-Syu",
+                        sync,
                         "--noconfirm",
                         "--needed",
                         "--disable-download-timeout",

@@ -56,6 +56,10 @@ Route route(NativePeerPurpose purpose)
     case NativePeerPurpose::NativeAuthenticationDaemon:
         return {"org.freedesktop.PolicyKit1", "polkit.service",
                 "/usr/lib/systemd/system/polkit.service", "/usr/lib/polkit-1/polkitd"};
+    case NativePeerPurpose::DisplayProtection:
+        return {"org.linura.DisplayProtection1", "linura-display-protection.service",
+                "/usr/lib/systemd/system/linura-display-protection.service",
+                "/usr/lib/linura/linura-executor-session"};
     }
     return {};
 }
@@ -111,16 +115,20 @@ bool exactExecStart(NativePeerPurpose purpose, quint32 expectedPid, const QVaria
     const auto selected = route(purpose);
     if (!selected.image)
         return false;
-    const auto expectedArgv =
+    auto expectedArgv =
         purpose == NativePeerPurpose::NativeAuthenticationDaemon
             ? QStringList{QLatin1String(selected.image), QStringLiteral("--no-debug"),
                           QStringLiteral("--log-level=notice")}
             : QStringList{QLatin1String(selected.image)};
+    if (purpose == NativePeerPurpose::DisplayProtection)
+        expectedArgv.append(QStringLiteral("--display-protection"));
     return exactNativeExecStart(value, QLatin1String(selected.image), expectedArgv, expectedPid);
 }
 
 std::optional<quint32> localServiceUid(NativePeerPurpose purpose)
 {
+    if (purpose == NativePeerPurpose::DisplayProtection)
+        return 0;
     // The packaged sysusers account is local. Bounded local lookup avoids an
     // NSS/network backend selecting identity or stalling a native authority call.
     struct stat metadata
@@ -224,10 +232,10 @@ std::optional<NativePeerIdentity> bindNativeService(NativePeerPurpose purpose,
     const QUuid invocation(facts.invocation);
     if (invocation.isNull() || invocation.toString(QUuid::WithoutBraces) != facts.invocation)
         return std::nullopt;
-    const quint32 expected =
-        purpose == NativePeerPurpose::PreparedSessionDispatch ? 0 : expectedServiceUid;
-    if ((purpose != NativePeerPurpose::PreparedSessionDispatch && expectedServiceUid == 0) ||
-        facts.nativeUid != expected)
+    const bool rootService = purpose == NativePeerPurpose::PreparedSessionDispatch ||
+                             purpose == NativePeerPurpose::DisplayProtection;
+    const quint32 expected = rootService ? 0 : expectedServiceUid;
+    if ((!rootService && expectedServiceUid == 0) || facts.nativeUid != expected)
         return std::nullopt;
     return NativePeerIdentity{facts.sender, facts.nativeUid, facts.nativePid, facts.invocation};
 }

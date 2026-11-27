@@ -81,6 +81,19 @@ def assistive(phase):
     }
 
 
+def display_admission():
+    return {
+        "schema_version": 1,
+        "claim": "native-display-owner-admission-predicate-cases-only",
+        "native_owner_pid": 123,
+        "native_owner_uid": 1000,
+        "native_owner_invocation": LOCK.split(":")[6].replace("-", ""),
+        "checks": dict.fromkeys(sorted(runner.DISPLAY_ADMISSION_CHECKS), True),
+        "s21_2_complete": False,
+        "release_support_promotion": False,
+    }
+
+
 class FakeGuest:
     def __init__(self, fail_at=None):
         self.commands = []
@@ -108,8 +121,12 @@ class FakeGuest:
         if command.endswith("clear-response"):
             self.configured = False
         args = command.split()
+        if args[-1] == "own-session-lock":
+            return wire({"resource": LOCK})
         if command.startswith(runner.ASSISTIVE_COMMAND):
             return json.dumps(assistive(args[-1])).encode("ascii")
+        if command == runner.DISPLAY_ADMISSION_COMMAND:
+            return json.dumps(display_admission()).encode("ascii")
         if command.endswith("/usr/bin/hyprctl -i 0 -j monitors all"):
             monitors = [
                 {
@@ -668,7 +685,7 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
         report = runner.qualify(guest, Mock(), LOCK, SOURCE)
         self.assertTrue(all(report["checks"].values()))
         self.assertEqual(guest.maximum_failures, 2)
-        self.assertEqual(guest.authenticated_after_failure, 2)
+        self.assertEqual(guest.authenticated_after_failure, 3)
         self.assertFalse(any("faillock" in command for command in guest.commands))
 
     def test_native_cooldown_wait_tracks_the_production_failure_boundary(self):
@@ -997,13 +1014,15 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             for index, command in enumerate(guest.commands)
             if index > 0 and command == runner.ASSISTIVE_COMMAND + "locked"
         ][1:]  # The initial locked presentation is independently checked too.
-        self.assertEqual(len(returned_to_lock), 6)
+        self.assertEqual(len(returned_to_lock), 8)
         for command, expected in zip(
             returned_to_lock,
             (
                 "/usr/bin/hyprctl -i 0 -j monitors all",
                 "unlock-session s17-native-account-locked-",
                 "configure-protective-lock enable ",
+                "/usr/bin/hyprctl -i 0 -j monitors all",
+                "own-session-lock",
                 "configure-protective-lock revoke ",
                 "unlock-session s17-native-cancel-",
                 "unlock-session s17-native-incorrect-",
@@ -1031,7 +1050,7 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
         self.assertTrue(supplied[4] == response, "final unlock response differs")
         self.assertEqual(
             [call.args[0] for call in self.sleep.call_args_list],
-            [runner.NATIVE_DENIAL_SETTLE_SECONDS] * 3,
+            [runner.NATIVE_DENIAL_SETTLE_SECONDS] * 4,
         )
         self.assertGreater(runner.NATIVE_DENIAL_SETTLE_SECONDS, 5)
         self.assertIs(report["s17_complete"], False)
@@ -1051,6 +1070,12 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             },
         )
         self.assertEqual(set(report["assistive_probes"]), {"locked", "unlock-prompt"})
+        self.assertEqual(report["native_display_admission"], display_admission())
+        self.assertTrue(
+            report["checks"][
+                "native-display-owner-supervision-admitted-and-same-uid-denied"
+            ]
+        )
         self.assertEqual(
             report["compositor_output_context"]["during-hotplug"]["count"], 2
         )
@@ -1059,6 +1084,15 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             report["compositor_output_context"]["after-recovery"],
         )
         self.assertIsNone(guest.output_name)
+        self.assertTrue(
+            report["checks"][
+                "output-hotplug-cancels-protected-authentication-without-release"
+            ]
+        )
+        self.assertEqual(
+            report["compositor_output_context"]["authentication-after-hotplug"],
+            report["compositor_output_context"]["after-recovery"],
+        )
         runner.require_same_retained_effect(
             report["receipts"]["lock"], report["receipts"]["lock-recovery"]
         )

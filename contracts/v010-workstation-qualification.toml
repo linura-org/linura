@@ -93,7 +93,7 @@ snapshots = "snapper"
 state = "source-pinned-package-set-pending"
 source_kind = "arch-linux-archive"
 snapshot_date = "2026-09-16"
-repository_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+repository_url = "https://umea.archive.pkgbuild.com/repos/2026/09/16/$repo/os/$arch"
 architecture = "x86_64"
 required_packages_path = "packaging/arch/archiso/packages.linura"
 package_manifest_format = "linura-arch-package-manifest-v1"
@@ -129,7 +129,7 @@ require_interrupted_install_recovery = true
 require_physical_accessibility_visual_evidence = true
 require_retained_physical_visual_artifact = true
 required_provider_ids = ["networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit"]
-required_cases = ["bounded-installer-lane", "physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "accessibility-and-visual", "provider-runtime-identities", "session-audio-transient-effect", "restart-recovery"]
+required_cases = ["bounded-installer-lane", "physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "accessibility-and-visual", "provider-runtime-identities", "session-audio-transient-effect", "restart-recovery", "s21-display-keep", "s21-display-revert", "s21-display-expiry", "s21-display-hotplug", "s21-display-lock-power", "s21-display-compositor-replacement", "s21-display-retirement"]
 
 [update_recovery_qualification]
 evidence_ready = false

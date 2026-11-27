@@ -34,7 +34,10 @@ PLAIN = frozenset(
         "apps/linura-shell/security-owner/compose/LICENSE",
         "apps/linura-shell/security-owner/compose/en_US.UTF-8",
         "bindings/python/LICENSE",
+        "crates/linura-core/src/display_recovery/fixtures/original-baseline.txt",
+        "crates/linura-core/src/display_recovery/fixtures/original-finalization.txt",
         "qualification/v010/session-security/fixtures/linura-s17-qualification.pam",
+        "tests/acceptance/v06/fault-matrix.txt",
         "tools/codex/container/.dockerignore",
         "tools/codex/container/ubuntu-snapshot.list",
     }
@@ -70,11 +73,13 @@ CONF_KINDS = {
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.SecurityOwner1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",
+    "packaging/dbus-1/system.d/org.linura.DisplayProtection1.conf": "xml",
     "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "ini",
     "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "ini",
     "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",
     "qualification/v010/session-security/fixtures/s17-hyprland.conf": "text",
     "packaging/sysusers.d/linura-authority.conf": "sysusers",
+    "packaging/sysusers.d/linura-display-entry.conf": "sysusers-display-entry",
     "tests/acceptance/v05/49-linura-v05-qualification-dbus.conf": "xml",
 }
 POLKIT_RULES = frozenset(
@@ -153,6 +158,9 @@ def classify(path: Path, content: bytes) -> str:
         "apps/linura-shell/ui/CMakeLists.txt",
         "apps/linura-shell/bridge/CMakeLists.txt",
         "apps/linura-shell/security-owner/CMakeLists.txt",
+        "apps/linura-hyprland-display/CMakeLists.txt",
+        "apps/linura-hyprland-display/integration_identity.cmake",
+        "apps/linura-hyprland-display/tests/integration_identity.cmake",
         "qualification/v010/session-security/CMakeLists.txt",
         "tools/codex/container/Dockerfile",
     }:
@@ -301,6 +309,16 @@ def format_errors(path: Path, content: bytes, kind: str) -> list[str]:
                             section == "Action" and option == "abortonfail"
                         ):
                             raise ValueError("unsupported bare Arch hook directive")
+        elif kind == "sysusers-display-entry":
+            entries = [
+                shlex.split(line, comments=True, posix=True)
+                for line in text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            if entries != [["g", "linura-display-entry", "-", "-"]]:
+                raise ValueError(
+                    "expected the dedicated display-entry group without members"
+                )
         elif kind == "sysusers":
             entries = [
                 shlex.split(line, comments=True, posix=True)

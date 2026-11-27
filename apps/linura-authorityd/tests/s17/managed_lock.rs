@@ -111,23 +111,35 @@ fn open_lock_control(
     locks: Vec<ObservationEnvelope>,
     sessions: Vec<ObservationEnvelope>,
 ) -> ManagedLifecycleControl<SqliteTransactionStore> {
+    // Preserve supplied timestamps for stale/future/expiry negative fixtures.
+    open_lock_control_after_storage_ready(database, || (locks, sessions))
+}
+
+fn open_lock_control_after_storage_ready(
+    database: &Path,
+    observations: impl FnOnce() -> (Vec<ObservationEnvelope>, Vec<ObservationEnvelope>),
+) -> ManagedLifecycleControl<SqliteTransactionStore> {
     let (signer, verifier) = authority_material();
     let store = value(SqliteTransactionStore::open(
         database,
         verifier,
         value(SqliteIntegrityKey::new(fixture_key(5))),
     ));
+    let journal = value(
+        linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
+            database.with_extension("requests.sqlite3"),
+            value(SqliteIntegrityKey::new(fixture_key(6))),
+        ),
+    );
+    // Positive handoff fixtures sample AFTER unrelated database initialization,
+    // as real observers do. Never extend validity or restamp captured evidence.
+    let (locks, sessions) = observations();
     let control = value(ManagedLifecycleControl::new(
         lock_preview_control(locks, sessions),
         store,
         signer,
     ));
-    value(control.with_request_journal(Box::new(value(
-        linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
-            database.with_extension("requests.sqlite3"),
-            value(SqliteIntegrityKey::new(fixture_key(6))),
-        ),
-    ))))
+    value(control.with_request_journal(Box::new(journal)))
 }
 
 #[test]
@@ -443,11 +455,12 @@ fn crash_after_dispatch_stays_durable_and_recovery_does_not_guess_or_replay() {
     let mut executor = ScriptedExecutor::failure(calls.clone());
     let mut verifier = ScriptedVerifier::new([]);
     {
-        let mut control = open_lock_control(
-            database.path(),
-            vec![lock_observation(true, 1), lock_observation(true, 2)],
-            vec![session_observation(1), session_observation(2)],
-        );
+        let mut control = open_lock_control_after_storage_ready(database.path(), || {
+            (
+                vec![lock_observation(true, 1), lock_observation(true, 2)],
+                vec![session_observation(1), session_observation(2)],
+            )
+        });
         assert!(matches!(
             control.converge_session_lock(
                 principal(),
@@ -672,24 +685,26 @@ fn leave_dispatched_lock_ambiguous(
     request: &PlanDesiredStateRequest,
     calls: &Arc<AtomicUsize>,
 ) {
-    let mut control = open_lock_control(
-        database.path(),
-        vec![lock_observation(true, 1), lock_observation(true, 2)],
-        vec![session_observation(1), session_observation(2)],
-    );
+    let mut control = open_lock_control_after_storage_ready(database.path(), || {
+        (
+            vec![lock_observation(true, 1), lock_observation(true, 2)],
+            vec![session_observation(1), session_observation(2)],
+        )
+    });
     let mut executor = ScriptedExecutor::failure(calls.clone());
     let mut verifier = ScriptedVerifier::new([]);
-    assert!(matches!(
-        control.converge_session_lock(
-            principal(),
-            actor(true),
-            request.clone(),
-            &approval(),
-            &mut executor,
-            &mut verifier
-        ),
-        Err(ManagedLifecycleError::Executor(_))
-    ));
+    let result = control.converge_session_lock(
+        principal(),
+        actor(true),
+        request.clone(),
+        &approval(),
+        &mut executor,
+        &mut verifier,
+    );
+    assert!(
+        matches!(result, Err(ManagedLifecycleError::Executor(_))),
+        "expected an ambiguous executor handoff, got {result:?}"
+    );
 }
 
 #[test]

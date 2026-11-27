@@ -88,6 +88,7 @@ permissions:
 env:
   SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
   BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
+  # Transport mirror only; the upstream artifact identity and digest stay pinned.
   BASE_IMAGE_DOWNLOAD_URL: https://mirror.iscas.ac.cn/ubuntu-cloud-images/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
   BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
   ACCEPTANCE_SCENARIO: ${{ inputs.scenario || 'authoritative-observation' }}

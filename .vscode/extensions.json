@@ -7,6 +7,7 @@
     "ms-python.python",
     "ms-python.vscode-pylance",
     "ms-vscode.cpptools",
+    "ms-vscode.cmake-tools",
     "rust-lang.rust-analyzer",
     "streetsidesoftware.code-spell-checker",
     "theqtcompany.qt-core",

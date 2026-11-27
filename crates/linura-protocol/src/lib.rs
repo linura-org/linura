@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+mod display;
+pub use display::{
+    DISPLAY_LAYOUT_REQUEST_PREFIX, DisplayLayoutReceipt, DisplayLayoutRequest, DisplayLayoutState,
+    DisplaySnapshot, display_layout_request_id,
+};
+
 use std::collections::BTreeMap;
 
 use linura_core::{

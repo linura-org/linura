@@ -1,11 +1,53 @@
 #![forbid(unsafe_code)]
 
 use std::env;
-use std::process::{Command, ExitCode};
+use std::ffi::OsStr;
+use std::process::{Command, ExitCode, Stdio};
+
+const SCOPED_OUTPUT_ENVIRONMENT: &str = "LINURA_XTASK_CARGO_ENVIRONMENT";
+
+fn child_command(program: &str, args: &[&str], cargo_target: Option<&OsStr>) -> Command {
+    let mut command = Command::new(program);
+    // A nested/detached workspace must select its own outputs. Never forward
+    // this xtask-specific selector or set Cargo's inherited target overrides.
+    command.env_remove(SCOPED_OUTPUT_ENVIRONMENT);
+    if let Some(target) = cargo_target {
+        command
+            .args(&args[..1])
+            .arg("--target-dir")
+            .arg(target)
+            .args(&args[1..]);
+    } else {
+        command.args(args);
+    }
+    command
+}
 
 fn run(program: &str, args: &[&str]) -> Result<(), String> {
-    let status = Command::new(program)
-        .args(args)
+    let target = if program == "cargo" && matches!(args.first(), Some(&"clippy" | &"test")) {
+        if let Some(environment) = env::var_os(SCOPED_OUTPUT_ENVIRONMENT) {
+            let target = env::var_os("LINURA_CARGO_TARGET")
+                .ok_or("scoped xtask output requires LINURA_CARGO_TARGET")?;
+            let status = Command::new("python3")
+                .args(["tools/development_storage.py", "--environment"])
+                .arg(environment)
+                .args(["check", "--role", "cargo", "--path"])
+                .arg(&target)
+                .env_remove(SCOPED_OUTPUT_ENVIRONMENT)
+                .stdout(Stdio::null())
+                .status()
+                .map_err(|error| format!("cannot validate scoped Cargo output: {error}"))?;
+            if !status.success() {
+                return Err("guarded Cargo output rejected; no root/shared fallback".into());
+            }
+            Some(target)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let status = child_command(program, args, target.as_deref())
         .status()
         .map_err(|error| format!("failed to start {program}: {error}"))?;
     if status.success() {
@@ -168,7 +210,57 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ruff_validator_output;
+    use super::{SCOPED_OUTPUT_ENVIRONMENT, child_command, parse_ruff_validator_output};
+    use std::ffi::OsStr;
+
+    #[test]
+    fn scoped_output_preserves_all_clippy_assertions_and_stays_out_of_child_environment() {
+        let command = child_command(
+            "cargo",
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--locked",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            Some(OsStr::new("/checked/task/cargo")),
+        );
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            [
+                "clippy",
+                "--target-dir",
+                "/checked/task/cargo",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--locked",
+                "--",
+                "-D",
+                "warnings"
+            ]
+        );
+        assert!(
+            command
+                .get_envs()
+                .any(|(key, value)| key == SCOPED_OUTPUT_ENVIRONMENT && value.is_none())
+        );
+        assert!(
+            !command
+                .get_envs()
+                .any(|(key, _)| key == "CARGO_TARGET_DIR" || key == "CARGO_BUILD_TARGET_DIR")
+        );
+        let python = child_command("python3", &["scripts/check_repository.py"], None);
+        assert_eq!(
+            python.get_args().collect::<Vec<_>>(),
+            ["scripts/check_repository.py"]
+        );
+    }
 
     #[test]
     fn isolated_ruff_validator_output_is_one_utf8_line() {

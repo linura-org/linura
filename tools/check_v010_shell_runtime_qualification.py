@@ -496,6 +496,7 @@ def validate(root: Path) -> list[str]:
         "timeout-minutes: 90",
         "VM_ACCELERATION: kvm",
         "- name: Verify KVM device and grant the isolated runner access",
+        '[[ "$VM_ACCELERATION" == kvm ]]\n          [[ -c /dev/kvm ]]',
         "[[ -c /dev/kvm ]]",
         "sudo chmod 0600 /dev/kvm",
         "[[ -r /dev/kvm && -w /dev/kvm ]]",
@@ -535,11 +536,18 @@ def validate(root: Path) -> list[str]:
         "quick-settings-audio-fixture.txt",
         '"disk_size_gib": contract["vm_disk_size_gib"]',
         "prepared immutable Arch runtime substrate",
-        "needs: substrate",
+        "needs: [substrate, display-build]",
+        "Retain exact-source compositor candidate for this runtime",
+        "Download this workflow attempt's compositor candidate",
+        "python3 tools/hyprland_display_candidate.py",
+        '--candidate "$LINURA_WORK_DIR/s21-candidate" --source-sha "$SOURCE_SHA"',
+        "for name in Hyprland integration-build.h prepared-substrate.json staged-source.json candidate.json; do",
+        '"$LINURA_WORK_DIR/s21-candidate/$name"',
+        "install -d -o root -g root -m 0700 /opt/linura-s21-candidate",
         "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         "linura-v010-prepared-v1-",
-        "hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh')",
+        "hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py')",
         "qualification/v010/shell-runtime/prepare-substrate.sh",
         "qualification/v010/shell-runtime/verify-substrate.py",
         "fail-on-cache-miss: true",
@@ -730,7 +738,9 @@ def validate(root: Path) -> list[str]:
 
     prepared_hash = (
         "hashFiles('contracts/v010-shell-runtime-substrate.toml', "
-        "'qualification/v010/shell-runtime/prepare-substrate.sh')"
+        "'qualification/v010/shell-runtime/prepare-substrate.sh', "
+        "'tools/arch_qualification_package_inputs.py', "
+        "'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py')"
     )
     restore_blocks = workflow.split("- name: Restore prepared runtime substrate")
     if len(restore_blocks) != 3:
@@ -764,6 +774,27 @@ def validate(root: Path) -> list[str]:
     builder_step = workflow_step_block(
         workflow, "Build sanitized prepared runtime substrate"
     )
+    substrate_kvm = workflow_step_block(workflow, "Verify substrate builder KVM access")
+    for required in (
+        "if: steps.prepared-substrate.outputs.cache-hit != 'true'",
+        '[[ "$VM_ACCELERATION" == kvm ]]',
+        "[[ -c /dev/kvm ]]",
+        'sudo chown "$(id -u):$(id -g)" /dev/kvm',
+        "sudo chmod 0600 /dev/kvm",
+        'test "$(stat -c \'%u:%g:%a:%F\' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"',
+        "[[ -r /dev/kvm && -w /dev/kvm ]]",
+    ):
+        if required not in substrate_kvm:
+            failures.append(
+                "substrate builder requires verified private KVM access: " + required
+            )
+    if (
+        substrate_kvm
+        and builder_step
+        and workflow.index("- name: Verify substrate builder KVM access")
+        > workflow.index("- name: Build sanitized prepared runtime substrate")
+    ):
+        failures.append("substrate builder KVM readiness must precede VM preparation")
     if "prepare-substrate.sh" not in builder_step:
         failures.append(
             "prepared substrate cache miss must invoke the repository-owned builder"
@@ -1614,7 +1645,23 @@ def validate(root: Path) -> list[str]:
             'vm_root="$(dirname "$output_image")"',
             'guest_image="$vm_root/substrate-guest.qcow2"',
             'seed_image="$vm_root/substrate-seed.img"',
-            "pacman -Syu",
+            "pacman_sync=-Syu",
+            "pacman_sync=-Su",
+            "pacman $pacman_sync --noconfirm --needed",
+            '--ssh-key "$ssh_key" --phase repositories',
+            '--ssh-key "$ssh_key" --phase dependencies',
+            'python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT"',
+            '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase acquire',
+            '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase stage',
+            '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase serve',
+            "CacheServer = http://127.0.0.1:2290",
+            '--acceleration "${VM_ACCELERATION:-tcg}"',
+            "-o ExitOnForwardFailure=yes",
+            '-N -R "127.0.0.1:2290:127.0.0.1:$package_cache_port"',
+            'kill -- "-$package_cache_pid"',
+            "No cache transport configuration enters the sanitized prepared image",
+            'for name in ("archive_input_verifier", "archive_input_contract"):',
+            'evidence["archive_input_environment_sha256"] = hashlib.sha256(',
             "timeout --signal=TERM --kill-after=10s 720",
             "--disable-download-timeout -- $RUNTIME_PACKAGES",
             "for attempt in 1 2 3",

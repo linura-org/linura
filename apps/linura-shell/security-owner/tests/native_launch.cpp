@@ -178,6 +178,13 @@ class PropertyFixture final : public QDBusVirtualObject
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
+    const QString guardImage = QStringLiteral("/usr/lib/linura/linura-executor-session");
+    const QStringList guardArgs{guardImage, QStringLiteral("--display-protection")};
+    const NativeLaunchFacts guard{guardImage, guardArgs, false, 10, 20, 0, 0, 2048, 0, 0};
+    assert(Linura::SecurityOwner::exactNativeLaunch(guard, guardImage, guardArgs, 2048));
+    assert(!Linura::SecurityOwner::exactNativeLaunch(guard, guardImage, {guardImage}, 2048));
+    assert(!Linura::SecurityOwner::exactNativeLaunch(
+        guard, guardImage, {guardImage, QStringLiteral("--protect-before-sleep")}, 2048));
     qDBusRegisterMetaType<NativeLaunchFacts>();
     qDBusRegisterMetaType<LaunchList>();
     qDBusRegisterMetaType<WireJob>();
