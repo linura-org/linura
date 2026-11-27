@@ -59,6 +59,57 @@ def fixture(directory: Path) -> tuple[dict, list[dict]]:
 
 
 class ArchivePackageInputsTests(unittest.TestCase):
+    def test_guest_guard_uses_base_tools_and_rejects_ineligible_or_failed_probes(self):
+        # Exercise the generated shell in a deliberately minimal PATH without
+        # hostname. These probe fixtures are unit coverage, not VM evidence.
+        for fault in (
+            "qemu",
+            "kvm",
+            "hostname",
+            "hostname-failure",
+            "virtualization",
+            "virtualization-failure",
+            "os",
+        ):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                helper = (
+                    f"#!{sys.executable}\n"
+                    + r"""import os,pathlib,sys
+name=pathlib.Path(sys.argv[0]).name;fault=os.environ['GUARD_FIXTURE_FAULT']
+if name=='uname':
+    assert sys.argv[1:]==['-n']
+    print('other-host' if fault=='hostname' else 'linura-v010-shell')
+    sys.exit(1 if fault=='hostname-failure' else 0)
+if name=='systemd-detect-virt':
+    assert sys.argv[1:]==['--vm']
+    print('none' if fault=='virtualization' else 'kvm' if fault=='kvm' else 'qemu')
+    sys.exit(1 if fault=='virtualization-failure' else 0)
+assert name=='grep' and sys.argv[1:]==['-qx','ID=arch','/etc/os-release']
+sys.exit(1 if fault=='os' else 0)
+"""
+                )
+                for name in ("uname", "systemd-detect-virt", "grep"):
+                    path = directory / name
+                    path.write_text(helper)
+                    path.chmod(0o700)
+                with patch.object(
+                    inputs, "cache_script", return_value="printf 'guard-passed\\n'\n"
+                ):
+                    script = inputs.guest_script([])
+                result = subprocess.run(
+                    ["/bin/bash", "-c", script],
+                    env={
+                        "PATH": str(directory),
+                        "GUARD_FIXTURE_FAULT": fault,
+                    },
+                    capture_output=True,
+                    timeout=10,
+                )
+                eligible = fault in ("qemu", "kvm")
+                self.assertEqual(result.returncode == 0, eligible, result.stderr)
+                self.assertEqual(result.stdout, b"guard-passed\n" if eligible else b"")
+
     def test_reader_is_a_read_only_nonseekable_stream_without_owning_its_source(self):
         source = io.BytesIO(b"bounded repository fixture")
         reader = inputs.RepositoryReader(source)
@@ -352,8 +403,10 @@ else:
                     self.assertTrue(all(x.startswith("verify ") for x in actions[:2]))
                     self.assertTrue(all(x.startswith("publish ") for x in actions[2:]))
         guard = inputs.guest_script(load_contract(CONTRACT)["repository_package_input"])
-        self.assertIn('test "$(hostname)" = linura-v010-shell', guard)
-        self.assertIn('case "$(systemd-detect-virt --vm)" in qemu|kvm)', guard)
+        self.assertIn("guest_hostname=$(uname -n)", guard)
+        self.assertIn('test "$guest_hostname" = linura-v010-shell', guard)
+        self.assertIn("guest_virtualization=$(systemd-detect-virt --vm)", guard)
+        self.assertIn('case "$guest_virtualization" in qemu|kvm)', guard)
         self.assertIn("grep -qx 'ID=arch' /etc/os-release", guard)
 
 
