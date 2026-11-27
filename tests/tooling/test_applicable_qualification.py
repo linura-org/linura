@@ -74,6 +74,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             "tools/hyprland_display_source.py",
             "contracts/s21-hyprland-build-environment.toml",
             "tools/hyprland_display_environment.py",
+            "tools/arch_qualification_package_inputs.py",
+            "tests/tooling/test_arch_qualification_package_inputs.py",
             "tools/hyprland_display_build.py",
             "tools/codex/native-profiles.toml",
             "tools/codex/native.py",

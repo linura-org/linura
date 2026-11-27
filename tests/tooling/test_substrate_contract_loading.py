@@ -41,12 +41,14 @@ class SubstrateContractLoadingTests(unittest.TestCase):
         lines = result.stdout.splitlines()
         self.assertEqual(len(lines), 1)
         fields = lines[0].split("\t")
-        self.assertEqual(len(fields), 5)
+        self.assertEqual(len(fields), 7)
         self.assertTrue(fields[0].startswith("https://"))
         self.assertIn("$repo/os/$arch", fields[1])
         self.assertEqual(fields[2], "16")
         self.assertIn("base-devel", fields[3].split())
         self.assertEqual(fields[4], "-")
+        self.assertEqual(fields[5], "tools/arch_qualification_package_inputs.py")
+        self.assertEqual(fields[6], "contracts/s21-hyprland-build-environment.toml")
 
     def test_invalid_inputs_emit_no_shell_data(self) -> None:
         original = CONTRACT.read_text(encoding="utf-8")
@@ -67,6 +69,14 @@ class SubstrateContractLoadingTests(unittest.TestCase):
             (
                 "arch_archive_url = ",
                 'arch_archive_url = "duplicated"\narch_archive_url = ',
+            ),
+            (
+                'archive_input_verifier = "tools/arch_qualification_package_inputs.py"',
+                'archive_input_verifier = "tools/untrusted.py"',
+            ),
+            (
+                'archive_input_contract = "contracts/s21-hyprland-build-environment.toml"',
+                'archive_input_contract = "../../untrusted.toml"',
             ),
             ("vm_disk_size_gib = 16", "vm_disk_size_gib = 0"),
         )
@@ -156,6 +166,16 @@ sudo() {
 pacman() { printf 'PACMAN_ARG:%s\n' "$@"; }
 export -f timeout sudo pacman
 ssh() { bash --noprofile --norc -c "${!#}"; }
+# This fixture exercises pacman's actual shell argument boundary. Staging is
+# independently exercised by the archive-input tests; it remains mandatory in
+# the extracted production loop and accepts only this fixed helper invocation.
+python3() {
+    [[ "$1" == tools/arch_qualification_package_inputs.py && "${!#}" == stage ]]
+}
+ARCHIVE_INPUT_VERIFIER=tools/arch_qualification_package_inputs.py
+ARCHIVE_INPUT_CONTRACT=contracts/s21-hyprland-build-environment.toml
+ssh_key=/private/fixture-key
+work_root=/private/fixture-work
 ssh_common=()
 install_succeeded=0
 """

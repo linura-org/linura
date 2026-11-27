@@ -62,10 +62,17 @@ if verifier != "-" and (
     or contract.get("id") != "qualification/s21-hyprland-build-substrate"
 ):
     raise SystemExit("unsupported substrate build dependency verifier")
-print("\t".join((urls[0], urls[1], str(disk), " ".join(packages), verifier)))
+input_verifier = contract.get("archive_input_verifier")
+input_contract = contract.get("archive_input_contract")
+if (
+    input_verifier != "tools/arch_qualification_package_inputs.py"
+    or input_contract != "contracts/s21-hyprland-build-environment.toml"
+):
+    raise SystemExit("unsupported pinned archive input source")
+print("\t".join((urls[0], urls[1], str(disk), " ".join(packages), verifier, input_verifier, input_contract)))
 PY
 )" || fail "substrate contract rejected before data loading"
-IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES BUILD_DEPENDENCY_VERIFIER <<<"$contract_values"
+IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES BUILD_DEPENDENCY_VERIFIER ARCHIVE_INPUT_VERIFIER ARCHIVE_INPUT_CONTRACT <<<"$contract_values"
 : "${BASE_IMAGE_URL_CONTRACT:?}" "${ARCH_ARCHIVE_URL_CONTRACT:?}" "${QUALIFICATION_DISK_GIB_CONTRACT:?}" "${RUNTIME_PACKAGES:?}"
 
 : "${BASE_IMAGE_URL:?}"
@@ -229,8 +236,15 @@ else
     pacman_sync=-Syu
 fi
 
+python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
+    --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase acquire
+
 install_succeeded=0
 for attempt in 1 2 3; do
+    # Rehash host inputs, verify their guest copies/signatures and read back the
+    # package cache before EVERY attempt, including after cache fault cleanup.
+    python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
+        --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase stage
     echo "prepared substrate package install attempt $attempt/3"
     if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
         "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman $pacman_sync --noconfirm --needed --disable-download-timeout -- $RUNTIME_PACKAGES"; then
@@ -299,6 +313,7 @@ builder_sha256="$(sha256sum qualification/v010/shell-runtime/prepare-substrate.s
 } >"$builder_evidence"
 
 python3 - "$output_manifest" "$contract_path" "$package_manifest" "$prepared_sha256" "$contract_sha256" "$builder_sha256" <<'PY'
+import hashlib
 import json
 import os
 import pathlib
@@ -337,10 +352,14 @@ evidence = {
     "release_support_promotion": False,
 }
 if verifier := contract.get("build_dependency_verifier"):
-    import hashlib
     evidence["build_dependency_verifier_sha256"] = hashlib.sha256(
         pathlib.Path(verifier).read_bytes()
     ).hexdigest()
+for name in ("archive_input_verifier", "archive_input_contract"):
+    evidence[name + "_sha256"] = hashlib.sha256(pathlib.Path(contract[name]).read_bytes()).hexdigest()
+evidence["archive_input_environment_sha256"] = hashlib.sha256(
+    pathlib.Path("tools/hyprland_display_environment.py").read_bytes()
+).hexdigest()
 output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 

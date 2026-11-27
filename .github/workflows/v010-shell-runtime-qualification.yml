@@ -78,7 +78,7 @@ jobs:
             ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2
             ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2.sha256
             ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.json
-          key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}
+          key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py') }}
 
       - name: Stage restored prepared substrate into private run
         if: steps.prepared-substrate.outputs.cache-hit == 'true'
@@ -392,7 +392,7 @@ jobs:
             ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2
             ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2.sha256
             ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.json
-          key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}
+          key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py') }}
           fail-on-cache-miss: true
 
       - name: Stage prepared substrate into private runtime namespace

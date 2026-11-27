@@ -547,7 +547,7 @@ def validate(root: Path) -> list[str]:
         "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
         "linura-v010-prepared-v1-",
-        "hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh')",
+        "hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py')",
         "qualification/v010/shell-runtime/prepare-substrate.sh",
         "qualification/v010/shell-runtime/verify-substrate.py",
         "fail-on-cache-miss: true",
@@ -738,7 +738,9 @@ def validate(root: Path) -> list[str]:
 
     prepared_hash = (
         "hashFiles('contracts/v010-shell-runtime-substrate.toml', "
-        "'qualification/v010/shell-runtime/prepare-substrate.sh')"
+        "'qualification/v010/shell-runtime/prepare-substrate.sh', "
+        "'tools/arch_qualification_package_inputs.py', "
+        "'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py')"
     )
     restore_blocks = workflow.split("- name: Restore prepared runtime substrate")
     if len(restore_blocks) != 3:
@@ -1627,6 +1629,11 @@ def validate(root: Path) -> list[str]:
             "pacman $pacman_sync --noconfirm --needed",
             '--ssh-key "$ssh_key" --phase repositories',
             '--ssh-key "$ssh_key" --phase dependencies',
+            'python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT"',
+            '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase acquire',
+            '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase stage',
+            'for name in ("archive_input_verifier", "archive_input_contract"):',
+            'evidence["archive_input_environment_sha256"] = hashlib.sha256(',
             "timeout --signal=TERM --kill-after=10s 720",
             "--disable-download-timeout -- $RUNTIME_PACKAGES",
             "for attempt in 1 2 3",

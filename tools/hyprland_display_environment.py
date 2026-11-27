@@ -59,6 +59,45 @@ REQUIRED = {
 }
 
 
+def archived_repository_package_inputs(data: dict) -> list[dict]:
+    records = data.get("repository_package_input")
+    if not isinstance(records, list) or not 1 <= len(records) <= 16:
+        raise ValueError("incomplete bounded archive package inputs")
+    seen = set()
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {
+            "name",
+            "filename",
+            "sha256",
+            "max_bytes",
+        }:
+            raise ValueError("unsupported archive package input")
+        name, filename, digest, maximum = (
+            record[k] for k in ("name", "filename", "sha256", "max_bytes")
+        )
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[a-z0-9][a-z0-9@._+-]{0,127}", name) is None
+            or name in seen
+            or not isinstance(filename, str)
+            or len(filename) > 255
+            or re.fullmatch(
+                re.escape(name)
+                + r"-[A-Za-z0-9:+._~-]+-[0-9.]+-(?:x86_64|any)\.pkg\.tar\.zst",
+                filename,
+            )
+            is None
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or digest == "0" * 64
+            or type(maximum) is not int
+            or not 1 <= maximum <= 512 * 1024 * 1024
+        ):
+            raise ValueError("unsafe or duplicate archive package input")
+        seen.add(name)
+    return records
+
+
 def load_contract(path: Path) -> dict:
     if any(part.is_symlink() for part in (path, *path.parents)):
         raise ValueError("symlinked build environment contract")
@@ -116,6 +155,7 @@ def load_contract(path: Path) -> dict:
         or archive.get("signature_required") is not True
     ):
         raise ValueError("unsupported archived Glaze SDK")
+    archived_repository_package_inputs(data)
     return data
 
 

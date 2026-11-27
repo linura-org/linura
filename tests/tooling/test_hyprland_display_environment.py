@@ -40,6 +40,7 @@ class HyprlandDisplayEnvironmentTests(unittest.TestCase):
             ),
             ('version = "0.56.2-3"', 'version = "0.56.3-1"'),
             ('name = "gcc"', 'name = "gcc;injected"'),
+            ('[[package]]\nname = "gcc"', '[[package]]\nname = "gcc;injected"'),
             ('version = "7.2.0-1"', 'version = "8.4.0-1"'),
             (
                 "https://umea.archive.pkgbuild.com/packages/g/glaze/",
@@ -254,6 +255,15 @@ else:raise AssertionError('unexpected fixture command')
                 "claim": "non-authoritative-prepared-substrate",
                 "contract_sha256": digest(environment.CONTRACT),
                 "builder_sha256": digest(builder),
+                "archive_input_verifier_sha256": digest(
+                    ROOT / data["archive_input_verifier"]
+                ),
+                "archive_input_contract_sha256": digest(
+                    ROOT / data["archive_input_contract"]
+                ),
+                "archive_input_environment_sha256": digest(
+                    ROOT / "tools/hyprland_display_environment.py"
+                ),
                 "build_dependency_verifier_sha256": digest(
                     ROOT / data["build_dependency_verifier"]
                 ),
@@ -282,12 +292,20 @@ else:raise AssertionError('unexpected fixture command')
                 "valid",
                 "package_versions",
                 "build_dependency_verifier_sha256",
+                "archive_input_verifier_sha256",
+                "archive_input_contract_sha256",
+                "archive_input_environment_sha256",
                 "base_image",
             ):
                 changed = copy.deepcopy(manifest)
                 if field == "package_versions":
                     changed[field] = ["libglvnd 0"]
-                elif field == "build_dependency_verifier_sha256":
+                elif field in {
+                    "build_dependency_verifier_sha256",
+                    "archive_input_verifier_sha256",
+                    "archive_input_contract_sha256",
+                    "archive_input_environment_sha256",
+                }:
                     changed[field] = "0" * 64
                 elif field == "base_image":
                     changed[field]["sha256"] = "0" * 64

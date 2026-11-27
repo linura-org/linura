@@ -6,6 +6,8 @@ cache_namespace = "linura-s21-hyprland-build-v1"
 builder = "qualification/v010/shell-runtime/prepare-substrate.sh"
 verifier = "qualification/v010/shell-runtime/verify-substrate.py"
 build_dependency_verifier = "tools/hyprland_display_environment.py"
+archive_input_verifier = "tools/arch_qualification_package_inputs.py"
+archive_input_contract = "contracts/s21-hyprland-build-environment.toml"
 integration_contract = "contracts/hyprland-display-integration.toml"
 base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
 base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
@@ -67,6 +69,40 @@ runtime_packages = [
 [repository_sha256]
 core = "7e00dedcbdafa67db01ea65b5657855f81271da0ed496d21d752b8f9037e036f"
 extra = "7d10af6511ba617512213e64434b8f55290893b9b77c959f21a1fcb5ef3c78cd"
+
+# The dated repository URLs for these exact files redirect to unavailable
+# historical-archive objects. Stage the same bytes from the official mirror's
+# per-package paths. Both database pins, package SHA-256 and native signatures
+# remain required; this list cannot change dependency resolution or versions.
+[[repository_package_input]]
+name = "gcc"
+filename = "gcc-16.2.1+r23+gd564253eb6c8-1-x86_64.pkg.tar.zst"
+sha256 = "1d79371ccf3138e3c172dd83b51560687b65ab824c1ad7e9cb41b7857ed9c55f"
+max_bytes = 536870912
+
+[[repository_package_input]]
+name = "perl"
+filename = "perl-5.42.2-2-x86_64.pkg.tar.zst"
+sha256 = "1f2f64d0c4c6c117ea814a2144cb9b22a93e2462e9a7773db2e982a68e378816"
+max_bytes = 536870912
+
+[[repository_package_input]]
+name = "hyprland"
+filename = "hyprland-0.56.2-3-x86_64.pkg.tar.zst"
+sha256 = "29dffae75c6dce936c31871bb223e9f60fe80882722565b823e7e0213b5d6086"
+max_bytes = 536870912
+
+[[repository_package_input]]
+name = "llvm-libs"
+filename = "llvm-libs-22.1.8-2-x86_64.pkg.tar.zst"
+sha256 = "ad4454d1b969192e7a878066400a583b984210322d67c6fa8958ad1175342658"
+max_bytes = 536870912
+
+[[repository_package_input]]
+name = "qt6-declarative"
+filename = "qt6-declarative-6.11.2-2-x86_64.pkg.tar.zst"
+sha256 = "230c1bec364d4af2c4c9d10f0df6dabd8361463e8559979f235f59f71e8c2f77"
+max_bytes = 536870912
 
 [[package]]
 name = "systemd-libs"

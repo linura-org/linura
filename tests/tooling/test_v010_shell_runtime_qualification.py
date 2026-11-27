@@ -322,7 +322,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = workflow.read_text(encoding="utf-8")
-            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}"
+            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py') }}"
             self.assertGreaterEqual(text.count(marker), 2)
             workflow.write_text(
                 text.replace(marker, "key: linura-v010-prepared-v1-unbound", 1),
@@ -338,7 +338,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = workflow.read_text(encoding="utf-8")
-            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}"
+            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh', 'tools/arch_qualification_package_inputs.py', 'contracts/s21-hyprland-build-environment.toml', 'tools/hyprland_display_environment.py') }}"
             index = text.rfind(marker)
             self.assertGreaterEqual(index, 0)
             workflow.write_text(
@@ -350,6 +350,43 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("prepared runtime cache key must bind", result.stderr)
+
+    def test_each_prepared_cache_identity_requires_both_archive_input_sources(
+        self,
+    ) -> None:
+        for input_path in (
+            "tools/arch_qualification_package_inputs.py",
+            "contracts/s21-hyprland-build-environment.toml",
+            "tools/hyprland_display_environment.py",
+        ):
+            for cache_index in (0, 1):
+                with self.subTest(input_path=input_path, cache_index=cache_index):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        root = Path(temp_dir)
+                        self._copy_fixture(root)
+                        workflow = (
+                            root
+                            / ".github/workflows/v010-shell-runtime-qualification.yml"
+                        )
+                        text = workflow.read_text(encoding="utf-8")
+                        lines = text.splitlines(keepends=True)
+                        cache_lines = [
+                            i
+                            for i, line in enumerate(lines)
+                            if "key: linura-v010-prepared-v1-" in line
+                        ]
+                        self.assertEqual(len(cache_lines), 2)
+                        index = cache_lines[cache_index]
+                        self.assertIn(", '" + input_path + "'", lines[index])
+                        lines[index] = lines[index].replace(
+                            ", '" + input_path + "'", "", 1
+                        )
+                        workflow.write_text("".join(lines), encoding="utf-8")
+                        result = self._run(root)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(
+                            "prepared runtime cache key must bind", result.stderr
+                        )
 
     def test_builder_cached_base_image_must_still_be_digest_verified(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

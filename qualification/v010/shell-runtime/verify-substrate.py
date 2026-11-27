@@ -40,6 +40,18 @@ if manifest.get("contract_sha256") != digest(contract_path):
     fail("prepared substrate contract digest mismatch")
 if manifest.get("builder_sha256") != digest(builder_path):
     fail("prepared substrate builder digest mismatch")
+for name, expected in (
+    ("archive_input_verifier", "tools/arch_qualification_package_inputs.py"),
+    ("archive_input_contract", "contracts/s21-hyprland-build-environment.toml"),
+):
+    if contract.get(name) != expected:
+        fail("unsupported pinned archive input source")
+    if manifest.get(name + "_sha256") != digest(pathlib.Path(expected)):
+        fail("prepared substrate archive input digest mismatch")
+if manifest.get("archive_input_environment_sha256") != digest(
+    pathlib.Path("tools/hyprland_display_environment.py")
+):
+    fail("prepared substrate archive environment digest mismatch")
 if verifier := contract.get("build_dependency_verifier"):
     if verifier != "tools/hyprland_display_environment.py":
         fail("unsupported build dependency verifier")
