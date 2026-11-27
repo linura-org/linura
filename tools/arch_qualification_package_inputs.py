@@ -10,17 +10,22 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import http.server
 import io
 import json
 import os
 from pathlib import Path
 import re
 import shlex
+import socketserver
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
+import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -35,6 +40,10 @@ from tools.hyprland_display_environment import (  # noqa: E402
 ORIGIN = "https://umea.archive.pkgbuild.com/packages"
 MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
 MAX_REPOSITORY_EXPANDED_BYTES = 128 * 1024 * 1024
+MAX_CACHE_FILES = 1024
+MAX_CACHE_REQUESTS = 4096
+MAX_CACHE_SECONDS = 3600
+MAX_CACHE_WORKERS = 8
 
 
 def open_input(path: Path, maximum: int):
@@ -402,12 +411,247 @@ def stage_inputs(data: dict, directory: Path, ssh_key: Path) -> None:
         )
 
 
+def repository_catalog(data: dict, directory: Path) -> dict[str, dict]:
+    """Exact immutable repository inputs, never a second dependency resolver."""
+    catalog = {}
+    seen = set()
+    for repository, expected in sorted(data["repository_sha256"].items()):
+        for name, fields in repository_records(
+            directory / (repository + ".db"), expected
+        ).items():
+            filename = fields.get("FILENAME", [])
+            hashes = fields.get("SHA256SUM", [])
+            sizes = fields.get("CSIZE", [])
+            if (
+                re.fullmatch(r"[a-z0-9@][a-z0-9@._+\-]{0,127}", name) is None
+                or len(filename) != 1
+                or re.fullmatch(
+                    r"[A-Za-z0-9@._+:\-]{1,240}\.pkg\.tar\.(zst|xz)", filename[0]
+                )
+                is None
+                or not filename[0].startswith(name + "-")
+                or len(hashes) != 1
+                or re.fullmatch(r"[0-9a-f]{64}", hashes[0]) is None
+                or hashes[0] == "0" * 64
+                or len(sizes) != 1
+                or re.fullmatch(r"[1-9][0-9]{0,9}", sizes[0]) is None
+                or filename[0] in seen
+            ):
+                raise ValueError("unsupported pinned package catalog entry")
+            seen.add(filename[0])
+            if len(seen) > 65536:
+                raise ValueError("pinned package catalog exceeds its bound")
+            # A pinned repository may contain unrelated multi-gigabyte inputs.
+            # Such files are unavailable through this bounded cache; native
+            # resolution is neither replaced nor silently altered.
+            if int(sizes[0]) > 512 * 1024 * 1024:
+                continue
+            catalog[filename[0]] = dict(name=name, sha256=hashes[0], size=int(sizes[0]))
+    if not catalog or len(catalog) > 65536:
+        raise ValueError("pinned package catalog exceeds its bound")
+    return catalog
+
+
+class PinnedPackageCache:
+    """Disposable, bounded input cache. Native pacman still resolves/verifies."""
+
+    def __init__(self, data: dict, directory: Path):
+        self.catalog = repository_catalog(data, directory)
+        self.directory = directory
+        self.deadline = time.monotonic() + MAX_CACHE_SECONDS
+        self.requests = 0
+        self.files: set[str] = set()
+        # Include the initial staged pairs even if pacman never requests them.
+        # Charging a subsequently requested initial pair again is conservative.
+        initial = package_inputs(data)
+        self.initial_files = 2 * len(initial)
+        self.bytes = sum(r["max_bytes"] + 1024 * 1024 for r in initial)
+        if self.bytes > MAX_TOTAL_BYTES or self.initial_files > MAX_CACHE_FILES:
+            raise ValueError("initial pinned package cache capacity exhausted")
+        self.lock = threading.Lock()
+        self.file_locks: dict[str, threading.Lock] = {}
+
+    def require_request_budget(self) -> None:
+        with self.lock:
+            self.requests += 1
+            if self.requests > MAX_CACHE_REQUESTS or time.monotonic() >= self.deadline:
+                raise ValueError("pinned package cache budget exhausted")
+
+    def open(self, request: str):
+        self.require_request_budget()
+        if (
+            len(request) > 1024
+            or not request.startswith("/")
+            or request.startswith("//")
+        ):
+            raise ValueError("unsupported package cache request")
+        parsed = urllib.parse.urlsplit(request)
+        if parsed.query or parsed.fragment or parsed.netloc or parsed.scheme:
+            raise ValueError("unsupported package cache request")
+        name = urllib.parse.unquote_to_bytes(parsed.path[1:]).decode("ascii")
+        signature = name.endswith(".sig")
+        package = name.removesuffix(".sig") if signature else name
+        record = self.catalog.get(package)
+        if record is None:
+            raise KeyError("package is absent from pinned repositories")
+        maximum = 1024 * 1024 if signature else record["size"]
+        with self.lock:
+            if name not in self.files:
+                if (
+                    len(self.files) + self.initial_files >= MAX_CACHE_FILES
+                    or self.bytes + maximum > MAX_TOTAL_BYTES
+                ):
+                    raise ValueError("pinned package cache capacity exhausted")
+                # Spend capacity before acquisition, including failed downloads.
+                self.files.add(name)
+                self.bytes += maximum
+            file_lock = self.file_locks.setdefault(name, threading.Lock())
+        # Different packages proceed concurrently; duplicate requests share one
+        # acquisition. Capacity and request budgets remain global and atomic.
+        with file_lock:
+            return self.open_file(name, record, signature, maximum)
+
+    def open_file(self, name: str, record: dict, signature: bool, maximum: int):
+        path = self.directory / name
+        if not path.exists() and not path.is_symlink():
+            acquire(
+                f"{ORIGIN}/{record['name'][0]}/{record['name']}/{name}",
+                path,
+                maximum,
+                None if signature else record["sha256"],
+            )
+        stream, before = open_input(path, maximum)
+        try:
+            if not signature and (
+                before.st_size != record["size"]
+                or hash_stream(stream, before.st_size) != record["sha256"]
+            ):
+                raise ValueError("cached package differs from pinned repository")
+            if not unchanged(before, os.fstat(stream.fileno())):
+                raise ValueError("cached input changed during verification")
+            stream.seek(0)
+            return stream, before
+        except BaseException:
+            stream.close()
+            raise
+
+
+def cache_server(cache: PinnedPackageCache) -> http.server.HTTPServer:
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            # Requests are untrusted, public input paths; never log their text.
+            pass
+
+        def do_GET(self):
+            if self.path == "/health" and time.monotonic() < cache.deadline:
+                try:
+                    cache.require_request_budget()
+                except ValueError:
+                    self.send_error(503, "Pinned package cache budget exhausted")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", "6")
+                self.end_headers()
+                self.wfile.write(b"ready\n")
+                return
+            try:
+                stream, before = cache.open(self.path)
+            except KeyError:
+                self.send_error(404, "Not in pinned package catalog")
+                return
+            except (OSError, ValueError, subprocess.SubprocessError):
+                self.send_error(503, "Pinned package input unavailable")
+                return
+            try:
+                with stream:
+                    start = 0
+                    requested = self.headers.get("Range")
+                    if requested is not None:
+                        matched = re.fullmatch(r"bytes=([0-9]{1,12})-", requested)
+                        if matched is None or int(matched[1]) >= before.st_size:
+                            self.send_error(416, "Unsupported byte range")
+                            return
+                        start = int(matched[1])
+                        stream.seek(start)
+                    self.send_response(206 if requested is not None else 200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(before.st_size - start))
+                    if requested is not None:
+                        self.send_header(
+                            "Content-Range",
+                            f"bytes {start}-{before.st_size - 1}/{before.st_size}",
+                        )
+                    self.end_headers()
+                    remaining = before.st_size - start
+                    while remaining:
+                        chunk = stream.read(min(remaining, 65536))
+                        if not chunk:
+                            raise ValueError("cached input truncated during transfer")
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+                    if not unchanged(before, os.fstat(stream.fileno())):
+                        raise ValueError("cached input changed during transfer")
+            except (OSError, ValueError):
+                # A partial/changed transfer is never an accepted input. Native
+                # pacman's unchanged digest and signature verification follows.
+                self.close_connection = True
+
+    class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+
+        def __init__(self, *args, **kwargs):
+            self.slots = threading.BoundedSemaphore(MAX_CACHE_WORKERS)
+            super().__init__(*args, **kwargs)
+
+        def process_request(self, request, client_address):
+            if not self.slots.acquire(blocking=False):
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request(request, client_address)
+            except BaseException:
+                self.slots.release()
+                raise
+
+        def process_request_thread(self, request, client_address):
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                self.slots.release()
+
+        def get_request(self):
+            connection, address = super().get_request()
+            connection.settimeout(15)
+            return connection, address
+
+    server = Server(("127.0.0.1", 0), Handler)
+    server.timeout = 1
+    return server
+
+
+def serve_cache(data: dict, directory: Path) -> None:
+    # Own the process group so the builder's trap also terminates any bounded
+    # downloader child. No persistent host daemon or public listener is created.
+    os.setsid()
+    cache = PinnedPackageCache(data, directory)
+    with cache_server(cache) as server:
+        descriptor = os.open(
+            directory / "cache-port",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w") as port:
+            port.write(str(server.server_address[1]) + "\n")
+        while time.monotonic() < cache.deadline:
+            server.handle_request()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract", type=Path, default=CONTRACT)
     parser.add_argument("--ssh-key", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)
-    parser.add_argument("--phase", choices=("acquire", "stage"), required=True)
+    parser.add_argument("--phase", choices=("acquire", "stage", "serve"), required=True)
     args = parser.parse_args()
     data = load_contract(args.contract)
     run = os.environ.get("LINURA_RUN_ID")
@@ -432,8 +676,10 @@ def main() -> None:
             )
             + "\n"
         )
-    else:
+    elif args.phase == "stage":
         stage_inputs(data, directory, args.ssh_key)
+    else:
+        serve_cache(data, directory)
 
 
 if __name__ == "__main__":

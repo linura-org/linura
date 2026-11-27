@@ -171,8 +171,19 @@ EOF
 cloud-localds --network-config="$network_config" "$seed_image" "$user_data" "$meta_data"
 
 vm_pid=""
+package_cache_pid=""
+package_cache_tunnel_pid=""
 cleanup() {
     set +e
+    if [[ -n "$package_cache_tunnel_pid" ]]; then
+        kill "$package_cache_tunnel_pid" 2>/dev/null || true
+        wait "$package_cache_tunnel_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$package_cache_pid" ]]; then
+        kill -- "-$package_cache_pid" 2>/dev/null || true
+        kill "$package_cache_pid" 2>/dev/null || true
+        wait "$package_cache_pid" 2>/dev/null || true
+    fi
     if [[ -n "$vm_pid" ]] && kill -0 "$vm_pid" 2>/dev/null; then
         kill "$vm_pid" 2>/dev/null || true
         wait "$vm_pid" 2>/dev/null || true
@@ -239,6 +250,40 @@ fi
 python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
     --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase acquire
 
+# libalpm keeps dependency resolution and native verification. The temporary
+# cache serves only complete hash-pinned packages selected by those same pinned
+# databases, fetching their official per-package URLs instead of dated redirects.
+python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
+    --ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase serve \
+    >"$work_root/package-cache.log" 2>&1 &
+package_cache_pid="$!"
+cache_ready_deadline=$((SECONDS + 30))
+while [[ ! -f "$work_root/archive-package-inputs/cache-port" ]] && ((SECONDS < cache_ready_deadline)); do
+    kill -0 "$package_cache_pid" 2>/dev/null || fail "pinned package cache exited before readiness"
+    sleep 1
+done
+[[ -f "$work_root/archive-package-inputs/cache-port" ]] || fail "pinned package cache readiness exceeded"
+read -r package_cache_port <"$work_root/archive-package-inputs/cache-port"
+[[ "$package_cache_port" =~ ^[1-9][0-9]{0,4}$ ]] && ((package_cache_port >= 1024 && package_cache_port <= 65535)) || fail "invalid pinned package cache port"
+ssh -F /dev/null "${ssh_common[@]}" -o ExitOnForwardFailure=yes -p 2223 \
+    -N -R "127.0.0.1:2290:127.0.0.1:$package_cache_port" linura@127.0.0.1 \
+    >"$work_root/package-cache-tunnel.log" 2>&1 &
+package_cache_tunnel_pid="$!"
+cache_ready=0
+cache_ready_deadline=$((SECONDS + 30))
+while ((SECONDS < cache_ready_deadline)); do
+    kill -0 "$package_cache_pid" 2>/dev/null && kill -0 "$package_cache_tunnel_pid" 2>/dev/null || fail "pinned package cache transport exited"
+    if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+        'test "$(curl --fail --silent --max-time 3 http://127.0.0.1:2290/health)" = ready'; then
+        cache_ready=1
+        break
+    fi
+    sleep 1
+done
+[[ "$cache_ready" -eq 1 ]] || fail "pinned package cache transport readiness exceeded"
+ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+    "printf '%s\\n' 'CacheServer = http://127.0.0.1:2290' 'Server = $ARCH_ARCHIVE_URL_CONTRACT' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
+
 install_succeeded=0
 for attempt in 1 2 3; do
     # Rehash host inputs, verify their guest copies/signatures and read back the
@@ -258,6 +303,18 @@ for attempt in 1 2 3; do
     fi
 done
 [[ "$install_succeeded" -eq 1 ]] || fail "prepared substrate package installation failed after 3 bounded attempts"
+
+# No cache transport configuration enters the sanitized prepared image.
+ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+    "printf '%s\\n' 'Server = $ARCH_ARCHIVE_URL_CONTRACT' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
+ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+    "test \"\$(cat /etc/pacman.d/mirrorlist)\" = 'Server = $ARCH_ARCHIVE_URL_CONTRACT'"
+kill "$package_cache_tunnel_pid"
+wait "$package_cache_tunnel_pid" || true
+package_cache_tunnel_pid=""
+kill -- "-$package_cache_pid"
+wait "$package_cache_pid" || true
+package_cache_pid=""
 
 if [[ "$BUILD_DEPENDENCY_VERIFIER" != - ]]; then
     python3 "$BUILD_DEPENDENCY_VERIFIER" --contract "$contract_path" \

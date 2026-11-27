@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import gzip
 import hashlib
+import http.client
 import io
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -17,10 +20,12 @@ from tools import arch_qualification_package_inputs as inputs
 from tools.hyprland_display_environment import CONTRACT, load_contract
 
 
-def fixture(directory: Path) -> tuple[dict, list[dict]]:
+def fixture(directory: Path, compression: str = "zst") -> tuple[dict, list[dict]]:
     records = []
     for name in ("alpha", "beta"):
-        filename = name + "-1-1-any.pkg.tar.zst"
+        filename = (
+            name + "-1-1-any.pkg.tar." + (compression if name == "beta" else "zst")
+        )
         payload = (name + "-fixture-only").encode()
         (directory / filename).write_bytes(payload)
         (directory / filename).chmod(0o600)
@@ -59,6 +64,211 @@ def fixture(directory: Path) -> tuple[dict, list[dict]]:
 
 
 class ArchivePackageInputsTests(unittest.TestCase):
+    def test_cache_parallel_downloads_coalesce_without_serializing_other_packages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data, records = fixture(directory)
+            payloads = {
+                r["filename"]: (directory / r["filename"]).read_bytes() for r in records
+            }
+            for name in payloads:
+                (directory / name).unlink()
+            downloads = []
+            downloads_lock = threading.Lock()
+            parallel_downloads = threading.Barrier(2)
+
+            def download(url, destination, maximum, expected):
+                with downloads_lock:
+                    downloads.append(destination.name)
+                # Both distinct inputs must enter acquisition together; a
+                # single server worker or global acquisition lock fails here.
+                parallel_downloads.wait(timeout=5)
+                destination.write_bytes(payloads[destination.name])
+                destination.chmod(0o600)
+
+            cache = inputs.PinnedPackageCache(data, directory)
+            with inputs.cache_server(cache) as server:
+                port = server.server_address[1]
+                assert isinstance(port, int)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+
+                def request(name):
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", port, timeout=10
+                    )
+                    try:
+                        connection.request("GET", "/" + name)
+                        response = connection.getresponse()
+                        return response.status, response.read()
+                    finally:
+                        connection.close()
+
+                names = [
+                    records[0]["filename"],
+                    records[1]["filename"],
+                    records[0]["filename"],
+                ]
+                try:
+                    with patch.object(inputs, "acquire", side_effect=download):
+                        with ThreadPoolExecutor(max_workers=3) as clients:
+                            results = list(clients.map(request, names))
+                    self.assertEqual(results, [(200, payloads[name]) for name in names])
+                    self.assertCountEqual(downloads, payloads)
+                    self.assertEqual(cache.requests, 3)
+                    self.assertEqual(len(cache.files), 2)
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    self.assertFalse(thread.is_alive())
+
+    def test_catalog_keeps_historical_compression_as_opaque_pinned_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data, records = fixture(directory, "xz")
+            data["repository_package_input"] = records[:1]
+            cache = inputs.PinnedPackageCache(data, directory)
+            path = directory / records[1]["filename"]
+            stream, _ = cache.open("/" + path.name)
+            with stream:
+                self.assertEqual(stream.read(), path.read_bytes())
+
+    def test_complete_catalog_cache_serves_pinned_pairs_and_bounded_resumption(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data, records = fixture(directory)
+            # Native resolution may require an input outside the initial staged
+            # exception set. The complete authenticated catalog owns selection.
+            data["repository_package_input"] = records[:1]
+            package = records[1]["filename"]
+            payload = (directory / package).read_bytes()
+            signature = (directory / (package + ".sig")).read_bytes()
+            (directory / package).unlink()
+            (directory / (package + ".sig")).unlink()
+            downloads = []
+
+            def curl(command, **kwargs):
+                url = command[-1]
+                expected = f"{inputs.ORIGIN}/b/beta/{package}"
+                self.assertIn(url, (expected, expected + ".sig"))
+                self.assertEqual(command[command.index("--proto") + 1], "=https")
+                downloads.append(url)
+                kwargs["stdout"].write(signature if url.endswith(".sig") else payload)
+
+            cache = inputs.PinnedPackageCache(data, directory)
+            with inputs.cache_server(cache) as server:
+                self.assertEqual(server.server_address[0], "127.0.0.1")
+                port = server.server_address[1]
+                self.assertIsInstance(port, int)
+                assert isinstance(port, int)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    with patch.object(inputs.subprocess, "run", side_effect=curl):
+                        for path, headers, expected_status, expected_payload in (
+                            ("/health", {}, 200, b"ready\n"),
+                            ("/" + package, {}, 200, payload),
+                            ("/" + package + ".sig", {}, 200, signature),
+                            ("/" + package, {"Range": "bytes=3-"}, 206, payload[3:]),
+                        ):
+                            connection = http.client.HTTPConnection(
+                                "127.0.0.1", port, timeout=5
+                            )
+                            connection.request("GET", path, headers=headers)
+                            response = connection.getresponse()
+                            self.assertEqual(response.status, expected_status)
+                            self.assertEqual(response.read(), expected_payload)
+                            if headers:
+                                self.assertEqual(
+                                    response.getheader("Content-Range"),
+                                    f"bytes 3-{len(payload) - 1}/{len(payload)}",
+                                )
+                            connection.close()
+                        for path, headers, status in (
+                            ("/unknown.pkg.tar.zst", {}, 404),
+                            ("/../core.db", {}, 404),
+                            ("/%2e%2e%2fcore.db", {}, 404),
+                            ("/core.db", {}, 404),
+                            ("/" + package + "?source=other", {}, 503),
+                            ("/" + package, {"Range": "bytes=0-1,3-4"}, 416),
+                            ("/" + package, {"Range": "bytes=999999-"}, 416),
+                        ):
+                            connection = http.client.HTTPConnection(
+                                "127.0.0.1", port, timeout=5
+                            )
+                            connection.request("GET", path, headers=headers)
+                            response = connection.getresponse()
+                            self.assertEqual(response.status, status)
+                            response.read()
+                            connection.close()
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=5)
+                    self.assertFalse(thread.is_alive())
+            self.assertEqual(len(downloads), 2)
+            self.assertEqual(cache.files, {package, package + ".sig"})
+
+    def test_catalog_cache_refuses_drift_unsafe_inputs_and_exhaustion(self):
+        for fault in (
+            "database",
+            "bytes",
+            "link",
+            "alias",
+            "writable",
+            "capacity",
+            "count",
+            "requests",
+            "deadline",
+        ):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                data, records = fixture(directory)
+                path = directory / records[0]["filename"]
+                if fault == "database":
+                    (directory / "core.db").write_bytes(b"changed")
+                    with self.assertRaises(ValueError):
+                        inputs.PinnedPackageCache(data, directory)
+                    continue
+                cache = inputs.PinnedPackageCache(data, directory)
+                if fault == "bytes":
+                    path.write_bytes(b"changed")
+                elif fault == "link":
+                    path.unlink()
+                    path.symlink_to(directory / records[1]["filename"])
+                elif fault == "alias":
+                    os.link(path, directory / "alias")
+                elif fault == "writable":
+                    path.chmod(0o666)
+                elif fault == "capacity":
+                    cache.bytes = inputs.MAX_TOTAL_BYTES
+                elif fault == "count":
+                    cache.files = {str(i) for i in range(inputs.MAX_CACHE_FILES)}
+                elif fault == "requests":
+                    cache.requests = inputs.MAX_CACHE_REQUESTS
+                elif fault == "deadline":
+                    cache.deadline = 0
+                with patch.object(inputs, "acquire") as download:
+                    with self.assertRaises((ValueError, OSError)):
+                        cache.open("/" + path.name)
+                    download.assert_not_called()
+
+    def test_catalog_cache_verifies_new_bytes_before_serving(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data, records = fixture(directory)
+            path = directory / records[0]["filename"]
+            path.unlink()
+            cache = inputs.PinnedPackageCache(data, directory)
+
+            def bad_download(url, destination, maximum, expected):
+                destination.write_bytes(b"substituted")
+                destination.chmod(0o600)
+
+            with patch.object(inputs, "acquire", side_effect=bad_download):
+                with self.assertRaises(ValueError):
+                    cache.open("/" + path.name)
+            self.assertIn(path.name, cache.files)
+
     def test_guest_guard_uses_base_tools_and_rejects_ineligible_or_failed_probes(self):
         # Exercise the generated shell in a deliberately minimal PATH without
         # hostname. These probe fixtures are unit coverage, not VM evidence.
