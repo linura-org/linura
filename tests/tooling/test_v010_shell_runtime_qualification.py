@@ -235,6 +235,42 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(expected, result.stderr)
 
+    def test_substrate_builder_requires_its_own_private_kvm_readiness(self):
+        relative = ".github/workflows/v010-shell-runtime-qualification.yml"
+        source = (ROOT / relative).read_text()
+        start = source.index("      - name: Verify substrate builder KVM access")
+        end = source.index(
+            "      - name: Restore official Arch base-image cache", start
+        )
+        step = source[start:end]
+        for marker in (
+            "if: steps.prepared-substrate.outputs.cache-hit != 'true'",
+            '[[ "$VM_ACCELERATION" == kvm ]]',
+            "[[ -c /dev/kvm ]]",
+            'sudo chown "$(id -u):$(id -g)" /dev/kvm',
+            "sudo chmod 0600 /dev/kvm",
+            'test "$(stat -c \'%u:%g:%a:%F\' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"',
+            "[[ -r /dev/kvm && -w /dev/kvm ]]",
+            step,
+        ):
+            with (
+                self.subTest(marker=marker),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                self._copy_fixture(root)
+                (root / relative).write_text(
+                    source[:start]
+                    + step.replace(marker, "true # unverified readiness", 1)
+                    + source[end:]
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "substrate builder requires verified private KVM access",
+                    result.stderr,
+                )
+
     def test_required_qualification_scripts_retain_executable_modes(self) -> None:
         # The shell runtime calls the recorder directly; losing the Git execute
         # bit during a rebase must fail locally before expensive guest setup.

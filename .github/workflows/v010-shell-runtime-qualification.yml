@@ -104,6 +104,17 @@ jobs:
             qemu-system-x86 \
             qemu-utils
 
+      - name: Verify substrate builder KVM access
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          [[ "$VM_ACCELERATION" == kvm ]]
+          [[ -c /dev/kvm ]]
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 0600 /dev/kvm
+          test "$(stat -c '%u:%g:%a:%F' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"
+          [[ -r /dev/kvm && -w /dev/kvm ]]
+
       - name: Restore official Arch base-image cache
         if: steps.prepared-substrate.outputs.cache-hit != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

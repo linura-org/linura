@@ -774,6 +774,27 @@ def validate(root: Path) -> list[str]:
     builder_step = workflow_step_block(
         workflow, "Build sanitized prepared runtime substrate"
     )
+    substrate_kvm = workflow_step_block(workflow, "Verify substrate builder KVM access")
+    for required in (
+        "if: steps.prepared-substrate.outputs.cache-hit != 'true'",
+        '[[ "$VM_ACCELERATION" == kvm ]]',
+        "[[ -c /dev/kvm ]]",
+        'sudo chown "$(id -u):$(id -g)" /dev/kvm',
+        "sudo chmod 0600 /dev/kvm",
+        'test "$(stat -c \'%u:%g:%a:%F\' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"',
+        "[[ -r /dev/kvm && -w /dev/kvm ]]",
+    ):
+        if required not in substrate_kvm:
+            failures.append(
+                "substrate builder requires verified private KVM access: " + required
+            )
+    if (
+        substrate_kvm
+        and builder_step
+        and workflow.index("- name: Verify substrate builder KVM access")
+        > workflow.index("- name: Build sanitized prepared runtime substrate")
+    ):
+        failures.append("substrate builder KVM readiness must precede VM preparation")
     if "prepare-substrate.sh" not in builder_step:
         failures.append(
             "prepared substrate cache miss must invoke the repository-owned builder"

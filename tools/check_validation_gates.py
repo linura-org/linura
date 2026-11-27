@@ -796,6 +796,7 @@ REVIEWED_STEP_CONDITIONS = {
         "Stage restored prepared substrate into private run": "steps.prepared-substrate.outputs.cache-hit == 'true'",
         "Stage verified prepared substrate in stable prerequisite cache": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Install disposable substrate builder dependencies": "steps.prepared-substrate.outputs.cache-hit != 'true'",
+        "Verify substrate builder KVM access": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Restore official Arch base-image cache": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Download and verify official Arch base image": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Build sanitized prepared runtime substrate": "steps.prepared-substrate.outputs.cache-hit != 'true'",
