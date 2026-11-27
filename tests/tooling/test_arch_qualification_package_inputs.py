@@ -66,6 +66,7 @@ class ArchivePackageInputsTests(unittest.TestCase):
             "qemu",
             "kvm",
             "hostname",
+            "runtime-hostname",
             "hostname-failure",
             "virtualization",
             "virtualization-failure",
@@ -79,7 +80,7 @@ class ArchivePackageInputsTests(unittest.TestCase):
 name=pathlib.Path(sys.argv[0]).name;fault=os.environ['GUARD_FIXTURE_FAULT']
 if name=='uname':
     assert sys.argv[1:]==['-n']
-    print('other-host' if fault=='hostname' else 'linura-v010-shell')
+    print('other-host' if fault=='hostname' else 'linura-v010-shell' if fault=='runtime-hostname' else 'linura-v010-substrate')
     sys.exit(1 if fault=='hostname-failure' else 0)
 if name=='systemd-detect-virt':
     assert sys.argv[1:]==['--vm']
@@ -404,7 +405,13 @@ else:
                     self.assertTrue(all(x.startswith("publish ") for x in actions[2:]))
         guard = inputs.guest_script(load_contract(CONTRACT)["repository_package_input"])
         self.assertIn("guest_hostname=$(uname -n)", guard)
-        self.assertIn('test "$guest_hostname" = linura-v010-shell', guard)
+        self.assertIn('test "$guest_hostname" = linura-v010-substrate', guard)
+        self.assertIn(
+            "\nlocal-hostname: linura-v010-substrate\n",
+            (
+                inputs.ROOT / "qualification/v010/shell-runtime/prepare-substrate.sh"
+            ).read_text(),
+        )
         self.assertIn("guest_virtualization=$(systemd-detect-virt --vm)", guard)
         self.assertIn('case "$guest_virtualization" in qemu|kvm)', guard)
         self.assertIn("grep -qx 'ID=arch' /etc/os-release", guard)

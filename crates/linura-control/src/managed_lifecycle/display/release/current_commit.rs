@@ -298,6 +298,30 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         {
             return Err(invalid_original());
         }
+        // Ready publication/readback can consume the earlier observation's
+        // entire window. Start a separate verification phase after that durable
+        // boundary; compare every retained identity and physical frame lineage
+        // before using the new independently observed evidence. This never
+        // extends either observation or recreates the live review/dispatch.
+        let verification = self.inspect_ordinary_display_root_power_retirement(
+            principal.clone(),
+            request,
+            attempt,
+            verifier,
+        )?;
+        if verification.root() != proof.root()
+            || verification.preparation() != proof.preparation()
+            || verification.power().current().request() != &desired
+            || verification.power().current().release() != &actual
+            || verification.power().current().comparison_release() != &before
+            || !verification
+                .power()
+                .current()
+                .frames()
+                .reconciles(c.frames())
+        {
+            return Err(invalid_original());
+        }
         let verified = match actual.state {
             TransactionState::Indeterminate => self
                 .authority
@@ -306,7 +330,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                     &principal,
                     actor.clone(),
                     &desired,
-                    &proof,
+                    &verification,
                 )?,
             TransactionState::Verified => self
                 .authority

@@ -301,7 +301,7 @@ def guest_script(records: list[dict]) -> str:
         # uname is supplied by the same coreutils dependency as sha256sum and
         # install; the minimal pinned image does not include inetutils/hostname.
         "guest_hostname=$(uname -n)\n"
-        'test "$guest_hostname" = linura-v010-shell\n'
+        'test "$guest_hostname" = linura-v010-substrate\n'
         "guest_virtualization=$(systemd-detect-virt --vm)\n"
         'case "$guest_virtualization" in qemu|kvm) ;; *) exit 1 ;; esac\n'
         "grep -qx 'ID=arch' /etc/os-release\n" + cache_script(records)

@@ -1170,6 +1170,19 @@ impl ApprovedRequestJournal for FailingJournal {
                         return Err(TransactionStoreError::CapacityExceeded);
                     }
                     4 => m.ordinary_current_fault = 6,
+                    5..=7 => {
+                        let fault = m.ordinary_current_commit_store_fault;
+                        drop(m);
+                        // Expire the pre-Ready sample without extending any
+                        // clock, observation window or retained approval.
+                        std::thread::sleep(std::time::Duration::from_millis(2_001));
+                        let mut m = self.machine.lock().unwrap_or_else(|_| unreachable!());
+                        if fault == 6 {
+                            m.ordinary_current_fault = 6;
+                        } else if fault == 7 {
+                            m.ordinary_current_fault = 12;
+                        }
+                    }
                     _ => (),
                 }
             }

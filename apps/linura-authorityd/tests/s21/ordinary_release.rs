@@ -2097,6 +2097,9 @@ pub(super) fn observe_current(
         );
     }
     let fault = m.ordinary_current_fault;
+    if fault == 12 {
+        sample.observed_at_unix_ms = wall.saturating_sub(2_001);
+    }
     let changed = if root {
         match fault {
             1 => Some(("phase", ObservedValue::Text("prepared".into()))),
@@ -2505,6 +2508,15 @@ impl linura_control::OrdinaryDisplayCurrentCommitPort for OrdinaryCurrentPort {
 }
 
 fn ordinary_current_commit_requires_independent_native_qualification() {
+    ordinary_current_commit_cases(0..=22);
+}
+
+#[test]
+fn ordinary_current_verification_reobserves_after_sync_and_refuses_new_drift_or_staleness() {
+    ordinary_current_commit_cases(23..=25);
+}
+
+fn ordinary_current_commit_cases(faults: impl Iterator<Item = u8> + Clone) {
     for action in [
         DisplayContinuationAction::Confirm,
         DisplayContinuationAction::Revert,
@@ -2512,7 +2524,7 @@ fn ordinary_current_commit_requires_independent_native_qualification() {
         // Positive, lost ACK, false physical ACK, restart-before-dispatch,
         // input/source faults, every publication phase/failure and early signed
         // metadata without a native grant are independent cases.
-        for fault in 0..=22 {
+        for fault in faults.clone() {
             let database = TestDatabase::new();
             let machine = Arc::new(Mutex::new(Machine::default()));
             let mut port = Port(machine.clone());
@@ -2632,6 +2644,10 @@ fn ordinary_current_commit_requires_independent_native_qualification() {
                     m.ordinary_current_commit_store_phase = 4;
                     m.ordinary_current_commit_store_fault = 4;
                 }
+                if (23..=25).contains(&fault) {
+                    m.ordinary_current_commit_store_phase = 1;
+                    m.ordinary_current_commit_store_fault = fault - 18;
+                }
             }
             let mut current =
                 OrdinaryCurrentPort(machine.clone(), if fault <= 2 { fault } else { 0 });
@@ -2665,7 +2681,7 @@ fn ordinary_current_commit_requires_independent_native_qualification() {
                 &mut verifier,
                 &mut current,
             );
-            let dispatched = fault <= 2 || (18..=21).contains(&fault);
+            let dispatched = fault <= 2 || (18..=21).contains(&fault) || fault == 23;
             assert_eq!(
                 result.is_ok(),
                 dispatched && fault != 1,
@@ -2683,7 +2699,7 @@ fn ordinary_current_commit_requires_independent_native_qualification() {
                 let mut m = machine.lock().unwrap_or_else(|_| unreachable!());
                 m.ordinary_current_fault = 0;
                 m.ordinary_current_commit_store_fault = 0;
-                if (5..=17).contains(&fault) {
+                if (5..=17).contains(&fault) || (23..=25).contains(&fault) {
                     assert!(
                         m.ordinary_current_commit_store_fault_hits > 0,
                         "intended publication fault was not reached: {action:?}/{fault}"
@@ -2745,7 +2761,7 @@ fn ordinary_current_commit_requires_independent_native_qualification() {
                 assert_eq!(again.first_verified_at_unix_ms(), first);
                 assert_eq!(again.record_digest(), &digest);
             }
-            if (5..=17).contains(&fault) || fault == 22 {
+            if (5..=17).contains(&fault) || fault == 22 || (24..=25).contains(&fault) {
                 let signed = value(restarted.commit_ordinary_display_current(
                     principal(),
                     actor(true),
