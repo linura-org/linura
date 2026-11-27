@@ -1007,7 +1007,7 @@ jobs:
         )
         self.assertIn('"fault_matrix": {\n                  "cases": 11,', workflow)
         self.assertIn(
-            '"expanded_fault_matrix": {\n                  "cases": 77,', workflow
+            '"expanded_fault_matrix": {\n                  "cases": 78,', workflow
         )
 
         self.assertIn(
@@ -1015,10 +1015,10 @@ jobs:
             workflow,
         )
         inventory = semantic_verifier._v06_matrix_inventory(ROOT)
-        for count, filtered in ((77, 0), (11, 66)):
+        for count, filtered in ((78, 0), (11, 67)):
             expected = (
                 inventory
-                if count == 77
+                if count == 78
                 else tuple(
                     name
                     for name in inventory
@@ -1079,12 +1079,12 @@ jobs:
     ):
         inventory = semantic_verifier._v06_matrix_inventory(ROOT)
         transcript = (
-            "running 77 tests\n"
+            "running 78 tests\n"
             + "".join(f"test {name} ... ok\n" for name in reversed(inventory))
-            + "test result: ok. 77 passed; 0 failed; 0 ignored; "
+            + "test result: ok. 78 passed; 0 failed; 0 ignored; "
             "0 measured; 0 filtered out; finished in 1.00s\n"
         )
-        metadata = {"cases": 77, "test_threads": 2, "includes_original_cases": 11}
+        metadata = {"cases": 78, "test_threads": 2, "includes_original_cases": 11}
         semantic_verifier._require_v06_concurrent_matrix(ROOT, transcript, metadata)
         for value in (
             None,
@@ -1094,9 +1094,11 @@ jobs:
             metadata | {"test_threads": "2"},
             metadata | {"test_threads": 2.0},
             metadata | {"test_threads": True},
-            metadata | {"cases": 77.0},
+            metadata | {"cases": 78.0},
             metadata | {"includes_original_cases": 11.0},
             metadata | {"cases": 76},
+            metadata | {"cases": 77},
+            metadata | {"cases": 79},
             metadata | {"includes_original_cases": 10},
             metadata | {"unreviewed": True},
         ):
@@ -1108,7 +1110,9 @@ jobs:
                     ROOT, transcript, value
                 )
         for invalid in (
-            transcript.replace("77 passed", "76 passed"),
+            transcript.replace("78 passed", "76 passed"),
+            transcript.replace("78 passed", "77 passed"),
+            transcript.replace("78 passed", "79 passed"),
             transcript.replace("0 ignored", "1 ignored"),
             transcript.replace("0 filtered out", "1 filtered out"),
             transcript.replace(f"test {inventory[0]} ... ok\n", ""),
@@ -1144,7 +1148,7 @@ jobs:
             target = root / "tests/acceptance/v06/fault-matrix.txt"
             target.parent.mkdir(parents=True)
             target.write_bytes(good)
-            self.assertEqual(len(semantic_verifier._v06_matrix_inventory(root)), 77)
+            self.assertEqual(len(semantic_verifier._v06_matrix_inventory(root)), 78)
             for data in invalid:
                 with self.subTest(data=data[:100]):
                     target.write_bytes(data)

@@ -62,8 +62,8 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             .read_text(encoding="ascii")
             .splitlines()
         )
-        self.assertEqual(len(names), 77)
-        self.assertEqual(len(set(names)), 77)
+        self.assertEqual(len(names), 78)
+        self.assertEqual(len(set(names)), 78)
         self.assertEqual(inventory, sorted(names))
         self.assertEqual(
             sum(
@@ -94,7 +94,7 @@ class V06PolkitBoundaryTests(unittest.TestCase):
         self.assertIn(
             "--test-threads=2 2>&1 | tee /tmp/v06-concurrent-matrix.log", script
         )
-        self.assertIn("77 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("78 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
@@ -114,11 +114,12 @@ matrix() {
 }
 """
         cases = (
-            (77, 11, 0, 0, 0, 0, True),
+            (78, 11, 0, 0, 0, 0, True),
             (76, 11, 0, 0, 0, 0, False),
             (71, 11, 0, 0, 0, 0, False),
             (75, 11, 0, 0, 0, 0, False),
-            (78, 11, 0, 0, 0, 0, False),
+            (77, 11, 0, 0, 0, 0, False),
+            (79, 11, 0, 0, 0, 0, False),
             (67, 11, 0, 0, 0, 0, False),
             (70, 11, 0, 0, 0, 0, False),
             (72, 11, 0, 0, 0, 0, False),
@@ -136,17 +137,19 @@ matrix() {
             (65, 11, 0, 0, 0, 0, False),
             (66, 11, 0, 0, 0, 0, False),
             (68, 11, 0, 0, 0, 0, False),
-            (77, 10, 0, 0, 0, 0, False),
-            (77, 12, 0, 0, 0, 0, False),
-            (77, 11, 1, 0, 0, 0, False),
-            (77, 11, 0, 1, 0, 0, False),
-            (77, 11, 0, 0, 1, 0, False),
-            (77, 11, 0, 0, 0, 1, False),
+            (78, 10, 0, 0, 0, 0, False),
+            (78, 12, 0, 0, 0, 0, False),
+            (78, 11, 1, 0, 0, 0, False),
+            (78, 11, 0, 1, 0, 0, False),
+            (78, 11, 0, 0, 1, 0, False),
+            (78, 11, 0, 0, 0, 1, False),
         )
-        cases = tuple((*case[:-1], 77, 0, 0, case[-1]) for case in cases) + (
-            (77, 11, 0, 0, 0, 0, 76, 0, 0, False),
-            (77, 11, 0, 0, 0, 0, 77, 1, 0, False),
-            (77, 11, 0, 0, 0, 0, 77, 0, 1, False),
+        cases = tuple((*case[:-1], 78, 0, 0, case[-1]) for case in cases) + (
+            (78, 11, 0, 0, 0, 0, 76, 0, 0, False),
+            (78, 11, 0, 0, 0, 0, 77, 0, 0, False),
+            (78, 11, 0, 0, 0, 0, 79, 0, 0, False),
+            (78, 11, 0, 0, 0, 0, 78, 1, 0, False),
+            (78, 11, 0, 0, 0, 0, 78, 0, 1, False),
         )
         for (
             full,

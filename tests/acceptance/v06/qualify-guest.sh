@@ -321,13 +321,13 @@ stage deterministic-fault-matrix-inside-disposable-guest
 # Retain all 49 inherited cases plus twenty-eight S21 controller/SQLite cases.
 # Their simulated native labels do not qualify actual display execution.
 /usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log
-grep -F 'test result: ok. 77 passed; 0 failed; 0 ignored;' /tmp/v06-matrix.log
+grep -F 'test result: ok. 78 passed; 0 failed; 0 ignored;' /tmp/v06-matrix.log
 # Independently require concurrency under the same qualified VM resources and
 # strict evidence windows. Capture per-test output so successful test diagnostics
 # cannot interleave with libtest's complete case-result lines.
 stage concurrent-fault-matrix-inside-disposable-guest
 /usr/libexec/linura/v06-qualification-matrix --test-threads=2 2>&1 | tee /tmp/v06-concurrent-matrix.log
-grep -F 'test result: ok. 77 passed; 0 failed; 0 ignored;' /tmp/v06-concurrent-matrix.log
+grep -F 'test result: ok. 78 passed; 0 failed; 0 ignored;' /tmp/v06-concurrent-matrix.log
 # Independently retain the original eleven cases, excluding later domain suites.
 /usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_ 2>&1 | tee /tmp/v06-legacy-matrix.log
 grep -F 'test result: ok. 11 passed; 0 failed; 0 ignored;' /tmp/v06-legacy-matrix.log
@@ -338,5 +338,5 @@ echo "real-direct-executor-denial=qualified"
 echo "real-idempotency=qualified"
 echo "real-verification-not-satisfied-explicit-recovery=qualified"
 echo "real-crash-restart-explicit-no-effect-recovery=qualified"
-echo "deterministic-fault-matrix=77/77"
-echo "deterministic-concurrent-fault-matrix=77/77"
+echo "deterministic-fault-matrix=78/78"
+echo "deterministic-concurrent-fault-matrix=78/78"

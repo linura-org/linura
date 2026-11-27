@@ -333,8 +333,8 @@ interfaces immediately. Only startup-time transport nonresponse is retried
 under a bounded method-call budget; failure to obtain a real contract proof
 fails qualification and retains diagnostics, never a synthetic pass.
 
-The S21 guest regression retains three mandatory executions: 77 sequential
-fault tests, 77 two-thread concurrent tests and the original 11-case regression.
+The S21 guest regression retains three mandatory executions: 78 sequential
+fault tests, 78 two-thread concurrent tests and the original 11-case regression.
 The nested ordinary handoff test executes all 33 fault scenarios without
 injecting progress messages into the canonical Rust test-harness transcript.
 The independent evidence verifier requires exactly one intact harness result

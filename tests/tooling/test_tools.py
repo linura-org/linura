@@ -414,7 +414,7 @@ class ToolingTests(unittest.TestCase):
             "--test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_",
         ):
             self.assertIn(command, guest)
-        self.assertIn("test result: ok. 77 passed; 0 failed;", guest)
+        self.assertIn("test result: ok. 78 passed; 0 failed;", guest)
         self.assertIn("test result: ok. 11 passed; 0 failed;", guest)
         self.assertNotIn("s21-ordinary-handoff-case-start", cases)
         self.assertNotIn("s21-ordinary-handoff-case-passed", cases)
