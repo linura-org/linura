@@ -8,6 +8,7 @@ pacman installation remain mandatory. These bytes are never execution evidence.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gzip
 import hashlib
 import http.server
@@ -16,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import socketserver
 import stat
@@ -26,6 +28,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+from typing import BinaryIO, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -104,13 +107,122 @@ def digest(path: Path) -> str:
         return value
 
 
-def acquire(url: str, path: Path, maximum: int, expected: str | None = None) -> None:
-    if path.exists() or path.is_symlink():
-        raise ValueError("archive input destination must be fresh")
-    descriptor = os.open(
-        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600
+def rename_fresh(directory: int, staged: str, destination: str) -> None:
+    # Linux qualification only. RENAME_NOREPLACE publishes one complete inode
+    # without overwriting a concurrent destination or exposing a two-link phase.
+    # A missing syscall/filesystem capability refuses; there is no racy fallback.
+    try:
+        rename = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError:
+        raise ValueError("atomic archive input publication is unavailable") from None
+    rename.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    rename.restype = ctypes.c_int
+    if (
+        rename(directory, os.fsencode(staged), directory, os.fsencode(destination), 1)
+        != 0
+    ):
+        raise OSError(ctypes.get_errno(), "atomic archive input publication failed")
+
+
+def publish_fresh(
+    path: Path,
+    maximum: int,
+    expected: str | None,
+    writer: Callable[[BinaryIO], object],
+) -> None:
+    """Validate/fsync private staging, then exclusively publish complete bytes.
+
+    Interrupted acquisition leaves no final cache entry. SIGKILL may retain an
+    unpublished staging file in this fresh run's private directory; it cannot
+    become a package or readiness record. Never repair/replace an existing name.
+    """
+    if type(maximum) is not int or not 0 < maximum <= 512 * 1024 * 1024:
+        raise ValueError("unsupported archive input size bound")
+    directory = os.open(
+        path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     )
-    with os.fdopen(descriptor, "wb") as output:
+    staged = ".archive-input-" + secrets.token_hex(16)
+    identity: tuple[int, int] | None = None
+    try:
+        parent = os.fstat(directory)
+        if parent.st_uid != os.geteuid() or parent.st_mode & 0o022:
+            raise ValueError(
+                "archive input publication requires an owned private directory"
+            )
+        try:
+            os.stat(path.name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("archive input destination must be fresh")
+        descriptor = os.open(
+            staged,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+            dir_fd=directory,
+        )
+        with os.fdopen(descriptor, "w+b") as output:
+            first = os.fstat(output.fileno())
+            identity = (first.st_dev, first.st_ino)
+            writer(output)
+            output.flush()
+            before = os.fstat(output.fileno())
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or before.st_nlink != 1
+                or before.st_mode & 0o022
+                or not 0 < before.st_size <= maximum
+            ):
+                raise ValueError(
+                    "archive input differs from its complete digest/size bound"
+                )
+            output.seek(0)
+            if expected is not None and hash_stream(output, before.st_size) != expected:
+                raise ValueError(
+                    "archive input differs from its complete digest/size bound"
+                )
+            os.fsync(output.fileno())
+            if not unchanged(before, os.fstat(output.fileno())) or not unchanged(
+                before, os.stat(staged, dir_fd=directory, follow_symlinks=False)
+            ):
+                raise ValueError("staged archive input changed before publication")
+            rename_fresh(directory, staged, path.name)
+            os.fsync(directory)
+            # The exact inode remains held across publication. The final name
+            # must refer to that single-link regular file, never an alias/reply.
+            if not unchanged(
+                os.fstat(output.fileno()),
+                os.stat(path.name, dir_fd=directory, follow_symlinks=False),
+            ):
+                raise ValueError("archive input publication readback changed")
+    finally:
+        try:
+            if identity is not None:
+                try:
+                    item = os.stat(staged, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    # Clean only our exact unpublished staging inode. Unknown
+                    # substitutions remain a failure, not cleanup candidates.
+                    if (
+                        stat.S_ISREG(item.st_mode)
+                        and (item.st_dev, item.st_ino) == identity
+                    ):
+                        os.unlink(staged, dir_fd=directory)
+        finally:
+            os.close(directory)
+
+
+def acquire(url: str, path: Path, maximum: int, expected: str | None = None) -> None:
+    def download(output: BinaryIO) -> None:
         subprocess.run(
             [
                 "curl",
@@ -138,12 +250,8 @@ def acquire(url: str, path: Path, maximum: int, expected: str | None = None) -> 
             timeout=310,
             stdout=output,
         )
-    if (
-        not 0 < path.stat().st_size <= maximum
-        or expected is not None
-        and digest(path) != expected
-    ):
-        raise ValueError("archive input differs from its complete digest/size bound")
+
+    publish_fresh(path, maximum, expected, download)
 
 
 class RepositoryReader(io.BufferedIOBase):
@@ -647,13 +755,14 @@ def serve_cache(data: dict, directory: Path) -> None:
     os.setsid()
     cache = PinnedPackageCache(data, directory)
     with cache_server(cache) as server:
-        descriptor = os.open(
-            directory / "cache-port",
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o600,
-        )
-        with os.fdopen(descriptor, "w") as port:
-            port.write(str(server.server_address[1]) + "\n")
+        port = server.server_address[1]
+        if not 1024 <= port <= 65535:
+            raise ValueError("unsupported pinned package cache port")
+
+        def write_port(output: BinaryIO) -> None:
+            output.write(f"{port}\n".encode("ascii"))
+
+        publish_fresh(directory / "cache-port", 6, None, write_port)
         while time.monotonic() < cache.deadline:
             server.handle_request()
 

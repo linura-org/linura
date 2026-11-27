@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import select
 import subprocess
 import signal
 import sys
@@ -71,6 +72,290 @@ def fixture(
 
 
 class ArchivePackageInputsTests(unittest.TestCase):
+    def test_interrupted_downloads_leave_no_final_or_staging_file_and_retry_cleanly(
+        self,
+    ):
+        for failure in (
+            subprocess.CalledProcessError(18, "curl"),
+            subprocess.TimeoutExpired("curl", 310),
+            OSError("download unavailable"),
+            KeyboardInterrupt(),
+        ):
+            with (
+                self.subTest(failure=type(failure).__name__),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                destination = directory / "download"
+                payload = b"complete verified input"
+                expected = hashlib.sha256(payload).hexdigest()
+
+                def interrupted(command, **kwargs):
+                    kwargs["stdout"].write(b"partial")
+                    kwargs["stdout"].flush()
+                    self.assertFalse(destination.exists())
+                    raise failure
+
+                with patch.object(inputs.subprocess, "run", side_effect=interrupted):
+                    with self.assertRaises(type(failure)):
+                        inputs.acquire(
+                            "https://fixture.invalid/input", destination, 128, expected
+                        )
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(directory.iterdir()), [])
+
+                def completed(command, **kwargs):
+                    self.assertFalse(destination.exists())
+                    kwargs["stdout"].write(payload)
+
+                with patch.object(inputs.subprocess, "run", side_effect=completed):
+                    inputs.acquire(
+                        "https://fixture.invalid/input", destination, 128, expected
+                    )
+                self.assertEqual(destination.read_bytes(), payload)
+                self.assertEqual(destination.stat().st_nlink, 1)
+                self.assertEqual(list(directory.iterdir()), [destination])
+
+    def test_invalid_complete_downloads_are_not_published_or_cached(self):
+        for payload, maximum, expected in (
+            (b"", 128, None),
+            (b"too large", 1, None),
+            (b"wrong digest", 128, "a" * 64),
+        ):
+            with (
+                self.subTest(payload=payload),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                with patch.object(
+                    inputs.subprocess,
+                    "run",
+                    side_effect=lambda command, **kwargs: kwargs["stdout"].write(
+                        payload
+                    ),
+                ):
+                    with self.assertRaises(ValueError):
+                        inputs.acquire(
+                            "https://fixture.invalid/input",
+                            directory / "download",
+                            maximum,
+                            expected,
+                        )
+                self.assertEqual(list(directory.iterdir()), [])
+
+    def test_dynamic_cache_retries_failed_acquisition_without_resetting_spent_budgets(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data, records = fixture(directory)
+            path = directory / records[0]["filename"]
+            payload = path.read_bytes()
+            path.unlink()
+            cache = inputs.PinnedPackageCache(data, directory)
+
+            def interrupted(command, **kwargs):
+                kwargs["stdout"].write(payload[:2])
+                raise subprocess.CalledProcessError(18, "curl")
+
+            with patch.object(inputs.subprocess, "run", side_effect=interrupted):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    cache.open("/" + path.name)
+            spent = cache.bytes
+            self.assertFalse(path.exists())
+            self.assertIn(path.name, cache.files)
+            with patch.object(
+                inputs.subprocess,
+                "run",
+                side_effect=lambda command, **kwargs: kwargs["stdout"].write(payload),
+            ):
+                stream, before = cache.open("/" + path.name)
+                with stream:
+                    self.assertEqual(stream.read(), payload)
+                    self.assertEqual(before.st_nlink, 1)
+            self.assertEqual(cache.bytes, spent)
+            self.assertEqual(cache.requests, 2)
+            self.assertEqual(cache.files, {path.name})
+
+    def test_atomic_publication_never_exposes_partial_readiness(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "cache-port"
+            partial, finish = threading.Event(), threading.Event()
+
+            def write(stream):
+                stream.write(b"12")
+                stream.flush()
+                partial.set()
+                if not finish.wait(timeout=5):
+                    raise TimeoutError("component publication barrier expired")
+                stream.write(b"345\n")
+
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                future = worker.submit(inputs.publish_fresh, path, 6, None, write)
+                try:
+                    self.assertTrue(partial.wait(timeout=5))
+                    self.assertFalse(path.exists())
+                    self.assertEqual(len(list(directory.glob(".archive-input-*"))), 1)
+                finally:
+                    finish.set()
+                future.result(timeout=5)
+            self.assertEqual(path.read_bytes(), b"12345\n")
+            self.assertEqual(path.stat().st_nlink, 1)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(directory.iterdir()), [path])
+
+    def test_atomic_publication_preserves_a_concurrent_destination_or_symlink(self):
+        for kind in ("file", "symlink", "directory"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                path, target = directory / "download", directory / "protected"
+                target.write_bytes(b"preserve existing bytes")
+
+                def write(stream):
+                    stream.write(b"complete staged input")
+                    if kind == "file":
+                        path.write_bytes(b"concurrent input")
+                    elif kind == "symlink":
+                        path.symlink_to(target)
+                    else:
+                        path.mkdir()
+
+                with self.assertRaises(FileExistsError):
+                    inputs.publish_fresh(path, 128, None, write)
+                self.assertEqual(target.read_bytes(), b"preserve existing bytes")
+                self.assertTrue(
+                    path.is_symlink() if kind == "symlink" else path.exists()
+                )
+                if kind == "file":
+                    self.assertEqual(path.read_bytes(), b"concurrent input")
+                self.assertEqual(list(directory.glob(".archive-input-*")), [])
+
+    def test_fsync_or_publication_failure_never_leaves_partial_final_bytes(self):
+        for point in ("file-sync", "rename", "directory-sync"):
+            with self.subTest(point=point), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                path = directory / "download"
+                sync = inputs.os.fsync
+                calls = 0
+
+                def fail_sync(descriptor):
+                    nonlocal calls
+                    calls += 1
+                    if calls == (1 if point == "file-sync" else 2):
+                        raise OSError("injected fsync failure")
+                    sync(descriptor)
+
+                with (
+                    patch.object(
+                        inputs.os,
+                        "fsync",
+                        side_effect=fail_sync if point != "rename" else sync,
+                    ),
+                    patch.object(
+                        inputs,
+                        "rename_fresh",
+                        side_effect=OSError("injected rename failure"),
+                    )
+                    if point == "rename"
+                    else patch.object(
+                        inputs, "rename_fresh", wraps=inputs.rename_fresh
+                    ),
+                ):
+                    with self.assertRaises(OSError):
+                        inputs.publish_fresh(
+                            path,
+                            128,
+                            None,
+                            lambda stream: stream.write(b"complete input"),
+                        )
+                if point == "directory-sync":
+                    # Publication succeeded before the durability error. Leave
+                    # the complete immutable entry; never replace/delete it.
+                    self.assertEqual(path.read_bytes(), b"complete input")
+                    self.assertEqual(path.stat().st_nlink, 1)
+                else:
+                    self.assertFalse(path.exists())
+                self.assertEqual(list(directory.glob(".archive-input-*")), [])
+
+    def test_killed_writer_cannot_publish_its_partial_cache_entry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "download"
+            program = """import sys,time
+from pathlib import Path
+from tools.arch_qualification_package_inputs import publish_fresh
+def write(stream):
+    stream.write(b'partial')
+    stream.flush()
+    print('staged', flush=True)
+    time.sleep(30)
+publish_fresh(Path(sys.argv[1]),128,None,write)
+"""
+            with subprocess.Popen(
+                [sys.executable, "-c", program, str(path)],
+                cwd=inputs.ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            ) as process:
+                try:
+                    assert process.stdout is not None
+                    self.assertTrue(select.select([process.stdout], [], [], 5)[0])
+                    self.assertEqual(os.read(process.stdout.fileno(), 7), b"staged\n")
+                    self.assertFalse(path.exists())
+                    process.kill()
+                    process.wait(timeout=5)
+                    self.assertFalse(path.exists())
+                    staged = list(directory.glob(".archive-input-*"))
+                    self.assertEqual(len(staged), 1)
+                    self.assertEqual(staged[0].read_bytes(), b"partial")
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=5)
+
+    def test_unknown_staging_substitution_is_preserved_and_never_published(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "download"
+            substituted = None
+
+            def write(stream):
+                nonlocal substituted
+                stream.write(b"verified bytes")
+                stream.flush()
+                substituted = directory / next(directory.glob(".archive-input-*")).name
+                substituted.unlink()
+                substituted.write_bytes(b"unknown substituted file")
+
+            with self.assertRaises(ValueError):
+                inputs.publish_fresh(path, 128, None, write)
+            self.assertFalse(path.exists())
+            assert substituted is not None
+            self.assertEqual(substituted.read_bytes(), b"unknown substituted file")
+
+    def test_unavailable_exclusive_rename_and_unsafe_parent_refuse_without_fallback(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "download"
+            with patch.object(inputs.ctypes, "CDLL", return_value=object()):
+                with self.assertRaises(ValueError):
+                    inputs.publish_fresh(
+                        path, 128, None, lambda stream: stream.write(b"complete")
+                    )
+            self.assertEqual(list(directory.iterdir()), [])
+            directory.chmod(0o777)
+            try:
+                with self.assertRaises(ValueError):
+                    inputs.publish_fresh(
+                        path, 128, None, lambda stream: stream.write(b"complete")
+                    )
+                self.assertEqual(list(directory.iterdir()), [])
+            finally:
+                directory.chmod(0o700)
+
     def test_real_cache_process_counts_exact_sizes_instead_of_acquisition_ceilings(
         self,
     ):
