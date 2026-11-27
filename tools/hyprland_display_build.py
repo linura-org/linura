@@ -110,7 +110,9 @@ def acquire_base_image(paths: dict, run_id: str, contract: dict, image: Path) ->
     )
 
 
-def prepare_environment(run_id: str, development: bool) -> int:
+def prepare_environment(run_id: str, development: bool, acceleration: str) -> int:
+    if acceleration not in ("tcg", "kvm"):
+        raise ValueError("unsupported build preparation acceleration")
     contract = load_contract(CONTRACT)
     paths, sha, dirty = reserve_run(run_id, development)
     temporary = storage.require_destination(
@@ -140,6 +142,7 @@ def prepare_environment(run_id: str, development: bool) -> int:
         BASE_IMAGE_URL=contract["base_image_url"],
         BASE_IMAGE_SHA256=contract["base_image_sha256"],
         QUALIFICATION_NIC_MAC="52:54:00:21:02:59",
+        VM_ACCELERATION=acceleration,
     )
     prepared, manifest = vm / "s21-hyprland-build.qcow2", vm / "s21-hyprland-build.json"
     with (temporary / "prepare.log").open("xb") as log:
@@ -648,7 +651,7 @@ def ci_build(args: argparse.Namespace) -> int:
             )
             / "prepare.log"
         )
-        prepare_environment(prepare_id, False)
+        prepare_environment(prepare_id, False, args.acceleration)
         prepared = storage.role_path(
             storage.run_layout(ROOT, ENVIRONMENT, prepare_id), "vm"
         )
@@ -732,7 +735,7 @@ def main() -> int:
     if args.command == "prepare":
         if args.archive or args.prepared_image or args.prepared_manifest:
             parser.error("prepare accepts no source archive or prepared-image inputs")
-        return prepare_environment(args.run, args.development)
+        return prepare_environment(args.run, args.development, args.acceleration)
     if (
         not args.prepared_image
         or not args.prepared_manifest

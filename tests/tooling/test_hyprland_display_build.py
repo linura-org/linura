@@ -15,6 +15,60 @@ from tools import hyprland_display_build as build
 
 
 class HyprlandDisplayBuildTests(unittest.TestCase):
+    def test_preparation_uses_explicit_acceleration_and_refuses_unknown_selection(self):
+        for acceleration in ("invalid", "kvm,tcg", ""):
+            with (
+                self.subTest(acceleration=acceleration),
+                patch.object(build, "load_contract") as load,
+            ):
+                with self.assertRaises(ValueError):
+                    build.prepare_environment("build", False, acceleration)
+                load.assert_not_called()
+        for acceleration in ("kvm", "tcg"):
+            with (
+                self.subTest(acceleration=acceleration),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                temporary = Path(directory) / "temporary"
+                vm = Path(directory) / "vm"
+                temporary.mkdir()
+                vm.mkdir()
+                with (
+                    patch.dict(
+                        os.environ, {"VM_ACCELERATION": "untrusted-inherited-value"}
+                    ),
+                    patch.object(
+                        build, "reserve_run", return_value=({}, "1" * 40, False)
+                    ),
+                    patch.object(build.storage, "role_path", return_value=temporary),
+                    patch.object(
+                        build.storage,
+                        "require_destination",
+                        side_effect=(temporary, vm),
+                    ),
+                    patch.object(build, "acquire_base_image"),
+                    patch.object(
+                        build, "run", side_effect=RuntimeError("stop before VM launch")
+                    ) as run,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "stop before VM launch"):
+                        build.prepare_environment("build", False, acceleration)
+                    self.assertEqual(
+                        run.call_args.kwargs["env"]["VM_ACCELERATION"], acceleration
+                    )
+
+    def test_prepare_command_forwards_explicit_acceleration(self):
+        with (
+            patch.object(
+                build.sys,
+                "argv",
+                ["build", "prepare", "--run", "build", "--acceleration", "kvm"],
+            ),
+            patch.object(build, "prepare_environment", return_value=0) as prepare,
+        ):
+            self.assertEqual(build.main(), 0)
+        prepare.assert_called_once_with("build", False, "kvm")
+
     def test_poweroff_reconciles_ssh_disconnect_with_clean_vm_exit(self) -> None:
         for ssh_code in (0, 255):
             with (

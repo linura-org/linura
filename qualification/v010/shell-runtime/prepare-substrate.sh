@@ -196,6 +196,7 @@ bash qualification/v010/shell-runtime/start-vm.sh \
     --persistent \
     --mode automated \
     --display none \
+    --acceleration "${VM_ACCELERATION:-tcg}" \
     --image "$guest_image" \
     --seed "$seed_image" \
     --memory 6144 \

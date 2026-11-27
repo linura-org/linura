@@ -1634,6 +1634,7 @@ def validate(root: Path) -> list[str]:
             '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase stage',
             '--ssh-key "$ssh_key" --work-root "$work_root/archive-package-inputs" --phase serve',
             "CacheServer = http://127.0.0.1:2290",
+            '--acceleration "${VM_ACCELERATION:-tcg}"',
             "-o ExitOnForwardFailure=yes",
             '-N -R "127.0.0.1:2290:127.0.0.1:$package_cache_port"',
             'kill -- "-$package_cache_pid"',

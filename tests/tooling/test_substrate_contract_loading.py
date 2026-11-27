@@ -21,6 +21,49 @@ def parser_source() -> str:
 
 
 class SubstrateContractLoadingTests(unittest.TestCase):
+    def test_substrate_launch_preserves_selected_acceleration_without_changing_resources(
+        self,
+    ):
+        script = BUILDER.read_text(encoding="utf-8")
+        launch = "bash qualification/v010/shell-runtime/start-vm.sh \\\n"
+        block = launch + script.split(launch, 1)[1].split('vm_pid="$!"', 1)[0]
+        for selected in (None, "kvm", "tcg"):
+            with (
+                self.subTest(selected=selected),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                arguments = root / "arguments"
+                env = {
+                    "PATH": os.defpath,
+                    "LAUNCH_ARGUMENTS": str(arguments),
+                    "vm_log": str(root / "vm.log"),
+                    "guest_image": str(root / "guest"),
+                    "seed_image": str(root / "seed"),
+                    "QUALIFICATION_NIC_MAC": "52:54:00:21:02:59",
+                }
+                if selected is not None:
+                    env["VM_ACCELERATION"] = selected
+                result = subprocess.run(
+                    ["/bin/bash", "--noprofile", "--norc", "-s"],
+                    input='set -euo pipefail\nbash() { printf "%s\\n" "$@" > "$LAUNCH_ARGUMENTS"; }\n'
+                    + block
+                    + "wait $!\n",
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = arguments.read_text().splitlines()
+                self.assertEqual(args.count("--acceleration"), 1)
+                self.assertEqual(
+                    args[args.index("--acceleration") + 1], selected or "tcg"
+                )
+                self.assertEqual(args[args.index("--memory") + 1], "6144")
+                self.assertEqual(args[args.index("--cpus") + 1], "4")
+                self.assertEqual(args[args.index("--display") + 1], "none")
+
     def run_loader(self, path: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, "-I", "-S", "-", str(path)],
