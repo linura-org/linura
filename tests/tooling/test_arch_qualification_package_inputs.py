@@ -342,7 +342,13 @@ sys.exit(1 if fault=='os' else 0)
     def test_native_verification_precedes_every_publication_and_readback_is_required(
         self,
     ):
-        for fault in ("none", "checksum", "signature", "readback"):
+        for fault in (
+            "none",
+            "checksum",
+            "signature",
+            "readback",
+            "signature-readback",
+        ):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
                 directory = Path(temporary)
                 _, records = fixture(directory)
@@ -353,6 +359,9 @@ sys.exit(1 if fault=='os' else 0)
                     + r"""import hashlib,os,pathlib,shutil,sys
 root=pathlib.Path(os.environ['INPUT_FIXTURE']);fault=os.environ['INPUT_FAULT'];args=sys.argv[1:]
 if pathlib.Path(sys.argv[0]).name=='sha256sum':
+    if args[0]=='--':
+        print(hashlib.sha256(pathlib.Path(args[1]).read_bytes()).hexdigest()+'  '+args[1])
+        sys.exit(0)
     expected,path=sys.stdin.read().strip().split('  ',1)
     actual=root/'published'/pathlib.Path(path).name if path.startswith('/var/cache/pacman/pkg/') else pathlib.Path(path)
     sys.exit(0 if hashlib.sha256(actual.read_bytes()).hexdigest()==expected else 1)
@@ -367,7 +376,7 @@ else:
         with (root/'actions').open('a') as out:out.write('publish '+args[-2]+'\n')
         target=root/'published'/pathlib.Path(args[-1]).name
         shutil.copyfile(args[-2],target)
-        if fault=='readback':target.write_bytes(b'corrupt')
+        if fault=='readback' or fault=='signature-readback' and target.name.endswith('.sig'):target.write_bytes(b'corrupt')
 """
                 )
                 for name in ("sudo", "sha256sum"):
@@ -403,6 +412,14 @@ else:
                 if fault == "none":
                     self.assertTrue(all(x.startswith("verify ") for x in actions[:2]))
                     self.assertTrue(all(x.startswith("publish ") for x in actions[2:]))
+                    self.assertEqual(len(actions), 2 + 2 * len(records))
+                    for record in records:
+                        for suffix in ("", ".sig"):
+                            name = record["filename"] + suffix
+                            self.assertEqual(
+                                (directory / "published" / name).read_bytes(),
+                                (directory / name).read_bytes(),
+                            )
         guard = inputs.guest_script(load_contract(CONTRACT)["repository_package_input"])
         self.assertIn("guest_hostname=$(uname -n)", guard)
         self.assertIn('test "$guest_hostname" = linura-v010-substrate', guard)

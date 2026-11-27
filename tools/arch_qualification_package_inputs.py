@@ -285,12 +285,25 @@ def cache_script(records: list[dict]) -> str:
     lines.append("sudo -n install -d -m 0755 -- /var/cache/pacman/pkg")
     for record in records:
         filename = shlex.quote(record["filename"])
+        signature = shlex.quote(record["filename"] + ".sig")
         target = "/var/cache/pacman/pkg/" + record["filename"]
         lines += [
             "sudo -n install -m 0644 -- " + filename + " " + shlex.quote(target),
             "printf '%s\\n' "
             + shlex.quote(record["sha256"] + "  " + target)
             + " | sha256sum --check --strict",
+            # libalpm deliberately redownloads a cached package when its
+            # detached signature is absent. Publish the verified pair and
+            # require byte-for-byte signature readback as well.
+            "signature_digest=$(sha256sum -- " + signature + ")",
+            "signature_digest=${signature_digest%% *}",
+            "sudo -n install -m 0644 -- "
+            + signature
+            + " "
+            + shlex.quote(target + ".sig"),
+            "printf '%s\\n' \"$signature_digest  "
+            + target
+            + '.sig" | sha256sum --check --strict',
         ]
     return "\n".join(lines) + "\n"
 
