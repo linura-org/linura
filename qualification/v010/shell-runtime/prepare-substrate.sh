@@ -259,7 +259,10 @@ python3 "$ARCHIVE_INPUT_VERIFIER" --contract "$ARCHIVE_INPUT_CONTRACT" \
 package_cache_pid="$!"
 cache_ready_deadline=$((SECONDS + 30))
 while [[ ! -f "$work_root/archive-package-inputs/cache-port" ]] && ((SECONDS < cache_ready_deadline)); do
-    kill -0 "$package_cache_pid" 2>/dev/null || fail "pinned package cache exited before readiness"
+    if ! kill -0 "$package_cache_pid" 2>/dev/null; then
+        tail -n 20 -- "$work_root/package-cache.log" >&2
+        fail "pinned package cache exited before readiness"
+    fi
     sleep 1
 done
 [[ -f "$work_root/archive-package-inputs/cache-port" ]] || fail "pinned package cache readiness exceeded"

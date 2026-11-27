@@ -1284,7 +1284,7 @@ REVIEWED_SHELL_EXECUTION = {
     # recorder paths and callback helpers. Here-doc data is conservatively
     # included in the scan; the digest also binds those opaque bodies.
     "scripts/prepare_qualification_storage.sh": "4967e7217aeb4644fb645f47e1f47c4983785e4a134c146ab1dbea770bd55546",
-    "qualification/v010/shell-runtime/prepare-substrate.sh": "64ee5dfc3b703ac906b0f86dc1c1ce90231ec49da73c91d5f5b9b8cefcfe3632",
+    "qualification/v010/shell-runtime/prepare-substrate.sh": "496f6dba8f99d2193da6e0ca9031eefc837daea5b52d595446a1f5bf2340f7ee",
     "qualification/v010/shell-runtime/run-shell-runtime.sh": "69c489d06175c89840e38adbc80ecdbea7486d8ff6a955f3a68e1073c05d8755",
     "qualification/v010/shell-runtime/start-vm.sh": "c2f516674ee155d6cd6f25caab2cd90d6aaa264fc4ddb997a0d4c036dbd6267b",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",

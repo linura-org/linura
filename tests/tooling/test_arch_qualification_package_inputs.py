@@ -6,13 +6,16 @@ import gzip
 import hashlib
 import http.client
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
+import signal
 import sys
 import tarfile
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -20,9 +23,13 @@ from tools import arch_qualification_package_inputs as inputs
 from tools.hyprland_display_environment import CONTRACT, load_contract
 
 
-def fixture(directory: Path, compression: str = "zst") -> tuple[dict, list[dict]]:
+def fixture(
+    directory: Path,
+    compression: str = "zst",
+    names: tuple[str, ...] = ("alpha", "beta"),
+) -> tuple[dict, list[dict]]:
     records = []
-    for name in ("alpha", "beta"):
+    for name in names:
         filename = (
             name + "-1-1-any.pkg.tar." + (compression if name == "beta" else "zst")
         )
@@ -64,6 +71,85 @@ def fixture(directory: Path, compression: str = "zst") -> tuple[dict, list[dict]
 
 
 class ArchivePackageInputsTests(unittest.TestCase):
+    def test_real_cache_process_counts_exact_sizes_instead_of_acquisition_ceilings(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data, records = fixture(
+                directory, names=("alpha", "beta", "gamma", "delta", "epsilon")
+            )
+            for record in records:
+                record["max_bytes"] = 512 * 1024 * 1024
+            cache = inputs.PinnedPackageCache(data, directory)
+            self.assertEqual(
+                cache.bytes,
+                sum((directory / r["filename"]).stat().st_size for r in records)
+                + len(records) * 1024 * 1024,
+            )
+            self.assertEqual(cache.initial_files, 10)
+            data_path = directory / "cache-process-input.json"
+            data_path.write_text(json.dumps(data))
+            with (directory / "cache-process.log").open("w+b") as log:
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import json,sys; from pathlib import Path; "
+                        "from tools.arch_qualification_package_inputs import serve_cache; "
+                        "serve_cache(json.loads(Path(sys.argv[1]).read_text()),Path(sys.argv[2]))",
+                        str(data_path),
+                        str(directory),
+                    ],
+                    cwd=inputs.ROOT,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
+                try:
+                    deadline = time.monotonic() + 10
+                    port_path = directory / "cache-port"
+                    while not port_path.exists() and time.monotonic() < deadline:
+                        if process.poll() is not None:
+                            log.seek(0)
+                            self.fail(log.read().decode(errors="replace"))
+                        time.sleep(0.02)
+                    self.assertTrue(port_path.is_file(), "cache readiness exceeded")
+                    self.assertEqual(os.getpgid(process.pid), process.pid)
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", int(port_path.read_text()), timeout=5
+                    )
+                    try:
+                        connection.request("GET", "/" + records[0]["filename"])
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual(
+                            response.read(),
+                            (directory / records[0]["filename"]).read_bytes(),
+                        )
+                    finally:
+                        connection.close()
+                finally:
+                    if process.poll() is None:
+                        if os.getpgid(process.pid) == process.pid:
+                            os.killpg(process.pid, signal.SIGTERM)
+                        else:
+                            process.terminate()
+                    process.wait(timeout=5)
+
+    def test_initial_cache_pairs_must_match_complete_pinned_catalog(self):
+        for field, value in (
+            ("name", "unselected"),
+            ("filename", "alpha-2-1-any.pkg.tar.zst"),
+            ("sha256", "a" * 64),
+            ("max_bytes", 1),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                data, records = fixture(directory)
+                records[0][field] = value
+                with self.assertRaises(ValueError):
+                    inputs.PinnedPackageCache(data, directory)
+
     def test_cache_parallel_downloads_coalesce_without_serializing_other_packages(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

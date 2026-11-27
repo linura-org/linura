@@ -465,7 +465,19 @@ class PinnedPackageCache:
         # Charging a subsequently requested initial pair again is conservative.
         initial = package_inputs(data)
         self.initial_files = 2 * len(initial)
-        self.bytes = sum(r["max_bytes"] + 1024 * 1024 for r in initial)
+        self.bytes = 0
+        for record in initial:
+            pinned = self.catalog.get(record["filename"])
+            if (
+                pinned is None
+                or pinned["name"] != record["name"]
+                or pinned["sha256"] != record["sha256"]
+                or pinned["size"] > record["max_bytes"]
+            ):
+                raise ValueError("initial cache input differs from pinned repository")
+            # The catalog's exact CSIZE bounds retained bytes; max_bytes is an
+            # acquisition ceiling, not the size of every retained package.
+            self.bytes += pinned["size"] + 1024 * 1024
         if self.bytes > MAX_TOTAL_BYTES or self.initial_files > MAX_CACHE_FILES:
             raise ValueError("initial pinned package cache capacity exhausted")
         self.lock = threading.Lock()
